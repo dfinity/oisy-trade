@@ -1,4 +1,4 @@
-use crate::DummyRequest;
+use crate::{DummyRequest, DummyResponse};
 
 #[test]
 fn should_deser() {
@@ -9,10 +9,10 @@ fn should_deser() {
     let decoded: DummyRequest = candid::decode_one(&encoded).unwrap();
     assert_eq!(request, decoded);
 
-    let response = DummyRequest {
-        input: "Hello world!".to_string(),
+    let response = DummyResponse {
+        output: "Hello world!".to_string(),
     };
     let encoded = candid::encode_one(&response).unwrap();
-    let decoded: DummyRequest = candid::decode_one(&encoded).unwrap();
+    let decoded: DummyResponse = candid::decode_one(&encoded).unwrap();
     assert_eq!(response, decoded);
 }
