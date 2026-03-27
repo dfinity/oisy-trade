@@ -22,7 +22,7 @@ fn check_candid_interface_compatibility() {
         std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("dex.did");
 
     service_equal(
-        CandidSource::Text(dbg!(&new_interface)),
+        CandidSource::Text(&new_interface),
         CandidSource::File(old_interface.as_path()),
     )
     .unwrap();
