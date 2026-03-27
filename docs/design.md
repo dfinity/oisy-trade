@@ -2,9 +2,41 @@
 
 High-level design for an order book DEX running entirely onchain as an Internet Computer canister.
 
+## Table of Contents
+
+- [Overview](#overview)
+  - [1. Deposit](#1-deposit)
+  - [2. Trade](#2-trade)
+  - [3. Withdrawal](#3-withdrawal)
+- [Trading Pairs](#trading-pairs)
+  - [Pair Management](#pair-management)
+- [Order Lifecycle](#order-lifecycle)
+- [Order Book Data Structure](#order-book-data-structure)
+  - [Price Levels](#price-levels)
+- [Matching Engine](#matching-engine)
+- [Settlement and Token Custody](#settlement-and-token-custody)
+  - [Deposits](#deposits)
+  - [Balances](#balances)
+  - [Withdrawals](#withdrawals)
+- [Fee Model](#fee-model)
+- [Access Control](#access-control)
+- [State Persistence](#state-persistence)
+  - [Event Sourcing](#event-sourcing)
+  - [Upgrade Process](#upgrade-process)
+  - [Benefits](#benefits)
+  - [Considerations](#considerations)
+- [Monitoring and Observability](#monitoring-and-observability)
+  - [Query Endpoints](#query-endpoints)
+  - [Metrics](#metrics)
+- [IC-Specific Considerations](#ic-specific-considerations)
+  - [Single-Canister Design](#single-canister-design)
+  - [Synchronous Trading](#synchronous-trading)
+  - [Async Deposits and Withdrawals](#async-deposits-and-withdrawals)
+- [Potential Additional Features](#potential-additional-features)
+
 ## Overview
 
-The DEX canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-1/ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
+The DEX canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
 
 There are three distinct flows:
 
