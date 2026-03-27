@@ -8,7 +8,7 @@ members = [
 
 [workspace.package]
 authors = ["DFINITY Stiftung"]
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/dfinity/dex"
 homepage = "https://github.com/dfinity/dex#readme"
 license = "Apache-2.0"

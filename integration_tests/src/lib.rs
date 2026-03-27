@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{decode_args, encode_args, CandidType, Encode, Principal};
+use candid::{CandidType, Encode, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
 use ic_cdk::call::RejectCode;
-use pocket_ic::{nonblocking::PocketIc, CanisterId, CanisterSettings, PocketIcBuilder};
+use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 
