@@ -1,6 +1,8 @@
-type DummyRequest = record {input : text};
-type DummyResponse = record {output : text};
+type LimitOrderRequest = record {};
+type LimitOrderResponse = record { order_id : nat64 };
+type OrderStatus = variant { NotFound; Pending };
 
 service : {
-    greet: (DummyRequest) -> (DummyResponse) query;
+    add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
+    get_order_status : (nat64) -> (OrderStatus) query;
 }
