@@ -5,7 +5,7 @@ impl OrderId {
     pub const ZERO: Self = Self(0);
 
     pub fn increment(&mut self) {
-        self.0 += 1;
+        self.0 = self.0.checked_add(1).expect("OrderId overflow");
     }
 }
 
