@@ -1,14 +1,14 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{decode_args, encode_args, CandidType, Encode, Principal};
+use dex_client::{DexClient, Runtime};
 use ic_cdk::call::RejectCode;
 use pocket_ic::{nonblocking::PocketIc, CanisterId, CanisterSettings, PocketIcBuilder};
 use serde::de::DeserializeOwned;
-use dex_client::{DexClient, Runtime};
 use std::path::PathBuf;
 
 pub struct Setup {
-    env: PocketIc,
+    env: Option<PocketIc>,
     caller: Principal,
     _controller: Principal,
     canister_id: CanisterId,
@@ -44,26 +44,37 @@ impl Setup {
         let caller = DEFAULT_CALLER_TEST_ID;
 
         Self {
-            env,
+            env: Some(env),
             caller,
             _controller: controller,
             canister_id,
         }
     }
 
-    pub fn client(&self) -> DexClient<PocketIcRuntime> {
+    pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(self.new_pocket_ic(), self.canister_id)
     }
 
-    fn new_pocket_ic(&self) -> PocketIcRuntime {
+    fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {
         PocketIcRuntime {
-            env: &self.env,
+            env: self.env.as_ref().unwrap(),
             caller: self.caller,
         }
     }
 
     pub async fn drop(self) {
-        self.env.drop().await
+        let mut setup = self;
+        if let Some(env) = setup.env.take() {
+            env.drop().await
+        }
+    }
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        if self.env.is_some() {
+            panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
+        }
     }
 }
 
