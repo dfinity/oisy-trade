@@ -1,8 +1,25 @@
+/// Unique identifier for an order, assigned by the canister upon submission.
+type OrderId = nat64;
+
+/// Request to place a new limit order.
 type LimitOrderRequest = record {};
-type LimitOrderResponse = record { order_id : nat64 };
-type OrderStatus = variant { NotFound; Pending };
+
+/// Response after successfully placing a limit order.
+type LimitOrderResponse = record { order_id : OrderId };
+
+/// Status of an order.
+type OrderStatus = variant {
+    /// The order was not found.
+    NotFound;
+    /// The order is pending processing.
+    Pending;
+};
 
 service : {
+    /// Submit a new limit order. The order is queued for *asynchronous* processing
+    /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
-    get_order_status : (nat64) -> (OrderStatus) query;
+
+    /// Query the status of an order by its ID.
+    get_order_status : (OrderId) -> (OrderStatus) query;
 }
