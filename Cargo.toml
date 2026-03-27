@@ -31,5 +31,5 @@ candid_parser = "0.3.0"
 ic-cdk = "0.20.0"
 ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
 pocket-ic = "13.0.0"
-serde = "1.0.217"
+serde = "1.0.228"
 tokio = "1.43.0"
