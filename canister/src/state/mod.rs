@@ -1,4 +1,4 @@
-use crate::order::{Order, OrderId};
+use crate::order::{Order, OrderId, PendingOrder};
 use dex_types::OrderStatus;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -22,9 +22,10 @@ pub struct State {
 }
 
 impl State {
-    pub fn add_order(&mut self) -> OrderId {
+    pub fn add_limit_order(&mut self, pending: PendingOrder) -> OrderId {
         let order_id = self.next_order_id.increment();
-        self.pending_orders.push_back(Order { id: order_id });
+        self.pending_orders
+            .push_back(Order::from_pending(pending, order_id));
         order_id
     }
 

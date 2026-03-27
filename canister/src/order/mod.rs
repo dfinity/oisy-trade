@@ -24,6 +24,18 @@ impl From<OrderId> for u64 {
 }
 
 #[derive(Debug)]
+pub struct PendingOrder {
+    // TODO DEFI-2723: add fields: price, quantity, side, etc.
+}
+
+#[derive(Debug)]
 pub struct Order {
     pub id: OrderId,
+    // TODO DEFI-2723: add fields: price, quantity, side, etc.
+}
+
+impl Order {
+    pub fn from_pending(_pending: PendingOrder, id: OrderId) -> Self {
+        Self { id }
+    }
 }
