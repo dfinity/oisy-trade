@@ -26,18 +26,14 @@ mod get_order_status {
     fn should_return_pending_for_existing_order() {
         init_state();
         let response = add_limit_order(LimitOrderRequest {});
-
         let status = get_order_status(response.order_id);
-
         assert_eq!(status, OrderStatus::Pending);
     }
 
     #[test]
     fn should_return_not_found_for_nonexistent_order() {
         init_state();
-
-        let status = get_order_status(999);
-
+        let status = get_order_status(u64::MAX);
         assert_eq!(status, OrderStatus::NotFound);
     }
 }

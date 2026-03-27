@@ -4,10 +4,8 @@ pub struct OrderId(u64);
 impl OrderId {
     pub const ZERO: Self = Self(0);
 
-    pub fn increment(&mut self) -> Self {
-        let current = *self;
+    pub fn increment(&mut self) {
         self.0 += 1;
-        current
     }
 }
 
@@ -28,14 +26,14 @@ pub struct PendingOrder {
     // TODO DEFI-2723: add fields: price, quantity, side, etc.
 }
 
+impl PendingOrder {
+    pub fn into_order(self, id: OrderId) -> Order {
+        Order { id }
+    }
+}
+
 #[derive(Debug)]
 pub struct Order {
     pub id: OrderId,
     // TODO DEFI-2723: add fields: price, quantity, side, etc.
-}
-
-impl Order {
-    pub fn from_pending(_pending: PendingOrder, id: OrderId) -> Self {
-        Self { id }
-    }
 }

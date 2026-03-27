@@ -30,10 +30,15 @@ pub struct State {
 }
 
 impl State {
+    pub fn next_order_id(&mut self) -> OrderId {
+        let id = self.next_order_id;
+        self.next_order_id.increment();
+        id
+    }
+
     pub fn add_limit_order(&mut self, pending: PendingOrder) -> OrderId {
-        let order_id = self.next_order_id.increment();
-        self.pending_orders
-            .push_back(Order::from_pending(pending, order_id));
+        let order_id = self.next_order_id();
+        self.pending_orders.push_back(pending.into_order(order_id));
         order_id
     }
 
