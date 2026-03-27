@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
+use dex_types::{DummyRequest, DummyResponse};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
-use dex_types::{DummyRequest, DummyResponse};
 
 /// Abstract the canister runtime so that the client code can be reused:
 /// * in production using `ic_cdk`,
