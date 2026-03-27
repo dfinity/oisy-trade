@@ -1,4 +1,4 @@
-name: 'SOL RPC'
+name: 'DEX'
 
 on:
   pull_request:
@@ -23,7 +23,7 @@ jobs:
         run: |
           cargo fmt --all -- --check
           cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
-          cargo clippy --locked --verbose --target wasm32-unknown-unknown -p sol_rpc_canister -- -D clippy::all
+          cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all
 
   reproducible-build:
     runs-on: ubuntu-22.04
@@ -33,19 +33,19 @@ jobs:
 #        TODO XC-283: setup reproducible build with Docker
       - name: Docker build
         run: |
-          cargo build --locked --target wasm32-unknown-unknown --release --package sol_rpc_canister
-          gzip -fckn9 target/wasm32-unknown-unknown/release/sol_rpc_canister.wasm >./wasms/sol_rpc_canister.wasm.gz
+          cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
+          gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm >./wasms/dex_canister.wasm.gz
 
       - name: 'Archive Artifact'
         uses: actions/upload-artifact@v4
         with:
-          name: sol_rpc_canister.wasm.gz
-          path: ./wasms/sol_rpc_canister.wasm.gz
+          name: dex_canister.wasm.gz
+          path: ./wasms/dex_canister.wasm.gz
           if-no-files-found: error
 
       - name: 'Add summary'
         run: |
-          hash=`sha256sum ./wasms/sol_rpc_canister.wasm.gz`
+          hash=`sha256sum ./wasms/dex_canister.wasm.gz`
           echo "SHA-256 :hash: ${hash}" >> $GITHUB_STEP_SUMMARY
 
   unit-tests:
@@ -54,7 +54,7 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@v4
       - name: 'Run unit tests'
-        run: cargo test --locked --workspace --exclude sol_rpc_int_tests
+        run: cargo test --locked --workspace --exclude dex_int_tests
 
   integration-tests:
     needs: [ reproducible-build ]
@@ -66,11 +66,11 @@ jobs:
       - name: 'Download Artifacts'
         uses: actions/download-artifact@v4
         with:
-          name: sol_rpc_canister.wasm.gz
+          name: dex_canister.wasm.gz
 
-      - name: 'Set SOL_RPC_CANISTER_WASM_PATH for load_wasm'
+      - name: 'Set DEX_CANISTER_WASM_PATH for load_wasm'
         run: |
-          echo "SOL_RPC_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/sol_rpc_canister.wasm.gz" >> "$GITHUB_ENV"
+          echo "DEX_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/dex_canister.wasm.gz" >> "$GITHUB_ENV"
 
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@main
@@ -78,4 +78,4 @@ jobs:
           pocket-ic-server-version: "7.0.0"
 
       - name: Cargo test
-        run: cargo test --package sol_rpc_int_tests -- --test-threads 2 --nocapture
+        run: cargo test --package dex_int_tests -- --test-threads 2 --nocapture

@@ -1,5 +1,5 @@
 [package]
-name = "sol_rpc_int_tests"
+name = "dex_int_tests"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
@@ -14,8 +14,8 @@ ic-cdk = { workspace = true }
 ic-test-utilities-load-wasm = { workspace = true }
 pocket-ic = { workspace = true }
 serde = { workspace = true }
-sol_rpc_client = { path = "../libs/client" }
-sol_rpc_types = { path = "../libs/types" }
+dex_client = { path = "../libs/client" }
+dex_types = { path = "../libs/types" }
 
 [dev-dependencies]
 tokio = { workspace = true }

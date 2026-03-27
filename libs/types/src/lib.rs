@@ -1,4 +1,4 @@
-//! Candid types used by the candid interface of the SOL RPC canister.
+//! Candid types used by the candid interface of the DEX canister.
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]

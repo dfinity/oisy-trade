@@ -1,5 +1,5 @@
-use sol_rpc_int_tests::Setup;
-use sol_rpc_types::{DummyRequest, DummyResponse};
+use dex_int_tests::Setup;
+use dex_types::{DummyRequest, DummyResponse};
 
 #[tokio::test]
 async fn should_greet() {

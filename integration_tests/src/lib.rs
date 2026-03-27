@@ -4,7 +4,7 @@ use candid::{decode_args, encode_args, CandidType, Encode, Principal};
 use ic_cdk::call::RejectCode;
 use pocket_ic::{nonblocking::PocketIc, CanisterId, CanisterSettings, PocketIcBuilder};
 use serde::de::DeserializeOwned;
-use sol_rpc_client::{Runtime, SolRpcClient};
+use dex_client::{DexClient, Runtime};
 use std::path::PathBuf;
 
 pub struct Setup {
@@ -36,7 +36,7 @@ impl Setup {
         env.add_cycles(canister_id, u128::MAX).await;
         env.install_canister(
             canister_id,
-            sol_rpc_wasm(),
+            dex_wasm(),
             Encode!().unwrap(),
             Some(controller),
         )
@@ -51,8 +51,8 @@ impl Setup {
         }
     }
 
-    pub fn client(&self) -> SolRpcClient<PocketIcRuntime> {
-        SolRpcClient::new(self.new_pocket_ic(), self.canister_id)
+    pub fn client(&self) -> DexClient<PocketIcRuntime> {
+        DexClient::new(self.new_pocket_ic(), self.canister_id)
     }
 
     fn new_pocket_ic(&self) -> PocketIcRuntime {
@@ -67,10 +67,10 @@ impl Setup {
     }
 }
 
-fn sol_rpc_wasm() -> Vec<u8> {
+fn dex_wasm() -> Vec<u8> {
     ic_test_utilities_load_wasm::load_wasm(
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../canister"),
-        "sol_rpc_canister",
+        "dex_canister",
         &[],
     )
 }

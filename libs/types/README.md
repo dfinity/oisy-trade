@@ -1,2 +1,2 @@
-# Crate `sol_rpc_types`
+# Crate `dex_types`
 

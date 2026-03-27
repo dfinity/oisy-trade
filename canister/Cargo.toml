@@ -1,7 +1,7 @@
 [package]
-name = "sol_rpc_canister"
+name = "dex_canister"
 version = "0.1.0"
-description = "Interact with the Solana blockchain from the Internet Computer."
+description = "DEX canister on the Internet Computer."
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -9,13 +9,13 @@ homepage.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "sol_rpc_canister"
+name = "dex_canister"
 path = "src/main.rs"
 
 [dependencies]
 candid = {workspace = true}
 ic-cdk = {workspace = true}
-sol_rpc_types =  {path = "../libs/types"}
+dex_types =  {path = "../libs/types"}
 
 [dev-dependencies]
 candid_parser = {workspace = true}

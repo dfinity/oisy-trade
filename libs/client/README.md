@@ -1,2 +1,2 @@
-# Crate `sol_rpc_client`
+# Crate `dex_client`
 

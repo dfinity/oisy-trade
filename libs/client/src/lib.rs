@@ -1,4 +1,4 @@
-//! Client to interact with the SOL RPC canister
+//! Client to interact with the DEX canister
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
@@ -8,7 +8,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
-use sol_rpc_types::{DummyRequest, DummyResponse};
+use dex_types::{DummyRequest, DummyResponse};
 
 /// Abstract the canister runtime so that the client code can be reused:
 /// * in production using `ic_cdk`,
@@ -29,40 +29,40 @@ pub trait Runtime {
         Out: CandidType + DeserializeOwned + 'static;
 }
 
-/// Client to interact with the SOL RPC canister.
+/// Client to interact with the DEX canister.
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct SolRpcClient<R: Runtime> {
+pub struct DexClient<R: Runtime> {
     runtime: R,
-    sol_rpc_canister: Principal,
+    dex_canister: Principal,
 }
 
-impl SolRpcClient<IcRuntime> {
+impl DexClient<IcRuntime> {
     /// Instantiate a new client to be used by a canister on the Internet Computer.
     ///
     /// To use another runtime, see [`Self::new`].
-    pub fn new_for_ic(sol_rpc_canister: Principal) -> Self {
+    pub fn new_for_ic(dex_canister: Principal) -> Self {
         Self {
             runtime: IcRuntime {},
-            sol_rpc_canister,
+            dex_canister,
         }
     }
 }
 
-impl<R: Runtime> SolRpcClient<R> {
+impl<R: Runtime> DexClient<R> {
     /// Instantiate a new client with a specific runtime.
     ///
-    /// To use the client inside a canister, see [`SolRpcClient<IcRuntime>::new_for_ic`].
-    pub fn new(runtime: R, sol_rpc_canister: Principal) -> Self {
+    /// To use the client inside a canister, see [`DexClient<IcRuntime>::new_for_ic`].
+    pub fn new(runtime: R, dex_canister: Principal) -> Self {
         Self {
             runtime,
-            sol_rpc_canister,
+            dex_canister,
         }
     }
 
-    /// Call `greet` on the SOL RPC canister.
+    /// Call `greet` on the DEX canister.
     pub async fn greet(&self, request: DummyRequest) -> DummyResponse {
         self.runtime
-            .call(self.sol_rpc_canister, "greet", (request,), 10_000)
+            .call(self.dex_canister, "greet", (request,), 10_000)
             .await
             .unwrap()
     }
