@@ -4,15 +4,23 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
+    static STATE: RefCell<Option<State>> = RefCell::default();
 }
 
 pub fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
-    STATE.with(|s| f(&s.borrow()))
+    STATE.with(|s| f(s.borrow().as_ref().expect("State not initialized!")))
 }
 
 pub fn with_state_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
-    STATE.with(|s| f(&mut s.borrow_mut()))
+    STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
+}
+
+pub fn init_state() {
+    STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        assert!(state.is_none(), "State already initialized!");
+        *state = Some(State::default());
+    });
 }
 
 #[derive(Debug, Default)]
