@@ -1,4 +1,5 @@
-use dex_types::{OrderId, OrderStatus};
+use crate::order::{Order, OrderId};
+use dex_types::OrderStatus;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
@@ -20,15 +21,9 @@ pub struct State {
     pending_orders: VecDeque<Order>,
 }
 
-#[derive(Debug)]
-pub struct Order {
-    pub id: OrderId,
-}
-
 impl State {
     pub fn add_order(&mut self) -> OrderId {
-        let order_id = self.next_order_id;
-        self.next_order_id += 1;
+        let order_id = self.next_order_id.increment();
         self.pending_orders.push_back(Order { id: order_id });
         order_id
     }

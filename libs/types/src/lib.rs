@@ -14,7 +14,9 @@ pub type OrderId = u64;
 
 /// Request to place a new limit order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct LimitOrderRequest {}
+pub struct LimitOrderRequest {
+    // TODO DEFI-2723: add fields: price, quantity, side, etc.
+}
 
 /// Response after successfully placing a limit order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]

@@ -1,14 +1,18 @@
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus};
+use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
 
 #[ic_cdk::update]
 fn add_limit_order(_request: LimitOrderRequest) -> LimitOrderResponse {
     let order_id = dex_canister::state::with_state_mut(|s| s.add_order());
-    LimitOrderResponse { order_id }
+    LimitOrderResponse {
+        order_id: u64::from(order_id),
+    }
 }
 
 #[ic_cdk::query]
-fn get_order_status(order_id: OrderId) -> OrderStatus {
-    dex_canister::state::with_state(|s| s.get_order_status(order_id))
+fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
+    dex_canister::state::with_state(|s| {
+        s.get_order_status(dex_canister::order::OrderId::from(order_id))
+    })
 }
 
 fn main() {}
