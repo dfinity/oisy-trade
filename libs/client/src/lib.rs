@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use ic_cdk::api::call::RejectionCode;
+use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 use sol_rpc_types::{DummyRequest, DummyResponse};
 
@@ -23,7 +23,7 @@ pub trait Runtime {
         method: &str,
         args: In,
         cycles: u128,
-    ) -> Result<Out, (RejectionCode, String)>
+    ) -> Result<Out, (RejectCode, String)>
     where
         In: ArgumentEncoder + Send + 'static,
         Out: CandidType + DeserializeOwned + 'static;
@@ -79,13 +79,29 @@ impl Runtime for IcRuntime {
         method: &str,
         args: In,
         cycles: u128,
-    ) -> Result<Out, (RejectionCode, String)>
+    ) -> Result<Out, (RejectCode, String)>
     where
         In: ArgumentEncoder + Send + 'static,
         Out: CandidType + DeserializeOwned + 'static,
     {
-        ic_cdk::api::call::call_with_payment128(id, method, args, cycles)
+        let response = Call::bounded_wait(id, method)
+            .with_args(&args)
+            .with_cycles(cycles)
             .await
+            .map_err(call_failed_to_reject)?;
+        response
+            .candid_tuple::<(Out,)>()
             .map(|(res,)| res)
+            .map_err(|e| (RejectCode::CanisterError, e.to_string()))
+    }
+}
+
+fn call_failed_to_reject(err: CallFailed) -> (RejectCode, String) {
+    match err {
+        CallFailed::CallRejected(rejected) => (
+            rejected.reject_code().unwrap_or(RejectCode::SysUnknown),
+            rejected.reject_message().to_string(),
+        ),
+        other => (RejectCode::CanisterError, other.to_string()),
     }
 }

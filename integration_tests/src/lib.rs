@@ -1,9 +1,8 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{decode_args, encode_args, CandidType, Encode, Principal};
-use ic_cdk::api::call::RejectionCode;
-use pocket_ic::management_canister::{CanisterId, CanisterSettings};
-use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder, WasmResult};
+use ic_cdk::call::RejectCode;
+use pocket_ic::{nonblocking::PocketIc, CanisterId, CanisterSettings, PocketIcBuilder};
 use serde::de::DeserializeOwned;
 use sol_rpc_client::{Runtime, SolRpcClient};
 use std::path::PathBuf;
@@ -90,7 +89,7 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
         method: &str,
         args: In,
         _cycles: u128,
-    ) -> Result<Out, (RejectionCode, String)>
+    ) -> Result<Out, (RejectCode, String)>
     where
         In: ArgumentEncoder + Send + 'static,
         Out: CandidType + DeserializeOwned + 'static,
@@ -101,9 +100,9 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
             .update_call(id, self.caller, method, args_raw)
             .await
         {
-            Ok(WasmResult::Reply(bytes)) => decode_args(&bytes).map(|(res,)| res).map_err(|e| {
+            Ok(bytes) => decode_args(&bytes).map(|(res,)| res).map_err(|e| {
                 (
-                    RejectionCode::CanisterError,
+                    RejectCode::CanisterError,
                     format!(
                         "failed to decode canister response as {}: {}",
                         std::any::type_name::<Out>(),
@@ -111,17 +110,16 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
                     ),
                 )
             }),
-            Ok(WasmResult::Reject(s)) => Err((RejectionCode::CanisterReject, s)),
             Err(e) => {
-                let rejection_code = match e.code as u64 {
-                    100..=199 => RejectionCode::SysFatal,
-                    200..=299 => RejectionCode::SysTransient,
-                    300..=399 => RejectionCode::DestinationInvalid,
-                    400..=499 => RejectionCode::CanisterReject,
-                    500..=599 => RejectionCode::CanisterError,
-                    _ => RejectionCode::Unknown,
+                let rejection_code = match e.reject_code {
+                    pocket_ic::RejectCode::SysFatal => RejectCode::SysFatal,
+                    pocket_ic::RejectCode::SysTransient => RejectCode::SysTransient,
+                    pocket_ic::RejectCode::DestinationInvalid => RejectCode::DestinationInvalid,
+                    pocket_ic::RejectCode::CanisterReject => RejectCode::CanisterReject,
+                    pocket_ic::RejectCode::CanisterError => RejectCode::CanisterError,
+                    pocket_ic::RejectCode::SysUnknown => RejectCode::SysUnknown,
                 };
-                Err((rejection_code, e.description))
+                Err((rejection_code, e.reject_message))
             }
         }
     }
