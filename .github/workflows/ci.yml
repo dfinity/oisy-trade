@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
-#        TODO XC-283: setup reproducible build with Docker
+#        TODO DEFI-2722: setup reproducible build with Docker
       - name: Docker build
         run: |
           cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
@@ -75,7 +75,7 @@ jobs:
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@main
         with:
-          pocket-ic-server-version: "7.0.0"
+          pocket-ic-server-version: "13.0.0"
 
       - name: Cargo test
         run: cargo test --package dex_int_tests -- --test-threads 2 --nocapture
