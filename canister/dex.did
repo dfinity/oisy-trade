@@ -15,7 +15,7 @@ type OrderStatus = variant {
     Pending;
 };
 
-service : {
+service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
