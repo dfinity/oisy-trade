@@ -15,3 +15,6 @@ target
 
 # JetBrains IntelliJ
 .idea/
+
+# Generated wasms
+wasms
