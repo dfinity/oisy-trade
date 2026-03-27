@@ -121,8 +121,8 @@ Since deposits are a separate step, the user's balance is already available when
 
 Each trading pair maintains two sorted sides:
 
-- **Bids** (buy orders): sorted by price descending, then by time ascending (price-time priority).
-- **Asks** (sell orders): sorted by price ascending, then by time ascending.
+- **Bids** (buy orders): sorted by price descending, then by insertion order (price-FIFO priority).
+- **Asks** (sell orders): sorted by price ascending, then by insertion order.
 
 ### Price Levels
 
@@ -144,84 +144,49 @@ This gives O(log n) insertion/removal by price and O(1) access to the best bid/a
 
 ## Matching Engine
 
-Matching runs synchronously within the `add_limit_order` update call, after the order transitions to `Open`.
-
-### Algorithm
-
-```
-fn match_order(book, incoming_order):
-    opposite_side = book.opposite(incoming_order.side)
-
-    while incoming_order.remaining > 0:
-        best = opposite_side.best_price_level()
-        if best is None:
-            break
-        if not prices_cross(incoming_order.price, best.price, incoming_order.side):
-            break
-
-        for resting_order in best.orders:
-            fill_qty = min(incoming_order.remaining, resting_order.remaining)
-            execute_fill(incoming_order, resting_order, fill_qty, best.price)
-
-            if resting_order.remaining == 0:
-                remove resting_order from level
-
-            if incoming_order.remaining == 0:
-                break
-
-        if best.orders is empty:
-            remove price level
-
-    if incoming_order.remaining > 0:
-        book.insert(incoming_order)  // rest in the book
-```
-
-### Price Crossing
-
-- A buy order crosses if `buy_price >= best_ask`.
-- A sell order crosses if `sell_price <= best_bid`.
-- Fills execute at the resting order's price (price improvement for the taker).
+Matching runs on a timer and process pending orders in the order book. This allows to potentially chunk the matching process into smaller batches.
 
 ## Settlement and Token Custody
 
-### Deposits (Escrow)
+### Deposits
 
-When a limit order is submitted:
-
-1. The user must have previously called `icrc2_approve` on the relevant ledger, granting the DEX canister a sufficient allowance.
-2. The canister calls `icrc2_transfer_from` to move tokens into its custody:
-   - **Buy order**: escrow `price * quantity` quote tokens.
-   - **Sell order**: escrow `quantity` base tokens.
-3. If the transfer fails, the order stays in `Pending` and is eventually rejected.
+Deposits are independent from order placement. The user first approves the DEX canister on the ICRC-2 ledger, then calls `deposit(token, amount)`. The canister executes `icrc2_transfer_from` to move tokens into its custody and credits the user's internal balance.
 
 ### Balances
 
-The canister tracks per-user balances internally:
+The canister tracks per-user balances internally. Each user's balance for a given token is split into:
 
-```
-balances: HashMap<(Principal, TokenId), u128>
-```
+- **Available**: funds that can be used to place new orders or be withdrawn.
+- **Reserved**: funds locked by open orders (quote tokens for bids, base tokens for asks).
 
-- **On fill**: the buyer's quote balance decreases, base balance increases. The seller's base balance decreases, quote balance increases.
-- **On cancel**: escrowed tokens are credited back to the user's balance.
-- Balances are purely internal accounting; actual token transfers only happen on deposit and withdrawal.
+Balance transitions:
+
+- **On order placement**: the required amount moves from available to reserved.
+- **On fill**: the reserved amount of the filled side is consumed, and the proceeds are credited to the available balance of the corresponding token. For example, when a buy order fills, the reserved quote tokens are consumed and the base tokens are credited as available.
+- **On cancel**: reserved tokens move back to available.
+- **On deposit**: available balance increases.
+- **On withdrawal**: available balance decreases.
+
+Actual token transfers (inter-canister calls) only happen during deposits and withdrawals. All trading operations are purely internal bookkeeping.
 
 ### Withdrawals
 
-Users call `withdraw(token, amount)` to transfer tokens from their canister balance to their wallet. The canister calls `icrc1_transfer` on the relevant ledger.
+Users call `withdraw(token, amount)` to transfer tokens from their available balance to their wallet. The canister calls `icrc1_transfer` on the relevant ledger. The withdrawal fails if the requested amount exceeds the user's available balance or if the ledger is not available.
 
 ## Fee Model
 
 - **Maker fee**: charged on fills where the order was resting in the book (can be 0 or negative for rebates).
-- **Maker/taker fee**: charged on fills where the order was the incoming aggressor.
-- Fees are deducted from the proceeds at fill time and accumulated in a fee account controlled by the canister admin.
+- **Taker fee**: charged on fills where the order was the incoming aggressor.
+- **Platform fee**: a fee charged on every trade (both maker and taker sides), used to cover canister cycle costs and fund protocol development.
+- Maker and taker fees are deducted from the proceeds at fill time. The platform fee is deducted in addition to the maker/taker fee.
+- All collected fees are accumulated in a fee account controlled by the canister admin.
 - Fee rates are configurable per trading pair.
 
 ## Access Control
 
 | Role | Capabilities |
 |------|-------------|
-| **Admin** (controller) | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees |
+| **Admin** (controller) | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected platform fees |
 | **User** (any principal) | Place orders, cancel own orders, deposit, withdraw own balance |
 
 - No allowlisting: any principal can trade on any active pair.
@@ -229,23 +194,27 @@ Users call `withdraw(token, amount)` to transfer tokens from their canister bala
 
 ## State Persistence
 
-Canister state must survive upgrades:
+Canister state must survive upgrades. Rather than serializing and deserializing the full state, the canister uses an **append-only event log** stored in stable memory. This is the same approach used by the ckBTC, ckETH, and ckSOL minters.
 
-- **Pre-upgrade**: serialize the full `State` (order books, balances, pair configs, fee accounts) into stable memory using a format like CBOR or the IC stable structures library.
-- **Post-upgrade**: deserialize from stable memory and reinitialize the `State`.
+### Event Sourcing
 
-The `State` struct encompasses:
+Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory. The in-memory `State` is a derived projection of these events.
 
-```
-State {
-    pairs: BTreeMap<PairId, TradingPair>,
-    order_books: BTreeMap<PairId, OrderBook>,
-    balances: HashMap<(Principal, TokenId), u128>,
-    next_order_id: OrderId,
-    fee_config: BTreeMap<PairId, FeeConfig>,
-    collected_fees: HashMap<TokenId, u128>,
-}
-```
+### Upgrade Process
+
+- **Pre-upgrade**: nothing to do — events are already persisted in stable memory as they occur.
+- **Post-upgrade**: the canister replays the event log from the beginning to reconstruct the full in-memory `State`.
+
+### Benefits
+
+- **Auditability**: the event log is a complete, ordered history of every state change.
+- **Simpler upgrades**: no need to maintain serialization compatibility for the `State` struct across versions. Only the event format needs to remain stable (new event types can be added without breaking existing ones).
+- **Debuggability**: bugs can be reproduced by replaying the event log.
+
+### Considerations
+
+- **Replay time**: as the event log grows, post-upgrade replay takes longer. This can be mitigated by periodic checkpointing (snapshotting the state and only replaying events after the checkpoint).
+- **Event schema evolution**: new event types can be added freely, but existing event types should not be modified to ensure backwards-compatible replay.
 
 ## Monitoring and Observability
 
@@ -274,30 +243,26 @@ The canister exposes basic metrics via a query endpoint:
 
 All state lives in one canister. This avoids cross-canister call complexity for matching but means:
 
-- **Instruction limit**: matching must complete within a single message execution (~2B instructions on a fiduciary subnet). Very large order books may require batched matching via self-calls.
+- **Instruction limit**: matching must complete within a single message execution (~2B instructions on a fiduciary subnet). Very large order books may require batched matching via self-calls or timer-based chunking.
 - **Memory limit**: current IC stable memory limit is 400 GiB, heap is 4 GiB. Order book state should fit comfortably in heap for moderate pair counts; stable structures can be used for larger datasets.
 
-### Async Token Transfers
+### Synchronous Trading
 
-ICRC-2 `transfer_from` is an inter-canister call (async). The order lifecycle handles this:
+Since deposits and withdrawals are separate from trading, the matching engine operates entirely on internal balances with no inter-canister calls. This means:
 
-1. `add_limit_order` queues the order as `Pending` and initiates the transfer.
-2. On transfer callback success, the order moves to `Open` and matching runs.
-3. On transfer failure, the order is rejected.
+- **No async complexity during matching**: order placement, matching, and settlement are fully synchronous within a single update call or timer execution. There is no reentrancy concern during trading.
+- **Predictable execution**: the matching engine's instruction cost depends only on the number of price levels and orders matched, not on external canister latency.
 
-This two-phase approach ensures the canister never matches orders with unconfirmed deposits.
+### Async Deposits and Withdrawals
 
-### Reentrancy
+Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for withdrawals) only occur at the edges. These calls are async, so:
 
-Between the `transfer_from` call and its response, other update calls can execute. The canister must handle this correctly:
+- **Deposit**: the canister must handle the case where the `transfer_from` call fails (e.g., insufficient allowance, ledger unavailable). The user's internal balance is only credited after a successful transfer.
+- **Withdrawal**: similarly, the available balance is debited optimistically, and if the `transfer` call fails, the balance must be restored.
+- **Reentrancy**: between an async transfer call and its response, other update calls can execute. Since deposits and withdrawals only affect the initiating user's balance and do not interact with the order book, this is safe as long as the same user cannot issue concurrent deposit/withdrawal requests for the same token.
 
-- Orders in `Pending` state are not visible to the matching engine.
-- User balance accounting is committed only after transfer confirmation.
+## Potential Additional Features
 
-## Open Questions
-
-- Should the canister support market orders (execute at best available price, no resting)?
-- Should there be order expiry (good-til-cancelled vs. good-til-time)?
-- Should the canister support batch order operations (place/cancel multiple orders atomically)?
-- How to handle ICRC-1 ledger fee deductions in balance calculations?
-- Should the canister run on a fiduciary subnet for higher instruction limits?
+- **Market orders**: execute at best available price with no resting in the book.
+- **Order expiry**: support good-til-time orders that are automatically canceled after a specified deadline, in addition to the default good-til-canceled.
+- **Batch operations**: place or cancel multiple orders atomically in a single call, reducing round trips for market makers.
