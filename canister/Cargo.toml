@@ -1,0 +1,21 @@
+[package]
+name = "dex_canister"
+version = "0.1.0"
+description = "DEX canister on the Internet Computer."
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dex_canister"
+path = "src/main.rs"
+
+[dependencies]
+candid = {workspace = true}
+ic-cdk = {workspace = true}
+dex_types =  {path = "../libs/types"}
+
+[dev-dependencies]
+candid_parser = {workspace = true}

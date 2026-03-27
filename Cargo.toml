@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "canister", "integration_tests",
+    "libs/client",
+    "libs/types",
+]
+
+[workspace.package]
+authors = ["DFINITY Stiftung"]
+edition = "2024"
+repository = "https://github.com/dfinity/dex"
+homepage = "https://github.com/dfinity/dex#readme"
+license = "Apache-2.0"
+readme = "README.md"
+
+[profile.release]
+debug = false
+lto = true
+strip = true
+opt-level = 's'
+
+# Required by `ic-test-utilities-load-wasm`
+[profile.canister-release]
+inherits = "release"
+
+[workspace.dependencies]
+async-trait = "0.1.85"
+candid = "0.10.26"
+candid_parser = "0.3.0"
+ic-cdk = "0.20.0"
+ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
+pocket-ic = "13.0.0"
+serde = "1.0.217"
+tokio = "1.43.0"

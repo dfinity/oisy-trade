@@ -1,0 +1,18 @@
+[package]
+name = "dex_client"
+version = "0.1.0"
+description = "Client to interact with the DEX canister"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme = "README.md"
+include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
+
+[dependencies]
+async-trait = { workspace = true }
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+serde = { workspace = true }
+dex_types = { path = "../types" }

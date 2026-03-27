@@ -1,0 +1,81 @@
+name: 'DEX'
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+    paths-ignore:
+      - "README.md"
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+      - name: 'Check code'
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
+          cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all
+
+  reproducible-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+#        TODO DEFI-2722: setup reproducible build with Docker
+      - name: Docker build
+        run: |
+          cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
+          gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm >./wasms/dex_canister.wasm.gz
+
+      - name: 'Archive Artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex_canister.wasm.gz
+          path: ./wasms/dex_canister.wasm.gz
+          if-no-files-found: error
+
+      - name: 'Add summary'
+        run: |
+          hash=`sha256sum ./wasms/dex_canister.wasm.gz`
+          echo "SHA-256 :hash: ${hash}" >> $GITHUB_STEP_SUMMARY
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+      - name: 'Run unit tests'
+        run: cargo test --locked --workspace --exclude dex_int_tests
+
+  integration-tests:
+    needs: [ reproducible-build ]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+
+      - name: 'Download Artifacts'
+        uses: actions/download-artifact@v4
+        with:
+          name: dex_canister.wasm.gz
+
+      - name: 'Set DEX_CANISTER_WASM_PATH for load_wasm'
+        run: |
+          echo "DEX_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/dex_canister.wasm.gz" >> "$GITHUB_ENV"
+
+      - name: 'Install PocketIC server'
+        uses: dfinity/pocketic@main
+        with:
+          pocket-ic-server-version: "13.0.0"
+
+      - name: Cargo test
+        run: cargo test --package dex_int_tests -- --test-threads 2 --nocapture
