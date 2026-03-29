@@ -44,10 +44,13 @@ User                    DEX Canister
  |                          |
  |-- add_limit_order ------>|
  |                          | debit user's available balance
- |                          | insert order into book
- |                          | run matching engine
- |                          | credit proceeds on fills
+ |                          | queue order for matching
  |<-- order_id -------------|
+ |                          |
+ |          (timer fires)   |
+ |                          | matching engine processes queue
+ |                          | insert/match against book
+ |                          | credit proceeds on fills
  |                          |
  |-- get_order_status ----->|
  |<-- status (Pending/      |
@@ -136,7 +139,7 @@ Since deposits are a separate step, the user's balance is already available when
 1. **Pending**: The order is submitted. The required funds are debited from the user's available balance (quote tokens for buys, base tokens for sells). The order is placed in a queue and an order ID is returned immediately. If the user has insufficient balance, the order is rejected.
 2. **Open**: The timer-driven matching engine dequeues the order and matches it against the opposite side of the book. If the order is fully filled during this initial matching, it transitions directly to `Filled` without ever resting in the book. If only partially filled, the filled portion is settled immediately (proceeds credited to the user's available balance) and the remaining quantity rests in the book at the specified price level, where it can be matched against future incoming orders.
 3. **Filled**: The order has been fully matched (either immediately or after resting in the book). Proceeds from the final fill are credited to the user's available balance.
-4. **Canceled**: The user canceled the order (or it was removed due to pair delisting). Reserved tokens are returned to the user's available balance.
+4. **Cancelled**: The user cancelled the order (or it was removed due to pair delisting). Reserved tokens are returned to the user's available balance.
 
 ### Order Book Data Structure
 
@@ -165,7 +168,7 @@ This gives O(log n) insertion/removal by price and O(1) access to the best bid/a
 
 ### Matching Engine
 
-Matching runs on a timer and process pending orders in the order book. This allows to potentially chunk the matching process into smaller batches.
+Matching runs on a timer and processes pending queued orders, which makes it possible to chunk the matching process into smaller batches.
 
 ### Fee Model
 
@@ -214,7 +217,7 @@ All state lives in one canister. This avoids cross-canister call complexity for 
 
 Since deposits and withdrawals are separate from trading, the matching engine operates entirely on internal balances with no inter-canister calls. This means:
 
-- **No async complexity during matching**: order placement, matching, and settlement are fully synchronous within a single update call or timer execution. There is no reentrancy concern during trading.
+- **No async complexity during matching**: order placement, matching, and settlement are fully synchronous within a single update call or timer execution. There are no reentrancy concerns during trading.
 - **Predictable execution**: the matching engine's instruction cost depends only on the number of price levels and orders matched, not on external canister latency.
 
 ### Async Deposits and Withdrawals
@@ -223,7 +226,7 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 
 - **Deposit**: the canister must handle the case where the `transfer_from` call fails (e.g., insufficient allowance, ledger unavailable). The user's internal balance is only credited after a successful transfer.
 - **Withdrawal**: similarly, the available balance is debited optimistically, and if the `transfer` call fails, the balance must be restored.
-- **Reentrancy**: between an async transfer call and its response, other update calls can execute. Since deposits and withdrawals only affect the initiating user's balance and do not interact with the order book, this is safe as long as the same user cannot issue concurrent deposit/withdrawal requests for the same token.
+- **Reentrancy**: between an async transfer call and its response, other update calls can execute. Since deposits and withdrawals only affect the initiating user's balance and do not interact with the order book, this is safe provided the implementation enforces that the same user cannot have multiple in-flight deposit/withdrawal requests for the same token (e.g., via a per-(user, token) in-flight guard).
 
 ### State Persistence
 
