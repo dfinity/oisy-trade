@@ -1,5 +1,7 @@
 mod icrc_ledger;
 
+pub use icrc_ledger::LedgerClient;
+
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Principal, decode_args, encode_args};
@@ -76,6 +78,14 @@ impl Setup {
 
     pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(self.new_pocket_ic(), self.canister_id)
+    }
+
+    pub fn base_token_ledger(&self) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), self.base_ledger_id)
+    }
+
+    pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
     }
 
     fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {

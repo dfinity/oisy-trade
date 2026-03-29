@@ -1,4 +1,4 @@
-use candid::{CandidType, Encode, Nat, Principal};
+use candid::{CandidType, Decode, Encode, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::nonblocking::PocketIc;
 use pocket_ic::{CanisterId, CanisterSettings};
@@ -98,6 +98,45 @@ pub fn cksol_init_args(controller: Principal) -> InitArgs {
         feature_flags: None,
         archive_options: test_archive_options(controller),
         index_principal: None,
+    }
+}
+
+pub struct LedgerClient<'a> {
+    env: &'a PocketIc,
+    canister_id: CanisterId,
+}
+
+impl<'a> LedgerClient<'a> {
+    pub fn new(env: &'a PocketIc, canister_id: CanisterId) -> Self {
+        Self { env, canister_id }
+    }
+
+    pub async fn icrc1_decimals(&self) -> u8 {
+        let response = self
+            .env
+            .query_call(
+                self.canister_id,
+                Principal::anonymous(),
+                "icrc1_decimals",
+                Encode!().unwrap(),
+            )
+            .await
+            .expect("Failed to query icrc1_decimals");
+        Decode!(&response, u8).expect("Failed to decode icrc1_decimals response")
+    }
+
+    pub async fn icrc1_fee(&self) -> Nat {
+        let response = self
+            .env
+            .query_call(
+                self.canister_id,
+                Principal::anonymous(),
+                "icrc1_fee",
+                Encode!().unwrap(),
+            )
+            .await
+            .expect("Failed to query icrc1_fee");
+        Decode!(&response, Nat).expect("Failed to decode icrc1_fee response")
     }
 }
 
