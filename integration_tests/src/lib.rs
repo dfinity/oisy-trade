@@ -1,3 +1,5 @@
+mod icrc_ledger;
+
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Principal, decode_args, encode_args};
@@ -12,6 +14,8 @@ pub struct Setup {
     caller: Principal,
     _controller: Principal,
     canister_id: CanisterId,
+    pub base_ledger_id: CanisterId,
+    pub quote_ledger_id: CanisterId,
 }
 
 impl Setup {
@@ -41,6 +45,23 @@ impl Setup {
             Some(controller),
         )
         .await;
+
+        let ledger_wasm = ledger_wasm();
+        let base_ledger_id = icrc_ledger::install_ledger(
+            &env,
+            controller,
+            ledger_wasm.clone(),
+            icrc_ledger::cksol_init_args(controller),
+        )
+        .await;
+        let quote_ledger_id = icrc_ledger::install_ledger(
+            &env,
+            controller,
+            ledger_wasm,
+            icrc_ledger::ckbtc_init_args(controller),
+        )
+        .await;
+
         let caller = DEFAULT_CALLER_TEST_ID;
 
         Self {
@@ -48,6 +69,8 @@ impl Setup {
             caller,
             _controller: controller,
             canister_id,
+            base_ledger_id,
+            quote_ledger_id,
         }
     }
 
