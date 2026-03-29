@@ -86,6 +86,22 @@ fn dex_wasm() -> Vec<u8> {
     )
 }
 
+pub fn ledger_wasm() -> Vec<u8> {
+    let path = std::env::var("IC_ICRC1_LEDGER_WASM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("../wasms/ic-icrc1-ledger.wasm.gz")
+        });
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read ledger WASM at {}: {}\nRun `just download-external-wasms` first.",
+            path.display(),
+            e
+        )
+    })
+}
+
 #[derive(Clone)]
 pub struct PocketIcRuntime<'a> {
     env: &'a PocketIc,
