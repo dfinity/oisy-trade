@@ -30,15 +30,56 @@ pub struct InitArgs {
         icrc_ledger_types::icrc::generic_metadata_value::MetadataValue,
     )>,
     pub initial_balances: Vec<(Account, Nat)>,
-    pub feature_flags: Option<()>,
+    pub feature_flags: Option<FeatureFlags>,
     pub archive_options: ArchiveOptions,
+    pub index_principal: Option<Principal>,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct FeatureFlags {
+    pub icrc2: bool,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum ChangeFeeCollector {
+    Unset,
+    SetTo(Account),
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ChangeArchiveOptions {
+    pub num_blocks_to_archive: Option<u64>,
+    pub max_transactions_per_response: Option<u64>,
+    pub trigger_threshold: Option<u64>,
+    pub max_message_size_bytes: Option<u64>,
+    pub cycles_for_archive_creation: Option<u64>,
+    pub node_max_memory_size_bytes: Option<u64>,
+    pub controller_id: Option<Principal>,
+    pub more_controller_ids: Option<Vec<Principal>>,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpgradeArgs {
+    pub metadata: Option<
+        Vec<(
+            String,
+            icrc_ledger_types::icrc::generic_metadata_value::MetadataValue,
+        )>,
+    >,
+    pub token_symbol: Option<String>,
+    pub token_name: Option<String>,
+    pub transfer_fee: Option<Nat>,
+    pub change_fee_collector: Option<ChangeFeeCollector>,
+    pub max_memo_length: Option<u16>,
+    pub feature_flags: Option<FeatureFlags>,
+    pub change_archive_options: Option<ChangeArchiveOptions>,
     pub index_principal: Option<Principal>,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum LedgerArg {
     Init(Box<InitArgs>),
-    Upgrade(Option<()>),
+    Upgrade(Option<Box<UpgradeArgs>>),
 }
 
 pub async fn install_ledger(
