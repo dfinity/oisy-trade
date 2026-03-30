@@ -23,6 +23,7 @@ pub fn init_state() {
     });
 }
 
+#[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
 #[derive(Debug, Default)]
 pub struct State {
     next_order_id: OrderId,
