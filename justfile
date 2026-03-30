@@ -26,7 +26,7 @@ unit-tests:
 
 # Download external WASMs for integration tests
 download-external-wasms:
-    ./scripts/download-external-wasms.sh
+    bash scripts/download-external-wasms.sh
 
 # Run integration tests
 integration-tests: download-external-wasms
