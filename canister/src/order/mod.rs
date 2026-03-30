@@ -67,6 +67,10 @@ impl Price {
     pub fn get(self) -> u64 {
         self.0
     }
+
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl From<u64> for Price {
@@ -95,7 +99,7 @@ impl Quantity {
         self.0
     }
 
-    pub fn is_zero(self) -> bool {
+    pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
@@ -172,7 +176,10 @@ pub enum MatchOrderError {
     /// Price is not a multiple of the tick size.
     InvalidTickSize { price: Price, tick_size: Price },
     /// Quantity is not a multiple of the lot size.
-    InvalidLotSize { quantity: Quantity, lot_size: Quantity },
+    InvalidLotSize {
+        quantity: Quantity,
+        lot_size: Quantity,
+    },
 }
 
 /// A single fill produced when an incoming order matches a resting order.

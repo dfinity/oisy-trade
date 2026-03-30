@@ -1,10 +1,22 @@
 mod order_book {
-    use crate::order::{Fill, MatchOrderError, MatchResult, OrderId, Price, Quantity};
+    use crate::order::{Fill, MatchOrderError, MatchResult, OrderBook, OrderId, Price, Quantity};
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, order_book, sell};
 
     mod validation {
         use super::*;
         use crate::test_fixtures::all_order_types;
+
+        #[test]
+        #[should_panic(expected = "tick_size must be non-zero")]
+        fn should_panic_on_zero_tick_size() {
+            OrderBook::new(Price::ZERO, Quantity::new(LOT_SIZE));
+        }
+
+        #[test]
+        #[should_panic(expected = "lot_size must be non-zero")]
+        fn should_panic_on_zero_lot_size() {
+            OrderBook::new(Price::new(TICK_SIZE), Quantity::ZERO);
+        }
 
         #[test]
         fn should_reject_price_not_multiple_of_tick_size() {

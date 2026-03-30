@@ -22,7 +22,15 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
+    /// Creates a new empty order book with the given constraints.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `tick_size` or `lot_size` is zero.
     pub fn new(tick_size: Price, lot_size: Quantity) -> Self {
+        assert!(!tick_size.is_zero(), "tick_size must be non-zero");
+        assert!(!lot_size.is_zero(), "lot_size must be non-zero");
+        
         Self {
             tick_size,
             lot_size,
