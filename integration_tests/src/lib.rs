@@ -16,8 +16,8 @@ pub struct Setup {
     caller: Principal,
     _controller: Principal,
     canister_id: CanisterId,
-    pub base_ledger_id: CanisterId,
-    pub quote_ledger_id: CanisterId,
+    base_ledger_id: CanisterId,
+    quote_ledger_id: CanisterId,
 }
 
 impl Setup {
