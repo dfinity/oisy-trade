@@ -1,8 +1,23 @@
 /// Unique identifier for an order, assigned by the canister upon submission.
 type OrderId = nat64;
 
+/// Side of an order.
+type Side = variant {
+    /// Buy order (bid).
+    Buy;
+    /// Sell order (ask).
+    Sell;
+};
+
 /// Request to place a new limit order.
-type LimitOrderRequest = record {};
+type LimitOrderRequest = record {
+    /// Whether this is a buy or sell order.
+    side : Side;
+    /// Limit price in quote token units per base token unit.
+    price : nat64;
+    /// Order quantity in base token units.
+    quantity : nat64;
+};
 
 /// Response after successfully placing a limit order.
 type LimitOrderResponse = record { order_id : OrderId };
@@ -13,6 +28,12 @@ type OrderStatus = variant {
     NotFound;
     /// The order is pending processing.
     Pending;
+    /// The order is open and resting in the order book.
+    Open;
+    /// The order has been fully filled.
+    Filled;
+    /// The order has been cancelled.
+    Cancelled;
 };
 
 service : () -> {

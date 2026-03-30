@@ -5,9 +5,16 @@ pub mod state;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod test_fixtures;
 
-pub fn add_limit_order(_request: LimitOrderRequest) -> LimitOrderResponse {
-    let order_id = state::with_state_mut(|s| s.add_limit_order(order::PendingOrder {}));
+pub fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+    let pending = order::PendingOrder {
+        side: request.side,
+        price: order::Price::from(request.price),
+        quantity: order::Quantity::from(request.quantity),
+    };
+    let order_id = state::with_state_mut(|s| s.add_limit_order(pending));
     LimitOrderResponse {
         order_id: u64::from(order_id),
     }

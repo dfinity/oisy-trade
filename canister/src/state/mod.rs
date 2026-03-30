@@ -1,7 +1,7 @@
-use crate::order::{Order, OrderId, PendingOrder};
+use crate::order::{Order, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair};
 use dex_types::OrderStatus;
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -27,6 +27,8 @@ pub fn init_state() {
 pub struct State {
     next_order_id: OrderId,
     pending_orders: VecDeque<Order>,
+    tokens: BTreeMap<TokenId, TokenMetadata>,
+    order_books: BTreeMap<TradingPair, OrderBook>,
 }
 
 impl State {
