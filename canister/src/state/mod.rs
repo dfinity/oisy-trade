@@ -23,12 +23,13 @@ pub fn init_state() {
     });
 }
 
-#[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
 #[derive(Debug, Default)]
 pub struct State {
     next_order_id: OrderId,
     pending_orders: VecDeque<Order>,
+    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     tokens: BTreeMap<TokenId, TokenMetadata>,
+    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
 }
 
