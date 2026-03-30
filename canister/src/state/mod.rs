@@ -1,7 +1,8 @@
 use crate::order::{Order, OrderId, PendingOrder};
+use candid::{Nat, Principal};
 use dex_types::OrderStatus;
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -27,6 +28,7 @@ pub fn init_state() {
 pub struct State {
     next_order_id: OrderId,
     pending_orders: VecDeque<Order>,
+    balances: BTreeMap<Principal, BTreeMap<Principal, Nat>>,
 }
 
 impl State {
@@ -48,5 +50,23 @@ impl State {
         } else {
             OrderStatus::NotFound
         }
+    }
+
+    pub fn deposit(&mut self, user: Principal, token_ledger: Principal, amount: Nat) {
+        let balance = self
+            .balances
+            .entry(user)
+            .or_default()
+            .entry(token_ledger)
+            .or_insert_with(|| Nat::from(0u64));
+        *balance += amount;
+    }
+
+    pub fn get_balance(&self, user: Principal, token_ledger: Principal) -> Nat {
+        self.balances
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token_ledger))
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
     }
 }

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 pub struct Setup {
     env: Option<PocketIc>,
     caller: Principal,
-    _controller: Principal,
+    controller: Principal,
     canister_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
@@ -69,7 +69,7 @@ impl Setup {
         Self {
             env: Some(env),
             caller,
-            _controller: controller,
+            controller,
             canister_id,
             base_ledger_id,
             quote_ledger_id,
@@ -86,6 +86,32 @@ impl Setup {
 
     pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
+    }
+
+    pub fn controller(&self) -> Principal {
+        self.controller
+    }
+
+    pub fn canister_id(&self) -> CanisterId {
+        self.canister_id
+    }
+
+    pub fn base_ledger_id(&self) -> CanisterId {
+        self.base_ledger_id
+    }
+
+    pub fn quote_ledger_id(&self) -> CanisterId {
+        self.quote_ledger_id
+    }
+
+    pub fn client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
+        DexClient::new(
+            PocketIcRuntime {
+                env: self.env.as_ref().unwrap(),
+                caller,
+            },
+            self.canister_id,
+        )
     }
 
     fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {

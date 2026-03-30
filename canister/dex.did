@@ -15,6 +15,49 @@ type OrderStatus = variant {
     Pending;
 };
 
+/// A token identified by its ledger canister ID.
+type Token = record {
+    /// The canister ID of the token's ledger.
+    ledger_canister_id : principal;
+};
+
+/// Errors that can be returned by icrc2_transfer_from.
+type LedgerTransferFromError = variant {
+    BadFee : record { expected_fee : nat };
+    BadBurn : record { min_burn_amount : nat };
+    InsufficientFunds : record { balance : nat };
+    InsufficientAllowance : record { allowance : nat };
+    TooOld;
+    CreatedInFuture : record { ledger_time : nat64 };
+    Duplicate : record { duplicate_of : nat };
+    TemporarilyUnavailable;
+    GenericError : record { error_code : nat; message : text };
+};
+
+/// Error returned by the deposit endpoint.
+type DepositError = variant {
+    /// The token is not supported by the DEX.
+    TokenUnsupported;
+    /// The icrc2_transfer_from call to the token ledger returned an error.
+    LedgerError : LedgerTransferFromError;
+};
+
+/// Request to deposit tokens into the DEX.
+type DepositRequest = record {
+    /// The token to deposit.
+    token : Token;
+    /// The amount to deposit.
+    amount : nat;
+};
+
+/// Response after a successful deposit.
+type DepositResponse = record {
+    /// The block index of the transfer on the token ledger.
+    block_index : nat;
+};
+
+type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
+
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
@@ -22,4 +65,12 @@ service : () -> {
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;
+
+    /// Deposit tokens into the DEX. Calls icrc2_transfer_from on the token ledger
+    /// to transfer the specified amount from the caller to the DEX canister,
+    /// then credits the caller's internal balance.
+    deposit : (DepositRequest) -> (DepositResult);
+
+    /// Query the caller's balance for a given token.
+    get_balance : (Token) -> (nat) query;
 }

@@ -1,4 +1,4 @@
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+use dex_types::{DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderStatus, Token};
 
 #[ic_cdk::init]
 fn init() {
@@ -13,6 +13,16 @@ fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
 #[ic_cdk::query]
 fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     dex_canister::get_order_status(order_id)
+}
+
+#[ic_cdk::update]
+async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    dex_canister::deposit(request).await
+}
+
+#[ic_cdk::query]
+fn get_balance(token: Token) -> candid::Nat {
+    dex_canister::get_balance(token)
 }
 
 fn main() {}

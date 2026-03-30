@@ -489,6 +489,7 @@ dependencies = [
  "candid_parser",
  "dex_types",
  "ic-cdk",
+ "icrc-ledger-types",
 ]
 
 [[package]]

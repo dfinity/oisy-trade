@@ -1,5 +1,7 @@
 use candid::{CandidType, Decode, Encode, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
 use pocket_ic::nonblocking::PocketIc;
 use pocket_ic::{CanisterId, CanisterSettings};
 use serde::{Deserialize, Serialize};
@@ -136,7 +138,7 @@ pub fn cksol_init_args(controller: Principal) -> InitArgs {
         token_name: "ckSOL".to_string(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: None,
+        feature_flags: Some(FeatureFlags { icrc2: true }),
         archive_options: test_archive_options(controller),
         index_principal: None,
     }
@@ -179,6 +181,66 @@ impl<'a> LedgerClient<'a> {
             .expect("Failed to query icrc1_fee");
         Decode!(&response, Nat).expect("Failed to decode icrc1_fee response")
     }
+
+    pub async fn icrc1_transfer(
+        &self,
+        caller: Principal,
+        to: Account,
+        amount: Nat,
+    ) -> Nat {
+        let args = TransferArg {
+            from_subaccount: None,
+            to,
+            fee: None,
+            created_at_time: None,
+            memo: None,
+            amount,
+        };
+        let response = self
+            .env
+            .update_call(
+                self.canister_id,
+                caller,
+                "icrc1_transfer",
+                Encode!(&args).unwrap(),
+            )
+            .await
+            .expect("Failed to call icrc1_transfer");
+        Decode!(&response, Result<Nat, TransferError>)
+            .expect("Failed to decode icrc1_transfer response")
+            .expect("icrc1_transfer failed")
+    }
+
+    pub async fn icrc2_approve(
+        &self,
+        caller: Principal,
+        spender: Account,
+        amount: Nat,
+    ) -> Nat {
+        let args = ApproveArgs {
+            from_subaccount: None,
+            spender,
+            amount,
+            expected_allowance: None,
+            expires_at: None,
+            fee: None,
+            memo: None,
+            created_at_time: None,
+        };
+        let response = self
+            .env
+            .update_call(
+                self.canister_id,
+                caller,
+                "icrc2_approve",
+                Encode!(&args).unwrap(),
+            )
+            .await
+            .expect("Failed to call icrc2_approve");
+        Decode!(&response, Result<Nat, ApproveError>)
+            .expect("Failed to decode icrc2_approve response")
+            .expect("icrc2_approve failed")
+    }
 }
 
 pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
@@ -195,7 +257,7 @@ pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
         token_name: "ckBTC".to_string(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: None,
+        feature_flags: Some(FeatureFlags { icrc2: true }),
         archive_options: test_archive_options(controller),
         index_principal: None,
     }
