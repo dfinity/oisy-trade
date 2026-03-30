@@ -19,11 +19,10 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+      - name: 'Install just'
+        uses: extractions/setup-just@v2
       - name: 'Check code'
-        run: |
-          cargo fmt --all -- --check
-          cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all
-          cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all
+        run: just lint
 
   reproducible-build:
     runs-on: ubuntu-22.04
@@ -31,10 +30,10 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@v4
 #        TODO DEFI-2722: setup reproducible build with Docker
+      - name: 'Install just'
+        uses: extractions/setup-just@v2
       - name: Docker build
-        run: |
-          cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
-          gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm >./wasms/dex_canister.wasm.gz
+        run: just build
 
       - name: 'Archive Artifact'
         uses: actions/upload-artifact@v4
@@ -53,8 +52,10 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+      - name: 'Install just'
+        uses: extractions/setup-just@v2
       - name: 'Run unit tests'
-        run: cargo test --locked --workspace --exclude dex_int_tests
+        run: just unit-tests
 
   integration-tests:
     needs: [ reproducible-build ]
@@ -62,6 +63,9 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+
+      - name: 'Install just'
+        uses: extractions/setup-just@v2
 
       - name: 'Download Artifacts'
         uses: actions/download-artifact@v4
@@ -78,4 +82,4 @@ jobs:
           pocket-ic-server-version: "13.0.0"
 
       - name: Cargo test
-        run: cargo test --package dex_int_tests -- --test-threads 2 --nocapture
+        run: just integration-tests
