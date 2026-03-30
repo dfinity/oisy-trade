@@ -2,7 +2,7 @@ mod book;
 #[cfg(test)]
 mod tests;
 
-pub use book::OrderBook;
+pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::Principal;
 use dex_types::Side;
 
@@ -176,50 +176,5 @@ impl Order {
             .remaining_quantity
             .checked_sub(amount)
             .expect("cannot reduce quantity below zero");
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum MatchOrderError {
-    /// Price is not a positive multiple of the tick size.
-    InvalidTickSize { price: Price, tick_size: Price },
-    /// Quantity is not a positive multiple of the lot size.
-    InvalidLotSize {
-        quantity: Quantity,
-        lot_size: Quantity,
-    },
-}
-
-/// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Fill {
-    /// The ID of the resting (maker) order that was matched.
-    pub maker_order_id: OrderId,
-    /// The price at which the fill occurred (always the maker's price).
-    pub price: Price,
-    /// The quantity filled.
-    pub quantity: Quantity,
-}
-
-/// The result of matching an incoming order against the book.
-#[derive(Debug, PartialEq, Eq)]
-pub enum MatchResult {
-    /// The order was fully filled and does not rest in the book.
-    Filled { fills: Vec<Fill> },
-    /// The order was partially filled and the remainder is now resting in the book.
-    PartiallyFilled {
-        fills: Vec<Fill>,
-        resting_order_id: OrderId,
-    },
-    /// No match was found; the order is resting in the book.
-    Resting { resting_order_id: OrderId },
-}
-
-impl MatchResult {
-    pub fn fills(&self) -> &[Fill] {
-        match self {
-            MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
-            MatchResult::Resting { .. } => &[],
-        }
     }
 }
