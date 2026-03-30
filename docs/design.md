@@ -254,16 +254,6 @@ Every state-changing operation (deposit, order placement, fill, cancellation, wi
 
 ## Monitoring
 
-### Query Endpoints
-
-| Endpoint                          | Description                                   |
-|-----------------------------------|-----------------------------------------------|
-| `get_order_status(OrderId)`       | Status of a specific order                    |
-| `get_order_book(PairId, depth)`   | Top N price levels for both sides             |
-| `get_balance(Principal, TokenId)` | User's available and reserved balance         |
-| `get_pairs()`                     | List of all trading pairs and their status    |
-| `get_trades(PairId, since)`       | Recent trade history                          |
-
 ### Metrics
 
 The canister exposes basic metrics via a query endpoint:
