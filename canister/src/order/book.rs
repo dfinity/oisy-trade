@@ -49,15 +49,15 @@ impl OrderBook {
 
         let mut fills = Vec::new();
 
-        match order.side {
+        match order.side() {
             Side::Buy => self.match_buy(&mut order, &mut fills),
             Side::Sell => self.match_sell(&mut order, &mut fills),
         }
 
-        if order.remaining_quantity.is_zero() {
+        if order.remaining_quantity().is_zero() {
             Ok(MatchResult::Filled { fills })
         } else {
-            let resting_order_id = order.id;
+            let resting_order_id = order.id();
             self.insert_order(order);
             Ok(MatchResult::Resting {
                 fills,
@@ -67,15 +67,15 @@ impl OrderBook {
     }
 
     fn validate_order(&self, order: &Order) -> Result<(), MatchOrderError> {
-        if order.price.get() % self.tick_size.get() != 0 {
+        if order.price().get() % self.tick_size.get() != 0 {
             return Err(MatchOrderError::InvalidTickSize {
-                price: order.price,
+                price: order.price(),
                 tick_size: self.tick_size,
             });
         }
-        if order.remaining_quantity.get() % self.lot_size.get() != 0 {
+        if order.remaining_quantity().get() % self.lot_size.get() != 0 {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity: order.remaining_quantity,
+                quantity: order.remaining_quantity(),
                 lot_size: self.lot_size,
             });
         }
@@ -83,11 +83,11 @@ impl OrderBook {
     }
 
     fn match_buy(&mut self, order: &mut Order, fills: &mut Vec<Fill>) {
-        while !order.remaining_quantity.is_zero() {
+        while !order.remaining_quantity().is_zero() {
             let Some((&ask_price, _)) = self.asks.first_key_value() else {
                 break;
             };
-            if ask_price > order.price {
+            if ask_price > order.price() {
                 break;
             }
             let queue = self.asks.get_mut(&ask_price).expect("price level must exist");
@@ -99,11 +99,11 @@ impl OrderBook {
     }
 
     fn match_sell(&mut self, order: &mut Order, fills: &mut Vec<Fill>) {
-        while !order.remaining_quantity.is_zero() {
+        while !order.remaining_quantity().is_zero() {
             let Some((&Reverse(bid_price), _)) = self.bids.first_key_value() else {
                 break;
             };
-            if bid_price < order.price {
+            if bid_price < order.price() {
                 break;
             }
             let queue = self.bids.get_mut(&Reverse(bid_price)).expect("price level must exist");
@@ -120,36 +120,37 @@ impl OrderBook {
         order: &mut Order,
         fills: &mut Vec<Fill>,
     ) {
-        while !order.remaining_quantity.is_zero() {
+        while !order.remaining_quantity().is_zero() {
             let Some(resting) = queue.front_mut() else {
                 break;
             };
-            let fill_qty = order.remaining_quantity.min(resting.remaining_quantity);
-            order.remaining_quantity = Quantity::new(order.remaining_quantity.get() - fill_qty.get());
-            resting.remaining_quantity = Quantity::new(resting.remaining_quantity.get() - fill_qty.get());
+            let fill_qty = order.remaining_quantity().min(resting.remaining_quantity());
+
+            order.reduce_quantity(fill_qty);
+            resting.reduce_quantity(fill_qty);
 
             fills.push(Fill {
-                maker_order_id: resting.id,
+                maker_order_id: resting.id(),
                 price,
                 quantity: fill_qty,
             });
 
-            if resting.remaining_quantity.is_zero() {
+            if resting.remaining_quantity().is_zero() {
                 queue.pop_front();
             }
         }
     }
 
     fn insert_order(&mut self, order: Order) {
-        match order.side {
+        match order.side() {
             Side::Buy => self
                 .bids
-                .entry(Reverse(order.price))
+                .entry(Reverse(order.price()))
                 .or_default()
                 .push_back(order),
             Side::Sell => self
                 .asks
-                .entry(order.price)
+                .entry(order.price())
                 .or_default()
                 .push_back(order),
         }

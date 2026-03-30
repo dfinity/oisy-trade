@@ -96,6 +96,10 @@ impl Quantity {
     pub fn is_zero(self) -> bool {
         self.0 == 0
     }
+
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
+    }
 }
 
 impl From<u64> for Quantity {
@@ -130,10 +134,35 @@ impl PendingOrder {
 
 #[derive(Debug)]
 pub struct Order {
-    pub id: OrderId,
-    pub side: Side,
-    pub price: Price,
-    pub remaining_quantity: Quantity,
+    id: OrderId,
+    side: Side,
+    price: Price,
+    remaining_quantity: Quantity,
+}
+
+impl Order {
+    pub fn id(&self) -> OrderId {
+        self.id
+    }
+
+    pub fn side(&self) -> Side {
+        self.side
+    }
+
+    pub fn price(&self) -> Price {
+        self.price
+    }
+
+    pub fn remaining_quantity(&self) -> Quantity {
+        self.remaining_quantity
+    }
+
+    pub fn reduce_quantity(&mut self, amount: Quantity) {
+        self.remaining_quantity = self
+            .remaining_quantity
+            .checked_sub(amount)
+            .expect("cannot reduce quantity below zero");
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

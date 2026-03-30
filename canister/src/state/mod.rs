@@ -45,7 +45,7 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        if self.pending_orders.iter().any(|o| o.id == order_id) {
+        if self.pending_orders.iter().any(|o| o.id() == order_id) {
             OrderStatus::Pending
         } else {
             OrderStatus::NotFound
