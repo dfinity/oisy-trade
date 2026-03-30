@@ -1,3 +1,7 @@
+mod icrc_ledger;
+
+pub use icrc_ledger::LedgerClient;
+
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Principal, decode_args, encode_args};
@@ -12,6 +16,8 @@ pub struct Setup {
     caller: Principal,
     _controller: Principal,
     canister_id: CanisterId,
+    base_ledger_id: CanisterId,
+    quote_ledger_id: CanisterId,
 }
 
 impl Setup {
@@ -41,6 +47,23 @@ impl Setup {
             Some(controller),
         )
         .await;
+
+        let ledger_wasm = ledger_wasm();
+        let base_ledger_id = icrc_ledger::install_ledger(
+            &env,
+            controller,
+            ledger_wasm.clone(),
+            icrc_ledger::cksol_init_args(controller),
+        )
+        .await;
+        let quote_ledger_id = icrc_ledger::install_ledger(
+            &env,
+            controller,
+            ledger_wasm,
+            icrc_ledger::ckbtc_init_args(controller),
+        )
+        .await;
+
         let caller = DEFAULT_CALLER_TEST_ID;
 
         Self {
@@ -48,11 +71,21 @@ impl Setup {
             caller,
             _controller: controller,
             canister_id,
+            base_ledger_id,
+            quote_ledger_id,
         }
     }
 
     pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(self.new_pocket_ic(), self.canister_id)
+    }
+
+    pub fn base_token_ledger(&self) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), self.base_ledger_id)
+    }
+
+    pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
     }
 
     fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {
@@ -84,6 +117,22 @@ fn dex_wasm() -> Vec<u8> {
         "dex_canister",
         &[],
     )
+}
+
+pub fn ledger_wasm() -> Vec<u8> {
+    let path = std::env::var("IC_ICRC1_LEDGER_WASM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("../wasms/ic-icrc1-ledger.wasm.gz")
+        });
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read ledger WASM at {}: {}\nRun `just download-external-wasms` first.",
+            path.display(),
+            e
+        )
+    })
 }
 
 #[derive(Clone)]
