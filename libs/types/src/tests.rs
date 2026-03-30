@@ -1,4 +1,4 @@
-use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus, Token};
 
 #[test]
 fn should_serialize_limit_order_request() {
@@ -23,4 +23,18 @@ fn should_serialize_order_status() {
         let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
         assert_eq!(status, decoded);
     }
+}
+
+#[test]
+fn should_serialize_token() {
+    let token = Token {
+        name: "Internet Computer".to_string(),
+        symbol: "ICP".to_string(),
+        decimals: 8,
+        ledger_id: candid::Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+        fee: candid::Nat::from(10_000_u64),
+    };
+    let encoded = candid::encode_one(&token).unwrap();
+    let decoded: Token = candid::decode_one(&encoded).unwrap();
+    assert_eq!(token, decoded);
 }

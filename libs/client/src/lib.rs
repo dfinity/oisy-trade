@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus};
+use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus, Token};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
@@ -71,6 +71,22 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         self.runtime
             .call(self.dex_canister, "get_order_status", (order_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Add a supported token to the DEX canister.
+    pub async fn add_supported_token(&self, token: Token) {
+        self.runtime
+            .call::<_, ()>(self.dex_canister, "add_supported_token", (token,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the list of supported tokens on the DEX canister.
+    pub async fn get_supported_tokens(&self) -> Vec<Token> {
+        self.runtime
+            .call(self.dex_canister, "get_supported_tokens", (), 0)
             .await
             .unwrap()
     }

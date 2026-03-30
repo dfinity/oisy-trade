@@ -6,7 +6,7 @@
 #[cfg(test)]
 mod tests;
 
-use candid::CandidType;
+use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for an order.
@@ -32,4 +32,19 @@ pub enum OrderStatus {
     NotFound,
     /// The order is pending processing.
     Pending,
+}
+
+/// A token that can be used in the DEX, either as a base or quote asset.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, CandidType)]
+pub struct Token {
+    /// The token name.
+    pub name: String,
+    /// The token symbol.
+    pub symbol: String,
+    /// The number of decimal places used by the token.
+    pub decimals: u8,
+    /// The ledger canister ID associated with this token.
+    pub ledger_id: candid::Principal,
+    /// The fee charged for transferring this token.
+    pub fee: Nat,
 }

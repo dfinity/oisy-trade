@@ -15,11 +15,26 @@ type OrderStatus = variant {
     Pending;
 };
 
+/// A token that can be used in the DEX, either as a base or quote asset.
+type Token = record {
+    name : text;
+    symbol : text;
+    decimals : nat8;
+    ledger_id : principal;
+    fee : nat;
+};
+
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
 
+    /// Add a supported token to the DEX.
+    add_supported_token : (Token) -> ();
+
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;
+
+    /// Query the list of supported tokens.
+    get_supported_tokens : () -> (vec Token) query;
 }

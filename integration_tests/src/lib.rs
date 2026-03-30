@@ -88,6 +88,14 @@ impl Setup {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
     }
 
+    pub fn base_ledger_id(&self) -> Principal {
+        self.base_ledger_id
+    }
+
+    pub fn quote_ledger_id(&self) -> Principal {
+        self.quote_ledger_id
+    }
+
     fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {
         PocketIcRuntime {
             env: self.env.as_ref().unwrap(),

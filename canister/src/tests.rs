@@ -37,3 +37,61 @@ mod get_order_status {
         assert_eq!(status, OrderStatus::NotFound);
     }
 }
+
+mod supported_tokens {
+    use crate::state::init_state;
+    use crate::{add_supported_token, get_supported_tokens};
+    use dex_types::Token;
+
+    fn test_token(symbol: &str, ledger_id: &str) -> Token {
+        Token {
+            name: symbol.to_string(),
+            symbol: symbol.to_string(),
+            decimals: 8,
+            ledger_id: candid::Principal::from_text(ledger_id).unwrap(),
+            fee: candid::Nat::from(10_000_u64),
+        }
+    }
+
+    #[test]
+    fn should_return_empty_when_no_tokens_added() {
+        init_state();
+        assert!(get_supported_tokens().is_empty());
+    }
+
+    #[test]
+    fn should_add_and_get_supported_token() {
+        init_state();
+        let token = test_token("ICP", "ryjl3-tyaaa-aaaaa-aaaba-cai");
+        add_supported_token(token.clone());
+
+        let tokens = get_supported_tokens();
+        assert_eq!(tokens, vec![token]);
+    }
+
+    #[test]
+    fn should_add_multiple_tokens() {
+        init_state();
+        let icp = test_token("ICP", "ryjl3-tyaaa-aaaaa-aaaba-cai");
+        let ckbtc = test_token("ckBTC", "mxzaz-hqaaa-aaaar-qaada-cai");
+
+        add_supported_token(icp.clone());
+        add_supported_token(ckbtc.clone());
+
+        let tokens = get_supported_tokens();
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens.contains(&icp));
+        assert!(tokens.contains(&ckbtc));
+    }
+
+    #[test]
+    fn should_not_duplicate_same_token() {
+        init_state();
+        let token = test_token("ICP", "ryjl3-tyaaa-aaaaa-aaaba-cai");
+        add_supported_token(token.clone());
+        add_supported_token(token.clone());
+
+        let tokens = get_supported_tokens();
+        assert_eq!(tokens, vec![token]);
+    }
+}

@@ -1,7 +1,7 @@
 use crate::order::{Order, OrderId, PendingOrder};
-use dex_types::OrderStatus;
+use dex_types::{OrderStatus, Token};
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -27,6 +27,7 @@ pub fn init_state() {
 pub struct State {
     next_order_id: OrderId,
     pending_orders: VecDeque<Order>,
+    supported_tokens: BTreeSet<Token>,
 }
 
 impl State {
@@ -42,11 +43,19 @@ impl State {
         order_id
     }
 
+    pub fn add_supported_token(&mut self, token: Token) {
+        self.supported_tokens.insert(token);
+    }
+
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         if self.pending_orders.iter().any(|o| o.id == order_id) {
             OrderStatus::Pending
         } else {
             OrderStatus::NotFound
         }
+    }
+
+    pub fn get_supported_tokens(&self) -> Vec<Token> {
+        self.supported_tokens.iter().cloned().collect()
     }
 }
