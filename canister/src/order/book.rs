@@ -1,6 +1,7 @@
 use super::{Fill, MatchOrderError, MatchResult, Order, Price, Quantity};
 use dex_types::Side;
 use std::cmp::Reverse;
+use std::collections::btree_map;
 use std::collections::{BTreeMap, VecDeque};
 
 /// Central limit order book for a single trading pair.
@@ -50,8 +51,30 @@ impl OrderBook {
         let mut fills = Vec::new();
 
         match order.side() {
-            Side::Buy => self.match_buy(&mut order, &mut fills),
-            Side::Sell => self.match_sell(&mut order, &mut fills),
+            Side::Buy => {
+                while !order.remaining_quantity().is_zero() {
+                    let Some(entry) = self.asks.first_entry() else {
+                        break;
+                    };
+                    if *entry.key() > order.price() {
+                        break;
+                    }
+                    let price = *entry.key();
+                    fill_against_queue(price, entry, &mut order, &mut fills);
+                }
+            }
+            Side::Sell => {
+                while !order.remaining_quantity().is_zero() {
+                    let Some(entry) = self.bids.first_entry() else {
+                        break;
+                    };
+                    let Reverse(price) = *entry.key();
+                    if price < order.price() {
+                        break;
+                    }
+                    fill_against_queue(price, entry, &mut order, &mut fills);
+                }
+            }
         }
 
         if order.remaining_quantity().is_zero() {
@@ -82,65 +105,6 @@ impl OrderBook {
         Ok(())
     }
 
-    fn match_buy(&mut self, order: &mut Order, fills: &mut Vec<Fill>) {
-        while !order.remaining_quantity().is_zero() {
-            let Some((&ask_price, _)) = self.asks.first_key_value() else {
-                break;
-            };
-            if ask_price > order.price() {
-                break;
-            }
-            let queue = self.asks.get_mut(&ask_price).expect("price level must exist");
-            Self::fill_against_queue(ask_price, queue, order, fills);
-            if queue.is_empty() {
-                self.asks.remove(&ask_price);
-            }
-        }
-    }
-
-    fn match_sell(&mut self, order: &mut Order, fills: &mut Vec<Fill>) {
-        while !order.remaining_quantity().is_zero() {
-            let Some((&Reverse(bid_price), _)) = self.bids.first_key_value() else {
-                break;
-            };
-            if bid_price < order.price() {
-                break;
-            }
-            let queue = self.bids.get_mut(&Reverse(bid_price)).expect("price level must exist");
-            Self::fill_against_queue(bid_price, queue, order, fills);
-            if queue.is_empty() {
-                self.bids.remove(&Reverse(bid_price));
-            }
-        }
-    }
-
-    fn fill_against_queue(
-        price: Price,
-        queue: &mut VecDeque<Order>,
-        order: &mut Order,
-        fills: &mut Vec<Fill>,
-    ) {
-        while !order.remaining_quantity().is_zero() {
-            let Some(resting) = queue.front_mut() else {
-                break;
-            };
-            let fill_qty = order.remaining_quantity().min(resting.remaining_quantity());
-
-            order.reduce_quantity(fill_qty);
-            resting.reduce_quantity(fill_qty);
-
-            fills.push(Fill {
-                maker_order_id: resting.id(),
-                price,
-                quantity: fill_qty,
-            });
-
-            if resting.remaining_quantity().is_zero() {
-                queue.pop_front();
-            }
-        }
-    }
-
     fn insert_order(&mut self, order: Order) {
         match order.side() {
             Side::Buy => self
@@ -148,11 +112,38 @@ impl OrderBook {
                 .entry(Reverse(order.price()))
                 .or_default()
                 .push_back(order),
-            Side::Sell => self
-                .asks
-                .entry(order.price())
-                .or_default()
-                .push_back(order),
+            Side::Sell => self.asks.entry(order.price()).or_default().push_back(order),
         }
+    }
+}
+
+fn fill_against_queue<K: Ord>(
+    price: Price,
+    mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<Order>>,
+    order: &mut Order,
+    fills: &mut Vec<Fill>,
+) {
+    let resting_orders = entry.get_mut();
+    while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
+        let Some(resting) = resting_orders.front_mut() else {
+            break;
+        };
+        let fill_qty = order.remaining_quantity().min(resting.remaining_quantity());
+
+        order.reduce_quantity(fill_qty);
+        resting.reduce_quantity(fill_qty);
+
+        fills.push(Fill {
+            maker_order_id: resting.id(),
+            price,
+            quantity: fill_qty,
+        });
+
+        if resting.remaining_quantity().is_zero() {
+            resting_orders.pop_front();
+        }
+    }
+    if resting_orders.is_empty() {
+        entry.remove();
     }
 }
