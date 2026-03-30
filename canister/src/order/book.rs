@@ -63,10 +63,11 @@ impl OrderBook {
 
     /// Match an incoming order against the book.
     ///
-    /// Validates tick size and lot size, then attempts to fill the order against
-    /// the opposite side. If the order is fully filled, returns [`MatchResult::Filled`].
-    /// Otherwise the remainder is inserted into the book as a resting order and
-    /// [`MatchResult::Resting`] is returned.
+    /// Validates tick size, lot size, and rejects zero price/quantity, then attempts
+    /// to fill the order against the opposite side. Returns:
+    /// - [`MatchResult::Filled`] if the order is fully filled.
+    /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
+    /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
     pub fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
         self.validate_order(&order)?;
 
@@ -116,13 +117,15 @@ impl OrderBook {
     }
 
     fn validate_order(&self, order: &Order) -> Result<(), MatchOrderError> {
-        if !order.price().is_multiple_of(self.tick_size) {
+        if order.price().is_zero() || !order.price().is_multiple_of(self.tick_size) {
             return Err(MatchOrderError::InvalidTickSize {
                 price: order.price(),
                 tick_size: self.tick_size,
             });
         }
-        if !order.remaining_quantity().is_multiple_of(self.lot_size) {
+        if order.remaining_quantity().is_zero()
+            || !order.remaining_quantity().is_multiple_of(self.lot_size)
+        {
             return Err(MatchOrderError::InvalidLotSize {
                 quantity: order.remaining_quantity(),
                 lot_size: self.lot_size,

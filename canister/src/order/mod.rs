@@ -181,9 +181,9 @@ impl Order {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MatchOrderError {
-    /// Price is not a multiple of the tick size.
+    /// Price is not a positive multiple of the tick size.
     InvalidTickSize { price: Price, tick_size: Price },
-    /// Quantity is not a multiple of the lot size.
+    /// Quantity is not a positive multiple of the lot size.
     InvalidLotSize {
         quantity: Quantity,
         lot_size: Quantity,

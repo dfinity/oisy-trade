@@ -55,6 +55,34 @@ mod order_book {
         }
 
         #[test]
+        fn should_reject_zero_price() {
+            let mut book = order_book();
+            for order in all_order_types(0, LOT_SIZE) {
+                assert_eq!(
+                    book.match_order(order),
+                    Err(MatchOrderError::InvalidTickSize {
+                        price: Price::ZERO,
+                        tick_size: Price::new(TICK_SIZE),
+                    })
+                );
+            }
+        }
+
+        #[test]
+        fn should_reject_zero_quantity() {
+            let mut book = order_book();
+            for order in all_order_types(TICK_SIZE, 0) {
+                assert_eq!(
+                    book.match_order(order),
+                    Err(MatchOrderError::InvalidLotSize {
+                        quantity: Quantity::ZERO,
+                        lot_size: Quantity::new(LOT_SIZE),
+                    })
+                );
+            }
+        }
+
+        #[test]
         fn should_accept_valid_order() {
             let mut book = order_book();
             for order in all_order_types(TICK_SIZE, LOT_SIZE) {
