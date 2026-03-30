@@ -1,7 +1,8 @@
+mod book;
+
+pub use book::OrderBook;
 use candid::Principal;
 use dex_types::Side;
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct OrderId(u64);
@@ -135,34 +136,41 @@ pub struct Order {
     pub remaining_quantity: Quantity,
 }
 
-/// Central limit order book for a single trading pair.
-///
-/// Bids are sorted by price descending (best bid = highest price).
-/// Asks are sorted by price ascending (best ask = lowest price).
-/// Within a price level, orders are matched in FIFO order.
-#[derive(Debug)]
-pub struct OrderBook {
-    tick_size: Price,
-    lot_size: Quantity,
-    bids: BTreeMap<Reverse<Price>, VecDeque<Order>>,
-    asks: BTreeMap<Price, VecDeque<Order>>,
+#[derive(Debug, PartialEq, Eq)]
+pub enum MatchOrderError {
+    /// Price is not a multiple of the tick size.
+    InvalidTickSize { price: Price, tick_size: Price },
+    /// Quantity is not a multiple of the lot size.
+    InvalidLotSize { quantity: Quantity, lot_size: Quantity },
 }
 
-impl OrderBook {
-    pub fn new(tick_size: Price, lot_size: Quantity) -> Self {
-        Self {
-            tick_size,
-            lot_size,
-            bids: BTreeMap::new(),
-            asks: BTreeMap::new(),
+/// A single fill produced when an incoming order matches a resting order.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Fill {
+    /// The ID of the resting (maker) order that was matched.
+    pub maker_order_id: OrderId,
+    /// The price at which the fill occurred (always the maker's price).
+    pub price: Price,
+    /// The quantity filled.
+    pub quantity: Quantity,
+}
+
+/// The result of matching an incoming order against the book.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MatchResult {
+    /// The order was fully filled and does not rest in the book.
+    Filled { fills: Vec<Fill> },
+    /// The order was partially filled (or not at all) and the remainder is now resting.
+    Resting {
+        fills: Vec<Fill>,
+        resting_order_id: OrderId,
+    },
+}
+
+impl MatchResult {
+    pub fn fills(&self) -> &[Fill] {
+        match self {
+            MatchResult::Filled { fills } | MatchResult::Resting { fills, .. } => fills,
         }
-    }
-
-    pub fn tick_size(&self) -> Price {
-        self.tick_size
-    }
-
-    pub fn lot_size(&self) -> Quantity {
-        self.lot_size
     }
 }
