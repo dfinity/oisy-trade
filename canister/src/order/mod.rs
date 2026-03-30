@@ -71,6 +71,10 @@ impl Price {
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
+
+    pub fn is_multiple_of(self, other: Self) -> bool {
+        self.0.is_multiple_of(other.0)
+    }
 }
 
 impl From<u64> for Price {
@@ -101,6 +105,10 @@ impl Quantity {
 
     pub const fn is_zero(self) -> bool {
         self.0 == 0
+    }
+
+    pub fn is_multiple_of(self, other: Self) -> bool {
+        self.0.is_multiple_of(other.0)
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {

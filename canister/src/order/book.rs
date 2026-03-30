@@ -30,7 +30,7 @@ impl OrderBook {
     pub fn new(tick_size: Price, lot_size: Quantity) -> Self {
         assert!(!tick_size.is_zero(), "tick_size must be non-zero");
         assert!(!lot_size.is_zero(), "lot_size must be non-zero");
-        
+
         Self {
             tick_size,
             lot_size,
@@ -116,13 +116,13 @@ impl OrderBook {
     }
 
     fn validate_order(&self, order: &Order) -> Result<(), MatchOrderError> {
-        if order.price().get() % self.tick_size.get() != 0 {
+        if !order.price().is_multiple_of(self.tick_size) {
             return Err(MatchOrderError::InvalidTickSize {
                 price: order.price(),
                 tick_size: self.tick_size,
             });
         }
-        if order.remaining_quantity().get() % self.lot_size.get() != 0 {
+        if !order.remaining_quantity().is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
                 quantity: order.remaining_quantity(),
                 lot_size: self.lot_size,

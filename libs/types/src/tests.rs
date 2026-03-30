@@ -38,7 +38,7 @@ fn should_serialize_order_status() {
 #[test]
 fn should_serialize_side() {
     for side in [Side::Buy, Side::Sell] {
-        let encoded = candid::encode_one(&side).unwrap();
+        let encoded = candid::encode_one(side).unwrap();
         let decoded: Side = candid::decode_one(&encoded).unwrap();
         assert_eq!(side, decoded);
     }

@@ -1,8 +1,8 @@
 mod add_limit_order {
     use crate::add_limit_order;
     use crate::state::init_state;
-    use std::collections::BTreeSet;
     use crate::test_fixtures::limit_order_request;
+    use std::collections::BTreeSet;
 
     #[test]
     fn should_add_limit_orders_with_distinct_order_ids() {
@@ -19,9 +19,9 @@ mod add_limit_order {
 
 mod get_order_status {
     use crate::state::init_state;
+    use crate::test_fixtures::limit_order_request;
     use crate::{add_limit_order, get_order_status};
     use dex_types::OrderStatus;
-    use crate::test_fixtures::limit_order_request;
 
     #[test]
     fn should_return_pending_for_existing_order() {

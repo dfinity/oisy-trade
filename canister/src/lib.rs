@@ -4,9 +4,9 @@ pub mod order;
 pub mod state;
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod test_fixtures;
+#[cfg(test)]
+mod tests;
 
 pub fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
     let pending = order::PendingOrder {

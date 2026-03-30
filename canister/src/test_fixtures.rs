@@ -4,7 +4,7 @@ use std::iter::once;
 
 /// ICP/BTC-like parameters from Binance.
 /// Source: `GET https://api.binance.com/api/v3/exchangeInfo?symbol=ICPBTC`
-
+///
 /// Minimum price increment: 0.00000010 BTC, i.e. 10 satoshis.
 pub const TICK_SIZE: u64 = 10;
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
