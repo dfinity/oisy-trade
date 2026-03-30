@@ -1,4 +1,6 @@
 mod book;
+#[cfg(test)]
+mod tests;
 
 pub use book::OrderBook;
 use candid::Principal;
@@ -189,17 +191,20 @@ pub struct Fill {
 pub enum MatchResult {
     /// The order was fully filled and does not rest in the book.
     Filled { fills: Vec<Fill> },
-    /// The order was partially filled (or not at all) and the remainder is now resting.
-    Resting {
+    /// The order was partially filled and the remainder is now resting in the book.
+    PartiallyFilled {
         fills: Vec<Fill>,
         resting_order_id: OrderId,
     },
+    /// No match was found; the order is resting in the book.
+    Resting { resting_order_id: OrderId },
 }
 
 impl MatchResult {
     pub fn fills(&self) -> &[Fill] {
         match self {
-            MatchResult::Filled { fills } | MatchResult::Resting { fills, .. } => fills,
+            MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
+            MatchResult::Resting { .. } => &[],
         }
     }
 }

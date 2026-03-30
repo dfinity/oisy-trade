@@ -31,12 +31,26 @@ impl OrderBook {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bids.is_empty() && self.asks.is_empty()
+    }
+
     pub fn tick_size(&self) -> Price {
         self.tick_size
     }
 
     pub fn lot_size(&self) -> Quantity {
         self.lot_size
+    }
+
+    /// Returns the best (highest price) bid order, or `None` if the bid side is empty.
+    pub fn best_bid(&self) -> Option<&Order> {
+        self.bids.first_key_value().and_then(|(_, q)| q.front())
+    }
+
+    /// Returns the best (lowest price) ask order, or `None` if the ask side is empty.
+    pub fn best_ask(&self) -> Option<&Order> {
+        self.asks.first_key_value().and_then(|(_, q)| q.front())
     }
 
     /// Match an incoming order against the book.
@@ -82,10 +96,14 @@ impl OrderBook {
         } else {
             let resting_order_id = order.id();
             self.insert_order(order);
-            Ok(MatchResult::Resting {
-                fills,
-                resting_order_id,
-            })
+            if fills.is_empty() {
+                Ok(MatchResult::Resting { resting_order_id })
+            } else {
+                Ok(MatchResult::PartiallyFilled {
+                    fills,
+                    resting_order_id,
+                })
+            }
         }
     }
 
