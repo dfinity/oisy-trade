@@ -1,18 +1,26 @@
-use crate::{DummyRequest, DummyResponse};
+use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
 
 #[test]
-fn should_deser() {
-    let request = DummyRequest {
-        input: "Hello".to_string(),
-    };
+fn should_serialize_limit_order_request() {
+    let request = LimitOrderRequest {};
     let encoded = candid::encode_one(&request).unwrap();
-    let decoded: DummyRequest = candid::decode_one(&encoded).unwrap();
+    let decoded: LimitOrderRequest = candid::decode_one(&encoded).unwrap();
     assert_eq!(request, decoded);
+}
 
-    let response = DummyResponse {
-        output: "Hello world!".to_string(),
-    };
+#[test]
+fn should_serialize_limit_order_response() {
+    let response = LimitOrderResponse { order_id: 42 };
     let encoded = candid::encode_one(&response).unwrap();
-    let decoded: DummyResponse = candid::decode_one(&encoded).unwrap();
+    let decoded: LimitOrderResponse = candid::decode_one(&encoded).unwrap();
     assert_eq!(response, decoded);
+}
+
+#[test]
+fn should_serialize_order_status() {
+    for status in [OrderStatus::NotFound, OrderStatus::Pending] {
+        let encoded = candid::encode_one(&status).unwrap();
+        let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
+        assert_eq!(status, decoded);
+    }
 }

@@ -1,6 +1,25 @@
-type DummyRequest = record {input : text};
-type DummyResponse = record {output : text};
+/// Unique identifier for an order, assigned by the canister upon submission.
+type OrderId = nat64;
 
-service : {
-    greet: (DummyRequest) -> (DummyResponse) query;
+/// Request to place a new limit order.
+type LimitOrderRequest = record {};
+
+/// Response after successfully placing a limit order.
+type LimitOrderResponse = record { order_id : OrderId };
+
+/// Status of an order.
+type OrderStatus = variant {
+    /// The order was not found.
+    NotFound;
+    /// The order is pending processing.
+    Pending;
+};
+
+service : () -> {
+    /// Submit a new limit order. The order is queued for *asynchronous* processing
+    /// and an order ID is immediately returned.
+    add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
+
+    /// Query the status of an order by its ID.
+    get_order_status : (OrderId) -> (OrderStatus) query;
 }

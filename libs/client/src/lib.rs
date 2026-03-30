@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use dex_types::{DummyRequest, DummyResponse};
+use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
@@ -59,10 +59,18 @@ impl<R: Runtime> DexClient<R> {
         }
     }
 
-    /// Call `greet` on the DEX canister.
-    pub async fn greet(&self, request: DummyRequest) -> DummyResponse {
+    /// Place a new limit order on the DEX canister.
+    pub async fn add_limit_order(&self, request: LimitOrderRequest) -> LimitOrderResponse {
         self.runtime
-            .call(self.dex_canister, "greet", (request,), 10_000)
+            .call(self.dex_canister, "add_limit_order", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the status of an existing order on the DEX canister.
+    pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
+        self.runtime
+            .call(self.dex_canister, "get_order_status", (order_id,), 0)
             .await
             .unwrap()
     }

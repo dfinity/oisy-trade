@@ -1,10 +1,18 @@
-use dex_types::{DummyRequest, DummyResponse};
+use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+
+#[ic_cdk::init]
+fn init() {
+    dex_canister::state::init_state();
+}
+
+#[ic_cdk::update]
+fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+    dex_canister::add_limit_order(request)
+}
 
 #[ic_cdk::query]
-fn greet(request: DummyRequest) -> DummyResponse {
-    DummyResponse {
-        output: format!("Hello, {}!", request.input),
-    }
+fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
+    dex_canister::get_order_status(order_id)
 }
 
 fn main() {}
