@@ -1,5 +1,4 @@
-use super::{Order, OrderId, Price, Quantity};
-use dex_types::Side;
+use super::{Order, OrderId, Price, Quantity, Side};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, VecDeque};

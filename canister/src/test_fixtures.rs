@@ -1,5 +1,5 @@
-use crate::order::{Order, OrderBook, OrderId, PendingOrder, Price, Quantity};
-use dex_types::{LimitOrderRequest, Side};
+use crate::order::{Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side};
+use dex_types::LimitOrderRequest;
 use std::iter::once;
 
 /// ICP/BTC-like parameters from Binance.
@@ -11,11 +11,7 @@ pub const TICK_SIZE: u64 = 10;
 pub const LOT_SIZE: u64 = 1_000_000;
 
 pub fn limit_order_request() -> LimitOrderRequest {
-    LimitOrderRequest {
-        side: Side::Buy,
-        price: 100,
-        quantity: LOT_SIZE,
-    }
+    LimitOrderRequest {}
 }
 
 pub fn order_book() -> OrderBook {

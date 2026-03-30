@@ -4,7 +4,12 @@ mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::Principal;
-use dex_types::Side;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Side {
+    Buy,
+    Sell,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct OrderId(u64);
