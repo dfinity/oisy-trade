@@ -143,28 +143,47 @@ Since deposits are a separate step, the user's balance is already available when
 
 ### Order Book Data Structure
 
-Each trading pair maintains two sorted sides:
+Each trading pair maintains an order book stored on the **heap** which consists of two sorted sides:
 
-- **Bids** (buy orders): sorted by price descending, then by insertion order (price-FIFO priority).
-- **Asks** (sell orders): sorted by price ascending, then by insertion order.
-
-#### Price Levels
-
-Orders at the same price are grouped into a price level. Within a level, orders are matched in FIFO order.
-
-```
-Price Level (BTreeMap key = price)
-  |
-  +-- VecDeque<Order>  (FIFO queue at this price)
-```
-
-The full book for one side:
-
-```
-BTreeMap<Price, VecDeque<Order>>
-```
+- **Bids** (buy orders): 
+    - sorted by price descending, then by insertion order (price-FIFO priority).
+    - Implemented as `BTreeMap<Reverse<Price>, VecDeque<Order>>`
+- **Asks** (sell orders): 
+    - sorted by price ascending, then by insertion order.
+    - Implemented by `BTreeMap<Price, VecDeque<Order>>`
 
 This gives O(log n) insertion/removal by price and O(1) access to the best bid/ask.
+
+#### Memory Estimates
+
+An `Order` instance contains:
+- an ID (`u64`): 8 bytes
+- a side (enum with 2 variants buy/sell): 1 byte
+- a price (`u64`): 8 bytes
+- a quantity (`u64`): 8 bytes
+
+totaling approximatively **25 bytes** per order. This could be reduced further to 17 bytes by removing the price from the `Order` struct given that it's already used as key in the buy/sell orders. The following estimates upper bound the memory taken by an order by 32 bytes.
+
+Per-price-level overhead consists of a `BTreeMap` node (~64 bytes per entry, amortized across B-tree nodes) plus a `VecDeque` header (~48 bytes including pointer, length, and capacity). The `VecDeque` backing buffer grows as needed and may over-allocate by up to 2x.
+
+Estimated memory per order book side:
+
+| Component                                                | Memory                                    |
+|----------------------------------------------------------|-------------------------------------------|
+| Per order                                                | ~32 bytes                                 |
+| Per price level (`BTreeMap` entry + `VecDeque` header)   | ~112 bytes                                |
+| Per order (`VecDeque` buffer slot)                       | ~32 bytes (up to 2x with over-allocation) |
+
+**Real-world reference: Binance ICP/BTC order book snapshot** (retrieved via `GET /api/v3/depth?symbol=ICPBTC&limit=5000`):
+
+- 135 bid price levels, 1,310 ask price levels (1,445 total).
+- Binance aggregates all orders at a price into a single entry. Assuming ~10 individual orders per price level on a DEX (no aggregation), the estimated memory for this pair would be:
+
+```
+1,445 levels × 112 B  +  14,450 orders × 64 B  ≈  1 MiB
+```
+
+This fits comfortably within the 4 GiB Wasm heap. Even with 100 trading pairs of similar depth, the total book state would remain well under 200 MiB.
 
 ### Matching Engine
 
@@ -208,10 +227,12 @@ Users call `withdraw(token, amount)` to transfer tokens from their available bal
 
 ### Single-Canister Design
 
-All state lives in one canister. This avoids cross-canister call complexity for matching but means:
+All state lives in one canister. This avoids cross-canister call complexity but one remains bound to the [canister resource limits](https://docs.internetcomputer.org/building-apps/canister-management/resource-limits):
 
-- **Instruction limit**: matching must complete within a single message execution (~2B instructions on a fiduciary subnet). Very large order books may require batched matching via self-calls or timer-based chunking.
-- **Memory limit**: current IC stable memory limit is 400 GiB, heap is 4 GiB. Order book state should fit comfortably in heap for moderate pair counts; stable structures can be used for larger datasets.
+- **Instruction limit**: matching must complete within a single message execution (~40B instructions on a fiduciary subnet). Very large order books may require to chunk the matching, which is possible because the matching is done on a timer.
+- **Memory limit**: 
+    - heap: limited to 4 GiB per canister. This can be a problem if an order book becomes too big or there are too many trading pairs (see the section on memory estimates).
+    - stable memory: limited to 2 TiB, shared across the whole subnet. This can be a problem for the replayable event log stored in stable memory.
 
 ### Synchronous Trading
 
