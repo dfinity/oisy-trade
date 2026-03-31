@@ -33,7 +33,7 @@ pub struct State {
     #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    balances: BTreeMap<Principal, BTreeMap<Principal, Nat>>,
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
 }
 
 impl State {
@@ -57,20 +57,20 @@ impl State {
         }
     }
 
-    pub fn deposit(&mut self, user: Principal, token_ledger: Principal, amount: Nat) {
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
         let balance = self
             .balances
             .entry(user)
             .or_default()
-            .entry(token_ledger)
+            .entry(token_id)
             .or_insert_with(|| Nat::from(0u64));
         *balance += amount;
     }
 
-    pub fn get_balance(&self, user: Principal, token_ledger: Principal) -> Nat {
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
         self.balances
             .get(&user)
-            .and_then(|tokens| tokens.get(&token_ledger))
+            .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
     }

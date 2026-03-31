@@ -47,6 +47,12 @@ impl TokenId {
     }
 }
 
+impl From<dex_types::TokenId> for TokenId {
+    fn from(value: dex_types::TokenId) -> Self {
+        Self(value.ledger_id)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TokenMetadata {
     pub symbol: String,

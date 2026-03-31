@@ -1,7 +1,7 @@
 use crate::order::{Price, Quantity, Side};
 use dex_types::{
     DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TokenId,
+    OrderStatus,
 };
 
 pub mod order;
@@ -32,19 +32,19 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 }
 
 pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    let token = request.token_id.clone();
+    let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let amount = request.amount.clone();
     let caller = ic_cdk::api::msg_caller();
 
     let deposit_response = ledger::deposit(request).await?;
-    state::with_state_mut(|s| s.deposit(caller, token.ledger_id, amount));
+    state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
 
     Ok(deposit_response)
 }
 
-pub fn get_balance(token_id: TokenId) -> candid::Nat {
+pub fn get_balance(token_id: dex_types::TokenId) -> candid::Nat {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = ic_cdk::api::msg_caller();
-    state::with_state(|s| s.get_balance(caller, token_id.ledger_id))
+    state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
 }
