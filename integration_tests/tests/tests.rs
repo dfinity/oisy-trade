@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use candid::{Encode, Nat, Principal};
+use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
@@ -277,61 +277,31 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
 }
 
 #[tokio::test]
-async fn should_fail_deposit_when_ledger_has_no_cycles() {
+async fn should_fail_deposit_when_ledger_is_stopped() {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x06]);
     let controller = setup.controller();
+    let ledger_id = setup.base_ledger_id();
 
-    // Install a ledger with no cycles added
-    let env = setup.env();
-    let ledger_id = env
-        .create_canister_with_settings(
-            None,
-            Some(pocket_ic::CanisterSettings {
-                controllers: Some(vec![controller]),
-                ..pocket_ic::CanisterSettings::default()
-            }),
-        )
-        .await;
-    // Add enough cycles to install the canister, but not enough to allow for an infinite freezing threshold.
-    env.add_cycles(ledger_id, 1_000_000_000_000).await;
-    let ledger_arg = dex_int_tests::icrc_ledger::LedgerArg::Init(Box::new(
-        dex_int_tests::icrc_ledger::cksol_init_args(controller),
-    ));
-    env.install_canister(
-        ledger_id,
-        dex_int_tests::ledger_wasm(),
-        Encode!(&ledger_arg).unwrap(),
-        Some(controller),
-    )
-    .await;
-
-    // Set freezing_threshold to u64::MAX so the subnet considers the canister frozen
-    env.update_canister_settings(
-        ledger_id,
-        Some(controller),
-        pocket_ic::CanisterSettings {
-            freezing_threshold: Some(Nat::from(u64::MAX)),
-            ..pocket_ic::CanisterSettings::default()
-        },
-    )
-    .await
-    .expect("Failed to update canister settings");
-
-    let token = Token { ledger_id };
+    // Stop the ledger so it rejects all incoming messages
+    setup
+        .env()
+        .stop_canister(ledger_id, Some(controller))
+        .await
+        .expect("Failed to stop canister");
 
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token,
+            token: Token { ledger_id },
             amount: Nat::from(1_000_000u64),
         })
         .await;
 
     assert_matches!(
         result,
-        Err(DepositError::CallFailed { reason, .. }) if reason.contains("out of cycles")
+        Err(DepositError::CallFailed { reason, .. }) if reason.contains("is stopped")
     );
 
     setup.drop().await;
