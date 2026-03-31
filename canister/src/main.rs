@@ -3,6 +3,8 @@ use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
 #[ic_cdk::init]
 fn init() {
     dex_canister::state::init_state();
+    // TODO DEFI-2744: replace with an admin endpoint
+    dex_canister::register_default_trading_pairs();
 }
 
 #[ic_cdk::update]
