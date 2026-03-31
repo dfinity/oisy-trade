@@ -15,14 +15,14 @@ pub struct OrderBook {
     tick_size: Price,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: Quantity,
+    /// Orders awaiting matching, processed by the timer.
+    pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
     bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>>,
     /// Sell side, sorted by price ascending (lowest first).
     asks: BTreeMap<Price, VecDeque<RestingOrder>>,
     /// Index mapping order IDs to their location (side, price) for O(log n) lookup.
-    orders: BTreeMap<OrderId, (Side, Price)>,
-    /// Orders awaiting matching, processed by the timer.
-    pending_orders: VecDeque<Order>,
+    resting_orders: BTreeMap<OrderId, (Side, Price)>,
 }
 
 impl OrderBook {
@@ -38,20 +38,20 @@ impl OrderBook {
         Self {
             tick_size,
             lot_size,
+            pending_orders: VecDeque::new(),
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
-            orders: BTreeMap::new(),
-            pending_orders: VecDeque::new(),
+            resting_orders: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         assert_eq!(
             self.bids.is_empty() && self.asks.is_empty(),
-            self.orders.is_empty(),
+            self.resting_orders.is_empty(),
             "BUG: orders should be empty iff both bids and asks are empty"
         );
-        self.orders.is_empty() && self.pending_orders.is_empty()
+        self.resting_orders.is_empty() && self.pending_orders.is_empty()
     }
 
     pub fn tick_size(&self) -> Price {
@@ -98,7 +98,13 @@ impl OrderBook {
                         break;
                     }
                     let price = *entry.key();
-                    fill_against_queue(price, entry, &mut order, &mut fills, &mut self.orders);
+                    fill_against_queue(
+                        price,
+                        entry,
+                        &mut order,
+                        &mut fills,
+                        &mut self.resting_orders,
+                    );
                 }
             }
             Side::Sell => {
@@ -110,7 +116,13 @@ impl OrderBook {
                     if price < order.price() {
                         break;
                     }
-                    fill_against_queue(price, entry, &mut order, &mut fills, &mut self.orders);
+                    fill_against_queue(
+                        price,
+                        entry,
+                        &mut order,
+                        &mut fills,
+                        &mut self.resting_orders,
+                    );
                 }
             }
         }
@@ -151,7 +163,7 @@ impl OrderBook {
 
     /// Look up a resting order by its ID.
     pub fn get_order(&self, order_id: OrderId) -> Option<Order> {
-        let &(side, price) = self.orders.get(&order_id)?;
+        let &(side, price) = self.resting_orders.get(&order_id)?;
         let queue = match side {
             Side::Buy => self.bids.get(&Reverse(price))?,
             Side::Sell => self.asks.get(&price)?,
@@ -162,7 +174,7 @@ impl OrderBook {
 
     /// Returns `true` if an order with the given ID is resting in the book.
     pub fn has_order(&self, order_id: &OrderId) -> bool {
-        self.orders.contains_key(order_id)
+        self.resting_orders.contains_key(order_id)
     }
 
     /// Validate and enqueue an order for matching.
@@ -202,7 +214,7 @@ impl OrderBook {
     fn insert_order(&mut self, order: Order) {
         let side = order.side();
         let price = order.price();
-        assert_eq!(self.orders.insert(order.id(), (side, price)), None);
+        assert_eq!(self.resting_orders.insert(order.id(), (side, price)), None);
         let resting = RestingOrder::from(order);
         match side {
             Side::Buy => self
