@@ -38,7 +38,7 @@ impl From<OrderId> for u64 {
 pub struct TokenId(Principal);
 
 impl TokenId {
-    pub fn new(principal: Principal) -> Self {
+    pub const fn new(principal: Principal) -> Self {
         Self(principal)
     }
 
