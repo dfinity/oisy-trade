@@ -1,6 +1,6 @@
 use candid::{Nat, Principal};
 use dex_int_tests::Setup;
-use dex_types::{DepositRequest, LimitOrderRequest, OrderStatus, Token};
+use dex_types::{DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Token};
 use icrc_ledger_types::icrc1::account::Account;
 
 #[tokio::test]
@@ -163,6 +163,110 @@ async fn should_deposit_and_track_balances() {
     assert_eq!(
         client2.get_balance(ckbtc.clone()).await,
         Nat::from(3_000_000u64)
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_deposit_with_insufficient_funds() {
+    let setup = Setup::new().await;
+
+    let user = Principal::from_slice(&[0x03]);
+    let cksol = Token {
+        ledger_canister_id: setup.base_ledger_id(),
+    };
+    let dex_account = Account {
+        owner: setup.canister_id(),
+        subaccount: None,
+    };
+    let base_ledger = setup.base_token_ledger();
+
+    // Mint only 1_000_000 tokens to the user
+    base_ledger
+        .icrc1_transfer(
+            setup.controller(),
+            Account {
+                owner: user,
+                subaccount: None,
+            },
+            Nat::from(1_000_000u64),
+        )
+        .await;
+
+    // Approve more than the user holds
+    base_ledger
+        .icrc2_approve(user, dex_account, Nat::from(u64::MAX))
+        .await;
+
+    // Try to deposit more than the user holds
+    let result = setup
+        .client_with_caller(user)
+        .deposit(DepositRequest {
+            token: cksol,
+            amount: Nat::from(2_000_000u64),
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(DepositError::LedgerError(
+            LedgerTransferFromError::InsufficientFunds {
+                balance: Nat::from(1_000_000u64),
+            }
+        ))
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_deposit_with_insufficient_allowance() {
+    let setup = Setup::new().await;
+
+    let user = Principal::from_slice(&[0x04]);
+    let cksol = Token {
+        ledger_canister_id: setup.base_ledger_id(),
+    };
+    let dex_account = Account {
+        owner: setup.canister_id(),
+        subaccount: None,
+    };
+    let base_ledger = setup.base_token_ledger();
+
+    // Mint plenty of tokens to the user
+    base_ledger
+        .icrc1_transfer(
+            setup.controller(),
+            Account {
+                owner: user,
+                subaccount: None,
+            },
+            Nat::from(10_000_000u64),
+        )
+        .await;
+
+    // Approve only 500_000
+    base_ledger
+        .icrc2_approve(user, dex_account, Nat::from(500_000u64))
+        .await;
+
+    // Try to deposit more than the allowance
+    let result = setup
+        .client_with_caller(user)
+        .deposit(DepositRequest {
+            token: cksol,
+            amount: Nat::from(1_000_000u64),
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(DepositError::LedgerError(
+            LedgerTransferFromError::InsufficientAllowance {
+                allowance: Nat::from(500_000u64),
+            }
+        ))
     );
 
     setup.drop().await;
