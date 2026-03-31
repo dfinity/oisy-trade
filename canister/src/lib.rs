@@ -1,5 +1,6 @@
 use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
 
+pub mod guard;
 pub mod order;
 pub mod state;
 
@@ -7,6 +8,11 @@ pub mod state;
 mod test_fixtures;
 #[cfg(test)]
 mod tests;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+pub enum Task {
+    ProcessPendingOrders,
+}
 
 pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     let pair = order::TradingPair::from(request.pair);

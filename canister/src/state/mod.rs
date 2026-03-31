@@ -1,9 +1,10 @@
+use crate::Task;
 use crate::order::{
     MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
 };
 use dex_types::OrderStatus;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -30,6 +31,7 @@ pub struct State {
     next_order_id: OrderId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
     order_books: BTreeMap<TradingPair, OrderBook>,
+    active_tasks: BTreeSet<Task>,
 }
 
 impl State {
@@ -79,6 +81,11 @@ impl State {
             self.order_books.insert(pair, book).is_none(),
             "ERROR: order book already exists for this pair"
         );
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
     }
 }
 
