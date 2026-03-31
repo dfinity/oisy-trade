@@ -1,4 +1,4 @@
-use crate::order::{Order, OrderId, PendingOrder};
+use crate::order::{Order, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair};
 use candid::{Nat, Principal};
 use dex_types::OrderStatus;
 use std::cell::RefCell;
@@ -28,6 +28,10 @@ pub fn init_state() {
 pub struct State {
     next_order_id: OrderId,
     pending_orders: VecDeque<Order>,
+    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
+    tokens: BTreeMap<TokenId, TokenMetadata>,
+    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
+    order_books: BTreeMap<TradingPair, OrderBook>,
     balances: BTreeMap<Principal, BTreeMap<Principal, Nat>>,
 }
 
@@ -45,7 +49,7 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        if self.pending_orders.iter().any(|o| o.id == order_id) {
+        if self.pending_orders.iter().any(|o| o.id() == order_id) {
             OrderStatus::Pending
         } else {
             OrderStatus::NotFound
