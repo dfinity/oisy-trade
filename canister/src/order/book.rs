@@ -1,4 +1,5 @@
 use super::{Order, OrderId, Price, Quantity, RestingOrder, Side};
+use dex_types::OrderStatus;
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, VecDeque};
@@ -20,6 +21,8 @@ pub struct OrderBook {
     asks: BTreeMap<Price, VecDeque<RestingOrder>>,
     /// Index mapping order IDs to their location (side, price) for O(log n) lookup.
     orders: BTreeMap<OrderId, (Side, Price)>,
+    /// Orders awaiting matching, processed by the timer.
+    pending_orders: VecDeque<Order>,
 }
 
 impl OrderBook {
@@ -38,6 +41,7 @@ impl OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             orders: BTreeMap::new(),
+            pending_orders: VecDeque::new(),
         }
     }
 
@@ -47,7 +51,7 @@ impl OrderBook {
             self.orders.is_empty(),
             "BUG: orders should be empty iff both bids and asks are empty"
         );
-        self.orders.is_empty()
+        self.orders.is_empty() && self.pending_orders.is_empty()
     }
 
     pub fn tick_size(&self) -> Price {
@@ -159,6 +163,40 @@ impl OrderBook {
     /// Returns `true` if an order with the given ID is resting in the book.
     pub fn has_order(&self, order_id: &OrderId) -> bool {
         self.orders.contains_key(order_id)
+    }
+
+    /// Validate and enqueue an order for matching.
+    pub fn add_pending_order(&mut self, order: Order) -> Result<(), MatchOrderError> {
+        self.validate_order(&order)?;
+        self.pending_orders.push_back(order);
+        Ok(())
+    }
+
+    /// Drain the pending queue and match each order against the book.
+    pub fn process_pending_orders(&mut self) {
+        while let Some(order) = self.pending_orders.pop_front() {
+            // Validation already happened in add_pending_order, so match_order
+            // should not fail. If it does, we skip the order.
+            match self.match_order(order) {
+                Ok(_result) => {
+                    // TODO: settle fills (credit/debit balances)
+                }
+                Err(_err) => {
+                    // TODO: handle invalid orders (return funds to user)
+                }
+            }
+        }
+    }
+
+    /// Returns the status of an order in this book, or `None` if not found.
+    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
+        if self.pending_orders.iter().any(|o| o.id() == order_id) {
+            return Some(OrderStatus::Pending);
+        }
+        if self.has_order(&order_id) {
+            return Some(OrderStatus::Open);
+        }
+        None
     }
 
     fn insert_order(&mut self, order: Order) {

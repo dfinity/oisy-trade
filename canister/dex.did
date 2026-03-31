@@ -29,8 +29,15 @@ type LimitOrderRequest = record {
     quantity : nat64;
 };
 
-/// Response after successfully placing a limit order.
-type LimitOrderResponse = record { order_id : OrderId };
+/// Error returned when placing a limit order fails.
+type AddLimitOrderError = variant {
+    /// The requested trading pair is not registered.
+    UnknownTradingPair;
+    /// The price is not a positive multiple of the tick size.
+    InvalidPrice;
+    /// The quantity is not a positive multiple of the lot size.
+    InvalidQuantity;
+};
 
 /// Status of an order.
 type OrderStatus = variant {
@@ -49,7 +56,7 @@ type OrderStatus = variant {
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
-    add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
+    add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;

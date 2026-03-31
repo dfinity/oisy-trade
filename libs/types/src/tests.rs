@@ -1,4 +1,4 @@
-use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus, Side, TradingPair};
+use crate::{AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TradingPair};
 use candid::Principal;
 
 fn test_trading_pair() -> TradingPair {
@@ -19,14 +19,6 @@ fn should_serialize_limit_order_request() {
     let encoded = candid::encode_one(&request).unwrap();
     let decoded: LimitOrderRequest = candid::decode_one(&encoded).unwrap();
     assert_eq!(request, decoded);
-}
-
-#[test]
-fn should_serialize_limit_order_response() {
-    let response = LimitOrderResponse { order_id: 42 };
-    let encoded = candid::encode_one(&response).unwrap();
-    let decoded: LimitOrderResponse = candid::decode_one(&encoded).unwrap();
-    assert_eq!(response, decoded);
 }
 
 #[test]
@@ -59,4 +51,17 @@ fn should_serialize_trading_pair() {
     let encoded = candid::encode_one(pair).unwrap();
     let decoded: TradingPair = candid::decode_one(&encoded).unwrap();
     assert_eq!(pair, decoded);
+}
+
+#[test]
+fn should_serialize_add_limit_order_error() {
+    for error in [
+        AddLimitOrderError::UnknownTradingPair,
+        AddLimitOrderError::InvalidPrice,
+        AddLimitOrderError::InvalidQuantity,
+    ] {
+        let encoded = candid::encode_one(&error).unwrap();
+        let decoded: AddLimitOrderError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(error, decoded);
+    }
 }

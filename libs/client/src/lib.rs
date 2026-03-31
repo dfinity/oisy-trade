@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus};
+use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
@@ -60,7 +60,10 @@ impl<R: Runtime> DexClient<R> {
     }
 
     /// Place a new limit order on the DEX canister.
-    pub async fn add_limit_order(&self, request: LimitOrderRequest) -> LimitOrderResponse {
+    pub async fn add_limit_order(
+        &self,
+        request: LimitOrderRequest,
+    ) -> Result<OrderId, AddLimitOrderError> {
         self.runtime
             .call(self.dex_canister, "add_limit_order", (request,), 0)
             .await

@@ -7,7 +7,7 @@ async fn should_add_limit_order_and_query_status() {
     let setup = Setup::new().await;
     let client = setup.client();
 
-    let response = client
+    let order_id = client
         .add_limit_order(LimitOrderRequest {
             pair: TradingPair {
                 base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
@@ -17,9 +17,10 @@ async fn should_add_limit_order_and_query_status() {
             price: 100,
             quantity: 1_000_000,
         })
-        .await;
+        .await
+        .unwrap();
 
-    let status = client.get_order_status(response.order_id).await;
+    let status = client.get_order_status(order_id).await;
     assert_eq!(status, OrderStatus::Pending);
 
     let not_found = client.get_order_status(u64::MAX).await;

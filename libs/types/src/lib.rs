@@ -43,11 +43,15 @@ pub struct LimitOrderRequest {
     pub quantity: u64,
 }
 
-/// Response after successfully placing a limit order.
+/// Error returned when placing a limit order fails.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct LimitOrderResponse {
-    /// The unique identifier assigned to the new order.
-    pub order_id: OrderId,
+pub enum AddLimitOrderError {
+    /// The requested trading pair is not registered.
+    UnknownTradingPair,
+    /// The price is not a positive multiple of the tick size.
+    InvalidPrice,
+    /// The quantity is not a positive multiple of the lot size.
+    InvalidQuantity,
 }
 
 /// Status of an order.

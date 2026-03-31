@@ -1,4 +1,4 @@
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
 
 pub mod order;
 pub mod state;
@@ -8,16 +8,16 @@ mod test_fixtures;
 #[cfg(test)]
 mod tests;
 
-pub fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
+    let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
         side: order::Side::from(request.side),
         price: order::Price::from(request.price),
         quantity: order::Quantity::from(request.quantity),
     };
-    let order_id = state::with_state_mut(|s| s.add_limit_order(pending));
-    LimitOrderResponse {
-        order_id: u64::from(order_id),
-    }
+    let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
+        .map_err(AddLimitOrderError::from)?;
+    Ok(u64::from(order_id))
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {

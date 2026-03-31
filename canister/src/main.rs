@@ -1,4 +1,4 @@
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
 
 #[ic_cdk::init]
 fn init() {
@@ -6,7 +6,7 @@ fn init() {
 }
 
 #[ic_cdk::update]
-fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     dex_canister::add_limit_order(request)
 }
 

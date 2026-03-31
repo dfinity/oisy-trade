@@ -1,4 +1,7 @@
-use crate::order::{Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side};
+use crate::order::{
+    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+};
+use crate::state;
 use candid::Principal;
 use dex_types::LimitOrderRequest;
 use std::iter::once;
@@ -27,6 +30,13 @@ pub fn order_book() -> OrderBook {
     OrderBook::new(Price::new(TICK_SIZE), Quantity::new(LOT_SIZE))
 }
 
+pub fn icp_ckbtc_trading_pair() -> TradingPair {
+    TradingPair {
+        base: TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
+        quote: TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
+    }
+}
+
 pub fn order(id: u64, side: Side, price: u64, quantity: u64) -> Order {
     PendingOrder {
         side,
@@ -46,4 +56,11 @@ pub fn sell(id: u64, price: u64, quantity: u64) -> Order {
 
 pub fn all_order_types(price: u64, quantity: u64) -> impl Iterator<Item = Order> {
     once(buy(1, price, quantity)).chain(once(sell(2, price, quantity)))
+}
+
+pub fn init_state_with_order_book() {
+    state::init_state();
+    state::with_state_mut(|s| {
+        s.add_order_book(icp_ckbtc_trading_pair(), order_book());
+    });
 }
