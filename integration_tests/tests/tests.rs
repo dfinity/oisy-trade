@@ -76,16 +76,16 @@ async fn should_deposit_and_track_balances() {
     let base_ledger = setup.base_token_ledger();
     let quote_ledger = setup.quote_token_ledger();
     base_ledger
-        .icrc2_approve(user1, dex_account, Nat::from(u64::MAX))
+        .icrc2_approve(user1, dex_account, Nat::from(5_000_000u64))
         .await;
     base_ledger
-        .icrc2_approve(user2, dex_account, Nat::from(u64::MAX))
+        .icrc2_approve(user2, dex_account, Nat::from(5_000_000u64))
         .await;
     quote_ledger
-        .icrc2_approve(user1, dex_account, Nat::from(u64::MAX))
+        .icrc2_approve(user1, dex_account, Nat::from(5_000_000u64))
         .await;
     quote_ledger
-        .icrc2_approve(user2, dex_account, Nat::from(u64::MAX))
+        .icrc2_approve(user2, dex_account, Nat::from(5_000_000u64))
         .await;
 
     let client1 = setup.client_with_caller(user1);
@@ -163,7 +163,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
     // Approve more than the user holds
     setup
         .base_token_ledger()
-        .icrc2_approve(user, dex_account, Nat::from(u64::MAX))
+        .icrc2_approve(user, dex_account, Nat::from(5_000_000u64))
         .await;
 
     // Try to deposit more than the user holds
