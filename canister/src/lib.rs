@@ -33,6 +33,7 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 
 pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
     let token = request.token.clone();
+    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let amount = request.amount.clone();
     let caller = ic_cdk::api::msg_caller();
 
@@ -43,6 +44,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
 }
 
 pub fn get_balance(token: Token) -> candid::Nat {
+    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = ic_cdk::api::msg_caller();
     state::with_state(|s| s.get_balance(caller, token.ledger_id))
 }
