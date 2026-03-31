@@ -50,7 +50,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
                 reason: e.to_string(),
             })?;
 
-    let block_index = result.map_err(|e| to_ledger_error(e))?;
+    let block_index = result.map_err(to_ledger_error)?;
 
     Ok(DepositResponse { block_index })
 }
