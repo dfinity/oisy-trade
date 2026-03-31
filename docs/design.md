@@ -249,6 +249,24 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 - **Withdrawal**: similarly, the available balance is debited optimistically, and if the `transfer` call fails, the balance must be restored.
 - **Reentrancy**: between an async transfer call and its response, other update calls can execute. Since deposits and withdrawals only affect the initiating user's balance and do not interact with the order book, this is safe provided the implementation enforces that the same user cannot have multiple in-flight deposit/withdrawal requests for the same token (e.g., via a per-(user, token) in-flight guard).
 
+### Main Endpoints
+
+**Update calls** (state-changing):
+
+- **`deposit(token, amount)`**: transfers tokens into the canister via `icrc2_transfer_from`. Credits the user's available balance on success. Involves one async inter-canister call. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
+- **`withdraw(token, amount)`**: transfers tokens from the canister to the user's wallet via `icrc1_transfer`. Debits the user's available balance. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
+- **`add_limit_order(pair, side, price, quantity)`**: validates the order (balance, tick/lot size), debits the required amount from the user's available balance to reserved, enqueues the order, and returns an order ID. Fully synchronous — no inter-canister calls. Time: O(1). Memory: O(1) for the queued order.
+- **`cancel_order(order_id)`**: removes a resting order from the book and returns reserved tokens to the user's available balance. Time: O(log p + k) where p is the number of price levels and k is the queue depth at the order's price level (to find and remove the order from the `VecDeque`). Memory: frees the canceled order.
+
+**Timer-driven** (internal):
+
+- **Matching engine**: dequeues pending orders and matches each against the opposite side of the book. Time per order: O(f · log p) where f is the number of fills and p is the number of price levels (each fill may remove a level, requiring a `BTreeMap` operation). Memory: O(f) for the fill records produced; net memory change depends on whether the order rests (adds to the book) or fills (removes from the book).
+
+**Query calls** (read-only):
+
+- **`get_order_status(order_id)`**: returns the current status of an order. Time: O(1) with an order-ID-indexed map.
+- **`get_balance(token)`**: returns the caller's available and reserved balances. Time: O(1).
+
 ### State Persistence
 
 Canister state must survive upgrades. Rather than serializing and deserializing the full state, the canister uses an **append-only event log** stored in stable memory. This is the same approach used by the ckBTC, ckETH, and ckSOL minters.
