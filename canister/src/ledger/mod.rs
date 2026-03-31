@@ -50,44 +50,35 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
                 reason: e.to_string(),
             })?;
 
-    let block_index = result.map_err(|e| DepositError::LedgerError(to_ledger_error(e)))?;
+    let block_index = result.map_err(|e| to_ledger_error(e))?;
 
     Ok(DepositResponse { block_index })
 }
 
-fn to_ledger_error(
-    e: icrc_ledger_types::icrc2::transfer_from::TransferFromError,
-) -> LedgerTransferFromError {
+fn to_ledger_error(e: icrc_ledger_types::icrc2::transfer_from::TransferFromError) -> DepositError {
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
     match e {
-        TransferFromError::BadFee { expected_fee } => {
-            LedgerTransferFromError::BadFee { expected_fee }
-        }
-        TransferFromError::BadBurn { min_burn_amount } => {
-            LedgerTransferFromError::BadBurn { min_burn_amount }
-        }
         TransferFromError::InsufficientFunds { balance } => {
-            LedgerTransferFromError::InsufficientFunds { balance }
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { balance })
         }
         TransferFromError::InsufficientAllowance { allowance } => {
-            LedgerTransferFromError::InsufficientAllowance { allowance }
-        }
-        TransferFromError::TooOld => LedgerTransferFromError::TooOld,
-        TransferFromError::CreatedInFuture { ledger_time } => {
-            LedgerTransferFromError::CreatedInFuture { ledger_time }
-        }
-        TransferFromError::Duplicate { duplicate_of } => {
-            LedgerTransferFromError::Duplicate { duplicate_of }
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance { allowance })
         }
         TransferFromError::TemporarilyUnavailable => {
-            LedgerTransferFromError::TemporarilyUnavailable
+            DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
         }
         TransferFromError::GenericError {
             error_code,
             message,
-        } => LedgerTransferFromError::GenericError {
+        } => DepositError::LedgerError(LedgerTransferFromError::GenericError {
             error_code,
             message,
-        },
+        }),
+        // These should never happen, but rather than trapping we return an internal error here.
+        TransferFromError::BadFee { .. } => DepositError::InternalError(format!("{e}")),
+        TransferFromError::BadBurn { .. } => DepositError::InternalError(format!("{e}")),
+        TransferFromError::CreatedInFuture { .. } => DepositError::InternalError(format!("{e}")),
+        TransferFromError::Duplicate { .. } => DepositError::InternalError(format!("{e}")),
+        TransferFromError::TooOld => DepositError::InternalError(format!("{e}")),
     }
 }

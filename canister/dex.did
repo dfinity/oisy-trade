@@ -23,13 +23,8 @@ type TokenId = record {
 
 /// Errors that can be returned by icrc2_transfer_from.
 type LedgerTransferFromError = variant {
-    BadFee : record { expected_fee : nat };
-    BadBurn : record { min_burn_amount : nat };
     InsufficientFunds : record { balance : nat };
     InsufficientAllowance : record { allowance : nat };
-    TooOld;
-    CreatedInFuture : record { ledger_time : nat64 };
-    Duplicate : record { duplicate_of : nat };
     TemporarilyUnavailable;
     GenericError : record { error_code : nat; message : text };
 };
@@ -38,6 +33,8 @@ type LedgerTransferFromError = variant {
 type DepositError = variant {
     /// The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
+    /// Internal error.
+    InternalError : text;
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError : LedgerTransferFromError;
 };

@@ -64,6 +64,8 @@ pub enum DepositError {
         /// The reason the call failed.
         reason: String,
     },
+    /// Internal error
+    InternalError(String),
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
 }
@@ -74,16 +76,6 @@ pub enum DepositError {
 /// so that `dex_types` does not depend on `icrc-ledger-types`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum LedgerTransferFromError {
-    /// The fee provided was incorrect.
-    BadFee {
-        /// The fee that the ledger expected.
-        expected_fee: Nat,
-    },
-    /// The burn amount was below the minimum.
-    BadBurn {
-        /// The minimum burn amount.
-        min_burn_amount: Nat,
-    },
     /// The source account does not hold enough funds.
     InsufficientFunds {
         /// The current balance of the source account.
@@ -93,18 +85,6 @@ pub enum LedgerTransferFromError {
     InsufficientAllowance {
         /// The current allowance.
         allowance: Nat,
-    },
-    /// The transaction is too old.
-    TooOld,
-    /// The transaction was created in the future.
-    CreatedInFuture {
-        /// The current ledger time.
-        ledger_time: u64,
-    },
-    /// The transaction is a duplicate.
-    Duplicate {
-        /// The block index of the duplicate transaction.
-        duplicate_of: Nat,
     },
     /// The ledger is temporarily unavailable.
     TemporarilyUnavailable,
