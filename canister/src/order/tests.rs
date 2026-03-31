@@ -422,4 +422,55 @@ mod order_book {
             assert_eq!(best.price(), Price::new(110));
         }
     }
+
+    mod get_order {
+        use super::*;
+
+        #[test]
+        fn should_return_none_for_empty_book() {
+            let book = order_book();
+            assert_eq!(book.get_order(OrderId::from(1)), None);
+        }
+
+        #[test]
+        fn should_find_resting_order() {
+            let mut book = order_book();
+            book.match_order(buy(1, 100, LOT_SIZE)).unwrap();
+
+            let order = book.get_order(OrderId::from(1)).unwrap();
+
+            assert_eq!(order.id(), OrderId::from(1));
+            assert_eq!(order.price(), Price::new(100));
+            assert_eq!(order.remaining_quantity(), Quantity::new(LOT_SIZE));
+        }
+
+        #[test]
+        fn should_return_none_for_fully_filled_order() {
+            let mut book = order_book();
+            book.match_order(sell(1, 100, LOT_SIZE)).unwrap();
+            book.match_order(buy(2, 100, LOT_SIZE)).unwrap();
+
+            assert_eq!(book.get_order(OrderId::from(1)), None);
+            assert_eq!(book.get_order(OrderId::from(2)), None);
+        }
+
+        #[test]
+        fn should_reflect_partial_fill_on_resting_order() {
+            let mut book = order_book();
+            book.match_order(sell(1, 100, 3 * LOT_SIZE)).unwrap();
+            book.match_order(buy(2, 100, LOT_SIZE)).unwrap();
+
+            let order = book.get_order(OrderId::from(1)).unwrap();
+            assert_eq!(order.remaining_quantity(), Quantity::new(2 * LOT_SIZE));
+            assert_eq!(book.get_order(OrderId::from(2)), None);
+        }
+
+        #[test]
+        fn should_return_none_for_nonexistent_id() {
+            let mut book = order_book();
+            book.match_order(buy(1, 100, LOT_SIZE)).unwrap();
+
+            assert!(book.get_order(OrderId::from(999)).is_none());
+        }
+    }
 }

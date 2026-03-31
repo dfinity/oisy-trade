@@ -20,7 +20,7 @@ impl From<dex_types::Side> for Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OrderId(u64);
 
 impl OrderId {
@@ -160,7 +160,7 @@ impl PendingOrder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Order {
     id: OrderId,
     side: Side,

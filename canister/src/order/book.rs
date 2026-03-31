@@ -18,6 +18,8 @@ pub struct OrderBook {
     bids: BTreeMap<Reverse<Price>, VecDeque<Order>>,
     /// Sell side, sorted by price ascending (lowest first).
     asks: BTreeMap<Price, VecDeque<Order>>,
+    /// Index mapping order IDs to their location (side, price) for O(log n) lookup.
+    orders: BTreeMap<OrderId, (Side, Price)>,
 }
 
 impl OrderBook {
@@ -35,11 +37,17 @@ impl OrderBook {
             lot_size,
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            orders: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.bids.is_empty() && self.asks.is_empty()
+        assert_eq!(
+            self.bids.is_empty() && self.asks.is_empty(),
+            self.orders.is_empty(),
+            "BUG: orders should be empty iff both bids and asks are empty"
+        );
+        self.orders.is_empty()
     }
 
     pub fn tick_size(&self) -> Price {
@@ -82,7 +90,7 @@ impl OrderBook {
                         break;
                     }
                     let price = *entry.key();
-                    fill_against_queue(price, entry, &mut order, &mut fills);
+                    fill_against_queue(price, entry, &mut order, &mut fills, &mut self.orders);
                 }
             }
             Side::Sell => {
@@ -94,7 +102,7 @@ impl OrderBook {
                     if price < order.price() {
                         break;
                     }
-                    fill_against_queue(price, entry, &mut order, &mut fills);
+                    fill_against_queue(price, entry, &mut order, &mut fills, &mut self.orders);
                 }
             }
         }
@@ -133,7 +141,27 @@ impl OrderBook {
         Ok(())
     }
 
+    /// Look up a resting order by its ID.
+    pub fn get_order(&self, order_id: OrderId) -> Option<&Order> {
+        let &(side, price) = self.orders.get(&order_id)?;
+        let queue = match side {
+            Side::Buy => self.bids.get(&Reverse(price))?,
+            Side::Sell => self.asks.get(&price)?,
+        };
+        queue.iter().find(|o| o.id() == order_id)
+    }
+
+    /// Returns `true` if an order with the given ID is resting in the book.
+    pub fn has_order(&self, order_id: &OrderId) -> bool {
+        self.orders.contains_key(order_id)
+    }
+
     fn insert_order(&mut self, order: Order) {
+        assert_eq!(
+            self.orders
+                .insert(order.id(), (order.side(), order.price())),
+            None
+        );
         match order.side() {
             Side::Buy => self
                 .bids
@@ -150,6 +178,7 @@ fn fill_against_queue<K: Ord>(
     mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<Order>>,
     order: &mut Order,
     fills: &mut Vec<Fill>,
+    orders_index: &mut BTreeMap<OrderId, (Side, Price)>,
 ) {
     let resting_orders = entry.get_mut();
     while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
@@ -168,7 +197,8 @@ fn fill_against_queue<K: Ord>(
         });
 
         if resting.remaining_quantity().is_zero() {
-            resting_orders.pop_front();
+            let filled = resting_orders.pop_front().expect("front exists");
+            assert!(orders_index.remove(&filled.id()).is_some());
         }
     }
     if resting_orders.is_empty() {

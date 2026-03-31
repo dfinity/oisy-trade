@@ -48,9 +48,15 @@ impl State {
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         if self.pending_orders.iter().any(|o| o.id() == order_id) {
-            OrderStatus::Pending
-        } else {
-            OrderStatus::NotFound
+            return OrderStatus::Pending;
         }
+        if self
+            .order_books
+            .values()
+            .any(|book| book.has_order(&order_id))
+        {
+            return OrderStatus::Open;
+        }
+        OrderStatus::NotFound
     }
 }
