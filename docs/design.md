@@ -55,7 +55,7 @@ User                    DEX Canister
  |-- get_order_status ----->|
  |<-- status (Pending/      |
  |    Open/Filled/          |
- |    Cancelled) -----------|
+ |    Canceled) ------------|
 ```
 
 ### 3. Withdrawal
@@ -132,7 +132,7 @@ Since deposits are a separate step, the user's balance is already available when
           partial      |          |
           fill         v          v
                |     +-----------+  +------------+
-               +--+->|  Filled   |  | Cancelled  |
+               +--+->|  Filled   |  | Canceled   |
                      +-----------+  +------------+
 ```
 
@@ -162,7 +162,7 @@ An `Order` instance contains:
 - a price (`u64`): 8 bytes
 - a quantity (`u64`): 8 bytes
 
-totaling approximatively **25 bytes** per order. This could be reduced further to 17 bytes by removing the price from the `Order` struct given that it's already used as key in the buy/sell orders. The following estimates upper bound the memory taken by an order by 32 bytes.
+totaling approximately **25 bytes** per order. This could be reduced further to 17 bytes by removing the price from the `Order` struct given that it's already used as key in the buy/sell orders. The following estimates upper bound the memory taken by an order by 32 bytes.
 
 Per-price-level overhead consists of a `BTreeMap` node (~64 bytes per entry, amortized across B-tree nodes) plus a `VecDeque` header (~48 bytes including pointer, length, and capacity). The `VecDeque` backing buffer grows as needed and may over-allocate by up to 2x.
 
