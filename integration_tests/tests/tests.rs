@@ -4,7 +4,6 @@ mod add_limit_order {
     use candid::Principal;
     use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{LimitOrderRequest, OrderStatus, Side, TradingPair};
-    use std::time::Duration;
 
     #[tokio::test]
     async fn should_add_limit_order_and_query_status() {
