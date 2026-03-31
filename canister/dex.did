@@ -36,6 +36,8 @@ type LedgerTransferFromError = variant {
 
 /// Error returned by the deposit endpoint.
 type DepositError = variant {
+    /// The inter-canister call to the token ledger failed.
+    CallFailed : record { ledger : principal; method : text; reason : text };
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError : LedgerTransferFromError;
 };

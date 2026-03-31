@@ -55,6 +55,15 @@ pub struct DepositRequest {
 /// Error returned by the deposit endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum DepositError {
+    /// The inter-canister call to the token ledger failed.
+    CallFailed {
+        /// The ledger canister that was called.
+        ledger: Principal,
+        /// The name of the method that was called.
+        method: String,
+        /// The reason the call failed.
+        reason: String,
+    },
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
 }

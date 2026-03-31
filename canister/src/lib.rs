@@ -58,19 +58,17 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
     let response = Call::unbounded_wait(token.ledger_canister_id, "icrc2_transfer_from")
         .with_args(&(transfer_args,))
         .await
-        .map_err(|e| {
-            DepositError::LedgerError(LedgerTransferFromError::GenericError {
-                error_code: candid::Nat::from(0u64),
-                message: format!("{e:?}"),
-            })
+        .map_err(|e| DepositError::CallFailed {
+            ledger: token.ledger_canister_id,
+            method: "icrc2_transfer_from".to_string(),
+            reason: format!("{e}"),
         })?;
 
     let (result,): (Result<candid::Nat, TransferFromError>,) =
-        response.candid_tuple().map_err(|e| {
-            DepositError::LedgerError(LedgerTransferFromError::GenericError {
-                error_code: candid::Nat::from(0u64),
-                message: e.to_string(),
-            })
+        response.candid_tuple().map_err(|e| DepositError::CallFailed {
+            ledger: token.ledger_canister_id,
+            method: "icrc2_transfer_from".to_string(),
+            reason: e.to_string(),
         })?;
 
     let block_index = result.map_err(|e| DepositError::LedgerError(to_ledger_error(e)))?;
