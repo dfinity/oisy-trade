@@ -1,6 +1,9 @@
-use candid::{Nat, Principal};
+use assert_matches::assert_matches;
+use candid::{Encode, Nat, Principal};
 use dex_int_tests::Setup;
-use dex_types::{DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Token};
+use dex_types::{
+    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Token,
+};
 use icrc_ledger_types::icrc1::account::Account;
 
 #[tokio::test]
@@ -208,11 +211,12 @@ async fn should_fail_deposit_with_insufficient_funds() {
         })
         .await;
 
+    // The user's balance is 1_000_000 minus the 5_000 fee for icrc2_approve
     assert_eq!(
         result,
         Err(DepositError::LedgerError(
             LedgerTransferFromError::InsufficientFunds {
-                balance: Nat::from(1_000_000u64),
+                balance: Nat::from(995_000u64),
             }
         ))
     );
@@ -267,6 +271,94 @@ async fn should_fail_deposit_with_insufficient_allowance() {
                 allowance: Nat::from(500_000u64),
             }
         ))
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_deposit_when_ledger_is_dex_canister() {
+    let setup = Setup::new().await;
+
+    let user = Principal::from_slice(&[0x05]);
+    let fake_token = Token {
+        ledger_canister_id: setup.canister_id(),
+    };
+
+    let result = setup
+        .client_with_caller(user)
+        .deposit(DepositRequest {
+            token: fake_token,
+            amount: Nat::from(1_000_000u64),
+        })
+        .await;
+
+    assert_matches!(
+        result,
+        Err(DepositError::CallFailed { reason, .. }) if reason.contains("Canister has no update method 'icrc2_transfer_from'")
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_deposit_when_ledger_has_no_cycles() {
+    let setup = Setup::new().await;
+
+    let user = Principal::from_slice(&[0x06]);
+    let controller = setup.controller();
+
+    // Install a ledger with no cycles added
+    let env = setup.env();
+    let ledger_id = env
+        .create_canister_with_settings(
+            None,
+            Some(pocket_ic::CanisterSettings {
+                controllers: Some(vec![controller]),
+                ..pocket_ic::CanisterSettings::default()
+            }),
+        )
+        .await;
+    // Add enough cycles to install the canister, but not enough to allow for an infinite freezing threshold.
+    env.add_cycles(ledger_id, 1_000_000_000_000).await;
+    let ledger_arg = dex_int_tests::icrc_ledger::LedgerArg::Init(Box::new(
+        dex_int_tests::icrc_ledger::cksol_init_args(controller),
+    ));
+    env.install_canister(
+        ledger_id,
+        dex_int_tests::ledger_wasm(),
+        Encode!(&ledger_arg).unwrap(),
+        Some(controller),
+    )
+    .await;
+
+    // Set freezing_threshold to u64::MAX so the subnet considers the canister frozen
+    env.update_canister_settings(
+        ledger_id,
+        Some(controller),
+        pocket_ic::CanisterSettings {
+            freezing_threshold: Some(Nat::from(u64::MAX)),
+            ..pocket_ic::CanisterSettings::default()
+        },
+    )
+    .await
+    .expect("Failed to update canister settings");
+
+    let token = Token {
+        ledger_canister_id: ledger_id,
+    };
+
+    let result = setup
+        .client_with_caller(user)
+        .deposit(DepositRequest {
+            token,
+            amount: Nat::from(1_000_000u64),
+        })
+        .await;
+
+    assert_matches!(
+        result,
+        Err(DepositError::CallFailed { reason, .. }) if reason.contains("out of cycles")
     );
 
     setup.drop().await;

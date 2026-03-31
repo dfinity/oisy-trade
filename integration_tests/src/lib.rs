@@ -1,4 +1,4 @@
-mod icrc_ledger;
+pub mod icrc_ledger;
 
 pub use icrc_ledger::LedgerClient;
 
@@ -102,6 +102,10 @@ impl Setup {
 
     pub fn quote_ledger_id(&self) -> CanisterId {
         self.quote_ledger_id
+    }
+
+    pub fn env(&self) -> &PocketIc {
+        self.env.as_ref().unwrap()
     }
 
     pub fn client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
