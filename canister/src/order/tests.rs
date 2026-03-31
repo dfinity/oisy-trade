@@ -21,7 +21,7 @@ mod order_book {
         #[test]
         fn should_reject_price_not_multiple_of_tick_size() {
             let mut book = order_book();
-            let invalid_price = TICK_SIZE + 5;
+            let invalid_price = TICK_SIZE / 2;
 
             for order in all_order_types(invalid_price, LOT_SIZE) {
                 let result = book.match_order(order);
