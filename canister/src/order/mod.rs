@@ -11,6 +11,15 @@ pub enum Side {
     Sell,
 }
 
+impl From<dex_types::Side> for Side {
+    fn from(side: dex_types::Side) -> Self {
+        match side {
+            dex_types::Side::Buy => Side::Buy,
+            dex_types::Side::Sell => Side::Sell,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct OrderId(u64);
 

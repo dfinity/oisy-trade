@@ -1,4 +1,5 @@
 use crate::order::{Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side};
+use candid::Principal;
 use dex_types::LimitOrderRequest;
 use std::iter::once;
 
@@ -11,7 +12,15 @@ pub const TICK_SIZE: u64 = 10;
 pub const LOT_SIZE: u64 = 1_000_000;
 
 pub fn limit_order_request() -> LimitOrderRequest {
-    LimitOrderRequest {}
+    LimitOrderRequest {
+        pair: dex_types::TradingPair {
+            base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+            quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+        },
+        side: dex_types::Side::Buy,
+        price: 100,
+        quantity: LOT_SIZE,
+    }
 }
 
 pub fn order_book() -> OrderBook {
