@@ -1,4 +1,4 @@
-use super::{Order, OrderId, Price, Quantity, Side};
+use super::{Order, OrderId, Price, Quantity, RestingOrder, Side};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, VecDeque};
@@ -15,9 +15,9 @@ pub struct OrderBook {
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: Quantity,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
-    bids: BTreeMap<Reverse<Price>, VecDeque<Order>>,
+    bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>>,
     /// Sell side, sorted by price ascending (lowest first).
-    asks: BTreeMap<Price, VecDeque<Order>>,
+    asks: BTreeMap<Price, VecDeque<RestingOrder>>,
     /// Index mapping order IDs to their location (side, price) for O(log n) lookup.
     orders: BTreeMap<OrderId, (Side, Price)>,
 }
@@ -59,13 +59,17 @@ impl OrderBook {
     }
 
     /// Returns the best (highest price) bid order, or `None` if the bid side is empty.
-    pub fn best_bid(&self) -> Option<&Order> {
-        self.bids.first_key_value().and_then(|(_, q)| q.front())
+    pub fn best_bid(&self) -> Option<Order> {
+        let (&Reverse(price), queue) = self.bids.first_key_value()?;
+        let resting = queue.front()?;
+        Some(resting.to_order(Side::Buy, price))
     }
 
     /// Returns the best (lowest price) ask order, or `None` if the ask side is empty.
-    pub fn best_ask(&self) -> Option<&Order> {
-        self.asks.first_key_value().and_then(|(_, q)| q.front())
+    pub fn best_ask(&self) -> Option<Order> {
+        let (&price, queue) = self.asks.first_key_value()?;
+        let resting = queue.front()?;
+        Some(resting.to_order(Side::Sell, price))
     }
 
     /// Match an incoming order against the book.
@@ -142,13 +146,14 @@ impl OrderBook {
     }
 
     /// Look up a resting order by its ID.
-    pub fn get_order(&self, order_id: OrderId) -> Option<&Order> {
+    pub fn get_order(&self, order_id: OrderId) -> Option<Order> {
         let &(side, price) = self.orders.get(&order_id)?;
         let queue = match side {
             Side::Buy => self.bids.get(&Reverse(price))?,
             Side::Sell => self.asks.get(&price)?,
         };
-        queue.iter().find(|o| o.id() == order_id)
+        let resting = queue.iter().find(|o| o.id() == order_id)?;
+        Some(resting.to_order(side, price))
     }
 
     /// Returns `true` if an order with the given ID is resting in the book.
@@ -157,25 +162,24 @@ impl OrderBook {
     }
 
     fn insert_order(&mut self, order: Order) {
-        assert_eq!(
-            self.orders
-                .insert(order.id(), (order.side(), order.price())),
-            None
-        );
-        match order.side() {
+        let side = order.side();
+        let price = order.price();
+        assert_eq!(self.orders.insert(order.id(), (side, price)), None);
+        let resting = RestingOrder::from(order);
+        match side {
             Side::Buy => self
                 .bids
-                .entry(Reverse(order.price()))
+                .entry(Reverse(price))
                 .or_default()
-                .push_back(order),
-            Side::Sell => self.asks.entry(order.price()).or_default().push_back(order),
+                .push_back(resting),
+            Side::Sell => self.asks.entry(price).or_default().push_back(resting),
         }
     }
 }
 
 fn fill_against_queue<K: Ord>(
     price: Price,
-    mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<Order>>,
+    mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<RestingOrder>>,
     order: &mut Order,
     fills: &mut Vec<Fill>,
     orders_index: &mut BTreeMap<OrderId, (Side, Price)>,

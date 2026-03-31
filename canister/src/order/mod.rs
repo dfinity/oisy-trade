@@ -192,3 +192,48 @@ impl Order {
             .expect("cannot reduce quantity below zero");
     }
 }
+
+/// An order resting in the order book. Only carries the ID and remaining
+/// quantity — side and price are implicit from the book's structure.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RestingOrder {
+    id: OrderId,
+    remaining_quantity: Quantity,
+}
+
+impl From<Order> for RestingOrder {
+    fn from(order: Order) -> Self {
+        Self {
+            id: order.id,
+            remaining_quantity: order.remaining_quantity,
+        }
+    }
+}
+
+impl RestingOrder {
+    /// Reconstruct a full [`Order`] by combining the resting order with its
+    /// side and price (which are stored in the book's index, not on the order itself).
+    pub fn to_order(&self, side: Side, price: Price) -> Order {
+        Order {
+            id: self.id,
+            side,
+            price,
+            remaining_quantity: self.remaining_quantity,
+        }
+    }
+
+    pub fn id(&self) -> OrderId {
+        self.id
+    }
+
+    pub fn remaining_quantity(&self) -> Quantity {
+        self.remaining_quantity
+    }
+
+    pub fn reduce_quantity(&mut self, amount: Quantity) {
+        self.remaining_quantity = self
+            .remaining_quantity
+            .checked_sub(amount)
+            .expect("cannot reduce quantity below zero");
+    }
+}

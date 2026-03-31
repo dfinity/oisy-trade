@@ -29,7 +29,6 @@ pub struct State {
     pending_orders: VecDeque<Order>,
     #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
 }
 
