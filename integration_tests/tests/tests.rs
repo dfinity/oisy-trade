@@ -1,10 +1,44 @@
 use assert_matches::assert_matches;
 use candid::{Encode, Nat, Principal};
+use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
     DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Token,
 };
 use icrc_ledger_types::icrc1::account::Account;
+
+#[allow(clippy::too_many_arguments)]
+async fn assert_balances<R: Runtime>(
+    client1: &DexClient<R>,
+    client2: &DexClient<R>,
+    cksol: &Token,
+    ckbtc: &Token,
+    expected_user1_cksol: u64,
+    expected_user1_ckbtc: u64,
+    expected_user2_cksol: u64,
+    expected_user2_ckbtc: u64,
+) {
+    assert_eq!(
+        client1.get_balance(cksol.clone()).await,
+        Nat::from(expected_user1_cksol),
+        "user1 ckSOL balance mismatch"
+    );
+    assert_eq!(
+        client1.get_balance(ckbtc.clone()).await,
+        Nat::from(expected_user1_ckbtc),
+        "user1 ckBTC balance mismatch"
+    );
+    assert_eq!(
+        client2.get_balance(cksol.clone()).await,
+        Nat::from(expected_user2_cksol),
+        "user2 ckSOL balance mismatch"
+    );
+    assert_eq!(
+        client2.get_balance(ckbtc.clone()).await,
+        Nat::from(expected_user2_ckbtc),
+        "user2 ckBTC balance mismatch"
+    );
+}
 
 #[tokio::test]
 async fn should_add_limit_order_and_query_status() {
@@ -91,7 +125,10 @@ async fn should_deposit_and_track_balances() {
     let client1 = setup.dex_client_with_caller(user1);
     let client2 = setup.dex_client_with_caller(user2);
 
-    // Deposit ckSOL and ckBTC for both users
+    // Verify initial balances are zero
+    assert_balances(&client1, &client2, &cksol, &ckbtc, 0, 0, 0, 0).await;
+
+    // Deposit ckSOL for user1
     client1
         .deposit(DepositRequest {
             token: cksol.clone(),
@@ -99,6 +136,9 @@ async fn should_deposit_and_track_balances() {
         })
         .await
         .expect("user1 ckSOL deposit failed");
+    assert_balances(&client1, &client2, &cksol, &ckbtc, 1_000_000, 0, 0, 0).await;
+
+    // Deposit ckBTC for user1
     client1
         .deposit(DepositRequest {
             token: ckbtc.clone(),
@@ -106,6 +146,9 @@ async fn should_deposit_and_track_balances() {
         })
         .await
         .expect("user1 ckBTC deposit failed");
+    assert_balances(&client1, &client2, &cksol, &ckbtc, 1_000_000, 500_000, 0, 0).await;
+
+    // Deposit ckSOL for user2
     client2
         .deposit(DepositRequest {
             token: cksol.clone(),
@@ -113,6 +156,12 @@ async fn should_deposit_and_track_balances() {
         })
         .await
         .expect("user2 ckSOL deposit failed");
+    assert_balances(
+        &client1, &client2, &cksol, &ckbtc, 1_000_000, 500_000, 2_000_000, 0,
+    )
+    .await;
+
+    // Deposit ckBTC for user2
     client2
         .deposit(DepositRequest {
             token: ckbtc.clone(),
@@ -120,24 +169,10 @@ async fn should_deposit_and_track_balances() {
         })
         .await
         .expect("user2 ckBTC deposit failed");
-
-    // Verify balances
-    assert_eq!(
-        client1.get_balance(cksol.clone()).await,
-        Nat::from(1_000_000u64)
-    );
-    assert_eq!(
-        client1.get_balance(ckbtc.clone()).await,
-        Nat::from(500_000u64)
-    );
-    assert_eq!(
-        client2.get_balance(cksol.clone()).await,
-        Nat::from(2_000_000u64)
-    );
-    assert_eq!(
-        client2.get_balance(ckbtc.clone()).await,
-        Nat::from(3_000_000u64)
-    );
+    assert_balances(
+        &client1, &client2, &cksol, &ckbtc, 1_000_000, 500_000, 2_000_000, 3_000_000,
+    )
+    .await;
 
     setup.drop().await;
 }
