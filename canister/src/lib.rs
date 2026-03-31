@@ -35,6 +35,8 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
+    // TODO(DEFI-2741): Consider adding a check for supported tokens to disallow users to deposit
+    //  funds that are not supported by the DEX.
     let token = request.token;
     let amount = request.amount;
     let caller = ic_cdk::api::msg_caller();
@@ -50,6 +52,10 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
             subaccount: None,
         },
         amount: amount.clone(),
+        // TODO(DEFI-2741): Not strictly necessary to set a fee for deposits, since it is deducted
+        //  from the from account, but for withdrawals we will need to know the fee to be able to
+        //  deduct it from the amount, so for consistency we should consider setting it for deposits
+        //  as well.
         fee: None,
         memo: None,
         created_at_time: Some(ic_cdk::api::time()),
@@ -65,11 +71,13 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
         })?;
 
     let (result,): (Result<candid::Nat, TransferFromError>,) =
-        response.candid_tuple().map_err(|e| DepositError::CallFailed {
-            ledger: token.ledger_canister_id,
-            method: "icrc2_transfer_from".to_string(),
-            reason: e.to_string(),
-        })?;
+        response
+            .candid_tuple()
+            .map_err(|e| DepositError::CallFailed {
+                ledger: token.ledger_canister_id,
+                method: "icrc2_transfer_from".to_string(),
+                reason: e.to_string(),
+            })?;
 
     let block_index = result.map_err(|e| DepositError::LedgerError(to_ledger_error(e)))?;
 
