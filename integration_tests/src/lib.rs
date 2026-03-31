@@ -15,7 +15,7 @@ pub struct Setup {
     env: Option<PocketIc>,
     caller: Principal,
     controller: Principal,
-    canister_id: CanisterId,
+    dex_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
 }
@@ -70,14 +70,14 @@ impl Setup {
             env: Some(env),
             caller,
             controller,
-            canister_id,
+            dex_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
         }
     }
 
     pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
-        DexClient::new(self.new_pocket_ic(), self.canister_id)
+        DexClient::new(self.new_pocket_ic(), self.dex_id)
     }
 
     pub fn base_token_ledger(&self) -> LedgerClient<'_> {
@@ -93,7 +93,7 @@ impl Setup {
     }
 
     pub fn canister_id(&self) -> CanisterId {
-        self.canister_id
+        self.dex_id
     }
 
     pub fn base_ledger_id(&self) -> CanisterId {
@@ -114,7 +114,7 @@ impl Setup {
                 env: self.env.as_ref().unwrap(),
                 caller,
             },
-            self.canister_id,
+            self.dex_id,
         )
     }
 
