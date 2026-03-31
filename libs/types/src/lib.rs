@@ -49,9 +49,19 @@ pub enum AddLimitOrderError {
     /// The requested trading pair is not registered.
     UnknownTradingPair,
     /// The price is not a positive multiple of the tick size.
-    InvalidPrice,
+    InvalidPrice {
+        /// The rejected price.
+        price: u64,
+        /// The required tick size.
+        tick_size: u64,
+    },
     /// The quantity is not a positive multiple of the lot size.
-    InvalidQuantity,
+    InvalidQuantity {
+        /// The rejected quantity.
+        quantity: u64,
+        /// The required lot size.
+        lot_size: u64,
+    },
 }
 
 /// Status of an order.

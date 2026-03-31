@@ -36,7 +36,13 @@ mod add_limit_order {
         let mut request = limit_order_request();
         request.price = 7; // not a multiple of tick size (10)
         let result = add_limit_order(request);
-        assert_eq!(result, Err(dex_types::AddLimitOrderError::InvalidPrice));
+        assert_eq!(
+            result,
+            Err(dex_types::AddLimitOrderError::InvalidPrice {
+                price: 7,
+                tick_size: 10,
+            })
+        );
     }
 
     #[test]
@@ -45,7 +51,13 @@ mod add_limit_order {
         let mut request = limit_order_request();
         request.quantity = 500_000; // not a multiple of lot size (1_000_000)
         let result = add_limit_order(request);
-        assert_eq!(result, Err(dex_types::AddLimitOrderError::InvalidQuantity));
+        assert_eq!(
+            result,
+            Err(dex_types::AddLimitOrderError::InvalidQuantity {
+                quantity: 500_000,
+                lot_size: 1_000_000,
+            })
+        );
     }
 }
 

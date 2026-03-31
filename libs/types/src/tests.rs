@@ -57,8 +57,14 @@ fn should_serialize_trading_pair() {
 fn should_serialize_add_limit_order_error() {
     for error in [
         AddLimitOrderError::UnknownTradingPair,
-        AddLimitOrderError::InvalidPrice,
-        AddLimitOrderError::InvalidQuantity,
+        AddLimitOrderError::InvalidPrice {
+            price: 7,
+            tick_size: 10,
+        },
+        AddLimitOrderError::InvalidQuantity {
+            quantity: 500_000,
+            lot_size: 1_000_000,
+        },
     ] {
         let encoded = candid::encode_one(&error).unwrap();
         let decoded: AddLimitOrderError = candid::decode_one(&encoded).unwrap();

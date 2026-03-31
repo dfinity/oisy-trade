@@ -94,12 +94,20 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             AddLimitOrderError::UnknownTradingPair => {
                 dex_types::AddLimitOrderError::UnknownTradingPair
             }
-            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize { .. }) => {
-                dex_types::AddLimitOrderError::InvalidPrice
-            }
-            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize { .. }) => {
-                dex_types::AddLimitOrderError::InvalidQuantity
-            }
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
+                price,
+                tick_size,
+            }) => dex_types::AddLimitOrderError::InvalidPrice {
+                price: price.get(),
+                tick_size: tick_size.get(),
+            },
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
+                quantity,
+                lot_size,
+            }) => dex_types::AddLimitOrderError::InvalidQuantity {
+                quantity: quantity.get(),
+                lot_size: lot_size.get(),
+            },
         }
     }
 }

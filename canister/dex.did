@@ -34,9 +34,9 @@ type AddLimitOrderError = variant {
     /// The requested trading pair is not registered.
     UnknownTradingPair;
     /// The price is not a positive multiple of the tick size.
-    InvalidPrice;
+    InvalidPrice : record { price : nat64; tick_size : nat64 };
     /// The quantity is not a positive multiple of the lot size.
-    InvalidQuantity;
+    InvalidQuantity : record { quantity : nat64; lot_size : nat64 };
 };
 
 /// Status of an order.
