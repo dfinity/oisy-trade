@@ -32,6 +32,7 @@ pub struct State {
     tokens: BTreeMap<TokenId, TokenMetadata>,
     #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
+    // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<Principal, Nat>>,
 }
 
