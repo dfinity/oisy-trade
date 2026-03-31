@@ -252,6 +252,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
 
 #[tokio::test]
 async fn should_fail_deposit_when_ledger_is_dex_canister() {
+    // TODO(DEFI-2741): Remove or modify this test once we have a proper check for supported tokens.
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x05]);
