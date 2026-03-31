@@ -36,8 +36,6 @@ type LedgerTransferFromError = variant {
 
 /// Error returned by the deposit endpoint.
 type DepositError = variant {
-    /// The token is not supported by the DEX.
-    TokenUnsupported;
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError : LedgerTransferFromError;
 };

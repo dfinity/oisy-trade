@@ -55,8 +55,6 @@ pub struct DepositRequest {
 /// Error returned by the deposit endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum DepositError {
-    /// The token is not supported by the DEX (no trading pairs exist for it).
-    TokenUnsupported,
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
 }

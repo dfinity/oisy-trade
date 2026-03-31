@@ -58,7 +58,7 @@ async fn should_deposit_and_track_balances() {
     let base_ledger = setup.base_token_ledger();
     let quote_ledger = setup.quote_token_ledger();
 
-    // Mint tokens to users (transfer from minting account = controller)
+    // Mint tokens to users
     base_ledger
         .icrc1_transfer(
             setup.controller(),
