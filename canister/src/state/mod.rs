@@ -29,6 +29,7 @@ pub fn init_state() {
 #[derive(Debug, Default)]
 pub struct State {
     next_order_id: OrderId,
+    #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
     order_books: BTreeMap<TradingPair, OrderBook>,
     active_tasks: BTreeSet<Task>,
