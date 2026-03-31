@@ -116,12 +116,11 @@ mod add_limit_order {
     }
 
     #[tokio::test]
-    async fn should_match_orders_after_timer_fires() {
+    async fn should_match_crossing_orders() {
         let setup = Setup::new().await;
         let client = setup.client();
         let pair = test_trading_pair();
 
-        // Place a sell, then a buy at the same price — both are pending
         let sell_id = client
             .add_limit_order(LimitOrderRequest {
                 pair,
@@ -141,16 +140,10 @@ mod add_limit_order {
             .await
             .unwrap();
 
-        assert_eq!(client.get_order_status(sell_id).await, OrderStatus::Pending);
-        assert_eq!(client.get_order_status(buy_id).await, OrderStatus::Pending);
-
-        // Advance time past the matching interval and tick to fire the timer
-        setup.env().advance_time(Duration::from_secs(61)).await;
-        setup.env().tick().await;
+        // Tick to let the zero-duration matching timers fire
         setup.env().tick().await;
 
-        // After matching, the sell rests in the book (processed first), then the
-        // buy matches against it — both are fully filled and no longer tracked.
+        // Both orders are fully filled and no longer tracked
         // TODO DEFI-2740: verify user's balances
         assert_eq!(
             client.get_order_status(sell_id).await,
@@ -162,7 +155,7 @@ mod add_limit_order {
     }
 
     #[tokio::test]
-    async fn should_transition_unmatched_order_to_open() {
+    async fn should_rest_unmatched_order_as_open() {
         let setup = Setup::new().await;
         let client = setup.client();
 
@@ -176,14 +169,7 @@ mod add_limit_order {
             .await
             .unwrap();
 
-        assert_eq!(
-            client.get_order_status(order_id).await,
-            OrderStatus::Pending
-        );
-
-        // Advance time past the matching interval and tick
-        setup.env().advance_time(Duration::from_secs(61)).await;
-        setup.env().tick().await;
+        // Tick to let the zero-duration matching timer fire
         setup.env().tick().await;
 
         // No counterparty — order rests in the book as Open
