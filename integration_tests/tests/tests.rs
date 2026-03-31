@@ -184,6 +184,8 @@ async fn should_fail_deposit_with_insufficient_funds() {
         subaccount: None,
     };
     let base_ledger = setup.base_token_ledger();
+    let fee = base_ledger.icrc1_fee().await;
+    let minted = Nat::from(1_000_000u64);
 
     // Mint only 1_000_000 tokens to the user
     base_ledger
@@ -193,7 +195,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
                 owner: user,
                 subaccount: None,
             },
-            Nat::from(1_000_000u64),
+            minted.clone(),
         )
         .await;
 
@@ -211,12 +213,12 @@ async fn should_fail_deposit_with_insufficient_funds() {
         })
         .await;
 
-    // The user's balance is 1_000_000 minus the 5_000 fee for icrc2_approve
+    // The user's balance is the minted amount minus the fee charged for icrc2_approve
     assert_eq!(
         result,
         Err(DepositError::LedgerError(
             LedgerTransferFromError::InsufficientFunds {
-                balance: Nat::from(995_000u64),
+                balance: minted - fee,
             }
         ))
     );
