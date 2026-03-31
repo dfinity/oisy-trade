@@ -77,7 +77,7 @@ impl Setup {
         }
     }
 
-    pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
+    pub fn dex_client(&self) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(self.new_pocket_ic(), self.dex_id)
     }
 
@@ -135,7 +135,7 @@ impl Setup {
             .await
     }
 
-    pub fn client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
+    pub fn dex_client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(
             PocketIcRuntime {
                 env: self.env.as_ref().unwrap(),

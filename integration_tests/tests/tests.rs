@@ -9,7 +9,7 @@ use icrc_ledger_types::icrc1::account::Account;
 #[tokio::test]
 async fn should_add_limit_order_and_query_status() {
     let setup = Setup::new().await;
-    let client = setup.client();
+    let client = setup.dex_client();
 
     let response = client.add_limit_order(LimitOrderRequest {}).await;
 
@@ -88,8 +88,8 @@ async fn should_deposit_and_track_balances() {
         .icrc2_approve(user2, dex_account, Nat::from(5_000_000u64))
         .await;
 
-    let client1 = setup.client_with_caller(user1);
-    let client2 = setup.client_with_caller(user2);
+    let client1 = setup.dex_client_with_caller(user1);
+    let client2 = setup.dex_client_with_caller(user2);
 
     // Deposit ckSOL and ckBTC for both users
     client1
@@ -168,7 +168,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
 
     // Try to deposit more than the user holds
     let result = setup
-        .client_with_caller(user)
+        .dex_client_with_caller(user)
         .deposit(DepositRequest {
             token: cksol,
             amount: Nat::from(2_000_000u64),
@@ -211,7 +211,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
 
     // Try to deposit more than the allowance
     let result = setup
-        .client_with_caller(user)
+        .dex_client_with_caller(user)
         .deposit(DepositRequest {
             token: cksol,
             amount: Nat::from(1_000_000u64),
@@ -240,7 +240,7 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
     };
 
     let result = setup
-        .client_with_caller(user)
+        .dex_client_with_caller(user)
         .deposit(DepositRequest {
             token: fake_token,
             amount: Nat::from(1_000_000u64),
@@ -301,7 +301,7 @@ async fn should_fail_deposit_when_ledger_has_no_cycles() {
     let token = Token { ledger_id };
 
     let result = setup
-        .client_with_caller(user)
+        .dex_client_with_caller(user)
         .deposit(DepositRequest {
             token,
             amount: Nat::from(1_000_000u64),
