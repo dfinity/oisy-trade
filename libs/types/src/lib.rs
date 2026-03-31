@@ -70,10 +70,7 @@ pub enum DepositError {
     LedgerError(LedgerTransferFromError),
 }
 
-/// Errors that can be returned by icrc2_transfer_from.
-///
-/// Mirrors [`icrc_ledger_types::icrc2::transfer_from::TransferFromError`]
-/// so that `dex_types` does not depend on `icrc-ledger-types`.
+/// Errors that can be returned by the ICRC-2 `transfer_from` endpoint on a ledger canister.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum LedgerTransferFromError {
     /// The source account does not hold enough funds.
