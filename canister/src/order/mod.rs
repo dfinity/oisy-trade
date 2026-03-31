@@ -68,6 +68,15 @@ pub struct TradingPair {
     pub quote: TokenId,
 }
 
+impl From<dex_types::TradingPair> for TradingPair {
+    fn from(pair: dex_types::TradingPair) -> Self {
+        Self {
+            base: TokenId::new(pair.base),
+            quote: TokenId::new(pair.quote),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Price(u64);
 
