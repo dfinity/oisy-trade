@@ -138,7 +138,7 @@ pub fn cksol_init_args(controller: Principal) -> InitArgs {
         token_name: "ckSOL".to_string(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: Some(FeatureFlags { icrc2: true }),
+        feature_flags: None,
         archive_options: test_archive_options(controller),
         index_principal: None,
     }
@@ -247,7 +247,7 @@ pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
         token_name: "ckBTC".to_string(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: Some(FeatureFlags { icrc2: true }),
+        feature_flags: None,
         archive_options: test_archive_options(controller),
         index_principal: None,
     }
