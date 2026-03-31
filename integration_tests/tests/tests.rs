@@ -177,8 +177,15 @@ async fn should_deposit_and_track_balances() {
     setup.drop().await;
 }
 
-#[tokio::test]
-async fn should_fail_deposit_with_insufficient_funds() {
+/// Test parameters for deposit failure scenarios.
+struct DepositFailureCase {
+    mint_amount: u64,
+    approve_amount: u64,
+    deposit_amount: u64,
+    expected_error: fn(fee: Nat) -> DepositError,
+}
+
+async fn test_deposit_failure(case: DepositFailureCase) {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x03]);
@@ -190,79 +197,57 @@ async fn should_fail_deposit_with_insufficient_funds() {
         subaccount: None,
     };
     let fee = setup.base_token_ledger().icrc1_fee().await;
-    let minted = Nat::from(1_000_000u64);
 
-    // Mint only 1_000_000 tokens to the user
-    setup.mint_base_tokens(user, minted.clone()).await;
-
-    // Approve more than the user holds
+    setup
+        .mint_base_tokens(user, Nat::from(case.mint_amount))
+        .await;
     setup
         .base_token_ledger()
-        .icrc2_approve(user, dex_account, Nat::from(5_000_000u64))
+        .icrc2_approve(user, dex_account, Nat::from(case.approve_amount))
         .await;
 
-    // Try to deposit more than the user holds
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
             token: cksol,
-            amount: Nat::from(2_000_000u64),
+            amount: Nat::from(case.deposit_amount),
         })
         .await;
 
-    // The user's balance is the minted amount minus the fee charged for icrc2_approve
-    assert_eq!(
-        result,
-        Err(DepositError::LedgerError(
-            LedgerTransferFromError::InsufficientFunds {
-                balance: minted - fee,
-            }
-        ))
-    );
+    assert_eq!(result, Err((case.expected_error)(fee)));
 
     setup.drop().await;
 }
 
 #[tokio::test]
+async fn should_fail_deposit_with_insufficient_funds() {
+    test_deposit_failure(DepositFailureCase {
+        mint_amount: 1_000_000,
+        approve_amount: 5_000_000,
+        deposit_amount: 2_000_000,
+        expected_error: |fee| {
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds {
+                // The user's balance is the minted amount minus the fee charged for icrc2_approve
+                balance: Nat::from(1_000_000u64) - fee,
+            })
+        },
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn should_fail_deposit_with_insufficient_allowance() {
-    let setup = Setup::new().await;
-
-    let user = Principal::from_slice(&[0x04]);
-    let cksol = Token {
-        ledger_id: setup.base_ledger_id(),
-    };
-    let dex_account = Account {
-        owner: setup.dex_id(),
-        subaccount: None,
-    };
-    // Mint plenty of tokens to the user
-    setup.mint_base_tokens(user, Nat::from(10_000_000u64)).await;
-
-    // Approve only 500_000
-    setup
-        .base_token_ledger()
-        .icrc2_approve(user, dex_account, Nat::from(500_000u64))
-        .await;
-
-    // Try to deposit more than the allowance
-    let result = setup
-        .dex_client_with_caller(user)
-        .deposit(DepositRequest {
-            token: cksol,
-            amount: Nat::from(1_000_000u64),
-        })
-        .await;
-
-    assert_eq!(
-        result,
-        Err(DepositError::LedgerError(
-            LedgerTransferFromError::InsufficientAllowance {
+    test_deposit_failure(DepositFailureCase {
+        mint_amount: 10_000_000,
+        approve_amount: 500_000,
+        deposit_amount: 1_000_000,
+        expected_error: |_fee| {
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
                 allowance: Nat::from(500_000u64),
-            }
-        ))
-    );
-
-    setup.drop().await;
+            })
+        },
+    })
+    .await;
 }
 
 #[tokio::test]
