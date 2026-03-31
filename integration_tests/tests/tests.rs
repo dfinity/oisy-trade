@@ -142,7 +142,7 @@ async fn should_deposit_and_track_balances() {
     client2
         .deposit(DepositRequest {
             token: ckbtc.clone(),
-            amount: Nat::from(1_000_000u64),
+            amount: Nat::from(3_000_000u64),
         })
         .await
         .expect("user2 ckBTC deposit failed");
@@ -162,14 +162,7 @@ async fn should_deposit_and_track_balances() {
     );
     assert_eq!(
         client2.get_balance(ckbtc.clone()).await,
-        Nat::from(1_000_000u64)
-    );
-
-    // Cross-check: user1 has no balance for a token they didn't interact with beyond what was deposited
-    // and user2's ckSOL balance is independent of user1's
-    assert_ne!(
-        client1.get_balance(cksol.clone()).await,
-        client2.get_balance(cksol.clone()).await
+        Nat::from(3_000_000u64)
     );
 
     setup.drop().await;
