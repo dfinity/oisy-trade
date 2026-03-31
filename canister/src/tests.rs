@@ -1,7 +1,7 @@
 mod add_limit_order {
     use crate::add_limit_order;
     use crate::state::init_state;
-    use dex_types::LimitOrderRequest;
+    use crate::test_fixtures::limit_order_request;
     use std::collections::BTreeSet;
 
     #[test]
@@ -11,7 +11,7 @@ mod add_limit_order {
         let num_orders = 100;
 
         for _ in 0..num_orders {
-            let response = add_limit_order(LimitOrderRequest {});
+            let response = add_limit_order(limit_order_request());
             assert!(order_ids.insert(response.order_id));
         }
     }
@@ -19,13 +19,14 @@ mod add_limit_order {
 
 mod get_order_status {
     use crate::state::init_state;
+    use crate::test_fixtures::limit_order_request;
     use crate::{add_limit_order, get_order_status};
-    use dex_types::{LimitOrderRequest, OrderStatus};
+    use dex_types::OrderStatus;
 
     #[test]
     fn should_return_pending_for_existing_order() {
         init_state();
-        let response = add_limit_order(LimitOrderRequest {});
+        let response = add_limit_order(limit_order_request());
         let status = get_order_status(response.order_id);
         assert_eq!(status, OrderStatus::Pending);
     }
