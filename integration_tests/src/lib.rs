@@ -4,9 +4,10 @@ pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Encode, Principal, decode_args, encode_args};
+use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
 use ic_cdk::call::RejectCode;
+use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
@@ -106,6 +107,32 @@ impl Setup {
 
     pub fn env(&self) -> &PocketIc {
         self.env.as_ref().unwrap()
+    }
+
+    pub async fn mint_base_tokens(&self, to: Principal, amount: Nat) -> Nat {
+        self.base_token_ledger()
+            .icrc1_transfer(
+                self.controller,
+                Account {
+                    owner: to,
+                    subaccount: None,
+                },
+                amount,
+            )
+            .await
+    }
+
+    pub async fn mint_quote_tokens(&self, to: Principal, amount: Nat) -> Nat {
+        self.quote_token_ledger()
+            .icrc1_transfer(
+                self.controller,
+                Account {
+                    owner: to,
+                    subaccount: None,
+                },
+                amount,
+            )
+            .await
     }
 
     pub fn client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {

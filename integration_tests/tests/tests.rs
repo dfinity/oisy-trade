@@ -58,52 +58,23 @@ async fn should_deposit_and_track_balances() {
         subaccount: None,
     };
 
-    let base_ledger = setup.base_token_ledger();
-    let quote_ledger = setup.quote_token_ledger();
-
     // Mint tokens to users
-    base_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user1,
-                subaccount: None,
-            },
-            Nat::from(10_000_000u64),
-        )
+    setup
+        .mint_base_tokens(user1, Nat::from(10_000_000u64))
         .await;
-    base_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user2,
-                subaccount: None,
-            },
-            Nat::from(20_000_000u64),
-        )
+    setup
+        .mint_base_tokens(user2, Nat::from(20_000_000u64))
         .await;
-    quote_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user1,
-                subaccount: None,
-            },
-            Nat::from(10_000_000u64),
-        )
+    setup
+        .mint_quote_tokens(user1, Nat::from(10_000_000u64))
         .await;
-    quote_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user2,
-                subaccount: None,
-            },
-            Nat::from(20_000_000u64),
-        )
+    setup
+        .mint_quote_tokens(user2, Nat::from(20_000_000u64))
         .await;
 
     // Approve DEX canister to spend on behalf of users
+    let base_ledger = setup.base_token_ledger();
+    let quote_ledger = setup.quote_token_ledger();
     base_ledger
         .icrc2_approve(user1, dex_account, Nat::from(u64::MAX))
         .await;
@@ -183,24 +154,15 @@ async fn should_fail_deposit_with_insufficient_funds() {
         owner: setup.dex_id(),
         subaccount: None,
     };
-    let base_ledger = setup.base_token_ledger();
-    let fee = base_ledger.icrc1_fee().await;
+    let fee = setup.base_token_ledger().icrc1_fee().await;
     let minted = Nat::from(1_000_000u64);
 
     // Mint only 1_000_000 tokens to the user
-    base_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user,
-                subaccount: None,
-            },
-            minted.clone(),
-        )
-        .await;
+    setup.mint_base_tokens(user, minted.clone()).await;
 
     // Approve more than the user holds
-    base_ledger
+    setup
+        .base_token_ledger()
         .icrc2_approve(user, dex_account, Nat::from(u64::MAX))
         .await;
 
@@ -238,22 +200,12 @@ async fn should_fail_deposit_with_insufficient_allowance() {
         owner: setup.dex_id(),
         subaccount: None,
     };
-    let base_ledger = setup.base_token_ledger();
-
     // Mint plenty of tokens to the user
-    base_ledger
-        .icrc1_transfer(
-            setup.controller(),
-            Account {
-                owner: user,
-                subaccount: None,
-            },
-            Nat::from(10_000_000u64),
-        )
-        .await;
+    setup.mint_base_tokens(user, Nat::from(10_000_000u64)).await;
 
     // Approve only 500_000
-    base_ledger
+    setup
+        .base_token_ledger()
         .icrc2_approve(user, dex_account, Nat::from(500_000u64))
         .await;
 
