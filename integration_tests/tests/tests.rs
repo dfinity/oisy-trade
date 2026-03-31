@@ -54,7 +54,7 @@ async fn should_deposit_and_track_balances() {
     };
 
     let dex_account = Account {
-        owner: setup.canister_id(),
+        owner: setup.dex_id(),
         subaccount: None,
     };
 
@@ -180,7 +180,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
         ledger_id: setup.base_ledger_id(),
     };
     let dex_account = Account {
-        owner: setup.canister_id(),
+        owner: setup.dex_id(),
         subaccount: None,
     };
     let base_ledger = setup.base_token_ledger();
@@ -235,7 +235,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
         ledger_id: setup.base_ledger_id(),
     };
     let dex_account = Account {
-        owner: setup.canister_id(),
+        owner: setup.dex_id(),
         subaccount: None,
     };
     let base_ledger = setup.base_token_ledger();
@@ -284,7 +284,7 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
 
     let user = Principal::from_slice(&[0x05]);
     let fake_token = Token {
-        ledger_id: setup.canister_id(),
+        ledger_id: setup.dex_id(),
     };
 
     let result = setup

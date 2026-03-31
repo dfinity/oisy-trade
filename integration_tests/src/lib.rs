@@ -92,7 +92,7 @@ impl Setup {
         self.controller
     }
 
-    pub fn canister_id(&self) -> CanisterId {
+    pub fn dex_id(&self) -> CanisterId {
         self.dex_id
     }
 
