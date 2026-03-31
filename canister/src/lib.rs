@@ -61,11 +61,11 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
         created_at_time: None,
     };
 
-    let response = Call::unbounded_wait(token.ledger_canister_id, "icrc2_transfer_from")
+    let response = Call::unbounded_wait(token.ledger_id, "icrc2_transfer_from")
         .with_args(&(transfer_args,))
         .await
         .map_err(|e| DepositError::CallFailed {
-            ledger: token.ledger_canister_id,
+            ledger: token.ledger_id,
             method: "icrc2_transfer_from".to_string(),
             reason: format!("{e}"),
         })?;
@@ -74,14 +74,14 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
         response
             .candid_tuple()
             .map_err(|e| DepositError::CallFailed {
-                ledger: token.ledger_canister_id,
+                ledger: token.ledger_id,
                 method: "icrc2_transfer_from".to_string(),
                 reason: e.to_string(),
             })?;
 
     let block_index = result.map_err(|e| DepositError::LedgerError(to_ledger_error(e)))?;
 
-    state::with_state_mut(|s| s.deposit(caller, token.ledger_canister_id, amount));
+    state::with_state_mut(|s| s.deposit(caller, token.ledger_id, amount));
 
     Ok(DepositResponse { block_index })
 }
@@ -125,5 +125,5 @@ fn to_ledger_error(
 
 pub fn get_balance(token: Token) -> candid::Nat {
     let caller = ic_cdk::api::msg_caller();
-    state::with_state(|s| s.get_balance(caller, token.ledger_canister_id))
+    state::with_state(|s| s.get_balance(caller, token.ledger_id))
 }

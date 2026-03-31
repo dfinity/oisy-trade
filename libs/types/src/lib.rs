@@ -40,7 +40,7 @@ pub enum OrderStatus {
 )]
 pub struct Token {
     /// The canister ID of the token's ledger.
-    pub ledger_canister_id: Principal,
+    pub ledger_id: Principal,
 }
 
 /// Request to deposit tokens into the DEX.

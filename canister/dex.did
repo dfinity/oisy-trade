@@ -18,7 +18,7 @@ type OrderStatus = variant {
 /// A token identified by its ledger canister ID.
 type Token = record {
     /// The canister ID of the token's ledger.
-    ledger_canister_id : principal;
+    ledger_id : principal;
 };
 
 /// Errors that can be returned by icrc2_transfer_from.

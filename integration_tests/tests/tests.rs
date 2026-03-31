@@ -47,10 +47,10 @@ async fn should_deposit_and_track_balances() {
     let user2 = Principal::from_slice(&[0x02]);
 
     let cksol = Token {
-        ledger_canister_id: setup.base_ledger_id(),
+        ledger_id: setup.base_ledger_id(),
     };
     let ckbtc = Token {
-        ledger_canister_id: setup.quote_ledger_id(),
+        ledger_id: setup.quote_ledger_id(),
     };
 
     let dex_account = Account {
@@ -177,7 +177,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
 
     let user = Principal::from_slice(&[0x03]);
     let cksol = Token {
-        ledger_canister_id: setup.base_ledger_id(),
+        ledger_id: setup.base_ledger_id(),
     };
     let dex_account = Account {
         owner: setup.canister_id(),
@@ -232,7 +232,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
 
     let user = Principal::from_slice(&[0x04]);
     let cksol = Token {
-        ledger_canister_id: setup.base_ledger_id(),
+        ledger_id: setup.base_ledger_id(),
     };
     let dex_account = Account {
         owner: setup.canister_id(),
@@ -284,7 +284,7 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
 
     let user = Principal::from_slice(&[0x05]);
     let fake_token = Token {
-        ledger_canister_id: setup.canister_id(),
+        ledger_id: setup.canister_id(),
     };
 
     let result = setup
@@ -346,9 +346,7 @@ async fn should_fail_deposit_when_ledger_has_no_cycles() {
     .await
     .expect("Failed to update canister settings");
 
-    let token = Token {
-        ledger_canister_id: ledger_id,
-    };
+    let token = Token { ledger_id };
 
     let result = setup
         .client_with_caller(user)
