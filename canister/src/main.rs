@@ -1,4 +1,7 @@
-use dex_types::{DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderStatus, Token};
+use dex_types::{
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
+    OrderStatus, Token,
+};
 
 #[ic_cdk::init]
 fn init() {

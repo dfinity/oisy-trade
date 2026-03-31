@@ -182,12 +182,7 @@ impl<'a> LedgerClient<'a> {
         Decode!(&response, Nat).expect("Failed to decode icrc1_fee response")
     }
 
-    pub async fn icrc1_transfer(
-        &self,
-        caller: Principal,
-        to: Account,
-        amount: Nat,
-    ) -> Nat {
+    pub async fn icrc1_transfer(&self, caller: Principal, to: Account, amount: Nat) -> Nat {
         let args = TransferArg {
             from_subaccount: None,
             to,
@@ -211,12 +206,7 @@ impl<'a> LedgerClient<'a> {
             .expect("icrc1_transfer failed")
     }
 
-    pub async fn icrc2_approve(
-        &self,
-        caller: Principal,
-        spender: Account,
-        amount: Nat,
-    ) -> Nat {
+    pub async fn icrc2_approve(&self, caller: Principal, spender: Account, amount: Nat) -> Nat {
         let args = ApproveArgs {
             from_subaccount: None,
             spender,

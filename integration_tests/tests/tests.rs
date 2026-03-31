@@ -62,44 +62,56 @@ async fn should_deposit_and_track_balances() {
     base_ledger
         .icrc1_transfer(
             setup.controller(),
-            Account { owner: user1, subaccount: None },
+            Account {
+                owner: user1,
+                subaccount: None,
+            },
             Nat::from(10_000_000u64),
         )
         .await;
     base_ledger
         .icrc1_transfer(
             setup.controller(),
-            Account { owner: user2, subaccount: None },
+            Account {
+                owner: user2,
+                subaccount: None,
+            },
             Nat::from(20_000_000u64),
         )
         .await;
     quote_ledger
         .icrc1_transfer(
             setup.controller(),
-            Account { owner: user1, subaccount: None },
+            Account {
+                owner: user1,
+                subaccount: None,
+            },
             Nat::from(10_000_000u64),
         )
         .await;
     quote_ledger
         .icrc1_transfer(
             setup.controller(),
-            Account { owner: user2, subaccount: None },
+            Account {
+                owner: user2,
+                subaccount: None,
+            },
             Nat::from(20_000_000u64),
         )
         .await;
 
     // Approve DEX canister to spend on behalf of users
     base_ledger
-        .icrc2_approve(user1, dex_account.clone(), Nat::from(u64::MAX))
+        .icrc2_approve(user1, dex_account, Nat::from(u64::MAX))
         .await;
     base_ledger
-        .icrc2_approve(user2, dex_account.clone(), Nat::from(u64::MAX))
+        .icrc2_approve(user2, dex_account, Nat::from(u64::MAX))
         .await;
     quote_ledger
-        .icrc2_approve(user1, dex_account.clone(), Nat::from(u64::MAX))
+        .icrc2_approve(user1, dex_account, Nat::from(u64::MAX))
         .await;
     quote_ledger
-        .icrc2_approve(user2, dex_account.clone(), Nat::from(u64::MAX))
+        .icrc2_approve(user2, dex_account, Nat::from(u64::MAX))
         .await;
 
     let client1 = setup.client_with_caller(user1);
@@ -107,19 +119,31 @@ async fn should_deposit_and_track_balances() {
 
     // Deposit ckSOL and ckBTC for both users
     client1
-        .deposit(DepositRequest { token: cksol.clone(), amount: Nat::from(1_000_000u64) })
+        .deposit(DepositRequest {
+            token: cksol.clone(),
+            amount: Nat::from(1_000_000u64),
+        })
         .await
         .expect("user1 ckSOL deposit failed");
     client1
-        .deposit(DepositRequest { token: ckbtc.clone(), amount: Nat::from(500_000u64) })
+        .deposit(DepositRequest {
+            token: ckbtc.clone(),
+            amount: Nat::from(500_000u64),
+        })
         .await
         .expect("user1 ckBTC deposit failed");
     client2
-        .deposit(DepositRequest { token: cksol.clone(), amount: Nat::from(2_000_000u64) })
+        .deposit(DepositRequest {
+            token: cksol.clone(),
+            amount: Nat::from(2_000_000u64),
+        })
         .await
         .expect("user2 ckSOL deposit failed");
     client2
-        .deposit(DepositRequest { token: ckbtc.clone(), amount: Nat::from(1_000_000u64) })
+        .deposit(DepositRequest {
+            token: ckbtc.clone(),
+            amount: Nat::from(1_000_000u64),
+        })
         .await
         .expect("user2 ckBTC deposit failed");
 

@@ -1,6 +1,6 @@
 use crate::order::{Price, Quantity, Side};
 use dex_types::{
-                DepositError, DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest,
+    DepositError, DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest,
     LimitOrderResponse, OrderStatus, Token,
 };
 

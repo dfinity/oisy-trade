@@ -35,7 +35,9 @@ pub enum OrderStatus {
 }
 
 /// A token identified by its ledger canister ID.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
+)]
 pub struct Token {
     /// The canister ID of the token's ledger.
     pub ledger_canister_id: Principal,

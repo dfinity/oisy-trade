@@ -79,10 +79,7 @@ impl<R: Runtime> DexClient<R> {
     }
 
     /// Deposit tokens into the DEX canister.
-    pub async fn deposit(
-        &self,
-        request: DepositRequest,
-    ) -> Result<DepositResponse, DepositError> {
+    pub async fn deposit(&self, request: DepositRequest) -> Result<DepositResponse, DepositError> {
         self.runtime
             .call(self.dex_canister, "deposit", (request,), 0)
             .await
