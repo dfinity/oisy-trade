@@ -31,6 +31,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
         created_at_time: None,
     };
 
+    // TODO(DEFI-2745): Consider switching to bounded_wait calls.
     let response = Call::unbounded_wait(token.ledger_id, "icrc2_transfer_from")
         .with_args(&(transfer_args,))
         .await
