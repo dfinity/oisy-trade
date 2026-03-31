@@ -58,11 +58,11 @@ pub enum DepositError {
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.
-        ledger: Principal,
+        pub ledger: Principal,
         /// The name of the method that was called.
-        method: String,
+        pub method: String,
         /// The reason the call failed.
-        reason: String,
+        pub reason: String,
     },
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
@@ -77,43 +77,43 @@ pub enum LedgerTransferFromError {
     /// The fee provided was incorrect.
     BadFee {
         /// The fee that the ledger expected.
-        expected_fee: Nat,
+        pub expected_fee: Nat,
     },
     /// The burn amount was below the minimum.
     BadBurn {
         /// The minimum burn amount.
-        min_burn_amount: Nat,
+        pub min_burn_amount: Nat,
     },
     /// The source account does not hold enough funds.
     InsufficientFunds {
         /// The current balance of the source account.
-        balance: Nat,
+        pub balance: Nat,
     },
     /// The caller's allowance is not large enough.
     InsufficientAllowance {
         /// The current allowance.
-        allowance: Nat,
+        pub allowance: Nat,
     },
     /// The transaction is too old.
     TooOld,
     /// The transaction was created in the future.
     CreatedInFuture {
         /// The current ledger time.
-        ledger_time: u64,
+        pub ledger_time: u64,
     },
     /// The transaction is a duplicate.
     Duplicate {
         /// The block index of the duplicate transaction.
-        duplicate_of: Nat,
+        pub duplicate_of: Nat,
     },
     /// The ledger is temporarily unavailable.
     TemporarilyUnavailable,
     /// A generic error from the ledger.
     GenericError {
         /// The error code.
-        error_code: Nat,
+        pub error_code: Nat,
         /// The error message.
-        message: String,
+        pub message: String,
     },
 }
 
