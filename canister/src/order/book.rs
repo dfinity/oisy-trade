@@ -172,11 +172,6 @@ impl OrderBook {
         Some(resting.to_order(side, price))
     }
 
-    /// Returns `true` if an order with the given ID is resting in the book.
-    pub fn has_order(&self, order_id: &OrderId) -> bool {
-        self.resting_orders.contains_key(order_id)
-    }
-
     /// Validate and enqueue an order for matching.
     pub fn add_pending_order(&mut self, order: Order) -> Result<(), MatchOrderError> {
         self.validate_order(&order)?;
@@ -186,15 +181,19 @@ impl OrderBook {
 
     /// Drain the pending queue and match each order against the book.
     pub fn process_pending_orders(&mut self) {
+        // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         while let Some(order) = self.pending_orders.pop_front() {
-            // Validation already happened in add_pending_order, so match_order
-            // should not fail. If it does, we skip the order.
             match self.match_order(order) {
                 Ok(_result) => {
-                    // TODO: settle fills (credit/debit balances)
+                    // TODO DEFI-2740: settle fills (credit/debit balances)
                 }
-                Err(_err) => {
-                    // TODO: handle invalid orders (return funds to user)
+                Err(err) => {
+                    panic!(
+                        "BUG: failed to match order: {:?}. Order was validated when inserted; \
+                        and, although matching happens asynchronously afterwards, \
+                        the tick/lot size are not mutable",
+                        err
+                    );
                 }
             }
         }
@@ -205,7 +204,7 @@ impl OrderBook {
         if self.pending_orders.iter().any(|o| o.id() == order_id) {
             return Some(OrderStatus::Pending);
         }
-        if self.has_order(&order_id) {
+        if self.resting_orders.contains_key(&order_id) {
             return Some(OrderStatus::Open);
         }
         None

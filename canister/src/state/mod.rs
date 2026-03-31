@@ -58,6 +58,7 @@ impl State {
     }
 
     pub fn process_pending_orders(&mut self) {
+        // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         for book in self.order_books.values_mut() {
             book.process_pending_orders();
         }
@@ -76,7 +77,7 @@ impl State {
     pub fn add_order_book(&mut self, pair: TradingPair, book: OrderBook) {
         assert!(
             self.order_books.insert(pair, book).is_none(),
-            "order book already exists for this pair"
+            "ERROR: order book already exists for this pair"
         );
     }
 }
