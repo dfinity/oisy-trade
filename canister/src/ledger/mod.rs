@@ -7,7 +7,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
 
     // TODO(DEFI-2741): Consider adding a check for supported tokens to disallow users to deposit
     //  funds that are not supported by the DEX.
-    let token = request.token;
+    let token = request.token_id;
     let amount = request.amount;
     let caller = ic_cdk::api::msg_caller();
 

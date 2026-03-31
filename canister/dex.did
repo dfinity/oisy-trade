@@ -16,7 +16,7 @@ type OrderStatus = variant {
 };
 
 /// A token identified by its ledger canister ID.
-type Token = record {
+type TokenId = record {
     /// The canister ID of the token's ledger.
     ledger_id : principal;
 };
@@ -45,7 +45,7 @@ type DepositError = variant {
 /// Request to deposit tokens into the DEX.
 type DepositRequest = record {
     /// The token to deposit.
-    token : Token;
+    token_id : TokenId;
     /// The amount to deposit.
     amount : nat;
 };
@@ -74,5 +74,5 @@ service : () -> {
     deposit : (DepositRequest) -> (DepositResult);
 
     /// Query the caller's balance for a given token.
-    get_balance : (Token) -> (nat) query;
+    get_balance : (TokenId) -> (nat) query;
 }

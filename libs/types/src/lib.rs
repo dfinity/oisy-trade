@@ -38,7 +38,7 @@ pub enum OrderStatus {
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
 )]
-pub struct Token {
+pub struct TokenId {
     /// The canister ID of the token's ledger.
     pub ledger_id: Principal,
 }
@@ -47,7 +47,7 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct DepositRequest {
     /// The token to deposit.
-    pub token: Token,
+    pub token_id: TokenId,
     /// The amount to deposit.
     pub amount: Nat,
 }

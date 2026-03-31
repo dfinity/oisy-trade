@@ -3,7 +3,7 @@ use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
-    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Token,
+    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, TokenId,
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -11,8 +11,8 @@ use icrc_ledger_types::icrc1::account::Account;
 async fn assert_balances<R: Runtime>(
     client1: &DexClient<R>,
     client2: &DexClient<R>,
-    cksol: &Token,
-    ckbtc: &Token,
+    cksol: &TokenId,
+    ckbtc: &TokenId,
     expected_user1_cksol: u64,
     expected_user1_ckbtc: u64,
     expected_user2_cksol: u64,
@@ -80,10 +80,10 @@ async fn should_deposit_and_track_balances() {
     let user1 = Principal::from_slice(&[0x01]);
     let user2 = Principal::from_slice(&[0x02]);
 
-    let cksol = Token {
+    let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
-    let ckbtc = Token {
+    let ckbtc = TokenId {
         ledger_id: setup.quote_ledger_id(),
     };
 
@@ -131,7 +131,7 @@ async fn should_deposit_and_track_balances() {
     // Deposit ckSOL for user1
     client1
         .deposit(DepositRequest {
-            token: cksol.clone(),
+            token_id: cksol.clone(),
             amount: Nat::from(1_000_000u64),
         })
         .await
@@ -141,7 +141,7 @@ async fn should_deposit_and_track_balances() {
     // Deposit ckBTC for user1
     client1
         .deposit(DepositRequest {
-            token: ckbtc.clone(),
+            token_id: ckbtc.clone(),
             amount: Nat::from(500_000u64),
         })
         .await
@@ -151,7 +151,7 @@ async fn should_deposit_and_track_balances() {
     // Deposit ckSOL for user2
     client2
         .deposit(DepositRequest {
-            token: cksol.clone(),
+            token_id: cksol.clone(),
             amount: Nat::from(2_000_000u64),
         })
         .await
@@ -164,7 +164,7 @@ async fn should_deposit_and_track_balances() {
     // Deposit ckBTC for user2
     client2
         .deposit(DepositRequest {
-            token: ckbtc.clone(),
+            token_id: ckbtc.clone(),
             amount: Nat::from(3_000_000u64),
         })
         .await
@@ -189,7 +189,7 @@ async fn test_deposit_failure(case: DepositFailureCase) {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x03]);
-    let cksol = Token {
+    let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
     let dex_account = Account {
@@ -209,7 +209,7 @@ async fn test_deposit_failure(case: DepositFailureCase) {
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token: cksol,
+            token_id: cksol,
             amount: Nat::from(case.deposit_amount),
         })
         .await;
@@ -256,14 +256,14 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x05]);
-    let fake_token = Token {
+    let fake_token = TokenId {
         ledger_id: setup.dex_id(),
     };
 
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token: fake_token,
+            token_id: fake_token,
             amount: Nat::from(1_000_000u64),
         })
         .await;
@@ -294,7 +294,7 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token: Token { ledger_id },
+            token_id: TokenId { ledger_id },
             amount: Nat::from(1_000_000u64),
         })
         .await;

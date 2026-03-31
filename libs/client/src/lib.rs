@@ -8,7 +8,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Nat, Principal};
 use dex_types::{
     DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderId,
-    OrderStatus, Token,
+    OrderStatus, TokenId,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -87,9 +87,9 @@ impl<R: Runtime> DexClient<R> {
     }
 
     /// Query the caller's balance for a given token.
-    pub async fn get_balance(&self, token: Token) -> Nat {
+    pub async fn get_balance(&self, token_id: TokenId) -> Nat {
         self.runtime
-            .call(self.dex_canister, "get_balance", (token,), 0)
+            .call(self.dex_canister, "get_balance", (token_id,), 0)
             .await
             .unwrap()
     }
