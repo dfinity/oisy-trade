@@ -58,7 +58,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
         //  as well.
         fee: None,
         memo: None,
-        created_at_time: Some(ic_cdk::api::time()),
+        created_at_time: None,
     };
 
     let response = Call::unbounded_wait(token.ledger_canister_id, "icrc2_transfer_from")
