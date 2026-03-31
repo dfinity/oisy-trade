@@ -161,17 +161,6 @@ impl OrderBook {
         Ok(())
     }
 
-    /// Look up a resting order by its ID.
-    pub fn get_order(&self, order_id: OrderId) -> Option<Order> {
-        let &(side, price) = self.resting_orders.get(&order_id)?;
-        let queue = match side {
-            Side::Buy => self.bids.get(&Reverse(price))?,
-            Side::Sell => self.asks.get(&price)?,
-        };
-        let resting = queue.iter().find(|o| o.id() == order_id)?;
-        Some(resting.to_order(side, price))
-    }
-
     /// Validate and enqueue an order for matching.
     pub fn add_pending_order(&mut self, order: Order) -> Result<(), MatchOrderError> {
         self.validate_order(&order)?;
