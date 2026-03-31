@@ -1,4 +1,5 @@
 use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
+use std::time::Duration;
 
 pub mod guard;
 pub mod order;
@@ -8,6 +9,8 @@ pub mod state;
 mod test_fixtures;
 #[cfg(test)]
 mod tests;
+
+pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
 pub enum Task {
@@ -24,6 +27,15 @@ pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOr
     let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
         .map_err(AddLimitOrderError::from)?;
     Ok(u64::from(order_id))
+}
+
+pub fn process_pending_orders() {
+    let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
+        Some(guard) => guard,
+        None => return,
+    };
+
+    state::with_state_mut(|s| s.process_pending_orders());
 }
 
 /// Register default trading pairs for testing.

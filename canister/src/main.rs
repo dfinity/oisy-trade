@@ -1,11 +1,5 @@
+use dex_canister::MATCHING_INTERVAL;
 use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
-
-#[ic_cdk::init]
-fn init() {
-    dex_canister::state::init_state();
-    // TODO DEFI-2744: replace with an admin endpoint
-    dex_canister::register_default_trading_pairs();
-}
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
@@ -15,6 +9,24 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
 #[ic_cdk::query]
 fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     dex_canister::get_order_status(order_id)
+}
+
+#[ic_cdk::init]
+fn init() {
+    dex_canister::state::init_state();
+    dex_canister::register_default_trading_pairs();
+    setup_timers();
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade() {
+    setup_timers();
+}
+
+fn setup_timers() {
+    ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
+        dex_canister::process_pending_orders();
+    });
 }
 
 fn main() {}
