@@ -35,7 +35,7 @@ pub fn register_default_trading_pairs() {
     };
     let book = order::OrderBook::new(
         order::TickSize::new(NonZeroU64::new(10).unwrap()),
-        order::Quantity::new(1_000_000),
+        order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
     );
     state::with_state_mut(|s| s.add_order_book(pair, book));
 }

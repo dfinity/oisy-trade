@@ -1,4 +1,4 @@
-use super::{Order, OrderId, Price, Quantity, RestingOrder, Side, TickSize};
+use super::{LotSize, Order, OrderId, Price, Quantity, RestingOrder, Side, TickSize};
 use dex_types::OrderStatus;
 use std::cmp::Reverse;
 use std::collections::btree_map;
@@ -14,7 +14,7 @@ pub struct OrderBook {
     /// Minimum price increment. All order prices must be a multiple of this value.
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
-    lot_size: Quantity,
+    lot_size: LotSize,
     /// Orders awaiting matching, processed by the timer.
     pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
@@ -26,14 +26,9 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-    /// Creates a new empty order book with the given constraints.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `tick_size` or `lot_size` is zero.
-    pub fn new(tick_size: TickSize, lot_size: Quantity) -> Self {
-        assert!(!lot_size.is_zero(), "lot_size must be non-zero");
 
+    /// Creates a new empty order book with the given constraints.
+    pub fn new(tick_size: TickSize, lot_size: LotSize) -> Self {
         Self {
             tick_size,
             lot_size,
@@ -57,7 +52,7 @@ impl OrderBook {
         self.tick_size
     }
 
-    pub fn lot_size(&self) -> Quantity {
+    pub fn lot_size(&self) -> LotSize {
         self.lot_size
     }
 
@@ -288,6 +283,6 @@ pub enum MatchOrderError {
     /// Quantity is not a positive multiple of the lot size.
     InvalidLotSize {
         quantity: Quantity,
-        lot_size: Quantity,
+        lot_size: LotSize,
     },
 }

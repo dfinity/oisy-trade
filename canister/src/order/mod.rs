@@ -121,6 +121,20 @@ impl TickSize {
     }
 }
 
+/// Minimum order quantity for a trading pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LotSize(NonZeroU64);
+
+impl LotSize {
+    pub const fn new(value: NonZeroU64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
 impl From<u64> for Price {
     fn from(value: u64) -> Self {
         Self(value)
@@ -151,8 +165,8 @@ impl Quantity {
         self.0 == 0
     }
 
-    pub fn is_multiple_of(self, other: Self) -> bool {
-        self.0.is_multiple_of(other.0)
+    pub fn is_multiple_of(self, lot_size: LotSize) -> bool {
+        self.0.is_multiple_of(lot_size.get())
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
