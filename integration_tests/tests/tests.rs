@@ -3,7 +3,8 @@ use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
-    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, TokenId,
+    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side,
+    TokenId, TradingPair,
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -45,9 +46,20 @@ async fn should_add_limit_order_and_query_status() {
     let setup = Setup::new().await;
     let client = setup.dex_client();
 
-    let response = client.add_limit_order(LimitOrderRequest {}).await;
+    let order_id = client
+        .add_limit_order(LimitOrderRequest {
+            pair: TradingPair {
+                base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+                quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+            },
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000,
+        })
+        .await
+        .unwrap();
 
-    let status = client.get_order_status(response.order_id).await;
+    let status = client.get_order_status(order_id).await;
     assert_eq!(status, OrderStatus::Pending);
 
     let not_found = client.get_order_status(u64::MAX).await;
@@ -62,7 +74,9 @@ async fn should_return_empty_trading_pairs() {
     let client = setup.dex_client();
 
     let pairs = client.get_trading_pairs().await;
-    assert!(pairs.is_empty());
+    // TODO DEFI-2723: there should only be a trading pair if one was added by an admin.
+    // Currently it's hard-coded in the init args.
+    assert!(!pairs.is_empty());
 
     setup.drop().await;
 }

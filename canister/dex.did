@@ -1,11 +1,43 @@
 /// Unique identifier for an order, assigned by the canister upon submission.
 type OrderId = nat64;
 
-/// Request to place a new limit order.
-type LimitOrderRequest = record {};
+/// Side of an order.
+type Side = variant {
+    /// Buy order (bid).
+    Buy;
+    /// Sell order (ask).
+    Sell;
+};
 
-/// Response after successfully placing a limit order.
-type LimitOrderResponse = record { order_id : OrderId };
+/// A trading pair identified by the base and quote token ledger principals.
+type TradingPair = record {
+    /// The base token ledger canister principal.
+    base : principal;
+    /// The quote token ledger canister principal.
+    quote : principal;
+};
+
+/// Request to place a new limit order.
+type LimitOrderRequest = record {
+    /// The trading pair to place the order on.
+    pair : TradingPair;
+    /// Whether this is a buy or sell order.
+    side : Side;
+    /// Limit price in quote token units per base token unit.
+    price : nat64;
+    /// Order quantity in base token units.
+    quantity : nat64;
+};
+
+/// Error returned when placing a limit order fails.
+type AddLimitOrderError = variant {
+    /// The requested trading pair is not registered.
+    UnknownTradingPair;
+    /// The price is not a positive multiple of the tick size.
+    InvalidPrice : record { price : nat64; tick_size : nat64 };
+    /// The quantity is not a positive multiple of the lot size.
+    InvalidQuantity : record { quantity : nat64; lot_size : nat64 };
+};
 
 /// Information about a listed trading pair.
 type TradingPairInfo = record {
@@ -25,6 +57,12 @@ type OrderStatus = variant {
     NotFound;
     /// The order is pending processing.
     Pending;
+    /// The order is open and resting in the order book.
+    Open;
+    /// The order has been fully filled.
+    Filled;
+    /// The order has been canceled.
+    Canceled;
 };
 
 /// A token identified by its ledger canister ID.
@@ -68,7 +106,7 @@ type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
-    add_limit_order : (LimitOrderRequest) -> (LimitOrderResponse);
+    add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;
