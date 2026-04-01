@@ -55,9 +55,9 @@ type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
 /// Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
-    /// The base token of the pair (e.g. ckSOL).
+    /// The base token of the pair.
     base : TokenId;
-    /// The quote token of the pair (e.g. ckBTC).
+    /// The quote token of the pair.
     quote : TokenId;
     /// Minimum price increment. Must be greater than zero.
     tick_size : nat64;
