@@ -7,21 +7,15 @@ mod order_book {
         use crate::test_fixtures::all_order_types;
 
         #[test]
-        #[should_panic(expected = "tick_size must be non-zero")]
-        fn should_panic_on_zero_tick_size() {
-            OrderBook::new(Price::ZERO, Quantity::new(LOT_SIZE));
-        }
-
-        #[test]
         #[should_panic(expected = "lot_size must be non-zero")]
         fn should_panic_on_zero_lot_size() {
-            OrderBook::new(Price::new(TICK_SIZE), Quantity::ZERO);
+            OrderBook::new(TICK_SIZE, Quantity::ZERO);
         }
 
         #[test]
         fn should_reject_price_not_multiple_of_tick_size() {
             let mut book = order_book();
-            let invalid_price = TICK_SIZE / 2;
+            let invalid_price = TICK_SIZE.get() / 2;
 
             for order in all_order_types(invalid_price, LOT_SIZE) {
                 let result = book.match_order(order);
@@ -30,7 +24,7 @@ mod order_book {
                     result,
                     Err(MatchOrderError::InvalidTickSize {
                         price: Price::from(invalid_price),
-                        tick_size: Price::new(TICK_SIZE),
+                        tick_size: TICK_SIZE,
                     })
                 );
             }
@@ -41,7 +35,7 @@ mod order_book {
             let mut book = order_book();
             let invalid_lot_size = LOT_SIZE / 2;
 
-            for order in all_order_types(TICK_SIZE, invalid_lot_size) {
+            for order in all_order_types(TICK_SIZE.get(), invalid_lot_size) {
                 let result = book.match_order(order);
 
                 assert_eq!(
@@ -62,7 +56,7 @@ mod order_book {
                     book.match_order(order),
                     Err(MatchOrderError::InvalidTickSize {
                         price: Price::ZERO,
-                        tick_size: Price::new(TICK_SIZE),
+                        tick_size: TICK_SIZE,
                     })
                 );
             }
@@ -71,7 +65,7 @@ mod order_book {
         #[test]
         fn should_reject_zero_quantity() {
             let mut book = order_book();
-            for order in all_order_types(TICK_SIZE, 0) {
+            for order in all_order_types(TICK_SIZE.get(), 0) {
                 assert_eq!(
                     book.match_order(order),
                     Err(MatchOrderError::InvalidLotSize {
@@ -85,7 +79,7 @@ mod order_book {
         #[test]
         fn should_accept_valid_order() {
             let mut book = order_book();
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let result = book.match_order(order);
                 assert!(result.is_ok());
             }
@@ -98,7 +92,7 @@ mod order_book {
 
         #[test]
         fn should_rest_in_empty_book() {
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
                 let result = book.match_order(order).unwrap();

@@ -1,16 +1,17 @@
 use crate::order::{
-    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TradingPair,
 };
 use crate::state;
 use candid::Principal;
 use dex_types::LimitOrderRequest;
 use std::iter::once;
+use std::num::NonZeroU64;
 
 /// ICP/BTC-like parameters from Binance.
 /// Source: `GET https://api.binance.com/api/v3/exchangeInfo?symbol=ICPBTC`
 ///
 /// Minimum price increment: 0.00000010 BTC, i.e. 10 satoshis.
-pub const TICK_SIZE: u64 = 10;
+pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(10).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: u64 = 1_000_000;
 
@@ -27,7 +28,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
 }
 
 pub fn order_book() -> OrderBook {
-    OrderBook::new(Price::new(TICK_SIZE), Quantity::new(LOT_SIZE))
+    OrderBook::new(TICK_SIZE, Quantity::new(LOT_SIZE))
 }
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {

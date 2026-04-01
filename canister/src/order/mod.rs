@@ -4,6 +4,7 @@ mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::Principal;
+use std::num::NonZeroU64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
@@ -101,8 +102,22 @@ impl Price {
         self.0 == 0
     }
 
-    pub fn is_multiple_of(self, other: Self) -> bool {
-        self.0.is_multiple_of(other.0)
+    pub fn is_multiple_of(self, tick_size: TickSize) -> bool {
+        self.0.is_multiple_of(tick_size.get())
+    }
+}
+
+/// Minimum price increment for a trading pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TickSize(NonZeroU64);
+
+impl TickSize {
+    pub const fn new(value: NonZeroU64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0.get()
     }
 }
 

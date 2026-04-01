@@ -1,4 +1,4 @@
-use super::{Order, OrderId, Price, Quantity, RestingOrder, Side};
+use super::{Order, OrderId, Price, Quantity, RestingOrder, Side, TickSize};
 use dex_types::OrderStatus;
 use std::cmp::Reverse;
 use std::collections::btree_map;
@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, VecDeque};
 #[derive(Debug)]
 pub struct OrderBook {
     /// Minimum price increment. All order prices must be a multiple of this value.
-    tick_size: Price,
+    tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: Quantity,
     /// Orders awaiting matching, processed by the timer.
@@ -31,8 +31,7 @@ impl OrderBook {
     /// # Panics
     ///
     /// Panics if `tick_size` or `lot_size` is zero.
-    pub fn new(tick_size: Price, lot_size: Quantity) -> Self {
-        assert!(!tick_size.is_zero(), "tick_size must be non-zero");
+    pub fn new(tick_size: TickSize, lot_size: Quantity) -> Self {
         assert!(!lot_size.is_zero(), "lot_size must be non-zero");
 
         Self {
@@ -54,7 +53,7 @@ impl OrderBook {
         self.resting_orders.is_empty() && self.pending_orders.is_empty()
     }
 
-    pub fn tick_size(&self) -> Price {
+    pub fn tick_size(&self) -> TickSize {
         self.tick_size
     }
 
@@ -285,7 +284,7 @@ pub struct Fill {
 #[derive(Debug, PartialEq, Eq)]
 pub enum MatchOrderError {
     /// Price is not a positive multiple of the tick size.
-    InvalidTickSize { price: Price, tick_size: Price },
+    InvalidTickSize { price: Price, tick_size: TickSize },
     /// Quantity is not a positive multiple of the lot size.
     InvalidLotSize {
         quantity: Quantity,

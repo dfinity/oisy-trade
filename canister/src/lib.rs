@@ -2,6 +2,7 @@ use dex_types::{
     AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
     OrderStatus,
 };
+use std::num::NonZeroU64;
 
 pub mod order;
 pub mod state;
@@ -32,7 +33,10 @@ pub fn register_default_trading_pairs() {
         base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
         quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
     };
-    let book = order::OrderBook::new(order::Price::new(10), order::Quantity::new(1_000_000));
+    let book = order::OrderBook::new(
+        order::TickSize::new(NonZeroU64::new(10).unwrap()),
+        order::Quantity::new(1_000_000),
+    );
     state::with_state_mut(|s| s.add_order_book(pair, book));
 }
 
