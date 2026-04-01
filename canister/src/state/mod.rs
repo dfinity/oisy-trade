@@ -1,4 +1,6 @@
-use crate::order::{Order, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair};
+use crate::order::{
+    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, TokenId, TokenMetadata, TradingPair,
+};
 use candid::{Nat, Principal};
 use dex_types::OrderStatus;
 use std::cell::RefCell;
@@ -73,5 +75,21 @@ impl State {
             .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn add_trading_pair(
+        &mut self,
+        pair: TradingPair,
+        tick_size: Price,
+        lot_size: Quantity,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        use std::collections::btree_map::Entry;
+        match self.order_books.entry(pair) {
+            Entry::Occupied(_) => Err(dex_types::AddTradingPairError::TradingPairAlreadyExists),
+            Entry::Vacant(entry) => {
+                entry.insert(OrderBook::new(tick_size, lot_size));
+                Ok(())
+            }
+        }
     }
 }

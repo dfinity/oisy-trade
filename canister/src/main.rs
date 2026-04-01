@@ -1,6 +1,6 @@
 use dex_types::{
-    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TokenId,
+    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse,
+    LimitOrderRequest, LimitOrderResponse, OrderStatus, TokenId,
 };
 
 #[ic_cdk::init]
@@ -26,6 +26,13 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 #[ic_cdk::query]
 fn get_balance(token_id: TokenId) -> candid::Nat {
     dex_canister::get_balance(token_id)
+}
+
+#[ic_cdk::update]
+fn add_trading_pair(
+    request: AddTradingPairRequest,
+) -> Result<(), AddTradingPairError> {
+    dex_canister::add_trading_pair(request)
 }
 
 fn main() {}

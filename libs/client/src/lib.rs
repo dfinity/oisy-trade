@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Nat, Principal};
 use dex_types::{
-    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderId,
-    OrderStatus, TokenId,
+    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse,
+    LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus, TokenId,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -90,6 +90,17 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_balance(&self, token_id: TokenId) -> Nat {
         self.runtime
             .call(self.dex_canister, "get_balance", (token_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Add a new trading pair to the DEX. Only callable by a controller.
+    pub async fn add_trading_pair(
+        &self,
+        request: AddTradingPairRequest,
+    ) -> Result<(), AddTradingPairError> {
+        self.runtime
+            .call(self.dex_canister, "add_trading_pair", (request,), 0)
             .await
             .unwrap()
     }

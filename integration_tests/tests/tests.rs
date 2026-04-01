@@ -3,7 +3,8 @@ use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
-    DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, TokenId,
+    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    LedgerTransferFromError, LimitOrderRequest, OrderStatus, TokenId,
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -303,6 +304,118 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
         result,
         Err(DepositError::CallFailed { reason, .. }) if reason.contains("is stopped")
     );
+
+    setup.drop().await;
+}
+
+fn add_trading_pair_request(setup: &Setup) -> AddTradingPairRequest {
+    AddTradingPairRequest {
+        base: TokenId {
+            ledger_id: setup.base_ledger_id(),
+        },
+        quote: TokenId {
+            ledger_id: setup.quote_ledger_id(),
+        },
+        tick_size: 10,
+        lot_size: 1_000_000,
+    }
+}
+
+#[tokio::test]
+async fn should_add_trading_pair_as_controller() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Ok(()));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_add_trading_pair_when_not_controller() {
+    let setup = Setup::new().await;
+    let user = Principal::from_slice(&[0x01]);
+    let user_client = setup.dex_client_with_caller(user);
+
+    let result = user_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Err(AddTradingPairError::NotController));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_add_trading_pair_when_base_equals_quote() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(AddTradingPairRequest {
+            base: TokenId {
+                ledger_id: setup.base_ledger_id(),
+            },
+            quote: TokenId {
+                ledger_id: setup.base_ledger_id(),
+            },
+            tick_size: 10,
+            lot_size: 1_000_000,
+        })
+        .await;
+    assert_eq!(result, Err(AddTradingPairError::BaseEqualsQuote));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_add_trading_pair_with_zero_tick_size() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(AddTradingPairRequest {
+            tick_size: 0,
+            ..add_trading_pair_request(&setup)
+        })
+        .await;
+    assert_eq!(result, Err(AddTradingPairError::InvalidTickSize));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_add_trading_pair_with_zero_lot_size() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(AddTradingPairRequest {
+            lot_size: 0,
+            ..add_trading_pair_request(&setup)
+        })
+        .await;
+    assert_eq!(result, Err(AddTradingPairError::InvalidLotSize));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_add_trading_pair_when_already_exists() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Ok(()));
+
+    let result = controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
 
     setup.drop().await;
 }

@@ -1,7 +1,7 @@
-use crate::order::{Price, Quantity, Side};
+use crate::order::{Price, Quantity, Side, TokenId, TradingPair};
 use dex_types::{
-    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus,
+    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse,
+    LimitOrderRequest, LimitOrderResponse, OrderStatus,
 };
 
 pub mod order;
@@ -47,4 +47,26 @@ pub fn get_balance(token_id: dex_types::TokenId) -> candid::Nat {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = ic_cdk::api::msg_caller();
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
+}
+
+pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
+    if !ic_cdk::api::is_controller(&ic_cdk::api::msg_caller()) {
+        return Err(AddTradingPairError::NotController);
+    }
+    if request.base == request.quote {
+        return Err(AddTradingPairError::BaseEqualsQuote);
+    }
+    if request.tick_size == 0 {
+        return Err(AddTradingPairError::InvalidTickSize);
+    }
+    if request.lot_size == 0 {
+        return Err(AddTradingPairError::InvalidLotSize);
+    }
+    let pair = TradingPair {
+        base: TokenId::from(request.base),
+        quote: TokenId::from(request.quote),
+    };
+    state::with_state_mut(|s| {
+        s.add_trading_pair(pair, Price::new(request.tick_size), Quantity::new(request.lot_size))
+    })
 }
