@@ -1,3 +1,53 @@
+mod order_id {
+    use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+
+    #[test]
+    fn should_roundtrip_through_display_and_parse() {
+        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(42));
+        let s = id.to_string();
+        let parsed: OrderId = s.parse().unwrap();
+        assert_eq!(parsed, id);
+    }
+
+    #[test]
+    fn should_encode_as_32_char_hex() {
+        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+        assert_eq!(id.to_string(), "00000000000000000000000000000000");
+
+        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1));
+        assert_eq!(id.to_string(), "00000000000000000000000000000001");
+    }
+
+    #[test]
+    fn should_reject_too_short() {
+        assert_eq!("abc".parse::<OrderId>(), Err(OrderIdParseError));
+    }
+
+    #[test]
+    fn should_reject_too_long() {
+        assert_eq!(
+            "000000000000000000000000000000001".parse::<OrderId>(),
+            Err(OrderIdParseError)
+        );
+    }
+
+    #[test]
+    fn should_reject_non_hex() {
+        assert_eq!(
+            "0000000000000000000000000000gggg".parse::<OrderId>(),
+            Err(OrderIdParseError)
+        );
+    }
+
+    #[test]
+    fn should_preserve_book_id_and_seq() {
+        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(255));
+        let parsed: OrderId = id.to_string().parse().unwrap();
+        assert_eq!(parsed.book_id(), OrderBookId::ZERO);
+        assert_eq!(parsed.seq(), OrderSeq::new(255));
+    }
+}
+
 mod order_book {
     use crate::order::{Fill, MatchOrderError, MatchResult, OrderBook, OrderSeq, Price, Quantity};
     use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, buy, order_book, sell};
