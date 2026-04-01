@@ -18,6 +18,17 @@ async fn should_add_limit_order_and_query_status() {
 }
 
 #[tokio::test]
+async fn should_return_empty_trading_pairs() {
+    let setup = Setup::new().await;
+    let client = setup.client();
+
+    let pairs = client.get_trading_pairs().await;
+    assert!(pairs.is_empty());
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_have_different_ledger_configs() {
     let setup = Setup::new().await;
     let base = setup.base_token_ledger();
