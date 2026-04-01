@@ -5,8 +5,11 @@
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Principal};
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderId, OrderStatus};
+use candid::{CandidType, Nat, Principal};
+use dex_types::{
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderId,
+    OrderStatus, TokenId,
+};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
@@ -71,6 +74,22 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         self.runtime
             .call(self.dex_canister, "get_order_status", (order_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Deposit tokens into the DEX canister.
+    pub async fn deposit(&self, request: DepositRequest) -> Result<DepositResponse, DepositError> {
+        self.runtime
+            .call(self.dex_canister, "deposit", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the caller's balance for a given token.
+    pub async fn get_balance(&self, token_id: TokenId) -> Nat {
+        self.runtime
+            .call(self.dex_canister, "get_balance", (token_id,), 0)
             .await
             .unwrap()
     }
