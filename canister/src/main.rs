@@ -1,6 +1,6 @@
 use dex_types::{
     DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TokenId,
+    OrderStatus, TokenId, TradingPairInfo,
 };
 
 #[ic_cdk::init]
@@ -16,6 +16,11 @@ fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
 #[ic_cdk::query]
 fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     dex_canister::get_order_status(order_id)
+}
+
+#[ic_cdk::query]
+fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    dex_canister::get_trading_pairs()
 }
 
 #[ic_cdk::update]
