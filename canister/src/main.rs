@@ -29,9 +29,7 @@ fn get_balance(token_id: TokenId) -> candid::Nat {
 }
 
 #[ic_cdk::update]
-fn add_trading_pair(
-    request: AddTradingPairRequest,
-) -> Result<(), AddTradingPairError> {
+fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
     dex_canister::add_trading_pair(request)
 }
 

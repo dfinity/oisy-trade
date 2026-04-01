@@ -61,6 +61,10 @@ pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTrading
         quote: TokenId::from(request.quote),
     };
     state::with_state_mut(|s| {
-        s.add_trading_pair(pair, Price::new(request.tick_size), Quantity::new(request.lot_size))
+        s.add_trading_pair(
+            pair,
+            Price::new(request.tick_size),
+            Quantity::new(request.lot_size),
+        )
     })
 }
