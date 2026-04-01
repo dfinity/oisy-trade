@@ -56,12 +56,6 @@ pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTrading
     if request.base == request.quote {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
-    if request.tick_size == 0 {
-        return Err(AddTradingPairError::InvalidTickSize);
-    }
-    if request.lot_size == 0 {
-        return Err(AddTradingPairError::InvalidLotSize);
-    }
     let pair = TradingPair {
         base: TokenId::from(request.base),
         quote: TokenId::from(request.quote),

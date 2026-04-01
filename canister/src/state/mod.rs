@@ -83,6 +83,12 @@ impl State {
         tick_size: Price,
         lot_size: Quantity,
     ) -> Result<(), dex_types::AddTradingPairError> {
+        if tick_size.is_zero() {
+            return Err(dex_types::AddTradingPairError::InvalidTickSize);
+        }
+        if lot_size.is_zero() {
+            return Err(dex_types::AddTradingPairError::InvalidLotSize);
+        }
         use std::collections::btree_map::Entry;
         match self.order_books.entry(pair) {
             Entry::Occupied(_) => Err(dex_types::AddTradingPairError::TradingPairAlreadyExists),
