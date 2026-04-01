@@ -1,10 +1,13 @@
 use assert_matches::assert_matches;
-use candid::{Nat, Principal};
+use candid::{Decode, Encode, Nat, Principal};
+use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
     DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, TokenId,
 };
+use dex_types_internal::log::Priority;
+use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::Account;
 
 #[allow(clippy::too_many_arguments)]
@@ -302,6 +305,43 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
     assert_matches!(
         result,
         Err(DepositError::CallFailed { reason, .. }) if reason.contains("is stopped")
+    );
+
+    setup.drop().await;
+}
+
+async fn retrieve_logs(setup: &Setup, priority: &Priority) -> Vec<LogEntry<Priority>> {
+    let request = HttpRequest {
+        method: "GET".to_string(),
+        url: format!("/logs?priority={priority}"),
+        headers: vec![],
+        body: Default::default(),
+    };
+    let response: HttpResponse = setup
+        .env()
+        .query_call(
+            setup.dex_id(),
+            Principal::anonymous(),
+            "http_request",
+            candid::Encode!(&request).unwrap(),
+        )
+        .await
+        .map(|bytes| candid::Decode!(&bytes, HttpResponse).unwrap())
+        .expect("Failed to query http_request");
+    serde_json::from_slice::<Log<Priority>>(&response.body)
+        .expect("Failed to deserialize logs")
+        .entries
+}
+
+#[tokio::test]
+async fn should_get_logs() {
+    let setup = Setup::new().await;
+
+    let logs = retrieve_logs(&setup, &Priority::Info).await;
+
+    assert!(
+        logs.iter().any(|entry| entry.message.contains("[init]")),
+        "Expected init log entry, got: {logs:?}",
     );
 
     setup.drop().await;

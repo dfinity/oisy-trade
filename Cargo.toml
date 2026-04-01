@@ -4,6 +4,7 @@ members = [
     "canister", "integration_tests",
     "libs/client",
     "libs/types",
+    "libs/types-internal",
 ]
 
 [workspace.package]
@@ -28,9 +29,12 @@ inherits = "release"
 async-trait = "0.1.89"
 candid = "0.10.26"
 candid_parser = "0.3.0"
+canlog = "0.2.0"
 ic-cdk = "0.20.0"
+ic-http-types = "0.1.0"
 ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
 icrc-ledger-types = "0.1.13"
 pocket-ic = "13.0.0"
 serde = "1.0.228"
+serde_json = "1"
 tokio = "1.50.0"
