@@ -17,7 +17,7 @@ pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOr
     };
     let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
         .map_err(AddLimitOrderError::from)?;
-    Ok(u64::from(order_id))
+    Ok(String::from(order_id))
 }
 
 /// Register default trading pairs for testing.
@@ -28,10 +28,14 @@ pub fn register_default_trading_pairs() {
         base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
         quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
     };
-    let book = order::OrderBook::new(order::Price::new(10), order::Quantity::new(1_000_000));
-    state::with_state_mut(|s| s.add_order_book(pair, book));
+    state::with_state_mut(|s| {
+        s.add_order_book(pair, order::Price::new(10), order::Quantity::new(1_000_000))
+    });
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
+    match order_id.parse::<order::OrderId>() {
+        Ok(id) => state::with_state(|s| s.get_order_status(id)),
+        Err(e) => panic!("ERROR: invalid order id: {}", e),
+    }
 }

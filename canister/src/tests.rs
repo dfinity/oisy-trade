@@ -77,7 +77,15 @@ mod get_order_status {
     #[test]
     fn should_return_not_found_for_nonexistent_order() {
         init_state_with_order_book();
-        let status = get_order_status(u64::MAX);
+        // Valid hex format but refers to a non-existent book/seq
+        let status = get_order_status("ffffffffffffffffffffffffffffffff".to_string());
         assert_eq!(status, OrderStatus::NotFound);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERROR: invalid order id")]
+    fn should_trap_on_syntactically_invalid_order_id() {
+        init_state_with_order_book();
+        get_order_status("not-a-valid-order-id".to_string());
     }
 }

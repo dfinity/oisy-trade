@@ -1,4 +1,4 @@
-use candid::Principal;
+use candid::{Encode, Principal};
 use dex_int_tests::Setup;
 use dex_types::{LimitOrderRequest, OrderStatus, Side, TradingPair};
 
@@ -23,8 +23,33 @@ async fn should_add_limit_order_and_query_status() {
     let status = client.get_order_status(order_id).await;
     assert_eq!(status, OrderStatus::Pending);
 
-    let not_found = client.get_order_status(u64::MAX).await;
+    // Valid hex format but non-existent order
+    let not_found = client
+        .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
+        .await;
     assert_eq!(not_found, OrderStatus::NotFound);
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_trap_on_syntactically_invalid_order_id() {
+    let setup = Setup::new().await;
+
+    let result = setup
+        .env()
+        .query_call(
+            setup.canister_id(),
+            setup.caller(),
+            "get_order_status",
+            Encode!(&"not-a-valid-id".to_string()).unwrap(),
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "expected canister to trap on invalid order ID"
+    );
 
     setup.drop().await;
 }

@@ -9,8 +9,8 @@ mod tests;
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
-/// Unique identifier for an order.
-pub type OrderId = u64;
+/// Unique identifier for an order, encoded as a hex string.
+pub type OrderId = String;
 
 /// Side of an order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]

@@ -1,5 +1,7 @@
 /// Unique identifier for an order, assigned by the canister upon submission.
-type OrderId = nat64;
+/// Opaque identifier, not meant to be interpreted by clients.
+/// Encoded as a 32-character hex string.
+type OrderId = text;
 
 /// Side of an order.
 type Side = variant {

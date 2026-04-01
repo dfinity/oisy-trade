@@ -1,6 +1,6 @@
 mod order_book {
-    use crate::order::{Fill, MatchOrderError, MatchResult, OrderBook, OrderId, Price, Quantity};
-    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, order_book, sell};
+    use crate::order::{Fill, MatchOrderError, MatchResult, OrderBook, OrderSeq, Price, Quantity};
+    use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, buy, order_book, sell};
 
     mod validation {
         use super::*;
@@ -9,13 +9,13 @@ mod order_book {
         #[test]
         #[should_panic(expected = "tick_size must be non-zero")]
         fn should_panic_on_zero_tick_size() {
-            OrderBook::new(Price::ZERO, Quantity::new(LOT_SIZE));
+            OrderBook::new(TEST_BOOK_ID, Price::ZERO, Quantity::new(LOT_SIZE));
         }
 
         #[test]
         #[should_panic(expected = "lot_size must be non-zero")]
         fn should_panic_on_zero_lot_size() {
-            OrderBook::new(Price::new(TICK_SIZE), Quantity::ZERO);
+            OrderBook::new(TEST_BOOK_ID, Price::new(TICK_SIZE), Quantity::ZERO);
         }
 
         #[test]
@@ -105,7 +105,7 @@ mod order_book {
                 assert_eq!(
                     result,
                     MatchResult::Resting {
-                        resting_order_id: order_id,
+                        resting_order_seq: order_id,
                     }
                 );
             }
@@ -120,10 +120,10 @@ mod order_book {
             for (first_order, resting_order) in orders {
                 let mut book = order_book();
                 book.match_order(first_order).unwrap();
-                let resting_order_id = resting_order.id();
+                let resting_order_seq = resting_order.id();
 
                 let result = book.match_order(resting_order).unwrap();
-                assert_eq!(result, MatchResult::Resting { resting_order_id });
+                assert_eq!(result, MatchResult::Resting { resting_order_seq });
             }
         }
     }
@@ -200,7 +200,7 @@ mod order_book {
 
                 let result = book.match_order(taker).unwrap();
 
-                assert_eq!(result.fills()[0].maker_order_id, first_maker_id);
+                assert_eq!(result.fills()[0].maker_order_seq, first_maker_id);
             }
         }
 
@@ -212,7 +212,7 @@ mod order_book {
             ];
             for (maker, taker) in cases {
                 let mut book = order_book();
-                let maker_order_id = maker.id();
+                let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
                 let result = book.match_order(taker).unwrap();
@@ -221,7 +221,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![Fill {
-                            maker_order_id,
+                            maker_order_seq,
                             price: Price::new(100),
                             quantity: Quantity::new(2 * LOT_SIZE),
                         }],
@@ -241,7 +241,7 @@ mod order_book {
             ];
             for (maker, taker, expected_price) in cases {
                 let mut book = order_book();
-                let maker_order_id = maker.id();
+                let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
                 let result = book.match_order(taker).unwrap();
@@ -250,7 +250,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![Fill {
-                            maker_order_id,
+                            maker_order_seq,
                             price: Price::new(expected_price),
                             quantity: Quantity::new(LOT_SIZE),
                         }],
@@ -271,15 +271,15 @@ mod order_book {
                 result,
                 MatchResult::PartiallyFilled {
                     fills: vec![Fill {
-                        maker_order_id: OrderId::from(1),
+                        maker_order_seq: OrderSeq::new(1),
                         price: Price::new(100),
                         quantity: Quantity::new(LOT_SIZE),
                     }],
-                    resting_order_id: OrderId::from(2),
+                    resting_order_seq: OrderSeq::new(2),
                 }
             );
             let resting = book.best_bid().expect("should have a resting bid");
-            assert_eq!(resting.id(), OrderId::from(2));
+            assert_eq!(resting.id(), OrderSeq::new(2));
             assert_eq!(resting.remaining_quantity(), Quantity::new(2 * LOT_SIZE));
         }
 
@@ -317,12 +317,12 @@ mod order_book {
                     MatchResult::Filled {
                         fills: vec![
                             Fill {
-                                maker_order_id: maker1_id,
+                                maker_order_seq: maker1_id,
                                 price: Price::new(price_fill_1),
                                 quantity: Quantity::new(LOT_SIZE),
                             },
                             Fill {
-                                maker_order_id: maker2_id,
+                                maker_order_seq: maker2_id,
                                 price: Price::new(price_fill_2),
                                 quantity: Quantity::new(LOT_SIZE),
                             },
@@ -342,7 +342,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![Fill {
-                        maker_order_id: OrderId::from(1),
+                        maker_order_seq: OrderSeq::new(1),
                         price: Price::new(100),
                         quantity: Quantity::new(LOT_SIZE),
                     }],
@@ -354,7 +354,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![Fill {
-                        maker_order_id: OrderId::from(1),
+                        maker_order_seq: OrderSeq::new(1),
                         price: Price::new(100),
                         quantity: Quantity::new(2 * LOT_SIZE),
                     }],
@@ -381,7 +381,7 @@ mod order_book {
             book.match_order(buy(2, 100, LOT_SIZE)).unwrap();
             book.match_order(buy(3, 90, LOT_SIZE)).unwrap();
             let best = book.best_bid().unwrap();
-            assert_eq!(best.id(), OrderId::from(2));
+            assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(100));
         }
 
@@ -392,7 +392,7 @@ mod order_book {
             book.match_order(sell(2, 100, LOT_SIZE)).unwrap();
             book.match_order(sell(3, 110, LOT_SIZE)).unwrap();
             let best = book.best_ask().unwrap();
-            assert_eq!(best.id(), OrderId::from(2));
+            assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(100));
         }
 
@@ -402,7 +402,7 @@ mod order_book {
             book.match_order(buy(1, 100, LOT_SIZE)).unwrap();
             book.match_order(buy(2, 100, 2 * LOT_SIZE)).unwrap();
             let best = book.best_bid().unwrap();
-            assert_eq!(best.id(), OrderId::from(1));
+            assert_eq!(best.id(), OrderSeq::new(1));
         }
 
         #[test]
@@ -412,13 +412,13 @@ mod order_book {
             book.match_order(sell(2, 110, LOT_SIZE)).unwrap();
 
             let best = book.best_ask().unwrap();
-            assert_eq!(best.id(), OrderId::from(1));
+            assert_eq!(best.id(), OrderSeq::new(1));
             assert_eq!(best.price(), Price::new(100));
 
             // Fill the best ask
             book.match_order(buy(3, 100, LOT_SIZE)).unwrap();
             let best = book.best_ask().unwrap();
-            assert_eq!(best.id(), OrderId::from(2));
+            assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(110));
         }
     }

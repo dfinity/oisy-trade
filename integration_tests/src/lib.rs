@@ -80,6 +80,21 @@ impl Setup {
         DexClient::new(self.new_pocket_ic(), self.canister_id)
     }
 
+    /// Access the PocketIc environment for raw canister calls.
+    pub fn env(&self) -> &PocketIc {
+        self.env.as_ref().unwrap()
+    }
+
+    /// The DEX canister ID.
+    pub fn canister_id(&self) -> CanisterId {
+        self.canister_id
+    }
+
+    /// The default caller principal used in tests.
+    pub fn caller(&self) -> Principal {
+        self.caller
+    }
+
     pub fn base_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.base_ledger_id)
     }

@@ -1,5 +1,6 @@
 use crate::order::{
-    MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
+    MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TokenId, TokenMetadata,
+    TradingPair,
 };
 use dex_types::OrderStatus;
 use std::cell::RefCell;
@@ -27,16 +28,17 @@ pub fn init_state() {
 
 #[derive(Debug, Default)]
 pub struct State {
-    next_order_id: OrderId,
+    next_book_id: OrderBookId,
     #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    order_books: BTreeMap<TradingPair, OrderBook>,
+    trading_pairs: BTreeMap<TradingPair, OrderBookId>,
+    order_books: BTreeMap<OrderBookId, OrderBook>,
 }
 
 impl State {
-    pub fn next_order_id(&mut self) -> OrderId {
-        let id = self.next_order_id;
-        self.next_order_id.increment();
+    fn next_book_id(&mut self) -> OrderBookId {
+        let id = self.next_book_id;
+        self.next_book_id.increment();
         id
     }
 
@@ -46,14 +48,16 @@ impl State {
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
         // TODO DEFI-2723: ensure the user has enough balance
-        // TODO DEFI-2723: only update ID if order is valid.
-        let order_id = self.next_order_id();
-        let order = pending.into_order(order_id);
+        let book_id = self
+            .trading_pairs
+            .get(&pair)
+            .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
-            .get_mut(&pair)
-            .ok_or(AddLimitOrderError::UnknownTradingPair)?;
-        book.add_pending_order(order)
+            .get_mut(book_id)
+            .expect("BUG: trading pair registered but order book missing");
+        let order_id = book
+            .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
         Ok(order_id)
     }
@@ -66,20 +70,30 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        for book in self.order_books.values() {
-            if let Some(status) = book.get_order_status(order_id) {
-                return status;
-            }
+        let book = self.order_books.get(&order_id.book_id());
+        match book {
+            Some(book) => book
+                .get_order_status(order_id.seq())
+                .unwrap_or(OrderStatus::NotFound),
+            None => OrderStatus::NotFound,
         }
-        OrderStatus::NotFound
     }
 
-    /// Register a new trading pair with the given order book.
-    pub fn add_order_book(&mut self, pair: TradingPair, book: OrderBook) {
+    /// Register a new trading pair with a new order book.
+    pub fn add_order_book(
+        &mut self,
+        pair: TradingPair,
+        tick_size: crate::order::Price,
+        lot_size: crate::order::Quantity,
+    ) {
         assert!(
-            self.order_books.insert(pair, book).is_none(),
+            !self.trading_pairs.contains_key(&pair),
             "ERROR: order book already exists for this pair"
         );
+        let book_id = self.next_book_id();
+        let book = OrderBook::new(book_id, tick_size, lot_size);
+        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        assert_eq!(self.order_books.insert(book_id, book), None);
     }
 }
 

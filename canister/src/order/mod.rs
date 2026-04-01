@@ -4,6 +4,8 @@ mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::Principal;
+use std::fmt;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
@@ -21,25 +23,83 @@ impl From<dex_types::Side> for Side {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrderId(u64);
+pub struct OrderBookId(u64);
 
-impl OrderId {
+impl OrderBookId {
     pub const ZERO: Self = Self(0);
 
     pub fn increment(&mut self) {
-        self.0 = self.0.checked_add(1).expect("OrderId overflow");
+        self.0 = self.0.checked_add(1).expect("OrderBookId overflow");
     }
 }
 
-impl From<u64> for OrderId {
-    fn from(id: u64) -> Self {
-        Self(id)
+/// Sequence number identifying an order within a single order book.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OrderSeq(u64);
+
+impl OrderSeq {
+    pub fn new(seq: u64) -> Self {
+        Self(seq)
     }
 }
 
-impl From<OrderId> for u64 {
+/// Unique order identifier encoding the order book ID and a per-book sequence number.
+///
+/// Serialized as a 32-character hex string (16 bytes: 8 for book ID, 8 for sequence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OrderId {
+    book_id: OrderBookId,
+    seq: OrderSeq,
+}
+
+impl OrderId {
+    pub fn new(book_id: OrderBookId, seq: OrderSeq) -> Self {
+        Self { book_id, seq }
+    }
+
+    pub fn book_id(&self) -> OrderBookId {
+        self.book_id
+    }
+
+    pub fn seq(&self) -> OrderSeq {
+        self.seq
+    }
+}
+
+impl fmt::Display for OrderId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}{:016x}", self.book_id.0, self.seq.0)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct OrderIdParseError;
+
+impl fmt::Display for OrderIdParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid order ID: expected 32-character hex string")
+    }
+}
+
+impl FromStr for OrderId {
+    type Err = OrderIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 32 {
+            return Err(OrderIdParseError);
+        }
+        let book_id = u64::from_str_radix(&s[..16], 16).map_err(|_| OrderIdParseError)?;
+        let seq = u64::from_str_radix(&s[16..], 16).map_err(|_| OrderIdParseError)?;
+        Ok(Self {
+            book_id: OrderBookId(book_id),
+            seq: OrderSeq(seq),
+        })
+    }
+}
+
+impl From<OrderId> for String {
     fn from(id: OrderId) -> Self {
-        id.0
+        id.to_string()
     }
 }
 
@@ -159,7 +219,7 @@ pub struct PendingOrder {
 }
 
 impl PendingOrder {
-    pub fn into_order(self, id: OrderId) -> Order {
+    pub fn into_order(self, id: OrderSeq) -> Order {
         Order {
             id,
             side: self.side,
@@ -171,14 +231,14 @@ impl PendingOrder {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Order {
-    id: OrderId,
+    id: OrderSeq,
     side: Side,
     price: Price,
     remaining_quantity: Quantity,
 }
 
 impl Order {
-    pub fn id(&self) -> OrderId {
+    pub fn id(&self) -> OrderSeq {
         self.id
     }
 
@@ -206,7 +266,7 @@ impl Order {
 /// quantity — side and price are implicit from the book's structure.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RestingOrder {
-    id: OrderId,
+    id: OrderSeq,
     remaining_quantity: Quantity,
 }
 
@@ -231,7 +291,7 @@ impl RestingOrder {
         }
     }
 
-    pub fn id(&self) -> OrderId {
+    pub fn id(&self) -> OrderSeq {
         self.id
     }
 
