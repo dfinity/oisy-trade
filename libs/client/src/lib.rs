@@ -8,7 +8,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Nat, Principal};
 use dex_types::{
     AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo
+    OrderStatus, TokenId, TradingPairInfo,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;

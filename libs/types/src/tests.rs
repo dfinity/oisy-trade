@@ -1,4 +1,6 @@
-use crate::{AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TradingPair, TradingPairInfo};
+use crate::{
+    AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TokenId, TradingPair, TradingPairInfo,
+};
 use candid::Principal;
 
 fn test_trading_pair() -> TradingPair {

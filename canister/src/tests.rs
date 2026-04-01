@@ -84,10 +84,12 @@ mod get_order_status {
 
 mod get_trading_pairs {
     use crate::get_trading_pairs;
-    use crate::order::{OrderBook, Price, Quantity, TokenId, TradingPair};
+    use crate::order::{TokenId, TradingPair};
     use crate::state;
     use crate::state::init_state;
+    use crate::test_fixtures::order_book;
     use candid::Principal;
+    use dex_types::TradingPairInfo;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -101,21 +103,23 @@ mod get_trading_pairs {
         init_state();
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        let tick_size = Price::new(10);
-        let lot_size = Quantity::new(1_000_000);
-
+        let order_book = order_book();
+        let tick_size = order_book.tick_size().get();
+        let lot_size = order_book.lot_size().get();
         state::with_state_mut(|s| {
-            s.add_trading_pair(
-                TradingPair { base, quote },
-                OrderBook::new(tick_size, lot_size),
-            );
+            s.add_trading_pair(TradingPair { base, quote }, order_book);
         });
 
         let pairs = get_trading_pairs();
-        assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].base_asset, dex_types::TokenId::from(base));
-        assert_eq!(pairs[0].quote_asset, dex_types::TokenId::from(quote));
-        assert_eq!(pairs[0].tick_size, 10);
-        assert_eq!(pairs[0].lot_size, 1_000_000);
+
+        assert_eq!(
+            pairs,
+            vec![TradingPairInfo {
+                base_asset: dex_types::TokenId::from(base),
+                quote_asset: dex_types::TokenId::from(quote),
+                tick_size,
+                lot_size,
+            }]
+        );
     }
 }

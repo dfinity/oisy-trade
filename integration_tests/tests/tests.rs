@@ -74,7 +74,9 @@ async fn should_return_empty_trading_pairs() {
     let client = setup.dex_client();
 
     let pairs = client.get_trading_pairs().await;
-    assert!(pairs.is_empty());
+    // TODO DEFI-2723: there should only be a trading pair if one was added by an admin.
+    // Currently it's hard-coded in the init args.
+    assert!(!pairs.is_empty());
 
     setup.drop().await;
 }
