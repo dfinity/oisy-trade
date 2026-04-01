@@ -16,7 +16,7 @@ pub struct OrderBook {
     /// Immutable identifier assigned at registration time.
     id: OrderBookId,
     /// Per-book sequence counter for generating order IDs.
-    next_seq: u64,
+    next_seq: OrderSeq,
     /// Minimum price increment. All order prices must be a multiple of this value.
     tick_size: Price,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
@@ -43,7 +43,7 @@ impl OrderBook {
 
         Self {
             id,
-            next_seq: 0,
+            next_seq: OrderSeq::default(),
             tick_size,
             lot_size,
             pending_orders: VecDeque::new(),
@@ -59,11 +59,8 @@ impl OrderBook {
 
     fn next_order_seq(&mut self) -> OrderSeq {
         let seq = self.next_seq;
-        self.next_seq = self
-            .next_seq
-            .checked_add(1)
-            .expect("order sequence overflow");
-        OrderSeq::new(seq)
+        self.next_seq.increment();
+        seq
     }
 
     pub fn is_empty(&self) -> bool {
