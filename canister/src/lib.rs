@@ -1,6 +1,6 @@
 use dex_types::{
     AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
-    OrderStatus,
+    OrderStatus, TradingPairInfo,
 };
 use std::num::NonZeroU64;
 
@@ -42,6 +42,10 @@ pub fn register_default_trading_pairs() {
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
+}
+
+pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    state::with_state(|s| s.get_trading_pairs())
 }
 
 pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {

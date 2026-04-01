@@ -1,4 +1,4 @@
-use crate::{AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TradingPair};
+use crate::{AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TradingPair, TradingPairInfo};
 use candid::Principal;
 
 fn test_trading_pair() -> TradingPair {
@@ -34,6 +34,23 @@ fn should_serialize_order_status() {
         let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
         assert_eq!(status, decoded);
     }
+}
+
+#[test]
+fn should_serialize_trading_pair_info() {
+    let info = TradingPairInfo {
+        base_asset: TokenId {
+            ledger_id: Principal::from_slice(&[0x01]),
+        },
+        quote_asset: TokenId {
+            ledger_id: Principal::from_slice(&[0x02]),
+        },
+        tick_size: 10,
+        lot_size: 1_000_000,
+    };
+    let encoded = candid::encode_one(&info).unwrap();
+    let decoded: TradingPairInfo = candid::decode_one(&encoded).unwrap();
+    assert_eq!(info, decoded);
 }
 
 #[test]

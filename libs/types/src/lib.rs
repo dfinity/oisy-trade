@@ -64,6 +64,19 @@ pub enum AddLimitOrderError {
     },
 }
 
+/// Information about a listed trading pair.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct TradingPairInfo {
+    /// Token ID of the base asset.
+    pub base_asset: TokenId,
+    /// Token ID of the quote asset.
+    pub quote_asset: TokenId,
+    /// Minimum price increment.
+    pub tick_size: u64,
+    /// Minimum order quantity.
+    pub lot_size: u64,
+}
+
 /// Status of an order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum OrderStatus {

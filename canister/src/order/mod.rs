@@ -63,6 +63,12 @@ impl From<dex_types::TokenId> for TokenId {
     }
 }
 
+impl From<TokenId> for dex_types::TokenId {
+    fn from(value: TokenId) -> Self {
+        Self { ledger_id: value.0 }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TokenMetadata {
     pub symbol: String,
