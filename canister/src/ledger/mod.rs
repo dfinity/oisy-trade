@@ -67,18 +67,24 @@ fn to_ledger_error(e: icrc_ledger_types::icrc2::transfer_from::TransferFromError
         TransferFromError::TemporarilyUnavailable => {
             DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
         }
-        TransferFromError::GenericError {
-            error_code,
-            message,
-        } => DepositError::LedgerError(LedgerTransferFromError::GenericError {
-            error_code,
-            message,
-        }),
         // These should never happen, but rather than trapping we return an internal error here.
-        TransferFromError::BadFee { .. } => DepositError::InternalError(format!("{e}")),
-        TransferFromError::BadBurn { .. } => DepositError::InternalError(format!("{e}")),
-        TransferFromError::CreatedInFuture { .. } => DepositError::InternalError(format!("{e}")),
-        TransferFromError::Duplicate { .. } => DepositError::InternalError(format!("{e}")),
-        TransferFromError::TooOld => DepositError::InternalError(format!("{e}")),
+        TransferFromError::BadFee { .. } => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
+        TransferFromError::BadBurn { .. } => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
+        TransferFromError::CreatedInFuture { .. } => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
+        TransferFromError::Duplicate { .. } => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
+        TransferFromError::GenericError { .. } => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
+        TransferFromError::TooOld => {
+            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
+        }
     }
 }

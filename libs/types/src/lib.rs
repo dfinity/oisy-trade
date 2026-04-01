@@ -64,8 +64,6 @@ pub enum DepositError {
         /// The reason the call failed.
         reason: String,
     },
-    /// Internal error
-    InternalError(String),
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
 }
@@ -85,13 +83,8 @@ pub enum LedgerTransferFromError {
     },
     /// The ledger is temporarily unavailable.
     TemporarilyUnavailable,
-    /// A generic error from the ledger.
-    GenericError {
-        /// The error code.
-        error_code: Nat,
-        /// The error message.
-        message: String,
-    },
+    /// Internal error
+    InternalError(String),
 }
 
 /// Response after a successful deposit.
