@@ -56,6 +56,7 @@ impl State {
         }
     }
 
+    #[cfg(test)]
     pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
         self.order_books.insert(pair, order_book);
     }
@@ -64,8 +65,8 @@ impl State {
         self.order_books
             .iter()
             .map(|(pair, book)| TradingPairInfo {
-                base_asset: *pair.base.as_principal(),
-                quote_asset: *pair.quote.as_principal(),
+                base_asset: dex_types::TokenId::from(pair.base),
+                quote_asset: dex_types::TokenId::from(pair.quote),
                 tick_size: book.tick_size().get(),
                 lot_size: book.lot_size().get(),
             })

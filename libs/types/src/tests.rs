@@ -1,4 +1,4 @@
-use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus, TradingPairInfo};
+use crate::{LimitOrderRequest, LimitOrderResponse, OrderStatus, TokenId, TradingPairInfo};
 use candid::Principal;
 
 #[test]
@@ -29,8 +29,12 @@ fn should_serialize_order_status() {
 #[test]
 fn should_serialize_trading_pair_info() {
     let info = TradingPairInfo {
-        base_asset: Principal::from_slice(&[0x01]),
-        quote_asset: Principal::from_slice(&[0x02]),
+        base_asset: TokenId {
+            ledger_id: Principal::from_slice(&[0x01]),
+        },
+        quote_asset: TokenId {
+            ledger_id: Principal::from_slice(&[0x02]),
+        },
         tick_size: 10,
         lot_size: 1_000_000,
     };

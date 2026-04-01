@@ -70,8 +70,8 @@ mod get_trading_pairs {
 
         let pairs = get_trading_pairs();
         assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].base_asset, *base.as_principal());
-        assert_eq!(pairs[0].quote_asset, *quote.as_principal());
+        assert_eq!(pairs[0].base_asset, dex_types::TokenId::from(base));
+        assert_eq!(pairs[0].quote_asset, dex_types::TokenId::from(quote));
         assert_eq!(pairs[0].tick_size, 10);
         assert_eq!(pairs[0].lot_size, 1_000_000);
     }
