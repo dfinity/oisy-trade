@@ -1,4 +1,7 @@
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus, TradingPairInfo};
+use dex_types::{
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
+    OrderStatus, TokenId, TradingPairInfo,
+};
 
 #[ic_cdk::init]
 fn init() {
@@ -18,6 +21,16 @@ fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 #[ic_cdk::query]
 fn get_trading_pairs() -> Vec<TradingPairInfo> {
     dex_canister::get_trading_pairs()
+}
+
+#[ic_cdk::update]
+async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    dex_canister::deposit(request).await
+}
+
+#[ic_cdk::query]
+fn get_balance(token_id: TokenId) -> candid::Nat {
+    dex_canister::get_balance(token_id)
 }
 
 fn main() {}

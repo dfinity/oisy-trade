@@ -27,6 +27,44 @@ type OrderStatus = variant {
     Pending;
 };
 
+/// A token identified by its ledger canister ID.
+type TokenId = record {
+    /// The canister ID of the token's ledger.
+    ledger_id : principal;
+};
+
+/// Errors that can be returned by icrc2_transfer_from.
+type LedgerTransferFromError = variant {
+    InsufficientFunds : record { balance : nat };
+    InsufficientAllowance : record { allowance : nat };
+    TemporarilyUnavailable;
+    InternalError : text;
+};
+
+/// Error returned by the deposit endpoint.
+type DepositError = variant {
+    /// The inter-canister call to the token ledger failed.
+    CallFailed : record { ledger : principal; method : text; reason : text };
+    /// The icrc2_transfer_from call to the token ledger returned an error.
+    LedgerError : LedgerTransferFromError;
+};
+
+/// Request to deposit tokens into the DEX.
+type DepositRequest = record {
+    /// The token to deposit.
+    token_id : TokenId;
+    /// The amount to deposit.
+    amount : nat;
+};
+
+/// Response after a successful deposit.
+type DepositResponse = record {
+    /// The block index of the transfer on the token ledger.
+    block_index : nat;
+};
+
+type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
+
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
@@ -37,4 +75,14 @@ service : () -> {
 
     /// Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
+
+    /// Deposit tokens into the DEX. Calls icrc2_transfer_from on the token ledger
+    /// to transfer the specified amount from the caller to the DEX canister,
+    /// then credits the caller's internal balance. The caller shall have previously
+    /// approved the DEX canister to spend the specified amount on their behalf by
+    /// calling icrc2_approve on the token ledger.
+    deposit : (DepositRequest) -> (DepositResult);
+
+    /// Query the caller's balance for a given token.
+    get_balance : (TokenId) -> (nat) query;
 }

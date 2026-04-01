@@ -1,4 +1,5 @@
 use crate::order::{Order, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair};
+use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
@@ -30,6 +31,8 @@ pub struct State {
     #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     tokens: BTreeMap<TokenId, TokenMetadata>,
     order_books: BTreeMap<TradingPair, OrderBook>,
+    // TODO(DEFI-2746): Add support for subaccounts.
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
 }
 
 impl State {
@@ -67,5 +70,23 @@ impl State {
                 lot_size: book.lot_size().get(),
             })
             .collect()
+    }
+
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
+        let balance = self
+            .balances
+            .entry(user)
+            .or_default()
+            .entry(token_id)
+            .or_insert_with(|| Nat::from(0u64));
+        *balance += amount;
+    }
+
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
+        self.balances
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token_id))
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
     }
 }
