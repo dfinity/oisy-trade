@@ -24,7 +24,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
         },
         side: dex_types::Side::Buy,
         price: 100,
-        quantity: LOT_SIZE.get(),
+        quantity: u64::from(LOT_SIZE),
     }
 }
 
@@ -39,24 +39,29 @@ pub fn icp_ckbtc_trading_pair() -> TradingPair {
     }
 }
 
-pub fn order(id: u64, side: Side, price: u64, quantity: u64) -> Order {
+fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
-        price: Price::new(price),
-        quantity: Quantity::new(quantity),
+        price: Price::new(price.into()),
+        quantity: Quantity::new(quantity.into()),
     }
     .into_order(OrderId::from(id))
 }
 
-pub fn buy(id: u64, price: u64, quantity: u64) -> Order {
+pub fn buy(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Buy, price, quantity)
 }
 
-pub fn sell(id: u64, price: u64, quantity: u64) -> Order {
+pub fn sell(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Sell, price, quantity)
 }
 
-pub fn all_order_types(price: u64, quantity: u64) -> impl Iterator<Item = Order> {
+pub fn all_order_types(
+    price: impl Into<u64>,
+    quantity: impl Into<u64>,
+) -> impl Iterator<Item = Order> {
+    let price = price.into();
+    let quantity = quantity.into();
     once(buy(1, price, quantity)).chain(once(sell(2, price, quantity)))
 }
 

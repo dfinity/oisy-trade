@@ -121,6 +121,12 @@ impl TickSize {
     }
 }
 
+impl From<TickSize> for u64 {
+    fn from(tick_size: TickSize) -> Self {
+        tick_size.get()
+    }
+}
+
 /// Minimum order quantity for a trading pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LotSize(NonZeroU64);
@@ -132,6 +138,12 @@ impl LotSize {
 
     pub fn get(self) -> u64 {
         self.0.get()
+    }
+}
+
+impl From<LotSize> for u64 {
+    fn from(lot_size: LotSize) -> Self {
+        lot_size.get()
     }
 }
 

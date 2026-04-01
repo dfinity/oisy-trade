@@ -26,7 +26,6 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-
     /// Creates a new empty order book with the given constraints.
     pub fn new(tick_size: TickSize, lot_size: LotSize) -> Self {
         Self {
