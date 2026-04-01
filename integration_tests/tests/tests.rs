@@ -39,8 +39,8 @@ async fn should_trap_on_syntactically_invalid_order_id() {
     let result = setup
         .env()
         .query_call(
-            setup.canister_id(),
-            setup.caller(),
+            setup.dex_id(),
+            Principal::anonymous(),
             "get_order_status",
             Encode!(&"not-a-valid-id".to_string()).unwrap(),
         )

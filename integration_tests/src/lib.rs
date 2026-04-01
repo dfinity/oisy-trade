@@ -86,13 +86,8 @@ impl Setup {
     }
 
     /// The DEX canister ID.
-    pub fn canister_id(&self) -> CanisterId {
+    pub fn dex_id(&self) -> CanisterId {
         self.canister_id
-    }
-
-    /// The default caller principal used in tests.
-    pub fn caller(&self) -> Principal {
-        self.caller
     }
 
     pub fn base_token_ledger(&self) -> LedgerClient<'_> {
