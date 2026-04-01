@@ -19,4 +19,5 @@ dex_client = { path = "../libs/client" }
 dex_types = { path = "../libs/types" }
 
 [dev-dependencies]
+assert_matches = "1"
 tokio = { workspace = true }

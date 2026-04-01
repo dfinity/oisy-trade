@@ -1,12 +1,13 @@
-mod icrc_ledger;
+pub mod icrc_ledger;
 
 pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Encode, Principal, decode_args, encode_args};
+use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
 use ic_cdk::call::RejectCode;
+use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
@@ -14,8 +15,8 @@ use std::path::PathBuf;
 pub struct Setup {
     env: Option<PocketIc>,
     caller: Principal,
-    _controller: Principal,
-    canister_id: CanisterId,
+    controller: Principal,
+    dex_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
 }
@@ -69,15 +70,15 @@ impl Setup {
         Self {
             env: Some(env),
             caller,
-            _controller: controller,
-            canister_id,
+            controller,
+            dex_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
         }
     }
 
-    pub fn client(&self) -> DexClient<PocketIcRuntime<'_>> {
-        DexClient::new(self.new_pocket_ic(), self.canister_id)
+    pub fn dex_client(&self) -> DexClient<PocketIcRuntime<'_>> {
+        DexClient::new(self.new_pocket_ic(), self.dex_id)
     }
 
     pub fn base_token_ledger(&self) -> LedgerClient<'_> {
@@ -86,6 +87,62 @@ impl Setup {
 
     pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
+    }
+
+    pub fn controller(&self) -> Principal {
+        self.controller
+    }
+
+    pub fn dex_id(&self) -> CanisterId {
+        self.dex_id
+    }
+
+    pub fn base_ledger_id(&self) -> CanisterId {
+        self.base_ledger_id
+    }
+
+    pub fn quote_ledger_id(&self) -> CanisterId {
+        self.quote_ledger_id
+    }
+
+    pub fn env(&self) -> &PocketIc {
+        self.env.as_ref().unwrap()
+    }
+
+    pub async fn mint_base_tokens(&self, to: Principal, amount: Nat) -> Nat {
+        self.base_token_ledger()
+            .icrc1_transfer(
+                self.controller,
+                Account {
+                    owner: to,
+                    subaccount: None,
+                },
+                amount,
+            )
+            .await
+    }
+
+    pub async fn mint_quote_tokens(&self, to: Principal, amount: Nat) -> Nat {
+        self.quote_token_ledger()
+            .icrc1_transfer(
+                self.controller,
+                Account {
+                    owner: to,
+                    subaccount: None,
+                },
+                amount,
+            )
+            .await
+    }
+
+    pub fn dex_client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
+        DexClient::new(
+            PocketIcRuntime {
+                env: self.env.as_ref().unwrap(),
+                caller,
+            },
+            self.dex_id,
+        )
     }
 
     fn new_pocket_ic(&self) -> PocketIcRuntime<'_> {
