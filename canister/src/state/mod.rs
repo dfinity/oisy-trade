@@ -1,5 +1,5 @@
 use crate::order::{Order, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair};
-use dex_types::OrderStatus;
+use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -29,7 +29,6 @@ pub struct State {
     pending_orders: VecDeque<Order>,
     #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
 }
 
@@ -52,5 +51,21 @@ impl State {
         } else {
             OrderStatus::NotFound
         }
+    }
+
+    pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
+        self.order_books.insert(pair, order_book);
+    }
+
+    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
+        self.order_books
+            .iter()
+            .map(|(pair, book)| TradingPairInfo {
+                base_asset: *pair.base.as_principal(),
+                quote_asset: *pair.quote.as_principal(),
+                tick_size: book.tick_size().get(),
+                lot_size: book.lot_size().get(),
+            })
+            .collect()
     }
 }

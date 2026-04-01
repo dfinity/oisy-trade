@@ -6,7 +6,7 @@
 #[cfg(test)]
 mod tests;
 
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for an order.
@@ -23,6 +23,19 @@ pub struct LimitOrderRequest {
 pub struct LimitOrderResponse {
     /// The unique identifier assigned to the new order.
     pub order_id: OrderId,
+}
+
+/// Information about a listed trading pair.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct TradingPairInfo {
+    /// Ledger canister ID of the base asset.
+    pub base_asset: Principal,
+    /// Ledger canister ID of the quote asset.
+    pub quote_asset: Principal,
+    /// Minimum price increment.
+    pub tick_size: u64,
+    /// Minimum order quantity.
+    pub lot_size: u64,
 }
 
 /// Status of an order.

@@ -1,5 +1,5 @@
 use crate::order::{Price, Quantity, Side};
-use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus};
+use dex_types::{LimitOrderRequest, LimitOrderResponse, OrderStatus, TradingPairInfo};
 
 pub mod order;
 pub mod state;
@@ -25,4 +25,8 @@ pub fn add_limit_order(_request: LimitOrderRequest) -> LimitOrderResponse {
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
+}
+
+pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    state::with_state(|s| s.get_trading_pairs())
 }

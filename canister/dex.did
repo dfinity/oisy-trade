@@ -7,6 +7,18 @@ type LimitOrderRequest = record {};
 /// Response after successfully placing a limit order.
 type LimitOrderResponse = record { order_id : OrderId };
 
+/// Information about a listed trading pair.
+type TradingPairInfo = record {
+    /// Ledger canister ID of the base asset.
+    base_asset : principal;
+    /// Ledger canister ID of the quote asset.
+    quote_asset : principal;
+    /// Minimum price increment. All order prices must be a positive multiple of this value.
+    tick_size : nat64;
+    /// Minimum order quantity. All order quantities must be a positive multiple of this value.
+    lot_size : nat64;
+};
+
 /// Status of an order.
 type OrderStatus = variant {
     /// The order was not found.
@@ -22,4 +34,7 @@ service : () -> {
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;
+
+    /// Query all listed trading pairs.
+    get_trading_pairs : () -> (vec TradingPairInfo) query;
 }
