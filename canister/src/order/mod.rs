@@ -28,6 +28,10 @@ pub struct OrderBookId(u64);
 impl OrderBookId {
     pub const ZERO: Self = Self(0);
 
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
     pub fn increment(&mut self) {
         self.0 = self.0.checked_add(1).expect("OrderBookId overflow");
     }
@@ -40,7 +44,7 @@ pub struct OrderSeq(u64);
 impl OrderSeq {
     pub const ZERO: Self = Self(0);
 
-    pub fn new(seq: u64) -> Self {
+    pub const fn new(seq: u64) -> Self {
         Self(seq)
     }
 

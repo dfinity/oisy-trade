@@ -19,3 +19,4 @@ dex_types =  {path = "../libs/types"}
 
 [dev-dependencies]
 candid_parser = {workspace = true}
+proptest = {workspace = true}

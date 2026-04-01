@@ -1,50 +1,32 @@
 mod order_id {
     use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use proptest::prelude::*;
 
-    #[test]
-    fn should_roundtrip_through_display_and_parse() {
-        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(42));
-        let s = id.to_string();
-        let parsed: OrderId = s.parse().unwrap();
-        assert_eq!(parsed, id);
-    }
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_display_and_parse(book_id: u64, seq: u64) {
+            let id = OrderId::new(OrderBookId::new(book_id), OrderSeq::new(seq));
+            let parsed: OrderId = id.to_string().parse().unwrap();
+            prop_assert_eq!(parsed, id);
+        }
 
-    #[test]
-    fn should_encode_as_32_char_hex() {
-        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-        assert_eq!(id.to_string(), "00000000000000000000000000000000");
+        #[test]
+        fn should_always_encode_as_32_char_hex(book_id: u64, seq: u64) {
+            let id = OrderId::new(OrderBookId::new(book_id), OrderSeq::new(seq));
+            let s = id.to_string();
+            prop_assert_eq!(s.len(), 32);
+            prop_assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+        }
 
-        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1));
-        assert_eq!(id.to_string(), "00000000000000000000000000000001");
-    }
+        #[test]
+        fn should_reject_wrong_length(s in "[0-9a-f]{0,31}|[0-9a-f]{33,64}") {
+            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+        }
 
-    #[test]
-    fn should_reject_too_short() {
-        assert_eq!("abc".parse::<OrderId>(), Err(OrderIdParseError));
-    }
-
-    #[test]
-    fn should_reject_too_long() {
-        assert_eq!(
-            "000000000000000000000000000000001".parse::<OrderId>(),
-            Err(OrderIdParseError)
-        );
-    }
-
-    #[test]
-    fn should_reject_non_hex() {
-        assert_eq!(
-            "0000000000000000000000000000gggg".parse::<OrderId>(),
-            Err(OrderIdParseError)
-        );
-    }
-
-    #[test]
-    fn should_preserve_book_id_and_seq() {
-        let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(255));
-        let parsed: OrderId = id.to_string().parse().unwrap();
-        assert_eq!(parsed.book_id(), OrderBookId::ZERO);
-        assert_eq!(parsed.seq(), OrderSeq::new(255));
+        #[test]
+        fn should_reject_non_hex(s in "[g-z]{32}") {
+            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+        }
     }
 }
 
