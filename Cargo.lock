@@ -45,6 +45,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -489,7 +495,7 @@ dependencies = [
  "candid_parser",
  "dex_types",
  "ic-cdk",
- "ic-cdk-timers",
+ "icrc-ledger-types",
 ]
 
 [[package]]
@@ -507,6 +513,7 @@ dependencies = [
 name = "dex_int_tests"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "candid",
  "dex_client",
@@ -989,17 +996,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "ic-cdk-timers"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6852b9c1d4a82ff50fc7318599298aee8bfb082bd7e9fe7e5c1420692b2170f7"
-dependencies = [
- "ic-cdk-executor",
- "ic0",
- "slotmap",
 ]
 
 [[package]]

@@ -1,10 +1,14 @@
-use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
-use std::time::Duration;
+use dex_types::{
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    OrderStatus, TradingPairInfo,
+};
+use std::{num::NonZeroU64, time::Duration};
 
 pub mod guard;
 pub mod order;
 pub mod state;
 
+mod ledger;
 #[cfg(test)]
 mod test_fixtures;
 #[cfg(test)]
@@ -50,10 +54,35 @@ pub fn register_default_trading_pairs() {
         base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
         quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
     };
-    let book = order::OrderBook::new(order::Price::new(10), order::Quantity::new(1_000_000));
+    let book = order::OrderBook::new(
+        order::TickSize::new(NonZeroU64::new(10).unwrap()),
+        order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
+    );
     state::with_state_mut(|s| s.add_order_book(pair, book));
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
+}
+
+pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    state::with_state(|s| s.get_trading_pairs())
+}
+
+pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    let token_id = request.token_id.clone();
+    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
+    let amount = request.amount.clone();
+    let caller = ic_cdk::api::msg_caller();
+
+    let deposit_response = ledger::deposit(request).await?;
+    state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
+
+    Ok(deposit_response)
+}
+
+pub fn get_balance(token_id: dex_types::TokenId) -> candid::Nat {
+    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
+    let caller = ic_cdk::api::msg_caller();
+    state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
 }

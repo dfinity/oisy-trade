@@ -1,18 +1,20 @@
 use crate::order::{
-    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+    LotSize, Order, OrderBook, OrderId, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+    TradingPair,
 };
 use crate::state;
 use candid::Principal;
 use dex_types::LimitOrderRequest;
 use std::iter::once;
+use std::num::NonZeroU64;
 
 /// ICP/BTC-like parameters from Binance.
 /// Source: `GET https://api.binance.com/api/v3/exchangeInfo?symbol=ICPBTC`
 ///
 /// Minimum price increment: 0.00000010 BTC, i.e. 10 satoshis.
-pub const TICK_SIZE: u64 = 10;
+pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(10).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
-pub const LOT_SIZE: u64 = 1_000_000;
+pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
 pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
@@ -22,12 +24,12 @@ pub fn limit_order_request() -> LimitOrderRequest {
         },
         side: dex_types::Side::Buy,
         price: 100,
-        quantity: LOT_SIZE,
+        quantity: u64::from(LOT_SIZE),
     }
 }
 
 pub fn order_book() -> OrderBook {
-    OrderBook::new(Price::new(TICK_SIZE), Quantity::new(LOT_SIZE))
+    OrderBook::new(TICK_SIZE, LOT_SIZE)
 }
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {
@@ -37,24 +39,29 @@ pub fn icp_ckbtc_trading_pair() -> TradingPair {
     }
 }
 
-pub fn order(id: u64, side: Side, price: u64, quantity: u64) -> Order {
+fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
-        price: Price::new(price),
-        quantity: Quantity::new(quantity),
+        price: Price::new(price.into()),
+        quantity: Quantity::new(quantity.into()),
     }
     .into_order(OrderId::from(id))
 }
 
-pub fn buy(id: u64, price: u64, quantity: u64) -> Order {
+pub fn buy(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Buy, price, quantity)
 }
 
-pub fn sell(id: u64, price: u64, quantity: u64) -> Order {
+pub fn sell(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Sell, price, quantity)
 }
 
-pub fn all_order_types(price: u64, quantity: u64) -> impl Iterator<Item = Order> {
+pub fn all_order_types(
+    price: impl Into<u64>,
+    quantity: impl Into<u64>,
+) -> impl Iterator<Item = Order> {
+    let price = price.into();
+    let quantity = quantity.into();
     once(buy(1, price, quantity)).chain(once(sell(2, price, quantity)))
 }
 

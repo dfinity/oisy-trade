@@ -16,6 +16,7 @@ path = "src/main.rs"
 candid = {workspace = true}
 ic-cdk = {workspace = true}
 ic-cdk-timers = {workspace = true}
+icrc-ledger-types = {workspace = true}
 dex_types =  {path = "../libs/types"}
 
 [dev-dependencies]

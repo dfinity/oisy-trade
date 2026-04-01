@@ -1,3 +1,4 @@
+// TODO: needed?
 /// Helper to add an order via State directly (bypasses IC timer in lib::add_limit_order).
 fn add_order(
     request: dex_types::LimitOrderRequest,
@@ -96,5 +97,47 @@ mod get_order_status {
         init_state_with_order_book();
         let status = get_order_status(u64::MAX);
         assert_eq!(status, OrderStatus::NotFound);
+    }
+}
+
+mod get_trading_pairs {
+    use crate::get_trading_pairs;
+    use crate::order::{TokenId, TradingPair};
+    use crate::state;
+    use crate::state::init_state;
+    use crate::test_fixtures::order_book;
+    use candid::Principal;
+    use dex_types::TradingPairInfo;
+
+    #[test]
+    fn should_return_empty_when_no_trading_pairs() {
+        init_state();
+        let pairs = get_trading_pairs();
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn should_return_listed_trading_pairs() {
+        init_state();
+        let base = TokenId::new(Principal::from_slice(&[0x01]));
+        let quote = TokenId::new(Principal::from_slice(&[0x02]));
+        let order_book = order_book();
+        let tick_size = order_book.tick_size().get();
+        let lot_size = order_book.lot_size().get();
+        state::with_state_mut(|s| {
+            s.add_trading_pair(TradingPair { base, quote }, order_book);
+        });
+
+        let pairs = get_trading_pairs();
+
+        assert_eq!(
+            pairs,
+            vec![TradingPairInfo {
+                base_asset: dex_types::TokenId::from(base),
+                quote_asset: dex_types::TokenId::from(quote),
+                tick_size,
+                lot_size,
+            }]
+        );
     }
 }

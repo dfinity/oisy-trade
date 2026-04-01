@@ -1,5 +1,8 @@
 use dex_canister::MATCHING_INTERVAL;
-use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
+use dex_types::{
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    OrderStatus, TokenId, TradingPairInfo,
+};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
@@ -11,9 +14,25 @@ fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     dex_canister::get_order_status(order_id)
 }
 
+#[ic_cdk::query]
+fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    dex_canister::get_trading_pairs()
+}
+
+#[ic_cdk::update]
+async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    dex_canister::deposit(request).await
+}
+
+#[ic_cdk::query]
+fn get_balance(token_id: TokenId) -> candid::Nat {
+    dex_canister::get_balance(token_id)
+}
+
 #[ic_cdk::init]
 fn init() {
     dex_canister::state::init_state();
+    // TODO DEFI-2744: replace with an admin endpoint
     dex_canister::register_default_trading_pairs();
     setup_timers();
 }

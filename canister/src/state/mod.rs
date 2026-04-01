@@ -2,7 +2,7 @@ use crate::Task;
 use crate::order::{
     MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
 };
-use dex_types::OrderStatus;
+use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,6 +32,8 @@ pub struct State {
     #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
     order_books: BTreeMap<TradingPair, OrderBook>,
+    // TODO(DEFI-2746): Add support for subaccounts.
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -87,6 +89,71 @@ impl State {
     /// Set of currently active tasks to avoid parallel execution.
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
         &mut self.active_tasks
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AddLimitOrderError {
+    UnknownTradingPair,
+    InvalidOrder(MatchOrderError),
+}
+
+impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
+    fn from(err: AddLimitOrderError) -> Self {
+        match err {
+            AddLimitOrderError::UnknownTradingPair => {
+                dex_types::AddLimitOrderError::UnknownTradingPair
+            }
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
+                price,
+                tick_size,
+            }) => dex_types::AddLimitOrderError::InvalidPrice {
+                price: price.get(),
+                tick_size: tick_size.get(),
+            },
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
+                quantity,
+                lot_size,
+            }) => dex_types::AddLimitOrderError::InvalidQuantity {
+                quantity: quantity.get(),
+                lot_size: lot_size.get(),
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
+        self.order_books.insert(pair, order_book);
+    }
+
+    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
+        self.order_books
+            .iter()
+            .map(|(pair, book)| TradingPairInfo {
+                base_asset: dex_types::TokenId::from(pair.base),
+                quote_asset: dex_types::TokenId::from(pair.quote),
+                tick_size: book.tick_size().get(),
+                lot_size: book.lot_size().get(),
+            })
+            .collect()
+    }
+
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
+        let balance = self
+            .balances
+            .entry(user)
+            .or_default()
+            .entry(token_id)
+            .or_insert_with(|| Nat::from(0u64));
+        *balance += amount;
+    }
+
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
+        self.balances
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token_id))
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
     }
 }
 
