@@ -2,6 +2,7 @@ use crate::Task;
 use crate::order::{
     MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
 };
+use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,41 +87,6 @@ impl State {
         );
     }
 
-    /// Set of currently active tasks to avoid parallel execution.
-    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
-        &mut self.active_tasks
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum AddLimitOrderError {
-    UnknownTradingPair,
-    InvalidOrder(MatchOrderError),
-}
-
-impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
-    fn from(err: AddLimitOrderError) -> Self {
-        match err {
-            AddLimitOrderError::UnknownTradingPair => {
-                dex_types::AddLimitOrderError::UnknownTradingPair
-            }
-            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
-                price,
-                tick_size,
-            }) => dex_types::AddLimitOrderError::InvalidPrice {
-                price: price.get(),
-                tick_size: tick_size.get(),
-            },
-            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
-                quantity,
-                lot_size,
-            }) => dex_types::AddLimitOrderError::InvalidQuantity {
-                quantity: quantity.get(),
-                lot_size: lot_size.get(),
-            },
-        }
-    }
-
     #[cfg(test)]
     pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
         self.order_books.insert(pair, order_book);
@@ -154,6 +120,11 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
     }
 }
 

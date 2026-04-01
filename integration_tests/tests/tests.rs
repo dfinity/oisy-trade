@@ -2,6 +2,8 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
+use dex_types::{DepositError, DepositRequest, LedgerTransferFromError, TokenId};
+use icrc_ledger_types::icrc1::account::Account;
 
 #[allow(clippy::too_many_arguments)]
 async fn assert_balances<R: Runtime>(
@@ -71,7 +73,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_reject_invalid_orders() {
         let setup = Setup::new().await;
-        let client = setup.client();
+        let client = setup.dex_client();
         let pair = test_trading_pair();
 
         let cases = vec![
@@ -153,7 +155,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_match_crossing_orders() {
         let setup = Setup::new().await;
-        let client = setup.client();
+        let client = setup.dex_client();
         let pair = test_trading_pair();
 
         let sell_id = client
@@ -192,7 +194,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_rest_unmatched_order_as_open() {
         let setup = Setup::new().await;
-        let client = setup.client();
+        let client = setup.dex_client();
 
         let order_id = client
             .add_limit_order(LimitOrderRequest {
