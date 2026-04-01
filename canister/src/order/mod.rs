@@ -235,7 +235,7 @@ impl PendingOrder {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Order {
     id: OrderSeq,
     side: Side,
@@ -270,7 +270,7 @@ impl Order {
 
 /// An order resting in the order book. Only carries the ID and remaining
 /// quantity — side and price are implicit from the book's structure.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RestingOrder {
     id: OrderSeq,
     remaining_quantity: Quantity,

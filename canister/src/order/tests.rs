@@ -19,66 +19,51 @@ mod order_book {
         }
 
         #[test]
-        fn should_reject_price_not_multiple_of_tick_size() {
-            let mut book = order_book();
-            let invalid_price = TICK_SIZE / 2;
-
-            for order in all_order_types(invalid_price, LOT_SIZE) {
-                let result = book.match_order(order);
-
-                assert_eq!(
-                    result,
-                    Err(MatchOrderError::InvalidTickSize {
-                        price: Price::from(invalid_price),
+        fn should_reject_invalid_orders_without_modifying_book() {
+            let cases: Vec<(u64, u64, MatchOrderError)> = vec![
+                (
+                    TICK_SIZE / 2,
+                    LOT_SIZE,
+                    MatchOrderError::InvalidTickSize {
+                        price: Price::new(TICK_SIZE / 2),
                         tick_size: Price::new(TICK_SIZE),
-                    })
-                );
-            }
-        }
-
-        #[test]
-        fn should_reject_quantity_not_multiple_of_lot_size() {
-            let mut book = order_book();
-            let invalid_lot_size = LOT_SIZE / 2;
-
-            for order in all_order_types(TICK_SIZE, invalid_lot_size) {
-                let result = book.match_order(order);
-
-                assert_eq!(
-                    result,
-                    Err(MatchOrderError::InvalidLotSize {
-                        quantity: Quantity::new(invalid_lot_size),
-                        lot_size: Quantity::new(LOT_SIZE),
-                    })
-                );
-            }
-        }
-
-        #[test]
-        fn should_reject_zero_price() {
-            let mut book = order_book();
-            for order in all_order_types(0, LOT_SIZE) {
-                assert_eq!(
-                    book.match_order(order),
-                    Err(MatchOrderError::InvalidTickSize {
+                    },
+                ),
+                (
+                    0,
+                    LOT_SIZE,
+                    MatchOrderError::InvalidTickSize {
                         price: Price::ZERO,
                         tick_size: Price::new(TICK_SIZE),
-                    })
-                );
-            }
-        }
-
-        #[test]
-        fn should_reject_zero_quantity() {
-            let mut book = order_book();
-            for order in all_order_types(TICK_SIZE, 0) {
-                assert_eq!(
-                    book.match_order(order),
-                    Err(MatchOrderError::InvalidLotSize {
+                    },
+                ),
+                (
+                    TICK_SIZE,
+                    LOT_SIZE / 2,
+                    MatchOrderError::InvalidLotSize {
+                        quantity: Quantity::new(LOT_SIZE / 2),
+                        lot_size: Quantity::new(LOT_SIZE),
+                    },
+                ),
+                (
+                    TICK_SIZE,
+                    0,
+                    MatchOrderError::InvalidLotSize {
                         quantity: Quantity::ZERO,
                         lot_size: Quantity::new(LOT_SIZE),
-                    })
-                );
+                    },
+                ),
+            ];
+            for (price, quantity, expected_err) in cases {
+                let mut book = order_book();
+                let expected_book = book.clone();
+                for order in all_order_types(price, quantity) {
+                    assert_eq!(book.match_order(order), Err(expected_err.clone()));
+                    assert_eq!(
+                        book, expected_book,
+                        "Rejected order should not modify the order book"
+                    );
+                }
             }
         }
 

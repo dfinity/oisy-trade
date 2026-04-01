@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, VecDeque};
 /// Bids are sorted by price descending (best bid = highest price).
 /// Asks are sorted by price ascending (best ask = lowest price).
 /// Within a price level, orders are matched in FIFO order.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrderBook {
     /// Immutable identifier assigned at registration time.
     id: OrderBookId,
@@ -301,7 +301,7 @@ pub struct Fill {
     pub quantity: Quantity,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchOrderError {
     /// Price is not a positive multiple of the tick size.
     InvalidTickSize { price: Price, tick_size: Price },
