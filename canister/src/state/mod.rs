@@ -1,11 +1,12 @@
+use crate::Task;
 use crate::order::{
-    MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TokenId, TokenMetadata,
+    LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TickSize, TokenId, TokenMetadata,
     TradingPair,
 };
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -36,6 +37,7 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
+    active_tasks: BTreeSet<Task>,
 }
 
 impl State {
@@ -133,6 +135,27 @@ impl State {
             .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn add_trading_pair(
+        &mut self,
+        pair: TradingPair,
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        use std::collections::btree_map::Entry;
+        match self.order_books.entry(pair) {
+            Entry::Occupied(_) => Err(dex_types::AddTradingPairError::TradingPairAlreadyExists),
+            Entry::Vacant(entry) => {
+                entry.insert(OrderBook::new(tick_size, lot_size));
+                Ok(())
+            }
+        }
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
     }
 }
 
