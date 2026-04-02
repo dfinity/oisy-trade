@@ -5,6 +5,8 @@ use dex_types::{
 };
 use std::num::NonZeroU64;
 
+pub use runtime::{IC_RUNTIME, Runtime};
+
 pub mod order;
 pub mod runtime;
 pub mod state;
@@ -52,7 +54,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 pub async fn deposit(
     request: DepositRequest,
-    runtime: &impl runtime::Runtime,
+    runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
@@ -65,7 +67,7 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
-pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl runtime::Runtime) -> candid::Nat {
+pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> candid::Nat {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = runtime.msg_caller();
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
@@ -73,7 +75,7 @@ pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl runtime::Runtime
 
 pub fn add_trading_pair(
     request: AddTradingPairRequest,
-    runtime: &impl runtime::Runtime,
+    runtime: &impl Runtime,
 ) -> Result<(), AddTradingPairError> {
     if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(AddTradingPairError::NotController);

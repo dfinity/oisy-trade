@@ -1,4 +1,4 @@
-use crate::runtime::Runtime;
+use crate::Runtime;
 use dex_types::{DepositError, DepositRequest, DepositResponse, LedgerTransferFromError};
 
 pub async fn deposit(
