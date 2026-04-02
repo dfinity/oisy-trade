@@ -88,15 +88,42 @@ impl Setup {
     }
 
     pub fn add_trading_pair_request(&self) -> AddTradingPairRequest {
+        let trading_pair = self.trading_pair();
         AddTradingPairRequest {
             base: TokenId {
-                ledger_id: self.base_ledger_id(),
+                ledger_id: trading_pair.base,
             },
             quote: TokenId {
-                ledger_id: self.quote_ledger_id(),
+                ledger_id: trading_pair.quote,
             },
             tick_size: 10,
             lot_size: 1_000_000,
+        }
+    }
+
+    pub fn trading_pair(&self) -> TradingPair {
+        TradingPair {
+            base: self.base_ledger_id,
+            quote: self.quote_ledger_id,
+        }
+    }
+
+    pub fn base_token_id(&self) -> TokenId {
+        TokenId {
+            ledger_id: self.base_ledger_id,
+        }
+    }
+
+    pub fn quote_token_id(&self) -> TokenId {
+        TokenId {
+            ledger_id: self.quote_ledger_id,
+        }
+    }
+
+    pub fn dex_account(&self) -> Account {
+        Account {
+            owner: self.dex_id,
+            subaccount: None,
         }
     }
 
@@ -110,6 +137,10 @@ impl Setup {
 
     pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
+    }
+
+    pub fn user(&self) -> Principal {
+        self.caller
     }
 
     pub fn controller(&self) -> Principal {
@@ -132,7 +163,7 @@ impl Setup {
         self.env.as_ref().unwrap()
     }
 
-    pub async fn mint_base_tokens(&self, to: Principal, amount: Nat) -> Nat {
+    pub async fn mint_base_tokens(&self, to: Principal, amount: impl Into<Nat>) -> Nat {
         self.base_token_ledger()
             .icrc1_transfer(
                 self.controller,
@@ -145,7 +176,7 @@ impl Setup {
             .await
     }
 
-    pub async fn mint_quote_tokens(&self, to: Principal, amount: Nat) -> Nat {
+    pub async fn mint_quote_tokens(&self, to: Principal, amount: impl Into<Nat>) -> Nat {
         self.quote_token_ledger()
             .icrc1_transfer(
                 self.controller,

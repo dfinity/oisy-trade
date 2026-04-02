@@ -50,44 +50,100 @@ async fn assert_balances<R: Runtime>(
 
 mod add_limit_order {
     use assert_matches::assert_matches;
-    use candid::{Encode, Principal};
+    use candid::{Encode, Nat, Principal};
+    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
     use dex_int_tests::{Setup, test_trading_pair};
-    use dex_types::{LimitOrderRequest, OrderStatus, Side, TradingPair};
+    use dex_types::{
+        AddLimitOrderError, Balance, DepositRequest, LimitOrderRequest, OrderStatus, Side,
+        TradingPair,
+    };
     use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
-    async fn should_add_limit_order_and_query_status() {
-        let setup = Setup::new().await;
+    async fn should_add_limit_buy_order_and_query_status() {
+        let setup = Setup::new().await.with_trading_pair().await;
         let client = setup.dex_client();
+        // buy 1M base tokens for a price of 100 quote tokens per base token
+        // need 100M quote tokens
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000,
+        };
 
-        let order_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair: TradingPair {
-                    base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-                    quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
-                },
-                side: Side::Buy,
-                price: 100,
-                quantity: 1_000_000,
+        let required = 100_000_000u64;
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::InsufficientBalance {
+                token: setup.quote_token_id(),
+                available: 0u64.into(),
+                required: required.into(),
+            })
+        );
+
+        // Ledger fees:
+        // 1 for approval
+        // 1 for transfer_from
+        setup
+            .mint_quote_tokens(setup.user(), required + 2 * QUOTE_LEDGER_FEE)
+            .await;
+        setup
+            .quote_token_ledger()
+            .icrc2_approve(
+                setup.user(),
+                setup.dex_account(),
+                required + QUOTE_LEDGER_FEE,
+            )
+            .await;
+        client
+            .deposit(DepositRequest {
+                token_id: setup.quote_token_id(),
+                amount: required.into(),
             })
             .await
             .unwrap();
+        assert_eq!(
+            client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: required.into(),
+                reserved: 0u64.into(),
+            }
+        );
+        assert_eq!(
+            setup
+                .quote_token_ledger()
+                .icrc1_balance_of(setup.user())
+                .await,
+            Nat::from(0u64)
+        );
 
-        let status = client.get_order_status(order_id).await;
-        assert_eq!(status, OrderStatus::Pending);
-
-        // Valid hex format but non-existent order
-        let not_found = client
-            .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
-            .await;
-        assert_eq!(not_found, OrderStatus::NotFound);
+        let order_id = client.add_limit_order(order).await.unwrap();
+        assert_eq!(
+            client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: required.into(),
+            }
+        );
+        assert_eq!(
+            client.get_order_status(order_id).await,
+            OrderStatus::Pending
+        );
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_trap_on_syntactically_invalid_order_id() {
+    async fn should_fail_to_get_order_status() {
         let setup = Setup::new().await;
+
+        // // Valid hex format but non-existent order
+        let not_found = setup
+            .dex_client()
+            .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
+            .await;
+        assert_eq!(not_found, OrderStatus::NotFound);
 
         let result = setup
             .env()
