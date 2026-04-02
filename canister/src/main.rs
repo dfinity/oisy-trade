@@ -1,16 +1,32 @@
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError,
-    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, DexArg,
+    LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
 };
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::init]
-fn init() {
+fn init(arg: DexArg) {
+    match arg {
+        DexArg::Init(_) => {}
+        DexArg::Upgrade(_) => {
+            ic_cdk::trap("ERROR: expected Init argument");
+        }
+    }
     dex_canister::state::init_state();
     // TODO DEFI-2744: replace with an admin endpoint
     dex_canister::register_default_trading_pairs();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade(arg: DexArg) {
+    match arg {
+        DexArg::Init(_) => {
+            ic_cdk::trap("ERROR: expected Upgrade argument");
+        }
+        DexArg::Upgrade(_) => {}
+    }
 }
 
 #[ic_cdk::update]

@@ -151,3 +151,20 @@ pub struct DepositResponse {
     /// The block index of the transfer on the token ledger.
     pub block_index: Nat,
 }
+
+/// Argument passed to the DEX canister on init or upgrade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum DexArg {
+    /// Argument used when the canister is first installed.
+    Init(InitArg),
+    /// Argument used when the canister is upgraded.
+    Upgrade(Option<UpgradeArg>),
+}
+
+/// Argument for canister initialization.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct InitArg {}
+
+/// Argument for canister upgrade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct UpgradeArg {}

@@ -7,6 +7,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
+use dex_types::{DexArg, InitArg};
 use dex_types_internal::log::Priority;
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -47,7 +48,7 @@ impl Setup {
         env.install_canister(
             canister_id,
             dex_wasm(),
-            Encode!().unwrap(),
+            Encode!(&DexArg::Init(InitArg {})).unwrap(),
             Some(controller),
         )
         .await;

@@ -103,7 +103,16 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
-service : () -> {
+/// Argument for canister initialization.
+type InitArg = record {};
+
+/// Argument for canister upgrade.
+type UpgradeArg = record {};
+
+/// Argument passed to the DEX canister on init or upgrade.
+type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
+
+service : (DexArg) -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
