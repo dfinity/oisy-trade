@@ -1,6 +1,6 @@
 use dex_types::{
-    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TokenId,
+    DepositError, DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest,
+    LimitOrderResponse, OrderStatus, TokenId,
 };
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -13,10 +13,11 @@ fn init() {
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+    let order_dbg = format!("{request:?}");
     let response = dex_canister::add_limit_order(request);
     canlog::log!(
         Priority::Info,
-        "[add_limit_order]: created order_id={}",
+        "[add_limit_order]: created order_id={} for request {order_dbg}",
         response.order_id
     );
     response
@@ -29,14 +30,31 @@ fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    let deposit_dbg = format!("{request:?}");
     let result = dex_canister::deposit(request).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
-            "[deposit]: success, block_index={}",
+            "[deposit]: successful deposit for request {deposit_dbg}, block_index={}",
             response.block_index
         ),
-        Err(err) => canlog::log!(Priority::Debug, "[deposit]: error={:?}", err),
+        Err(err) => match err {
+            DepositError::CallFailed { .. }
+            | DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
+            | DepositError::LedgerError(LedgerTransferFromError::InternalError(_)) => {
+                canlog::log!(
+                    Priority::Debug,
+                    "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
+                    err
+                )
+            }
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
+            | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
+                ..
+            }) => {
+                // do not log errors due to user actions
+            }
+        },
     }
     result
 }
