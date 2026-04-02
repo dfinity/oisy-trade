@@ -363,6 +363,19 @@ fn add_trading_pair_request(setup: &Setup) -> AddTradingPairRequest {
 }
 
 #[tokio::test]
+async fn should_add_trading_pair_as_controller() {
+    let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+
+    let result = controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Ok(()));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_fail_add_trading_pair() {
     let setup = Setup::new().await;
     let controller_client = setup.dex_client_with_caller(setup.controller());
