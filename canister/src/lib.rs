@@ -1,7 +1,7 @@
-use crate::order::{Price, Quantity, Side, TokenId, TradingPair};
+use crate::order::TokenId;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderStatus, TradingPairInfo,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
 };
 use std::num::NonZeroU64;
 
@@ -74,15 +74,15 @@ pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTrading
     if request.base == request.quote {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
-    let pair = TradingPair {
+    let pair = order::TradingPair {
         base: TokenId::from(request.base),
         quote: TokenId::from(request.quote),
     };
-    state::with_state_mut(|s| {
-        s.add_trading_pair(
-            pair,
-            Price::new(request.tick_size),
-            Quantity::new(request.lot_size),
-        )
-    })
+    let tick_size = order::TickSize::new(
+        NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
+    );
+    let lot_size = order::LotSize::new(
+        NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
+    );
+    state::with_state_mut(|s| s.add_trading_pair(pair, tick_size, lot_size))
 }
