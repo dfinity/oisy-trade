@@ -71,3 +71,32 @@ pub fn init_state_with_order_book() {
         s.add_order_book(icp_ckbtc_trading_pair(), order_book());
     });
 }
+
+pub mod mocks {
+    use crate::Runtime;
+    use candid::Principal;
+    use candid::utils::ArgumentEncoder;
+    use ic_cdk::call::{CallFailed, Response};
+    use mockall::mock;
+
+    mock! {
+        pub Runtime {}
+
+        #[async_trait::async_trait]
+        impl Runtime for Runtime {
+            #[mockall::concretize]
+            async fn call_unbounded_wait<A>(
+                &self,
+                canister_id: Principal,
+                method: &str,
+                args: A,
+            ) -> Result<Response, CallFailed>
+            where
+                A: ArgumentEncoder + Send;
+
+            fn msg_caller(&self) -> Principal;
+            fn canister_self(&self) -> Principal;
+            fn is_controller(&self, principal: &Principal) -> bool;
+        }
+    }
+}

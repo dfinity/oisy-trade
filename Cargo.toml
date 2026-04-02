@@ -26,6 +26,7 @@ inherits = "release"
 
 [workspace.dependencies]
 async-trait = "0.1.89"
+mockall = "0.14.0"
 candid = "0.10.26"
 candid_parser = "0.3.0"
 ic-cdk = "0.20.0"
