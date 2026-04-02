@@ -96,7 +96,7 @@ impl FromStr for OrderId {
     type Err = OrderIdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 32 {
+        if s.len() != 32 || !s.is_ascii() {
             return Err(OrderIdParseError);
         }
         let book_id = u64::from_str_radix(&s[..16], 16).map_err(|_| OrderIdParseError)?;
