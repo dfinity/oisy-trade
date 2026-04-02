@@ -1,7 +1,7 @@
 use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
 };
 
 #[ic_cdk::update]
@@ -27,6 +27,11 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 #[ic_cdk::query]
 fn get_balance(token_id: TokenId) -> candid::Nat {
     dex_canister::get_balance(token_id)
+}
+
+#[ic_cdk::update]
+fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
+    dex_canister::add_trading_pair(request)
 }
 
 #[ic_cdk::init]

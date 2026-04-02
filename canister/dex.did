@@ -103,6 +103,34 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
+/// Request to add a new trading pair to the DEX.
+type AddTradingPairRequest = record {
+    /// The base token of the pair.
+    base : TokenId;
+    /// The quote token of the pair.
+    quote : TokenId;
+    /// Minimum price increment. Must be greater than zero.
+    tick_size : nat64;
+    /// Minimum order quantity. Must be greater than zero.
+    lot_size : nat64;
+};
+
+/// Error returned by the add_trading_pair endpoint.
+type AddTradingPairError = variant {
+    /// The caller is not a controller of the canister.
+    NotController;
+    /// The base and quote tokens are the same.
+    BaseEqualsQuote;
+    /// The tick size must be greater than zero.
+    InvalidTickSize;
+    /// The lot size must be greater than zero.
+    InvalidLotSize;
+    /// A trading pair with the same base and quote tokens already exists.
+    TradingPairAlreadyExists;
+};
+
+type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
+
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
@@ -123,4 +151,7 @@ service : () -> {
 
     /// Query the caller's balance for a given token.
     get_balance : (TokenId) -> (nat) query;
+
+    /// Add a new trading pair to the DEX. Only callable by a controller.
+    add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 }
