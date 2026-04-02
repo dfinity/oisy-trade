@@ -1,4 +1,7 @@
-use crate::order::{MatchOrderError, Order, OrderBook, OrderId, PendingOrder, Price, Quantity, TokenId, TokenMetadata, TradingPair};
+use crate::order::{
+    MatchOrderError, Order, OrderBook, OrderId, PendingOrder, Price, Quantity, TokenId,
+    TokenMetadata, TradingPair,
+};
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;

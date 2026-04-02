@@ -1,7 +1,7 @@
 use crate::order::{Price, Quantity, Side, TokenId, TradingPair};
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderStatus, TradingPairInfo,
 };
 use std::num::NonZeroU64;
 

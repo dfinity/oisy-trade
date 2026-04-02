@@ -3,8 +3,8 @@ use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
-    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side,
-    TokenId, TradingPair,
+    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side, TokenId, TradingPair,
 };
 use icrc_ledger_types::icrc1::account::Account;
 

@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Nat, Principal};
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;

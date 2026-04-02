@@ -1,6 +1,6 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
-    OrderStatus, TokenId,TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    DepositResponse, LimitOrderRequest, LimitOrderResponse, OrderStatus, TokenId, TradingPairInfo,
 };
 
 #[ic_cdk::init]
