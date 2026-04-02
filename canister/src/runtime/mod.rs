@@ -22,6 +22,9 @@ pub trait Runtime {
 
     /// Gets canister's own identity.
     fn canister_self(&self) -> Principal;
+
+    /// Checks if the given principal is a controller of the canister.
+    fn is_controller(&self, principal: &Principal) -> bool;
 }
 
 #[derive(Copy, Clone)]
@@ -49,5 +52,9 @@ impl Runtime for IcRuntime {
 
     fn canister_self(&self) -> Principal {
         ic_cdk::api::canister_self()
+    }
+
+    fn is_controller(&self, principal: &Principal) -> bool {
+        ic_cdk::api::is_controller(principal)
     }
 }
