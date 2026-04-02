@@ -12,6 +12,10 @@ pub struct Balance {
 }
 
 impl Balance {
+    pub fn zero() -> Self {
+        Self::default()
+    }
+
     pub fn free(&self) -> &Nat {
         &self.free
     }
@@ -22,5 +26,23 @@ impl Balance {
 
     pub fn deposit(&mut self, amount: Nat) {
         self.free += amount;
+    }
+}
+
+impl From<Balance> for dex_types::Balance {
+    fn from(b: Balance) -> Self {
+        Self {
+            free: b.free,
+            reserved: b.reserved,
+        }
+    }
+}
+
+impl From<&Balance> for dex_types::Balance {
+    fn from(b: &Balance) -> Self {
+        Self {
+            free: b.free.clone(),
+            reserved: b.reserved.clone(),
+        }
     }
 }

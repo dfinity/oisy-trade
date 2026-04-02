@@ -106,6 +106,14 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
+/// A user's balance for a given token.
+type Balance = record {
+    /// Funds available for new orders or withdrawal.
+    free : nat;
+    /// Funds locked by open orders.
+    reserved : nat;
+};
+
 /// Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
     /// The base token of the pair.
@@ -153,7 +161,7 @@ service : () -> {
     deposit : (DepositRequest) -> (DepositResult);
 
     /// Query the caller's balance for a given token.
-    get_balance : (TokenId) -> (nat) query;
+    get_balance : (TokenId) -> (Balance) query;
 
     /// Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);

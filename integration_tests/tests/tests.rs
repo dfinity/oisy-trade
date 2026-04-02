@@ -3,10 +3,17 @@ use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
-    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
+    AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, TokenId,
 };
 use icrc_ledger_types::icrc1::account::Account;
+
+fn expected_balance(free: u64) -> Balance {
+    Balance {
+        free: Nat::from(free),
+        reserved: Nat::from(0u64),
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 async fn assert_balances<R: Runtime>(
@@ -21,22 +28,22 @@ async fn assert_balances<R: Runtime>(
 ) {
     assert_eq!(
         client1.get_balance(cksol.clone()).await,
-        Nat::from(expected_user1_cksol),
+        expected_balance(expected_user1_cksol),
         "user1 ckSOL balance mismatch"
     );
     assert_eq!(
         client1.get_balance(ckbtc.clone()).await,
-        Nat::from(expected_user1_ckbtc),
+        expected_balance(expected_user1_ckbtc),
         "user1 ckBTC balance mismatch"
     );
     assert_eq!(
         client2.get_balance(cksol.clone()).await,
-        Nat::from(expected_user2_cksol),
+        expected_balance(expected_user2_cksol),
         "user2 ckSOL balance mismatch"
     );
     assert_eq!(
         client2.get_balance(ckbtc.clone()).await,
-        Nat::from(expected_user2_ckbtc),
+        expected_balance(expected_user2_ckbtc),
         "user2 ckBTC balance mismatch"
     );
 }
