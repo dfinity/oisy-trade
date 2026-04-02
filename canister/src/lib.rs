@@ -71,8 +71,11 @@ pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl runtime::Runtime
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
 }
 
-pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
-    if !ic_cdk::api::is_controller(&ic_cdk::api::msg_caller()) {
+pub fn add_trading_pair(
+    request: AddTradingPairRequest,
+    runtime: &impl runtime::Runtime,
+) -> Result<(), AddTradingPairError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(AddTradingPairError::NotController);
     }
     if request.base == request.quote {
