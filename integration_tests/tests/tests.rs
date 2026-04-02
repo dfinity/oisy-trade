@@ -7,6 +7,7 @@ use dex_types::{
     TokenId, TradingPair,
 };
 use icrc_ledger_types::icrc1::account::Account;
+use pocket_ic::{RejectCode, RejectResponse};
 
 #[allow(clippy::too_many_arguments)]
 async fn assert_balances<R: Runtime>(
@@ -85,9 +86,10 @@ async fn should_trap_on_syntactically_invalid_order_id() {
         )
         .await;
 
-    assert!(
-        result.is_err(),
-        "expected canister to trap on invalid order ID"
+    assert_matches!(
+        result,
+        Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
+        if reject_message.contains("invalid order ID")
     );
 
     setup.drop().await;
