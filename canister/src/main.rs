@@ -1,7 +1,8 @@
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, DexArg,
-    LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError,
+    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
 };
+use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
 

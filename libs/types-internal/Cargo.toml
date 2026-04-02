@@ -9,8 +9,9 @@ homepage.workspace = true
 license.workspace = true
 
 [features]
-log = ["dep:canlog", "dep:serde"]
+log = ["dep:canlog"]
 
 [dependencies]
+candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"], optional = true }
-serde = { workspace = true, features = ["derive"], optional = true }
+serde = { workspace = true, features = ["derive"] }

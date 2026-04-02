@@ -7,7 +7,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
-use dex_types::{DexArg, InitArg};
+use dex_types_internal::{DexArg, InitArg};
 use dex_types_internal::log::Priority;
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
