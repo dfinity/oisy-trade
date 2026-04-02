@@ -66,7 +66,9 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
-    state::init_state();
+    state::init_state(dex_types_internal::InitArg {
+        mode: dex_types_internal::Mode::GeneralAvailability,
+    });
     state::with_state_mut(|s| {
         s.add_order_book(icp_ckbtc_trading_pair(), order_book());
     });
