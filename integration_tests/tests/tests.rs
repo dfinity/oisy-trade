@@ -75,25 +75,12 @@ async fn should_add_limit_order_and_query_status() {
 }
 
 #[tokio::test]
-async fn should_return_trading_pairs() {
+async fn should_return_empty_trading_pairs() {
     let setup = Setup::new().await;
     let client = setup.dex_client();
 
     let pairs = client.get_trading_pairs().await;
     assert!(pairs.is_empty());
-
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-    controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
-        .await
-        .expect("Failed to add trading pair");
-
-    let pairs = client.get_trading_pairs().await;
-    assert_eq!(pairs.len(), 1);
-    assert_eq!(pairs[0].base_asset.ledger_id, setup.base_ledger_id());
-    assert_eq!(pairs[0].quote_asset.ledger_id, setup.quote_ledger_id());
-    assert_eq!(pairs[0].tick_size, 10);
-    assert_eq!(pairs[0].lot_size, 1_000_000);
 
     setup.drop().await;
 }
@@ -371,6 +358,13 @@ async fn should_add_trading_pair_as_controller() {
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;
     assert_eq!(result, Ok(()));
+
+    let pairs = setup.dex_client().get_trading_pairs().await;
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].base_asset.ledger_id, setup.base_ledger_id());
+    assert_eq!(pairs[0].quote_asset.ledger_id, setup.quote_ledger_id());
+    assert_eq!(pairs[0].tick_size, 10);
+    assert_eq!(pairs[0].lot_size, 1_000_000);
 
     setup.drop().await;
 }
