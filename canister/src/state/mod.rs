@@ -50,10 +50,12 @@ impl State {
 
     pub fn add_limit_order(
         &mut self,
+        user: Principal,
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
         // TODO DEFI-2723: ensure the user has enough balance
+        let _ = user;
         let book_id = self
             .trading_pairs
             .get(&pair)

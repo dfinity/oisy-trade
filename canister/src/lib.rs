@@ -26,14 +26,18 @@ pub enum Task {
     ProcessPendingOrders,
 }
 
-pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
+pub fn add_limit_order(
+    request: LimitOrderRequest,
+    runtime: &impl Runtime,
+) -> Result<OrderId, AddLimitOrderError> {
+    let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
         side: order::Side::from(request.side),
         price: order::Price::from(request.price),
         quantity: order::Quantity::from(request.quantity),
     };
-    let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
+    let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending))
         .map_err(AddLimitOrderError::from)?;
     // Trigger matching, no need to wait for the timer to fire
     ic_cdk_timers::set_timer(Duration::ZERO, async {

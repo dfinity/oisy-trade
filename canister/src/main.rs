@@ -7,7 +7,7 @@ use dex_types::{
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::add_limit_order(request)
+    dex_canister::add_limit_order(request, &dex_canister::IC_RUNTIME)
 }
 
 #[ic_cdk::query]

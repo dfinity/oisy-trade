@@ -3,6 +3,13 @@
 fn add_order(
     request: dex_types::LimitOrderRequest,
 ) -> Result<dex_types::OrderId, dex_types::AddLimitOrderError> {
+    add_order_as(candid::Principal::anonymous(), request)
+}
+
+fn add_order_as(
+    user: candid::Principal,
+    request: dex_types::LimitOrderRequest,
+) -> Result<dex_types::OrderId, dex_types::AddLimitOrderError> {
     use crate::{order, state};
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
@@ -10,7 +17,7 @@ fn add_order(
         price: order::Price::from(request.price),
         quantity: order::Quantity::from(request.quantity),
     };
-    state::with_state_mut(|s| s.add_limit_order(pair, pending))
+    state::with_state_mut(|s| s.add_limit_order(user, pair, pending))
         .map(|id| id.to_string())
         .map_err(dex_types::AddLimitOrderError::from)
 }
