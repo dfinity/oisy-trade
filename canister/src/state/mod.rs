@@ -147,6 +147,11 @@ impl State {
 pub enum AddLimitOrderError {
     UnknownTradingPair,
     InvalidOrder(MatchOrderError),
+    InsufficientBalance {
+        token: TokenId,
+        available: Nat,
+        required: Nat,
+    },
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
@@ -168,6 +173,15 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             }) => dex_types::AddLimitOrderError::InvalidQuantity {
                 quantity: quantity.get(),
                 lot_size: lot_size.get(),
+            },
+            AddLimitOrderError::InsufficientBalance {
+                token,
+                available,
+                required,
+            } => dex_types::AddLimitOrderError::InsufficientBalance {
+                token: token.into(),
+                available,
+                required,
             },
         }
     }
