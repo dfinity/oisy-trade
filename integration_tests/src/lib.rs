@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
-use dex_types::TradingPair;
+use dex_types::{AddTradingPairRequest, TokenId, TradingPair};
 use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
@@ -75,6 +75,28 @@ impl Setup {
             dex_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
+        }
+    }
+
+    pub async fn with_trading_pair(self) -> Self {
+        let controller_client = self.dex_client_with_caller(self.controller());
+        let result = controller_client
+            .add_trading_pair(self.add_trading_pair_request())
+            .await;
+        assert_eq!(result, Ok(()));
+        self
+    }
+
+    pub fn add_trading_pair_request(&self) -> AddTradingPairRequest {
+        AddTradingPairRequest {
+            base: TokenId {
+                ledger_id: self.base_ledger_id(),
+            },
+            quote: TokenId {
+                ledger_id: self.quote_ledger_id(),
+            },
+            tick_size: 10,
+            lot_size: 1_000_000,
         }
     }
 

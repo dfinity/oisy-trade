@@ -519,32 +519,6 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
     setup.drop().await;
 }
 
-fn add_trading_pair_request(setup: &Setup) -> AddTradingPairRequest {
-    AddTradingPairRequest {
-        base: TokenId {
-            ledger_id: setup.base_ledger_id(),
-        },
-        quote: TokenId {
-            ledger_id: setup.quote_ledger_id(),
-        },
-        tick_size: 10,
-        lot_size: 1_000_000,
-    }
-}
-
-#[tokio::test]
-async fn should_add_trading_pair_as_controller() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
-    let result = controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
-        .await;
-    assert_eq!(result, Ok(()));
-
-    setup.drop().await;
-}
-
 #[tokio::test]
 async fn should_fail_add_trading_pair() {
     let setup = Setup::new().await;
@@ -554,7 +528,7 @@ async fn should_fail_add_trading_pair() {
 
     // not controller
     let result = user_client
-        .add_trading_pair(add_trading_pair_request(&setup))
+        .add_trading_pair(setup.add_trading_pair_request())
         .await;
     assert_eq!(result, Err(AddTradingPairError::NotController));
 
@@ -567,8 +541,7 @@ async fn should_fail_add_trading_pair() {
             quote: TokenId {
                 ledger_id: setup.base_ledger_id(),
             },
-            tick_size: 10,
-            lot_size: 1_000_000,
+            ..setup.add_trading_pair_request()
         })
         .await;
     assert_eq!(result, Err(AddTradingPairError::BaseEqualsQuote));
@@ -577,7 +550,7 @@ async fn should_fail_add_trading_pair() {
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
             tick_size: 0,
-            ..add_trading_pair_request(&setup)
+            ..setup.add_trading_pair_request()
         })
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidTickSize));
@@ -586,19 +559,19 @@ async fn should_fail_add_trading_pair() {
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
             lot_size: 0,
-            ..add_trading_pair_request(&setup)
+            ..setup.add_trading_pair_request()
         })
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidLotSize));
 
     // already exists
     let result = controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
+        .add_trading_pair(setup.add_trading_pair_request())
         .await;
     assert_eq!(result, Ok(()));
 
     let result = controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
+        .add_trading_pair(setup.add_trading_pair_request())
         .await;
     assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
 
