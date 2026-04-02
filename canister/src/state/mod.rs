@@ -1,10 +1,8 @@
-use crate::order::{
-    Order, OrderBook, OrderId, PendingOrder, Price, Quantity, TokenId, TokenMetadata, TradingPair,
-};
+use crate::order::{MatchOrderError, Order, OrderBook, OrderId, PendingOrder, Price, Quantity, TokenId, TokenMetadata, TradingPair};
 use candid::{Nat, Principal};
-use dex_types::OrderStatus;
+use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -29,10 +27,8 @@ pub fn init_state() {
 #[derive(Debug, Default)]
 pub struct State {
     next_order_id: OrderId,
-    pending_orders: VecDeque<Order>,
-    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
+    #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    #[allow(dead_code)] //TODO: DEFI-2730 process pending orders on a timer
     order_books: BTreeMap<TradingPair, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
@@ -45,18 +41,63 @@ impl State {
         id
     }
 
-    pub fn add_limit_order(&mut self, pending: PendingOrder) -> OrderId {
+    pub fn add_limit_order(
+        &mut self,
+        pair: TradingPair,
+        pending: PendingOrder,
+    ) -> Result<OrderId, AddLimitOrderError> {
+        // TODO DEFI-2723: ensure the user has enough balance
+        // TODO DEFI-2723: only update ID if order is valid.
         let order_id = self.next_order_id();
-        self.pending_orders.push_back(pending.into_order(order_id));
-        order_id
+        let order = pending.into_order(order_id);
+        let book = self
+            .order_books
+            .get_mut(&pair)
+            .ok_or(AddLimitOrderError::UnknownTradingPair)?;
+        book.add_pending_order(order)
+            .map_err(AddLimitOrderError::InvalidOrder)?;
+        Ok(order_id)
+    }
+
+    pub fn process_pending_orders(&mut self) {
+        // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
+        for book in self.order_books.values_mut() {
+            book.process_pending_orders();
+        }
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        if self.pending_orders.iter().any(|o| o.id() == order_id) {
-            OrderStatus::Pending
-        } else {
-            OrderStatus::NotFound
+        for book in self.order_books.values() {
+            if let Some(status) = book.get_order_status(order_id) {
+                return status;
+            }
         }
+        OrderStatus::NotFound
+    }
+
+    /// Register a new trading pair with the given order book.
+    pub fn add_order_book(&mut self, pair: TradingPair, book: OrderBook) {
+        assert!(
+            self.order_books.insert(pair, book).is_none(),
+            "ERROR: order book already exists for this pair"
+        );
+    }
+
+    #[cfg(test)]
+    pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
+        self.order_books.insert(pair, order_book);
+    }
+
+    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
+        self.order_books
+            .iter()
+            .map(|(pair, book)| TradingPairInfo {
+                base_asset: dex_types::TokenId::from(pair.base),
+                quote_asset: dex_types::TokenId::from(pair.quote),
+                tick_size: book.tick_size().get(),
+                lot_size: book.lot_size().get(),
+            })
+            .collect()
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
@@ -96,6 +137,36 @@ impl State {
                 entry.insert(OrderBook::new(tick_size, lot_size));
                 Ok(())
             }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AddLimitOrderError {
+    UnknownTradingPair,
+    InvalidOrder(MatchOrderError),
+}
+
+impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
+    fn from(err: AddLimitOrderError) -> Self {
+        match err {
+            AddLimitOrderError::UnknownTradingPair => {
+                dex_types::AddLimitOrderError::UnknownTradingPair
+            }
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
+                price,
+                tick_size,
+            }) => dex_types::AddLimitOrderError::InvalidPrice {
+                price: price.get(),
+                tick_size: tick_size.get(),
+            },
+            AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
+                quantity,
+                lot_size,
+            }) => dex_types::AddLimitOrderError::InvalidQuantity {
+                quantity: quantity.get(),
+                lot_size: lot_size.get(),
+            },
         }
     }
 }

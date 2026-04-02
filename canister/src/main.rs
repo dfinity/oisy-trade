@@ -1,21 +1,28 @@
 use dex_types::{
-    AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse,
-    LimitOrderRequest, LimitOrderResponse, OrderStatus, TokenId,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, LimitOrderResponse,
+    OrderStatus, TokenId,TradingPairInfo,
 };
 
 #[ic_cdk::init]
 fn init() {
     dex_canister::state::init_state();
+    // TODO DEFI-2744: replace with an admin endpoint
+    dex_canister::register_default_trading_pairs();
 }
 
 #[ic_cdk::update]
-fn add_limit_order(request: LimitOrderRequest) -> LimitOrderResponse {
+fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     dex_canister::add_limit_order(request)
 }
 
 #[ic_cdk::query]
 fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     dex_canister::get_order_status(order_id)
+}
+
+#[ic_cdk::query]
+fn get_trading_pairs() -> Vec<TradingPairInfo> {
+    dex_canister::get_trading_pairs()
 }
 
 #[ic_cdk::update]
