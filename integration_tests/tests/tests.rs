@@ -335,24 +335,19 @@ async fn should_add_trading_pair_as_controller() {
 }
 
 #[tokio::test]
-async fn should_fail_add_trading_pair_when_not_controller() {
+async fn should_fail_add_trading_pair() {
     let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
     let user = Principal::from_slice(&[0x01]);
     let user_client = setup.dex_client_with_caller(user);
 
+    // not controller
     let result = user_client
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;
     assert_eq!(result, Err(AddTradingPairError::NotController));
 
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_fail_add_trading_pair_when_base_equals_quote() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
+    // base equals quote
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
             base: TokenId {
@@ -367,14 +362,7 @@ async fn should_fail_add_trading_pair_when_base_equals_quote() {
         .await;
     assert_eq!(result, Err(AddTradingPairError::BaseEqualsQuote));
 
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_fail_add_trading_pair_with_zero_tick_size() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
+    // zero tick size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
             tick_size: 0,
@@ -383,14 +371,7 @@ async fn should_fail_add_trading_pair_with_zero_tick_size() {
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidTickSize));
 
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_fail_add_trading_pair_with_zero_lot_size() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
+    // zero lot size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
             lot_size: 0,
@@ -399,14 +380,7 @@ async fn should_fail_add_trading_pair_with_zero_lot_size() {
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidLotSize));
 
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_fail_add_trading_pair_when_already_exists() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
+    // already exists
     let result = controller_client
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;
