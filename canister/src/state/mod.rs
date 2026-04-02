@@ -54,8 +54,8 @@ impl State {
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
-        // TODO DEFI-2723: ensure the user has enough balance
-        let _ = user;
+        use crate::order::Side;
+
         let book_id = self
             .trading_pairs
             .get(&pair)
@@ -64,6 +64,28 @@ impl State {
             .order_books
             .get_mut(book_id)
             .expect("BUG: trading pair registered but order book missing");
+
+        let (token, required) = match pending.side {
+            Side::Buy => (
+                pair.quote,
+                Nat::from(pending.price.get()) * Nat::from(pending.quantity.get()),
+            ),
+            Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
+        };
+        let available = self
+            .balances
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token))
+            .map(|b| b.free().clone())
+            .unwrap_or(Nat::from(0u64));
+        if available < required {
+            return Err(AddLimitOrderError::InsufficientBalance {
+                token,
+                available,
+                required,
+            });
+        }
+
         let order_id = book
             .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;

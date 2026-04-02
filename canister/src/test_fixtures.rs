@@ -76,6 +76,18 @@ pub fn init_state_with_order_book() {
     });
 }
 
+/// Fund the given user with a large balance for both tokens of the default
+/// trading pair so that balance checks pass in tests that don't care about
+/// balance validation.
+pub fn fund_user(user: Principal) {
+    state::with_state_mut(|s| {
+        let pair = icp_ckbtc_trading_pair();
+        let amount = candid::Nat::from(u64::MAX);
+        s.deposit(user, pair.base, amount.clone());
+        s.deposit(user, pair.quote, amount);
+    });
+}
+
 pub mod mocks {
     use crate::Runtime;
     use candid::Principal;
