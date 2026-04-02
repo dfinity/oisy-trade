@@ -1,41 +1,23 @@
-// TODO DEFI-2753: use mock runtime
-/// Helper to add an order via State directly (bypasses IC timer in lib::add_limit_order).
-fn add_order(
-    request: dex_types::LimitOrderRequest,
-) -> Result<dex_types::OrderId, dex_types::AddLimitOrderError> {
-    add_order_as(candid::Principal::anonymous(), request)
-}
-
-fn add_order_as(
-    user: candid::Principal,
-    request: dex_types::LimitOrderRequest,
-) -> Result<dex_types::OrderId, dex_types::AddLimitOrderError> {
-    use crate::{order, state};
-    let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder {
-        side: order::Side::from(request.side),
-        price: order::Price::from(request.price),
-        quantity: order::Quantity::from(request.quantity),
-    };
-    state::with_state_mut(|s| s.add_limit_order(user, pair, pending))
-        .map(|id| id.to_string())
-        .map_err(dex_types::AddLimitOrderError::from)
-}
-
 mod add_limit_order {
-    use super::{add_order, add_order_as};
-    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::add_limit_order;
+    use crate::test_fixtures::{
+        fund_user, init_state_with_order_book, limit_order_request, mocks::MockRuntime,
+    };
+    use candid::Principal;
     use std::collections::BTreeSet;
+
+    const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
 
     #[test]
     fn should_add_limit_orders_with_distinct_order_ids() {
         init_state_with_order_book();
-        fund_user(candid::Principal::anonymous());
+        fund_user(DEFAULT_USER);
+        let runtime = mock_runtime_for(DEFAULT_USER);
         let mut order_ids = BTreeSet::new();
         let num_orders = 100;
 
         for _ in 0..num_orders {
-            let order_id = add_order(limit_order_request()).unwrap();
+            let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
             assert!(order_ids.insert(order_id));
         }
     }
@@ -43,12 +25,13 @@ mod add_limit_order {
     #[test]
     fn should_reject_order_for_unknown_trading_pair() {
         init_state_with_order_book();
+        let runtime = mock_runtime_for(DEFAULT_USER);
         let mut request = limit_order_request();
         request.pair = dex_types::TradingPair {
-            base: candid::Principal::management_canister(),
-            quote: candid::Principal::management_canister(),
+            base: Principal::management_canister(),
+            quote: Principal::management_canister(),
         };
-        let result = add_order(request);
+        let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::UnknownTradingPair)
@@ -58,10 +41,11 @@ mod add_limit_order {
     #[test]
     fn should_reject_order_with_invalid_price() {
         init_state_with_order_book();
-        fund_user(candid::Principal::anonymous());
+        fund_user(DEFAULT_USER);
+        let runtime = mock_runtime_for(DEFAULT_USER);
         let mut request = limit_order_request();
         request.price = 7; // not a multiple of tick size (10)
-        let result = add_order(request);
+        let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InvalidPrice {
@@ -74,10 +58,11 @@ mod add_limit_order {
     #[test]
     fn should_reject_order_with_invalid_quantity() {
         init_state_with_order_book();
-        fund_user(candid::Principal::anonymous());
+        fund_user(DEFAULT_USER);
+        let runtime = mock_runtime_for(DEFAULT_USER);
         let mut request = limit_order_request();
         request.quantity = 500_000; // not a multiple of lot size (1_000_000)
-        let result = add_order(request);
+        let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InvalidQuantity {
@@ -90,16 +75,16 @@ mod add_limit_order {
     #[test]
     fn should_reject_buy_order_with_insufficient_balance() {
         init_state_with_order_book();
-        let user = candid::Principal::from_slice(&[0x01]);
+        let user = Principal::from_slice(&[0x01]);
+        let runtime = mock_runtime_for(user);
         // user has no balance at all
         let request = limit_order_request(); // Buy, price=100, quantity=1_000_000
-        let result = add_order_as(user, request);
+        let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InsufficientBalance {
                 token: dex_types::TokenId {
-                    ledger_id: candid::Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai",)
-                        .unwrap(),
+                    ledger_id: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
                 },
                 available: candid::Nat::from(0u64),
                 // price * quantity = 100 * 1_000_000
@@ -111,35 +96,48 @@ mod add_limit_order {
     #[test]
     fn should_reject_sell_order_with_insufficient_balance() {
         init_state_with_order_book();
-        let user = candid::Principal::from_slice(&[0x01]);
+        let user = Principal::from_slice(&[0x01]);
+        let runtime = mock_runtime_for(user);
         let mut request = limit_order_request();
         request.side = dex_types::Side::Sell;
-        let result = add_order_as(user, request);
+        let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InsufficientBalance {
                 token: dex_types::TokenId {
-                    ledger_id: candid::Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai",)
-                        .unwrap(),
+                    ledger_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
                 },
                 available: candid::Nat::from(0u64),
                 required: candid::Nat::from(1_000_000u64),
             })
         );
     }
+
+    fn mock_runtime_for(caller: Principal) -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller().return_const(caller);
+        mock
+    }
 }
 
 mod get_order_status {
-    use super::add_order;
+    use crate::add_limit_order;
     use crate::get_order_status;
-    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::test_fixtures::{
+        fund_user, init_state_with_order_book, limit_order_request, mocks::MockRuntime,
+    };
+    use candid::Principal;
     use dex_types::OrderStatus;
 
     #[test]
     fn should_return_pending_for_existing_order() {
         init_state_with_order_book();
-        fund_user(candid::Principal::anonymous());
-        let order_id = add_order(limit_order_request()).unwrap();
+        fund_user(Principal::anonymous());
+        let mut runtime = MockRuntime::new();
+        runtime
+            .expect_msg_caller()
+            .return_const(Principal::anonymous());
+        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
         let status = get_order_status(order_id);
         assert_eq!(status, OrderStatus::Pending);
     }

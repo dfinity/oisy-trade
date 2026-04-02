@@ -7,7 +7,12 @@ use dex_types::{
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::add_limit_order(request, &dex_canister::IC_RUNTIME)
+    let order_id = dex_canister::add_limit_order(request, &dex_canister::IC_RUNTIME)?;
+    // Trigger matching immediately, no need to wait for the periodic timer.
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        dex_canister::process_pending_orders();
+    });
+    Ok(order_id)
 }
 
 #[ic_cdk::query]

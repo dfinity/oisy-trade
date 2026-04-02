@@ -39,10 +39,6 @@ pub fn add_limit_order(
     };
     let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending))
         .map_err(AddLimitOrderError::from)?;
-    // Trigger matching, no need to wait for the timer to fire
-    ic_cdk_timers::set_timer(Duration::ZERO, async {
-        process_pending_orders();
-    });
     Ok(order_id.to_string())
 }
 
