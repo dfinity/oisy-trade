@@ -64,7 +64,7 @@ impl State {
                 return;
             }
             if !allowed.contains(&caller) {
-                ic_cdk::trap(&format!(
+                ic_cdk::trap(format!(
                     "Caller {} is not allowed to call this endpoint in restricted mode",
                     caller
                 ));

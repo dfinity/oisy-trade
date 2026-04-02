@@ -27,10 +27,10 @@ fn post_upgrade(arg: DexArg) {
             ic_cdk::trap("ERROR: expected Upgrade argument");
         }
         DexArg::Upgrade(upgrade_arg) => {
-            if let Some(upgrade_arg) = upgrade_arg {
-                if let Some(mode) = upgrade_arg.mode {
-                    dex_canister::state::with_state_mut(|s| s.set_mode(mode));
-                }
+            if let Some(upgrade_arg) = upgrade_arg
+                && let Some(mode) = upgrade_arg.mode
+            {
+                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
             }
         }
     }
