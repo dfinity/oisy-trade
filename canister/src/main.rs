@@ -8,13 +8,13 @@ use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::init]
 fn init(arg: DexArg) {
-    match arg {
-        DexArg::Init(_) => {}
+    let init_arg = match arg {
+        DexArg::Init(init_arg) => init_arg,
         DexArg::Upgrade(_) => {
             ic_cdk::trap("ERROR: expected Init argument");
         }
-    }
-    dex_canister::state::init_state();
+    };
+    dex_canister::state::init_state(init_arg);
     // TODO DEFI-2744: replace with an admin endpoint
     dex_canister::register_default_trading_pairs();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
@@ -26,12 +26,19 @@ fn post_upgrade(arg: DexArg) {
         DexArg::Init(_) => {
             ic_cdk::trap("ERROR: expected Upgrade argument");
         }
-        DexArg::Upgrade(_) => {}
+        DexArg::Upgrade(upgrade_arg) => {
+            if let Some(upgrade_arg) = upgrade_arg {
+                if let Some(mode) = upgrade_arg.mode {
+                    dex_canister::state::with_state_mut(|s| s.set_mode(mode));
+                }
+            }
+        }
     }
 }
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
+    dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
     let order_dbg = format!("{request:?}");
     dex_canister::add_limit_order(request).inspect(|order_id| {
         canlog::log!(
@@ -54,6 +61,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+    dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
     let deposit_dbg = format!("{request:?}");
     let result = dex_canister::deposit(request).await;
     match &result {
