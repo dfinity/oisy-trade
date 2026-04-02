@@ -3,6 +3,7 @@ use crate::order::{
 };
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
+use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -18,16 +19,17 @@ pub fn with_state_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
 }
 
-pub fn init_state() {
+pub fn init_state(init_arg: InitArg) {
     STATE.with(|s| {
         let mut state = s.borrow_mut();
         assert!(state.is_none(), "State already initialized!");
-        *state = Some(State::default());
+        *state = Some(State::try_from(init_arg).expect("Failed to initialize state"));
     });
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
+    mode: Mode,
     next_order_id: OrderId,
     #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
@@ -36,7 +38,40 @@ pub struct State {
     balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
 }
 
+impl TryFrom<InitArg> for State {
+    type Error = String;
+
+    fn try_from(init_arg: InitArg) -> Result<Self, Self::Error> {
+        Ok(Self {
+            mode: init_arg.mode,
+            next_order_id: OrderId::default(),
+            tokens: BTreeMap::default(),
+            order_books: BTreeMap::default(),
+            balances: BTreeMap::default(),
+        })
+    }
+}
+
 impl State {
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+    }
+
+    pub fn assert_caller_is_allowed(&self) {
+        if let Mode::RestrictedTo(ref allowed) = self.mode {
+            let caller = ic_cdk::api::msg_caller();
+            if ic_cdk::api::is_controller(&caller) {
+                return;
+            }
+            if !allowed.contains(&caller) {
+                ic_cdk::trap(&format!(
+                    "Caller {} is not allowed to call this endpoint in restricted mode",
+                    caller
+                ));
+            }
+        }
+    }
+
     pub fn next_order_id(&mut self) -> OrderId {
         let id = self.next_order_id;
         self.next_order_id.increment();
