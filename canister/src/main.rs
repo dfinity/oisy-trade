@@ -1,6 +1,6 @@
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError,
+    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
 };
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -16,13 +16,13 @@ fn init() {
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     let order_dbg = format!("{request:?}");
-    let response = dex_canister::add_limit_order(request);
-    canlog::log!(
-        Priority::Info,
-        "[add_limit_order]: created order_id={} for request {order_dbg}",
-        response.order_id
-    );
-    response
+    dex_canister::add_limit_order(request).inspect(|order_id| {
+        canlog::log!(
+            Priority::Info,
+            "[add_limit_order]: created order_id={} for request {order_dbg}",
+            order_id
+        );
+    })
 }
 
 #[ic_cdk::query]
