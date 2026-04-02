@@ -44,6 +44,12 @@ async fn assert_balances<R: Runtime>(
 #[tokio::test]
 async fn should_add_limit_order_and_query_status() {
     let setup = Setup::new().await;
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+    controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await
+        .expect("Failed to add trading pair");
+
     let client = setup.dex_client();
 
     let order_id = client
@@ -72,6 +78,15 @@ async fn should_add_limit_order_and_query_status() {
 async fn should_return_trading_pairs() {
     let setup = Setup::new().await;
     let client = setup.dex_client();
+
+    let pairs = client.get_trading_pairs().await;
+    assert!(pairs.is_empty());
+
+    let controller_client = setup.dex_client_with_caller(setup.controller());
+    controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await
+        .expect("Failed to add trading pair");
 
     let pairs = client.get_trading_pairs().await;
     assert_eq!(pairs.len(), 1);
@@ -393,7 +408,12 @@ async fn should_fail_add_trading_pair() {
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidLotSize));
 
-    // already exists (registered by Setup::new())
+    // already exists
+    let result = controller_client
+        .add_trading_pair(add_trading_pair_request(&setup))
+        .await;
+    assert_eq!(result, Ok(()));
+
     let result = controller_client
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;
