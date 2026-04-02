@@ -3,10 +3,11 @@ use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
     DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
 };
-use std::num::NonZeroU64;
+use std::{num::NonZeroU64, time::Duration};
 
 pub use runtime::{IC_RUNTIME, Runtime};
 
+pub mod guard;
 pub mod order;
 pub mod runtime;
 pub mod state;
@@ -17,6 +18,13 @@ mod test_fixtures;
 #[cfg(test)]
 mod tests;
 
+pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+pub enum Task {
+    ProcessPendingOrders,
+}
+
 pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
@@ -26,7 +34,20 @@ pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOr
     };
     let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
         .map_err(AddLimitOrderError::from)?;
-    Ok(u64::from(order_id))
+    // Trigger matching, no need to wait for the timer to fire
+    ic_cdk_timers::set_timer(Duration::ZERO, async {
+        process_pending_orders();
+    });
+    Ok(order_id.to_string())
+}
+
+pub fn process_pending_orders() {
+    let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
+        Some(guard) => guard,
+        None => return,
+    };
+
+    state::with_state_mut(|s| s.process_pending_orders());
 }
 
 /// Register default trading pairs for testing.
@@ -37,15 +58,21 @@ pub fn register_default_trading_pairs() {
         base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
         quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
     };
-    let book = order::OrderBook::new(
-        order::TickSize::new(NonZeroU64::new(10).unwrap()),
-        order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-    );
-    state::with_state_mut(|s| s.add_order_book(pair, book));
+    state::with_state_mut(|s| {
+        s.add_trading_pair(
+            pair,
+            order::TickSize::new(NonZeroU64::new(10).unwrap()),
+            order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
+        )
+        .unwrap()
+    });
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
+    match order_id.parse::<order::OrderId>() {
+        Ok(id) => state::with_state(|s| s.get_order_status(id)),
+        Err(e) => panic!("ERROR: invalid order id: {}", e),
+    }
 }
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {

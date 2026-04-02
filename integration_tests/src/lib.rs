@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
+use dex_types::TradingPair;
 use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
@@ -239,5 +240,13 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
                 Err((rejection_code, e.reject_message))
             }
         }
+    }
+}
+
+// TODO DEFI-2744: remove once admin can add trading pairs
+pub fn test_trading_pair() -> TradingPair {
+    TradingPair {
+        base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+        quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
     }
 }
