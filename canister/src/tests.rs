@@ -1,4 +1,4 @@
-// TODO: needed?
+// TODO DEFI-2753: use mock runtime
 /// Helper to add an order via State directly (bypasses IC timer in lib::add_limit_order).
 fn add_order(
     request: dex_types::LimitOrderRequest,
@@ -11,7 +11,7 @@ fn add_order(
         quantity: order::Quantity::from(request.quantity),
     };
     state::with_state_mut(|s| s.add_limit_order(pair, pending))
-        .map(u64::from)
+        .map(|id| id.to_string())
         .map_err(dex_types::AddLimitOrderError::from)
 }
 
@@ -95,19 +95,27 @@ mod get_order_status {
     #[test]
     fn should_return_not_found_for_nonexistent_order() {
         init_state_with_order_book();
-        let status = get_order_status(u64::MAX);
+        // Valid hex format but refers to a non-existent book/seq
+        let status = get_order_status("ffffffffffffffffffffffffffffffff".to_string());
         assert_eq!(status, OrderStatus::NotFound);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERROR: invalid order id")]
+    fn should_trap_on_syntactically_invalid_order_id() {
+        init_state_with_order_book();
+        get_order_status("not-a-valid-order-id".to_string());
     }
 }
 
 mod get_trading_pairs {
+    use crate::get_trading_pairs;
     use crate::order::{TokenId, TradingPair};
     use crate::state;
     use crate::state::init_state;
-    use crate::{get_trading_pairs, order};
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use candid::Principal;
     use dex_types::TradingPairInfo;
-    use std::num::NonZeroU64;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -121,12 +129,10 @@ mod get_trading_pairs {
         init_state();
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        let tick_size = order::TickSize::new(NonZeroU64::new(10).unwrap());
-        let lot_size = order::LotSize::new(NonZeroU64::new(100).unwrap());
         state::with_state_mut(|s| {
-            s.add_trading_pair(TradingPair { base, quote }, tick_size, lot_size)
-        })
-        .expect("should successfully add new trading pair");
+            s.add_trading_pair(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE)
+                .unwrap();
+        });
 
         let pairs = get_trading_pairs();
 
@@ -135,8 +141,8 @@ mod get_trading_pairs {
             vec![TradingPairInfo {
                 base_asset: dex_types::TokenId::from(base),
                 quote_asset: dex_types::TokenId::from(quote),
-                tick_size: tick_size.get(),
-                lot_size: lot_size.get(),
+                tick_size: TICK_SIZE.get(),
+                lot_size: LOT_SIZE.get(),
             }]
         );
     }
