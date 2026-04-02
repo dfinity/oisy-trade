@@ -56,11 +56,12 @@ pub fn register_default_trading_pairs() {
         quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
     };
     state::with_state_mut(|s| {
-        s.add_order_book(
+        s.add_trading_pair(
             pair,
             order::TickSize::new(NonZeroU64::new(10).unwrap()),
             order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
         )
+        .unwrap()
     });
 }
 

@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use candid::{Encode, Nat, Principal};
+use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::Setup;
 use dex_types::{
@@ -7,7 +7,6 @@ use dex_types::{
     LedgerTransferFromError, TokenId,
 };
 use icrc_ledger_types::icrc1::account::Account;
-use pocket_ic::{RejectCode, RejectResponse};
 
 #[allow(clippy::too_many_arguments)]
 async fn assert_balances<R: Runtime>(
@@ -43,9 +42,11 @@ async fn assert_balances<R: Runtime>(
 }
 
 mod add_limit_order {
-    use candid::Principal;
+    use assert_matches::assert_matches;
+    use candid::{Encode, Principal};
     use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{LimitOrderRequest, OrderStatus, Side, TradingPair};
+    use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
     async fn should_add_limit_order_and_query_status() {
@@ -68,37 +69,37 @@ mod add_limit_order {
         let status = client.get_order_status(order_id).await;
         assert_eq!(status, OrderStatus::Pending);
 
-    // Valid hex format but non-existent order
-    let not_found = client
-        .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
-        .await;
-    assert_eq!(not_found, OrderStatus::NotFound);
+        // Valid hex format but non-existent order
+        let not_found = client
+            .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
+            .await;
+        assert_eq!(not_found, OrderStatus::NotFound);
 
-    setup.drop().await;
-}
+        setup.drop().await;
+    }
 
-#[tokio::test]
-async fn should_trap_on_syntactically_invalid_order_id() {
-    let setup = Setup::new().await;
+    #[tokio::test]
+    async fn should_trap_on_syntactically_invalid_order_id() {
+        let setup = Setup::new().await;
 
-    let result = setup
-        .env()
-        .query_call(
-            setup.dex_id(),
-            Principal::anonymous(),
-            "get_order_status",
-            Encode!(&"not-a-valid-id".to_string()).unwrap(),
-        )
-        .await;
+        let result = setup
+            .env()
+            .query_call(
+                setup.dex_id(),
+                Principal::anonymous(),
+                "get_order_status",
+                Encode!(&"not-a-valid-id".to_string()).unwrap(),
+            )
+            .await;
 
-    assert_matches!(
-        result,
-        Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
-        if reject_message.contains("invalid order ID")
-    );
+        assert_matches!(
+            result,
+            Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
+            if reject_message.contains("invalid order ID")
+        );
 
-    setup.drop().await;
-}
+        setup.drop().await;
+    }
 
     #[tokio::test]
     async fn should_reject_invalid_orders() {

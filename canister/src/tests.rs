@@ -1,4 +1,4 @@
-// TODO: needed?
+// TODO DEFI-2753: use mock runtime
 /// Helper to add an order via State directly (bypasses IC timer in lib::add_limit_order).
 fn add_order(
     request: dex_types::LimitOrderRequest,
@@ -11,7 +11,7 @@ fn add_order(
         quantity: order::Quantity::from(request.quantity),
     };
     state::with_state_mut(|s| s.add_limit_order(pair, pending))
-        .map(u64::from)
+        .map(|id| id.to_string())
         .map_err(dex_types::AddLimitOrderError::from)
 }
 
@@ -116,7 +116,6 @@ mod get_trading_pairs {
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use candid::Principal;
     use dex_types::TradingPairInfo;
-    use std::num::NonZeroU64;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -131,7 +130,8 @@ mod get_trading_pairs {
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
         state::with_state_mut(|s| {
-            s.add_order_book(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE);
+            s.add_trading_pair(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE)
+                .unwrap();
         });
 
         let pairs = get_trading_pairs();

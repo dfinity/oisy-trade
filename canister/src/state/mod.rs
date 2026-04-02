@@ -1,7 +1,7 @@
 use crate::Task;
 use crate::order::{
-    LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
@@ -85,20 +85,20 @@ impl State {
     }
 
     /// Register a new trading pair with a new order book.
-    pub fn add_order_book(
+    pub fn add_trading_pair(
         &mut self,
         pair: TradingPair,
-        tick_size: crate::order::TickSize,
-        lot_size: crate::order::LotSize,
-    ) {
-        assert!(
-            !self.trading_pairs.contains_key(&pair),
-            "ERROR: order book already exists for this pair"
-        );
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        if self.trading_pairs.contains_key(&pair) {
+            return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
+        }
         let book_id = self.next_book_id();
         let book = OrderBook::new(book_id, tick_size, lot_size);
         assert_eq!(self.trading_pairs.insert(pair, book_id), None);
         assert_eq!(self.order_books.insert(book_id, book), None);
+        Ok(())
     }
 
     pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
@@ -135,22 +135,6 @@ impl State {
             .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
-    }
-
-    pub fn add_trading_pair(
-        &mut self,
-        pair: TradingPair,
-        tick_size: TickSize,
-        lot_size: LotSize,
-    ) -> Result<(), dex_types::AddTradingPairError> {
-        use std::collections::btree_map::Entry;
-        match self.order_books.entry(pair) {
-            Entry::Occupied(_) => Err(dex_types::AddTradingPairError::TradingPairAlreadyExists),
-            Entry::Vacant(entry) => {
-                entry.insert(OrderBook::new(tick_size, lot_size));
-                Ok(())
-            }
-        }
     }
 
     /// Set of currently active tasks to avoid parallel execution.
