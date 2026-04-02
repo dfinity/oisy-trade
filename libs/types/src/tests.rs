@@ -1,5 +1,6 @@
 use crate::{
-    AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TokenId, TradingPair, TradingPairInfo,
+    AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId, TradingPair,
+    TradingPairInfo,
 };
 use candid::Principal;
 
@@ -70,6 +71,17 @@ fn should_serialize_trading_pair() {
     let encoded = candid::encode_one(pair).unwrap();
     let decoded: TradingPair = candid::decode_one(&encoded).unwrap();
     assert_eq!(pair, decoded);
+}
+
+#[test]
+fn should_serialize_balance() {
+    let balance = Balance {
+        free: candid::Nat::from(1_000_000_u64),
+        reserved: candid::Nat::from(500_000_u64),
+    };
+    let encoded = candid::encode_one(&balance).unwrap();
+    let decoded: Balance = candid::decode_one(&encoded).unwrap();
+    assert_eq!(balance, decoded);
 }
 
 #[test]
