@@ -1,5 +1,6 @@
 use super::{
-    Order, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, RestingOrder, Side,
+    LotSize, Order, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, RestingOrder,
+    Side, TickSize,
 };
 use dex_types::OrderStatus;
 use std::cmp::Reverse;
@@ -18,9 +19,9 @@ pub struct OrderBook {
     /// Per-book sequence counter for generating order IDs.
     next_seq: OrderSeq,
     /// Minimum price increment. All order prices must be a multiple of this value.
-    tick_size: Price,
+    tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
-    lot_size: Quantity,
+    lot_size: LotSize,
     /// Orders awaiting matching, processed by the timer.
     pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
@@ -33,14 +34,7 @@ pub struct OrderBook {
 
 impl OrderBook {
     /// Creates a new empty order book with the given constraints.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `tick_size` or `lot_size` is zero.
-    pub fn new(id: OrderBookId, tick_size: Price, lot_size: Quantity) -> Self {
-        assert!(!tick_size.is_zero(), "tick_size must be non-zero");
-        assert!(!lot_size.is_zero(), "lot_size must be non-zero");
-
+    pub fn new(id: OrderBookId, tick_size: TickSize, lot_size: LotSize) -> Self {
         Self {
             id,
             next_seq: OrderSeq::default(),
@@ -72,11 +66,11 @@ impl OrderBook {
         self.resting_orders.is_empty() && self.pending_orders.is_empty()
     }
 
-    pub fn tick_size(&self) -> Price {
+    pub fn tick_size(&self) -> TickSize {
         self.tick_size
     }
 
-    pub fn lot_size(&self) -> Quantity {
+    pub fn lot_size(&self) -> LotSize {
         self.lot_size
     }
 
@@ -304,10 +298,10 @@ pub struct Fill {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchOrderError {
     /// Price is not a positive multiple of the tick size.
-    InvalidTickSize { price: Price, tick_size: Price },
+    InvalidTickSize { price: Price, tick_size: TickSize },
     /// Quantity is not a positive multiple of the lot size.
     InvalidLotSize {
         quantity: Quantity,
-        lot_size: Quantity,
+        lot_size: LotSize,
     },
 }

@@ -5,8 +5,11 @@
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Principal};
-use dex_types::{AddLimitOrderError, LimitOrderRequest, OrderId, OrderStatus};
+use candid::{CandidType, Nat, Principal};
+use dex_types::{
+    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    OrderStatus, TokenId, TradingPairInfo,
+};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
@@ -74,6 +77,30 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         self.runtime
             .call(self.dex_canister, "get_order_status", (order_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query all listed trading pairs on the DEX canister.
+    pub async fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
+        self.runtime
+            .call(self.dex_canister, "get_trading_pairs", (), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Deposit tokens into the DEX canister.
+    pub async fn deposit(&self, request: DepositRequest) -> Result<DepositResponse, DepositError> {
+        self.runtime
+            .call(self.dex_canister, "deposit", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the caller's balance for a given token.
+    pub async fn get_balance(&self, token_id: TokenId) -> Nat {
+        self.runtime
+            .call(self.dex_canister, "get_balance", (token_id,), 0)
             .await
             .unwrap()
     }

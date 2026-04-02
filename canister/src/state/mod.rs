@@ -2,7 +2,8 @@ use crate::order::{
     MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TokenId, TokenMetadata,
     TradingPair,
 };
-use dex_types::OrderStatus;
+use candid::{Nat, Principal};
+use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -33,6 +34,8 @@ pub struct State {
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: BTreeMap<TradingPair, OrderBookId>,
     order_books: BTreeMap<OrderBookId, OrderBook>,
+    // TODO(DEFI-2746): Add support for subaccounts.
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
 }
 
 impl State {
@@ -83,8 +86,8 @@ impl State {
     pub fn add_order_book(
         &mut self,
         pair: TradingPair,
-        tick_size: crate::order::Price,
-        lot_size: crate::order::Quantity,
+        tick_size: crate::order::TickSize,
+        lot_size: crate::order::LotSize,
     ) {
         assert!(
             !self.trading_pairs.contains_key(&pair),
@@ -94,6 +97,42 @@ impl State {
         let book = OrderBook::new(book_id, tick_size, lot_size);
         assert_eq!(self.trading_pairs.insert(pair, book_id), None);
         assert_eq!(self.order_books.insert(book_id, book), None);
+    }
+
+    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
+        self.trading_pairs
+            .iter()
+            .map(|(pair, book_id)| {
+                let book = self
+                    .order_books
+                    .get(book_id)
+                    .expect("BUG: trading pair registered but order book missing");
+                TradingPairInfo {
+                    base_asset: dex_types::TokenId::from(pair.base),
+                    quote_asset: dex_types::TokenId::from(pair.quote),
+                    tick_size: book.tick_size().get(),
+                    lot_size: book.lot_size().get(),
+                }
+            })
+            .collect()
+    }
+
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
+        let balance = self
+            .balances
+            .entry(user)
+            .or_default()
+            .entry(token_id)
+            .or_insert_with(|| Nat::from(0u64));
+        *balance += amount;
+    }
+
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
+        self.balances
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token_id))
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
     }
 }
 

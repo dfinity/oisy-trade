@@ -5,6 +5,7 @@ mod tests;
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::Principal;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,6 +127,18 @@ impl TokenId {
     }
 }
 
+impl From<dex_types::TokenId> for TokenId {
+    fn from(value: dex_types::TokenId) -> Self {
+        Self(value.ledger_id)
+    }
+}
+
+impl From<TokenId> for dex_types::TokenId {
+    fn from(value: TokenId) -> Self {
+        Self { ledger_id: value.0 }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TokenMetadata {
     pub symbol: String,
@@ -165,8 +178,48 @@ impl Price {
         self.0 == 0
     }
 
-    pub fn is_multiple_of(self, other: Self) -> bool {
-        self.0.is_multiple_of(other.0)
+    pub fn is_multiple_of(self, tick_size: TickSize) -> bool {
+        self.0.is_multiple_of(tick_size.get())
+    }
+}
+
+/// Minimum price increment for a trading pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TickSize(NonZeroU64);
+
+impl TickSize {
+    pub const fn new(value: NonZeroU64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl From<TickSize> for u64 {
+    fn from(tick_size: TickSize) -> Self {
+        tick_size.get()
+    }
+}
+
+/// Minimum order quantity for a trading pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LotSize(NonZeroU64);
+
+impl LotSize {
+    pub const fn new(value: NonZeroU64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl From<LotSize> for u64 {
+    fn from(lot_size: LotSize) -> Self {
+        lot_size.get()
     }
 }
 
@@ -200,8 +253,8 @@ impl Quantity {
         self.0 == 0
     }
 
-    pub fn is_multiple_of(self, other: Self) -> bool {
-        self.0.is_multiple_of(other.0)
+    pub fn is_multiple_of(self, lot_size: LotSize) -> bool {
+        self.0.is_multiple_of(lot_size.get())
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
