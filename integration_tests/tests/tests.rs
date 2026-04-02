@@ -49,8 +49,8 @@ async fn should_add_limit_order_and_query_status() {
     let order_id = client
         .add_limit_order(LimitOrderRequest {
             pair: TradingPair {
-                base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-                quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+                base: setup.base_ledger_id(),
+                quote: setup.quote_ledger_id(),
             },
             side: Side::Buy,
             price: 100,
@@ -69,14 +69,16 @@ async fn should_add_limit_order_and_query_status() {
 }
 
 #[tokio::test]
-async fn should_return_empty_trading_pairs() {
+async fn should_return_trading_pairs() {
     let setup = Setup::new().await;
     let client = setup.dex_client();
 
     let pairs = client.get_trading_pairs().await;
-    // TODO DEFI-2723: there should only be a trading pair if one was added by an admin.
-    // Currently it's hard-coded in the init args.
-    assert!(!pairs.is_empty());
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].base_asset.ledger_id, setup.base_ledger_id());
+    assert_eq!(pairs[0].quote_asset.ledger_id, setup.quote_ledger_id());
+    assert_eq!(pairs[0].tick_size, 10);
+    assert_eq!(pairs[0].lot_size, 1_000_000);
 
     setup.drop().await;
 }
@@ -346,19 +348,6 @@ fn add_trading_pair_request(setup: &Setup) -> AddTradingPairRequest {
 }
 
 #[tokio::test]
-async fn should_add_trading_pair_as_controller() {
-    let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
-
-    let result = controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
-        .await;
-    assert_eq!(result, Ok(()));
-
-    setup.drop().await;
-}
-
-#[tokio::test]
 async fn should_fail_add_trading_pair() {
     let setup = Setup::new().await;
     let controller_client = setup.dex_client_with_caller(setup.controller());
@@ -404,12 +393,7 @@ async fn should_fail_add_trading_pair() {
         .await;
     assert_eq!(result, Err(AddTradingPairError::InvalidLotSize));
 
-    // already exists
-    let result = controller_client
-        .add_trading_pair(add_trading_pair_request(&setup))
-        .await;
-    assert_eq!(result, Ok(()));
-
+    // already exists (registered by Setup::new())
     let result = controller_client
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;

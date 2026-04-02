@@ -26,21 +26,6 @@ pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOr
     Ok(u64::from(order_id))
 }
 
-/// Register default trading pairs for testing.
-/// TODO DEFI-2744: replace with an admin endpoint.
-pub fn register_default_trading_pairs() {
-    use candid::Principal;
-    let pair = order::TradingPair {
-        base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
-        quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
-    };
-    let book = order::OrderBook::new(
-        order::TickSize::new(NonZeroU64::new(10).unwrap()),
-        order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-    );
-    state::with_state_mut(|s| s.add_order_book(pair, book));
-}
-
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     state::with_state(|s| s.get_order_status(order::OrderId::from(order_id)))
 }

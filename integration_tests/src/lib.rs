@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
 use dex_client::{DexClient, Runtime};
+use dex_types::{AddTradingPairRequest, TokenId};
 use ic_cdk::call::RejectCode;
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
@@ -66,6 +67,28 @@ impl Setup {
         .await;
 
         let caller = DEFAULT_CALLER_TEST_ID;
+
+        // Register a default trading pair as the controller.
+        let controller_client = DexClient::new(
+            PocketIcRuntime {
+                env: &env,
+                caller: controller,
+            },
+            canister_id,
+        );
+        controller_client
+            .add_trading_pair(AddTradingPairRequest {
+                base: TokenId {
+                    ledger_id: base_ledger_id,
+                },
+                quote: TokenId {
+                    ledger_id: quote_ledger_id,
+                },
+                tick_size: 10,
+                lot_size: 1_000_000,
+            })
+            .await
+            .expect("Failed to register default trading pair");
 
         Self {
             env: Some(env),
