@@ -65,9 +65,9 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
-pub fn get_balance(token_id: dex_types::TokenId) -> candid::Nat {
+pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl runtime::Runtime) -> candid::Nat {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let caller = ic_cdk::api::msg_caller();
+    let caller = runtime.msg_caller();
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
 }
 

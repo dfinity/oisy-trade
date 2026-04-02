@@ -32,7 +32,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 
 #[ic_cdk::query]
 fn get_balance(token_id: TokenId) -> candid::Nat {
-    dex_canister::get_balance(token_id)
+    dex_canister::get_balance(token_id, &dex_canister::runtime::IC_RUNTIME)
 }
 
 #[ic_cdk::update]
