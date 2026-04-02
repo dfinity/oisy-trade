@@ -30,7 +30,9 @@ impl FromStr for Priority {
         match s.to_lowercase().as_str() {
             "info" => Ok(Priority::Info),
             "debug" => Ok(Priority::Debug),
-            _ => Err("could not recognize priority".to_string()),
+            _ => Err(format!(
+                "unrecognized priority '{s}'; expected one of: info | debug"
+            )),
         }
     }
 }
