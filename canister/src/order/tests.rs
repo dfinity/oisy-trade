@@ -19,12 +19,12 @@ mod order_id {
         }
 
         #[test]
-        fn should_reject_wrong_length(s in "[0-9a-f]{0,31}|[0-9a-f]{33,64}") {
+        fn should_reject_wrong_length(s in ".{0,31}|.{33,64}") {
             prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
         }
 
         #[test]
-        fn should_reject_non_hex(s in "[g-z]{32}") {
+        fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
             prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
         }
     }
