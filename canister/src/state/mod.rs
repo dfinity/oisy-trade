@@ -1,4 +1,5 @@
 use crate::Task;
+use crate::balance::Balance;
 use crate::order::{
     LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TickSize, TokenId,
     TokenMetadata, TradingPair,
@@ -36,7 +37,7 @@ pub struct State {
     trading_pairs: BTreeMap<TradingPair, OrderBookId>,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -120,21 +121,20 @@ impl State {
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
-        let balance = self
-            .balances
+        self.balances
             .entry(user)
             .or_default()
             .entry(token_id)
-            .or_insert_with(|| Nat::from(0u64));
-        *balance += amount;
+            .or_default()
+            .deposit(amount);
     }
 
-    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> dex_types::Balance {
         self.balances
             .get(&user)
             .and_then(|tokens| tokens.get(&token_id))
-            .cloned()
-            .unwrap_or(Nat::from(0u64))
+            .map(dex_types::Balance::from)
+            .unwrap_or_else(|| Balance::zero().into())
     }
 
     /// Set of currently active tasks to avoid parallel execution.

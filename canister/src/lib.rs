@@ -7,6 +7,7 @@ use std::{num::NonZeroU64, time::Duration};
 
 pub use runtime::{IC_RUNTIME, Runtime};
 
+pub mod balance;
 pub mod guard;
 pub mod order;
 pub mod runtime;
@@ -94,7 +95,7 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
-pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> candid::Nat {
+pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = runtime.msg_caller();
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
