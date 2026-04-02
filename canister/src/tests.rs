@@ -83,13 +83,13 @@ mod get_order_status {
 }
 
 mod get_trading_pairs {
-    use crate::get_trading_pairs;
     use crate::order::{TokenId, TradingPair};
     use crate::state;
     use crate::state::init_state;
-    use crate::test_fixtures::order_book;
+    use crate::{get_trading_pairs, order};
     use candid::Principal;
     use dex_types::TradingPairInfo;
+    use std::num::NonZeroU64;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -103,12 +103,12 @@ mod get_trading_pairs {
         init_state();
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        let order_book = order_book();
-        let tick_size = order_book.tick_size().get();
-        let lot_size = order_book.lot_size().get();
+        let tick_size = order::TickSize::new(NonZeroU64::new(10).unwrap());
+        let lot_size = order::LotSize::new(NonZeroU64::new(100).unwrap());
         state::with_state_mut(|s| {
-            s.add_trading_pair(TradingPair { base, quote }, order_book);
-        });
+            s.add_trading_pair(TradingPair { base, quote }, tick_size, lot_size)
+        })
+        .expect("should successfully add new trading pair");
 
         let pairs = get_trading_pairs();
 
@@ -117,8 +117,8 @@ mod get_trading_pairs {
             vec![TradingPairInfo {
                 base_asset: dex_types::TokenId::from(base),
                 quote_asset: dex_types::TokenId::from(quote),
-                tick_size,
-                lot_size,
+                tick_size: tick_size.get(),
+                lot_size: lot_size.get(),
             }]
         );
     }

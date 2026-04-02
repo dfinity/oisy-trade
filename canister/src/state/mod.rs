@@ -1,5 +1,6 @@
 use crate::order::{
-    MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
+    LotSize, MatchOrderError, OrderBook, OrderId, PendingOrder, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
@@ -85,11 +86,6 @@ impl State {
         );
     }
 
-    #[cfg(test)]
-    pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
-        self.order_books.insert(pair, order_book);
-    }
-
     pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
         self.order_books
             .iter()
@@ -118,6 +114,22 @@ impl State {
             .and_then(|tokens| tokens.get(&token_id))
             .cloned()
             .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn add_trading_pair(
+        &mut self,
+        pair: TradingPair,
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        use std::collections::btree_map::Entry;
+        match self.order_books.entry(pair) {
+            Entry::Occupied(_) => Err(dex_types::AddTradingPairError::TradingPairAlreadyExists),
+            Entry::Vacant(entry) => {
+                entry.insert(OrderBook::new(tick_size, lot_size));
+                Ok(())
+            }
+        }
     }
 }
 
