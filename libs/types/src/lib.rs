@@ -62,6 +62,15 @@ pub enum AddLimitOrderError {
         /// The required lot size.
         lot_size: u64,
     },
+    /// The user does not have enough balance to place the order.
+    InsufficientBalance {
+        /// The token for which the balance is insufficient.
+        token: TokenId,
+        /// The user's available balance.
+        available: Nat,
+        /// The balance required to place the order.
+        required: Nat,
+    },
 }
 
 /// Information about a listed trading pair.

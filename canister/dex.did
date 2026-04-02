@@ -40,6 +40,8 @@ type AddLimitOrderError = variant {
     InvalidPrice : record { price : nat64; tick_size : nat64 };
     /// The quantity is not a positive multiple of the lot size.
     InvalidQuantity : record { quantity : nat64; lot_size : nat64 };
+    /// The user does not have enough balance to place the order.
+    InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
 /// Information about a listed trading pair.
