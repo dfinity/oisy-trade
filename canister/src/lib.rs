@@ -5,8 +5,11 @@ use dex_types::{
 };
 use std::{num::NonZeroU64, time::Duration};
 
+pub use runtime::{IC_RUNTIME, Runtime};
+
 pub mod guard;
 pub mod order;
+pub mod runtime;
 pub mod state;
 
 mod ledger;
@@ -76,26 +79,32 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| s.get_trading_pairs())
 }
 
-pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+pub async fn deposit(
+    request: DepositRequest,
+    runtime: &impl Runtime,
+) -> Result<DepositResponse, DepositError> {
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let amount = request.amount.clone();
-    let caller = ic_cdk::api::msg_caller();
+    let caller = runtime.msg_caller();
 
-    let deposit_response = ledger::deposit(request).await?;
+    let deposit_response = ledger::deposit(request, runtime).await?;
     state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
 
     Ok(deposit_response)
 }
 
-pub fn get_balance(token_id: dex_types::TokenId) -> candid::Nat {
+pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> candid::Nat {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let caller = ic_cdk::api::msg_caller();
+    let caller = runtime.msg_caller();
     state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
 }
 
-pub fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
-    if !ic_cdk::api::is_controller(&ic_cdk::api::msg_caller()) {
+pub fn add_trading_pair(
+    request: AddTradingPairRequest,
+    runtime: &impl Runtime,
+) -> Result<(), AddTradingPairError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(AddTradingPairError::NotController);
     }
     if request.base == request.quote {

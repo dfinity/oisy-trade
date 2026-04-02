@@ -21,17 +21,17 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    dex_canister::deposit(request).await
+    dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await
 }
 
 #[ic_cdk::query]
 fn get_balance(token_id: TokenId) -> candid::Nat {
-    dex_canister::get_balance(token_id)
+    dex_canister::get_balance(token_id, &dex_canister::IC_RUNTIME)
 }
 
 #[ic_cdk::update]
 fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
-    dex_canister::add_trading_pair(request)
+    dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
 }
 
 #[ic_cdk::init]
