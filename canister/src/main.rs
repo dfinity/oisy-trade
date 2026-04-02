@@ -27,7 +27,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    dex_canister::deposit(request).await
+    dex_canister::deposit(request, &dex_canister::runtime::IC_RUNTIME).await
 }
 
 #[ic_cdk::query]

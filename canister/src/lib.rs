@@ -50,13 +50,16 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| s.get_trading_pairs())
 }
 
-pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
+pub async fn deposit(
+    request: DepositRequest,
+    runtime: &impl runtime::Runtime,
+) -> Result<DepositResponse, DepositError> {
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let amount = request.amount.clone();
-    let caller = ic_cdk::api::msg_caller();
+    let caller = runtime.msg_caller();
 
-    let deposit_response = ledger::deposit(request).await?;
+    let deposit_response = ledger::deposit(request, runtime).await?;
     state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
 
     Ok(deposit_response)
