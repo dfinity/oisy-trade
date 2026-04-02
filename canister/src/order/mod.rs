@@ -56,7 +56,7 @@ impl OrderSeq {
 
 /// Unique order identifier encoding the order book ID and a per-book sequence number.
 ///
-/// Serialized as a 32-character hex string (16 bytes: 8 for book ID, 8 for sequence).
+/// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OrderId {
     book_id: OrderBookId,
