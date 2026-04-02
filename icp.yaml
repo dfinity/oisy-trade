@@ -1,0 +1,18 @@
+canisters:
+  - name: dex
+    recipe:
+      type: "@dfinity/rust@latest"
+      configuration:
+        package: dex_canister
+        candid: canister/dex.did
+        shrink: true
+        compress: true
+
+environments:
+  - name: staging
+    network: ic
+    canisters: [dex]
+
+  - name: prod
+    network: ic
+    canisters: [dex]
