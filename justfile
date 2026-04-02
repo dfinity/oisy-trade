@@ -33,5 +33,5 @@ integration-tests: download-external-wasms
     cargo test --package dex_int_tests -- --test-threads 2 --nocapture
 
 # Deploy to staging
-deploy:
-    icp deploy dex --identity hsm --environment staging
+deploy identity='hsm':
+    icp deploy dex --identity {{identity}} --environment staging

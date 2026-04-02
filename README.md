@@ -38,6 +38,9 @@ just ci
 
 ### Deployment to staging :rocket:
 
+Requires the [icp CLI](https://cli.internetcomputer.org/) with an identity that has deploy permissions.
+By default the `hsm` identity is used; override with `just deploy <identity>`.
+
 ```bash
 just deploy
 ```
