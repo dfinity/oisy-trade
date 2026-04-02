@@ -31,8 +31,8 @@ mod order_id {
 }
 
 mod order_book {
-    use crate::order::{Fill, MatchOrderError, MatchResult, OrderBook, OrderSeq, Price, Quantity};
-    use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, buy, order_book, sell};
+    use crate::order::{Fill, MatchOrderError, MatchResult, OrderSeq, Price, Quantity};
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, order_book, sell};
 
     mod validation {
         use super::*;
