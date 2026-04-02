@@ -55,24 +55,6 @@ pub fn process_pending_orders() {
     state::with_state_mut(|s| s.process_pending_orders());
 }
 
-/// Register default trading pairs for testing.
-/// TODO DEFI-2744: replace with an admin endpoint.
-pub fn register_default_trading_pairs() {
-    use candid::Principal;
-    let pair = order::TradingPair {
-        base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
-        quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
-    };
-    state::with_state_mut(|s| {
-        s.add_trading_pair(
-            pair,
-            order::TickSize::new(NonZeroU64::new(10).unwrap()),
-            order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-        )
-        .unwrap()
-    });
-}
-
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     match order_id.parse::<order::OrderId>() {
         Ok(id) => state::with_state(|s| s.get_order_status(id)),

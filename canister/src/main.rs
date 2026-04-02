@@ -39,7 +39,6 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
 fn init() {
     dex_canister::state::init_state();
     // TODO DEFI-2744: replace with an admin endpoint
-    dex_canister::register_default_trading_pairs();
     setup_timers();
 }
 
