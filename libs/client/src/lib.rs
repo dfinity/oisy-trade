@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Nat, Principal};
+use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
     DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId,
