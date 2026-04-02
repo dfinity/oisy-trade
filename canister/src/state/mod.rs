@@ -1,3 +1,4 @@
+use crate::Task;
 use crate::order::{
     LotSize, MatchOrderError, OrderBook, OrderId, PendingOrder, TickSize, TokenId, TokenMetadata,
     TradingPair,
@@ -5,7 +6,7 @@ use crate::order::{
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -35,6 +36,7 @@ pub struct State {
     order_books: BTreeMap<TradingPair, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
+    active_tasks: BTreeSet<Task>,
 }
 
 impl State {
@@ -130,6 +132,11 @@ impl State {
                 Ok(())
             }
         }
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
     }
 }
 

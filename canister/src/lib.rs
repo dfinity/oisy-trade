@@ -3,8 +3,9 @@ use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
     DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
 };
-use std::num::NonZeroU64;
+use std::{num::NonZeroU64, time::Duration};
 
+pub mod guard;
 pub mod order;
 pub mod state;
 
@@ -13,6 +14,13 @@ mod ledger;
 mod test_fixtures;
 #[cfg(test)]
 mod tests;
+
+pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+pub enum Task {
+    ProcessPendingOrders,
+}
 
 pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     let pair = order::TradingPair::from(request.pair);
@@ -23,7 +31,20 @@ pub fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOr
     };
     let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
         .map_err(AddLimitOrderError::from)?;
+    // Trigger matching, no need to wait for the timer to fire
+    ic_cdk_timers::set_timer(Duration::ZERO, async {
+        process_pending_orders();
+    });
     Ok(u64::from(order_id))
+}
+
+pub fn process_pending_orders() {
+    let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
+        Some(guard) => guard,
+        None => return,
+    };
+
+    state::with_state_mut(|s| s.process_pending_orders());
 }
 
 /// Register default trading pairs for testing.
