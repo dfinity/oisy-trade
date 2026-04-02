@@ -12,6 +12,7 @@ See the [design document](docs/design.md) for the high-level architecture.
 
 - [Rust](https://www.rust-lang.org/tools/install)
 - [just](https://github.com/casey/just)
+- [icp](https://cli.internetcomputer.org/)
 
 ### Build
 
@@ -33,4 +34,10 @@ just build
 
 ```bash
 just ci
+```
+
+### Deployment to staging :rocket:
+
+```bash
+just deploy
 ```
