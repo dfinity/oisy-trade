@@ -6,6 +6,7 @@ use dex_types::{
 use std::num::NonZeroU64;
 
 pub mod order;
+pub mod runtime;
 pub mod state;
 
 mod ledger;

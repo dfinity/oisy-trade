@@ -491,6 +491,7 @@ dependencies = [
 name = "dex_canister"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "candid",
  "candid_parser",
  "dex_types",
