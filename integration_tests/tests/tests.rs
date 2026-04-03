@@ -55,7 +55,6 @@ mod add_limit_order {
     use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{
         AddLimitOrderError, Balance, DepositRequest, LimitOrderRequest, OrderStatus, Side,
-        TradingPair,
     };
     use pocket_ic::{RejectCode, RejectResponse};
 
@@ -160,88 +159,6 @@ mod add_limit_order {
             Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
             if reject_message.contains("invalid order ID")
         );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_reject_invalid_orders() {
-        let setup = Setup::new().await;
-        let client = setup.dex_client();
-        let pair = test_trading_pair();
-
-        let cases = vec![
-            (
-                "unknown trading pair",
-                LimitOrderRequest {
-                    pair: TradingPair {
-                        base: Principal::management_canister(),
-                        quote: Principal::management_canister(),
-                    },
-                    side: Side::Buy,
-                    price: 100,
-                    quantity: 1_000_000,
-                },
-                dex_types::AddLimitOrderError::UnknownTradingPair,
-            ),
-            (
-                "price not a multiple of tick size",
-                LimitOrderRequest {
-                    pair,
-                    side: Side::Buy,
-                    price: 7,
-                    quantity: 1_000_000,
-                },
-                dex_types::AddLimitOrderError::InvalidPrice {
-                    price: 7,
-                    tick_size: 10,
-                },
-            ),
-            (
-                "zero price",
-                LimitOrderRequest {
-                    pair,
-                    side: Side::Buy,
-                    price: 0,
-                    quantity: 1_000_000,
-                },
-                dex_types::AddLimitOrderError::InvalidPrice {
-                    price: 0,
-                    tick_size: 10,
-                },
-            ),
-            (
-                "quantity not a multiple of lot size",
-                LimitOrderRequest {
-                    pair,
-                    side: Side::Sell,
-                    price: 100,
-                    quantity: 500_000,
-                },
-                dex_types::AddLimitOrderError::InvalidQuantity {
-                    quantity: 500_000,
-                    lot_size: 1_000_000,
-                },
-            ),
-            (
-                "zero quantity",
-                LimitOrderRequest {
-                    pair,
-                    side: Side::Sell,
-                    price: 100,
-                    quantity: 0,
-                },
-                dex_types::AddLimitOrderError::InvalidQuantity {
-                    quantity: 0,
-                    lot_size: 1_000_000,
-                },
-            ),
-        ];
-
-        for (name, request, expected_error) in cases {
-            let result = client.add_limit_order(request).await;
-            assert_eq!(result, Err(expected_error), "case: {name}");
-        }
 
         setup.drop().await;
     }

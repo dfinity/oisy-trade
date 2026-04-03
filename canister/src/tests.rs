@@ -43,16 +43,21 @@ mod add_limit_order {
         init_state_with_order_book();
         fund_user(DEFAULT_USER);
         let runtime = mock_runtime_for(DEFAULT_USER);
-        let mut request = limit_order_request();
-        request.price = 7; // not a multiple of tick size (10)
-        let result = add_limit_order(request, &runtime);
-        assert_eq!(
-            result,
-            Err(dex_types::AddLimitOrderError::InvalidPrice {
-                price: 7,
-                tick_size: 10,
-            })
-        );
+
+        let cases = vec![(7, "not a multiple of tick size"), (0, "zero price")];
+        for (price, name) in cases {
+            let mut request = limit_order_request();
+            request.price = price;
+            let result = add_limit_order(request, &runtime);
+            assert_eq!(
+                result,
+                Err(dex_types::AddLimitOrderError::InvalidPrice {
+                    price,
+                    tick_size: 10,
+                }),
+                "case: {name}"
+            );
+        }
     }
 
     #[test]
@@ -60,16 +65,25 @@ mod add_limit_order {
         init_state_with_order_book();
         fund_user(DEFAULT_USER);
         let runtime = mock_runtime_for(DEFAULT_USER);
-        let mut request = limit_order_request();
-        request.quantity = 500_000; // not a multiple of lot size (1_000_000)
-        let result = add_limit_order(request, &runtime);
-        assert_eq!(
-            result,
-            Err(dex_types::AddLimitOrderError::InvalidQuantity {
-                quantity: 500_000,
-                lot_size: 1_000_000,
-            })
-        );
+
+        let cases = vec![
+            (500_000, "not a multiple of lot size"),
+            (0, "zero quantity"),
+        ];
+        for (quantity, name) in cases {
+            let mut request = limit_order_request();
+            request.side = dex_types::Side::Sell;
+            request.quantity = quantity;
+            let result = add_limit_order(request, &runtime);
+            assert_eq!(
+                result,
+                Err(dex_types::AddLimitOrderError::InvalidQuantity {
+                    quantity,
+                    lot_size: 1_000_000,
+                }),
+                "case: {name}"
+            );
+        }
     }
 
     #[test]
