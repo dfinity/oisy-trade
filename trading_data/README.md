@@ -1,10 +1,21 @@
 # Trading Data
 
-Trading data obtained from Binance public API on 2026-04-04. Interesting pairs related to ICP:
+The aim is to get a rough idea of the load that can be envisioned for a successful order book in the ICP ecosystem. 
+We focus on Binance as the primary benchmark because it handles 25-40x more ICP volume than the next largest exchange (Kraken):
+
+| Metric             | Binance ICP/USDT | Kraken ICP/USD | Ratio |
+|--------------------|-----------------|----------------|-------|
+| Trades/24h         | 15,726          | 644            | 24x   |
+| Volume/24h (ICP)   | 1,190,221       | 28,933         | 41x   |
+| Book depth (levels) | 5,697          | 761            | 7.5x  |
+| Peak trades/hour   | 143,932         | 3,532          | 41x   |
+
+Both exchanges peaked at the same hour (2026-03-11 06:00 UTC) with similar peak-to-average ratios (~30-54x), confirming that burst patterns are market-wide, not exchange-specific.
+
+The trading data below was obtained from Binance public API on 2026-04-04. Interesting pairs related to ICP:
 * ICP/BTC: pure crypto trading pair
 * ICP/USDT: most active trading pair involving ICP
 
-The aim is to get a rough idea of the load that can be envisioned for a successful order book in the ICP ecosystem.
 
 ## Overview of ICP Trading Pairs on Binance (24h snapshot, 2026-04-04)
 
