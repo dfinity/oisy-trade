@@ -216,18 +216,22 @@ impl Setup {
 
 impl Drop for Setup {
     fn drop(&mut self) {
-        if self.env.is_some() {
+        if self.env.is_some() && !std::thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
 }
 
 fn dex_wasm() -> Vec<u8> {
-    ic_test_utilities_load_wasm::load_wasm(
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../canister"),
-        "dex_canister",
-        &[],
-    )
+    let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("../wasms/dex_canister.wasm.gz");
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read DEX WASM at {}: {}\nRun `just build` first.",
+            path.display(),
+            e
+        )
+    })
 }
 
 pub fn ledger_wasm() -> Vec<u8> {

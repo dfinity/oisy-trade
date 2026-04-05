@@ -201,15 +201,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
-name = "camino"
-version = "1.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "candid"
 version = "0.10.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -264,28 +255,6 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "toml",
-]
-
-[[package]]
-name = "cargo-platform"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "cargo_metadata"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4acbb09d9ee8e23699b9634375c72795d095bf268439da88562cf9b501f181fa"
-dependencies = [
- "camino",
- "cargo-platform",
- "semver",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -544,7 +513,6 @@ dependencies = [
  "dex_client",
  "dex_types",
  "ic-cdk",
- "ic-test-utilities-load-wasm",
  "icrc-ledger-types",
  "pocket-ic",
  "serde",
@@ -651,18 +619,6 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "escargot"
-version = "0.5.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05a3ac187a16b5382fef8c69fd1bad123c67b7cf3932240a2d43dcdd32cded88"
-dependencies = [
- "log",
- "once_cell",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1090,15 +1046,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d30d4cf17aff1024e13133897048bcba580e063c9000571ab766ca37e2996f4"
 dependencies = [
  "ic_principal",
-]
-
-[[package]]
-name = "ic-test-utilities-load-wasm"
-version = "0.9.0"
-source = "git+https://github.com/dfinity/ic?tag=release-2026-01-29_23-28-base#6f1ce3bb4c253f1bc4c5f432c7c47b06dccdba7e"
-dependencies = [
- "cargo_metadata",
- "escargot",
 ]
 
 [[package]]
