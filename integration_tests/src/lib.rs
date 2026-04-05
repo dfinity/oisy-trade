@@ -223,8 +223,12 @@ impl Drop for Setup {
 }
 
 fn dex_wasm() -> Vec<u8> {
-    let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../wasms/dex_canister.wasm.gz");
+    let path = std::env::var("DEX_CANISTER_WASM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("../wasms/dex_canister.wasm.gz")
+        });
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
             "Failed to read DEX WASM at {}: {}\nRun `just build` first.",
