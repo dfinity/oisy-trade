@@ -1,6 +1,6 @@
 use crate::Setup;
 use candid::{Nat, Principal};
-use dex_types::{DepositRequest, TokenId};
+use dex_types::{Balance, DepositRequest, TokenId};
 
 /// Builder for the deposit flow in integration tests.
 ///
@@ -64,14 +64,35 @@ impl<'a> DepositFlow<'a> {
         }
 
         if let Some(amount) = self.deposit_amount {
-            self.setup
-                .dex_client_with_caller(self.user)
+            let dex_client = self.setup.dex_client_with_caller(self.user);
+            let ledger_fee = ledger.icrc1_fee().await;
+
+            let ledger_balance_before = ledger.icrc1_balance_of(self.user).await;
+            let dex_balance_before = dex_client.get_balance(self.token_id.clone()).await;
+
+            dex_client
                 .deposit(DepositRequest {
                     token_id: self.token_id.clone(),
-                    amount,
+                    amount: amount.clone(),
                 })
                 .await
                 .expect("deposit failed");
+
+            let ledger_balance_after = ledger.icrc1_balance_of(self.user).await;
+            assert_eq!(
+                ledger_balance_after,
+                ledger_balance_before - (amount.clone() + ledger_fee),
+                "ledger balance should decrease by deposit amount + fee"
+            );
+
+            let dex_balance_after = dex_client.get_balance(self.token_id.clone()).await;
+            assert_eq!(
+                dex_balance_after,
+                Balance {
+                    free: dex_balance_before.free + amount,
+                    reserved: dex_balance_before.reserved
+                }
+            );
         }
     }
 }

@@ -50,7 +50,7 @@ async fn assert_balances<R: Runtime>(
 
 mod add_limit_order {
     use assert_matches::assert_matches;
-    use candid::{Encode, Nat, Principal};
+    use candid::{Encode, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId};
@@ -88,20 +88,6 @@ mod add_limit_order {
             .deposit(required)
             .execute()
             .await;
-        assert_eq!(
-            client.get_balance(token_id.clone()).await,
-            Balance {
-                free: required.into(),
-                reserved: 0u64.into(),
-            }
-        );
-        assert_eq!(
-            setup
-                .ledger_for(&token_id)
-                .icrc1_balance_of(setup.user())
-                .await,
-            Nat::from(0u64)
-        );
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
@@ -150,20 +136,6 @@ mod add_limit_order {
             .deposit(required)
             .execute()
             .await;
-        assert_eq!(
-            client.get_balance(token_id.clone()).await,
-            Balance {
-                free: required.into(),
-                reserved: 0u64.into(),
-            }
-        );
-        assert_eq!(
-            setup
-                .ledger_for(&token_id)
-                .icrc1_balance_of(setup.user())
-                .await,
-            Nat::from(0u64)
-        );
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
