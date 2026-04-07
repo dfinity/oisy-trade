@@ -51,7 +51,7 @@ async fn assert_balances<R: Runtime>(
 mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Nat, Principal};
-    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{
         AddLimitOrderError, Balance, DepositRequest, LimitOrderRequest, OrderStatus, Side,
@@ -120,6 +120,80 @@ mod add_limit_order {
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
             client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: required.into(),
+            }
+        );
+        // The matching timer fires eagerly after placement; with no counterparty
+        // the order rests in the book as Open.
+        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_add_limit_sell_order_and_query_status() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+        // sell 1M base tokens at a price of 100 quote tokens per base token
+        // need 1M base tokens
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 100,
+            quantity: 1_000_000,
+        };
+
+        let required = 1_000_000u64;
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::InsufficientBalance {
+                token: setup.base_token_id(),
+                available: 0u64.into(),
+                required: required.into(),
+            })
+        );
+
+        // Ledger fees:
+        // 1 for approval
+        // 1 for transfer_from
+        setup
+            .mint_base_tokens(setup.user(), required + 2 * BASE_LEDGER_FEE)
+            .await;
+        setup
+            .base_token_ledger()
+            .icrc2_approve(
+                setup.user(),
+                setup.dex_account(),
+                required + BASE_LEDGER_FEE,
+            )
+            .await;
+        client
+            .deposit(DepositRequest {
+                token_id: setup.base_token_id(),
+                amount: required.into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            client.get_balance(setup.base_token_id()).await,
+            Balance {
+                free: required.into(),
+                reserved: 0u64.into(),
+            }
+        );
+        assert_eq!(
+            setup
+                .base_token_ledger()
+                .icrc1_balance_of(setup.user())
+                .await,
+            Nat::from(0u64)
+        );
+
+        let order_id = client.add_limit_order(order).await.unwrap();
+        assert_eq!(
+            client.get_balance(setup.base_token_id()).await,
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
