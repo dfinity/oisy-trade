@@ -245,7 +245,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 available,
                 required,
             } => dex_types::AddLimitOrderError::InsufficientBalance {
-                token: token.into(),
+                token: dex_types::TokenId::from(token),
                 available,
                 required,
             },
