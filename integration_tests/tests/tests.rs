@@ -157,7 +157,7 @@ mod add_limit_order {
     async fn should_fail_to_get_order_status() {
         let setup = Setup::new().await;
 
-        // // Valid hex format but non-existent order
+        // Valid hex format but non-existent order
         let not_found = setup
             .dex_client()
             .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
