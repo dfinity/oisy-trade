@@ -13,6 +13,9 @@ use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::Pock
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 
+pub const TICK_SIZE: u64 = 10;
+pub const LOT_SIZE: u64 = 1_000_000;
+
 pub struct Setup {
     env: Option<PocketIc>,
     caller: Principal,
@@ -96,8 +99,8 @@ impl Setup {
             quote: TokenId {
                 ledger_id: trading_pair.quote,
             },
-            tick_size: 10,
-            lot_size: 1_000_000,
+            tick_size: TICK_SIZE,
+            lot_size: LOT_SIZE,
         }
     }
 

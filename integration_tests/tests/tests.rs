@@ -1,10 +1,10 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
-use dex_int_tests::Setup;
+use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, TokenId,
+    LedgerTransferFromError, TokenId, TradingPairInfo,
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -232,11 +232,20 @@ mod add_limit_order {
 async fn should_return_empty_trading_pairs() {
     let setup = Setup::new().await;
     let client = setup.dex_client();
+    assert_eq!(client.get_trading_pairs().await, vec![]);
 
-    let pairs = client.get_trading_pairs().await;
-    // TODO DEFI-2723: there should only be a trading pair if one was added by an admin.
-    // Currently it's hard-coded in the init args.
-    assert!(!pairs.is_empty());
+    let setup = setup.with_trading_pair().await;
+    let client = setup.dex_client();
+
+    assert_eq!(
+        client.get_trading_pairs().await,
+        vec![TradingPairInfo {
+            base_asset: setup.base_token_id(),
+            quote_asset: setup.quote_token_id(),
+            tick_size: TICK_SIZE,
+            lot_size: LOT_SIZE,
+        }]
+    );
 
     setup.drop().await;
 }
