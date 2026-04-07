@@ -43,7 +43,6 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
 #[ic_cdk::init]
 fn init() {
     dex_canister::state::init_state();
-    // TODO DEFI-2744: replace with an admin endpoint
     setup_timers();
 }
 
