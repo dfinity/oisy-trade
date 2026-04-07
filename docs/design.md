@@ -267,6 +267,17 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 - **`get_order_status(order_id)`**: returns the current status of an order. Time: O(1) with an order-ID-indexed map.
 - **`get_balance(token)`**: returns the caller's available and reserved balances. Time: O(1).
 
+### Expected Load
+
+Based on Binance ICP/USDT data (the most active ICP pair), two numbers drive the design:
+
+- **Steady-state: ~0.7 trades/sec** (avg 2,600 trades/hour). A single canister handles this trivially.
+- **Peak: ~40 trades/sec** sustained over a full hour during market-wide events, with p99 at ~4 trades/sec.
+
+Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load will be addressed in DEFI-2724.
+
+See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
+
 ### State Persistence
 
 Canister state must survive upgrades. Rather than serializing and deserializing the full state, the canister uses an **append-only event log** stored in stable memory. This is the same approach used by the ckBTC, ckETH, and ckSOL minters.
@@ -290,6 +301,7 @@ Every state-changing operation (deposit, order placement, fill, cancellation, wi
 
 - **Replay time**: as the event log grows, post-upgrade replay takes longer. This can be mitigated by periodic checkpointing (snapshotting the state and only replaying events after the checkpoint).
 - **Event schema evolution**: new event types can be added freely, but existing event types should not be modified to ensure backwards-compatible replay.
+- **Peak load (open)**: the design must sustain ~40 trades/sec during market events for one hour (see [Expected Load](#expected-load)). The exact design of events to match that load is currently open. 
 
 ## Monitoring
 
