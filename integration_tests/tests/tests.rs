@@ -125,10 +125,9 @@ mod add_limit_order {
                 reserved: required.into(),
             }
         );
-        assert_eq!(
-            client.get_order_status(order_id).await,
-            OrderStatus::Pending
-        );
+        // The matching timer fires eagerly after placement; with no counterparty
+        // the order rests in the book as Open.
+        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
 
         setup.drop().await;
     }
