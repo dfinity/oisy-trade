@@ -127,6 +127,26 @@ mod add_limit_order {
         );
     }
 
+    #[test]
+    fn should_reserve_balance_on_buy_order() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(DEFAULT_USER);
+        // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
+        crate::state::with_state_mut(|s| {
+            let pair = crate::test_fixtures::icp_ckbtc_trading_pair();
+            s.deposit(DEFAULT_USER, pair.quote, candid::Nat::from(100_000_000u64));
+        });
+        let quote_token = dex_types::TokenId {
+            ledger_id: candid::Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+        };
+
+        add_limit_order(limit_order_request(), &runtime).unwrap();
+
+        let balance = crate::get_balance(quote_token, &runtime);
+        assert_eq!(balance.free, candid::Nat::from(0u64));
+        assert_eq!(balance.reserved, candid::Nat::from(100_000_000u64));
+    }
+
     fn mock_runtime_for(caller: Principal) -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller().return_const(caller);

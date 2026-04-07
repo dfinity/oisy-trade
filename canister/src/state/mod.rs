@@ -72,19 +72,17 @@ impl State {
             ),
             Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
         };
-        let available = self
-            .balances
-            .get(&user)
-            .and_then(|tokens| tokens.get(&token))
-            .map(|b| b.free().clone())
-            .unwrap_or(Nat::from(0u64));
-        if available < required {
-            return Err(AddLimitOrderError::InsufficientBalance {
+        self.balances
+            .entry(user)
+            .or_default()
+            .entry(token)
+            .or_default()
+            .reserve(required)
+            .map_err(|e| AddLimitOrderError::InsufficientBalance {
                 token,
-                available,
-                required,
-            });
-        }
+                available: e.available,
+                required: e.required,
+            })?;
 
         let order_id = book
             .add_pending_order(pending)
