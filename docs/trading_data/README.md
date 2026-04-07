@@ -6,11 +6,11 @@ We focus on Binance as the primary benchmark because it handles 25-40x more ICP 
 | Metric             | Binance ICP/USDT | Kraken ICP/USD | Ratio |
 |--------------------|-----------------|----------------|-------|
 | Trades/24h         | 15,726          | 644            | 24x   |
-| Volume/24h (ICP)   | 1,190,221       | 28,933         | 41x   |
+| Volume/24h (ICP)   | 1,189,216       | 28,933         | 41x   |
 | Book depth (levels) | 5,697          | 761            | 7.5x  |
 | Peak trades/hour   | 143,932         | 3,532          | 41x   |
 
-Both exchanges peaked at the same hour (2026-03-11 06:00 UTC) with similar peak-to-average ratios (~30-54x), confirming that burst patterns are market-wide, not exchange-specific.
+Both exchanges peaked at the same hour (2026-03-11 06:00 UTC) with similar peak-to-average ratios (~30-54x), confirming that burst patterns are market-wide, not exchange-specific. Kraken data was fetched from their public REST API (`/0/public/Ticker`, `/0/public/OHLC`, `/0/public/Depth`, and `/0/public/Trades` endpoints) on the same date.
 
 The trading data below was obtained from Binance public API on 2026-04-04. Interesting pairs related to ICP:
 * ICP/BTC: pure crypto trading pair
@@ -21,7 +21,7 @@ The trading data below was obtained from Binance public API on 2026-04-04. Inter
 
 | Pair      | Trades/24h | Volume (ICP)  | Quote Volume        |
 |-----------|-----------|---------------|---------------------|
-| ICP/USDT  | 15,754    | 1,190,221     | $2,730,276          |
+| ICP/USDT  | 15,726    | 1,189,216     | $2,727,915          |
 | ICP/BNB   | 4,000     | 36,058        | 567 BNB             |
 | ICP/BUSD  | 4,000     | 112,270       | $442,288            |
 | ICP/ETH   | 4,000     | 70,381        | 84 ETH              |
@@ -87,10 +87,10 @@ From the last 1000 historical trades of each pair:
 
 | Pair     | Period covered | Avg trades/hour | Avg gap between trades | Min gap (burst) | Max gap (quiet) |
 |----------|---------------|-----------------|------------------------|-----------------|-----------------|
-| ICP/BTC  | 5.0 days      | 8.4             | 7 min 8s               | < 1ms           | 1h 53min        |
-| ICP/USDT | 1.5 hours     | 656.8           | 5.5s                   | < 1ms           | 2.8 min         |
+| ICP/BTC  | 5.0 days      | 8.4             | 7 min 8s               | 0ms             | 1h 53min        |
+| ICP/USDT | 1.5 hours     | 656.8           | 5.5s                   | 0ms             | 2.8 min         |
 
-All pairs exhibit bursty behavior: the minimum gap is sub-millisecond (multiple trades from a single market order hitting several resting orders), while quiet periods can stretch to nearly 2 hours on ICP/BTC.
+All pairs exhibit bursty behavior: the minimum observed gap is 0ms (multiple trades share the same millisecond timestamp when a single market order hits several resting orders), while quiet periods can stretch to nearly 2 hours on ICP/BTC.
 
 ### 3. Aggregation Ratio (aggTrades vs individual trades)
 
@@ -108,7 +108,7 @@ A ratio above 1 means a single incoming order frequently matches against multipl
 | ICP/BTC  | 92        | 1,180     | 1,272       | 61,857          | 78,557          | 0.291%    |
 | ICP/USDT | 697       | 5,000+    | 5,697       | 924,901         | 1,289,920       | 0.043%    |
 
-ICP/USDT has the deepest book with 5,697+ price levels of resting orders. Both pairs are heavily ask-skewed, meaning more liquidity is offered on the sell side. ICP/USDT has a tight spread (0.043%), while BTC has a wider spread (0.291%), reflecting lower liquidity.
+ICP/USDT has the deepest book with at least 5,697 price levels of resting orders (the ask side hit the API's 5,000-level limit, so the true count is higher). Both pairs are heavily ask-skewed, meaning more liquidity is offered on the sell side. ICP/USDT has a tight spread (0.043%), while BTC has a wider spread (0.291%), reflecting lower liquidity.
 
 ### 5. Peak Load Analysis (from 1000 hours of kline data)
 
@@ -121,11 +121,11 @@ Both pairs saw their peak at the exact same hour (2026-03-11 06:00 UTC), suggest
 
 ## Interpretation for ICP DEX Design
 
-**Steady-state load is very manageable.** During normal conditions, ICP/USDT -- the busiest pair -- sees about 2,600 trades/hour (~0.7/sec). Even aggregating all three pairs, the matching engine would process fewer than 1 trade per second on average. This is well within the capacity of a single canister on ICP.
+**Steady-state load is very manageable.** During normal conditions, ICP/USDT -- the busiest pair -- sees about 2,600 trades/hour (~0.7/sec). Even aggregating both pairs, the matching engine would process fewer than 1 trade per second on average. This is well within the capacity of a single canister on ICP.
 
 **Peak load is the real design constraint.** The busiest hour recorded saw ~144,000 trades on ICP/USDT alone -- that is 40 trades/sec sustained over an hour, with likely much higher sub-minute bursts. At p99 the rate is ~3.7 trades/sec. Designing for the p99 case (~15,000 trades/hour, ~4 trades/sec) is sensible; handling the extreme peak (40/sec) would require either batching or accepting some queuing delay.
 
-**Order book size is moderate.** The deepest book (ICP/USDT) has ~5,700 price levels. An ICP canister can easily hold this in-memory. Even 10x this depth (57,000 levels) would be manageable.
+**Order book size is moderate.** The deepest book (ICP/USDT) has at least ~5,700 price levels. An ICP canister can easily hold this in-memory. Even 10x this depth (57,000 levels) would be manageable.
 
 **Fan-out is cheap in our design.** Each incoming order generates ~2 fills on average (ICP/USDT). Since our DEX settles fills via internal balance updates (no ledger calls), the fan-out only adds in-canister bookkeeping cost, which is negligible. Ledger transfers are only needed at deposit/withdrawal time, not per fill.
 

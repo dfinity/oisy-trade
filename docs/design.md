@@ -274,7 +274,7 @@ Based on Binance ICP/USDT data (the most active ICP pair), two numbers drive the
 - **Steady-state: ~0.7 trades/sec** (avg 2,600 trades/hour). A single canister handles this trivially.
 - **Peak: ~40 trades/sec** sustained over a full hour during market-wide events, with p99 at ~4 trades/sec.
 
-Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load is TODO.
+Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load will be addressed in DEFI-2724.
 
 See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
 
