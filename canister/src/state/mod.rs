@@ -49,10 +49,12 @@ impl TryFrom<InitArg> for State {
     fn try_from(init_arg: InitArg) -> Result<Self, Self::Error> {
         Ok(Self {
             mode: init_arg.mode,
-            next_order_id: OrderId::default(),
+            next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
+            trading_pairs: BTreeMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
+            active_tasks: BTreeSet::default(),
         })
     }
 }
