@@ -52,7 +52,7 @@ mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Nat, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{DepositFlow, Setup, test_trading_pair};
+    use dex_int_tests::{Setup, test_trading_pair};
     use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId};
     use pocket_ic::{RejectCode, RejectResponse};
 
@@ -81,7 +81,8 @@ mod add_limit_order {
             })
         );
 
-        DepositFlow::new(&setup, token_id.clone())
+        setup
+            .deposit_flow(token_id.clone())
             .mint(required + 2 * fee)
             .approve(required + fee)
             .deposit(required)
@@ -142,7 +143,8 @@ mod add_limit_order {
             })
         );
 
-        DepositFlow::new(&setup, token_id.clone())
+        setup
+            .deposit_flow(token_id.clone())
             .mint(required + 2 * fee)
             .approve(required + fee)
             .deposit(required)
