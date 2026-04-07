@@ -148,8 +148,8 @@ impl Setup {
         LedgerClient::new(self.env.as_ref().unwrap(), token_id.ledger_id)
     }
 
-    pub fn deposit_flow(&self, token_id: TokenId) -> DepositFlow<'_> {
-        DepositFlow::new(self, token_id)
+    pub fn deposit_flow(&self, user: Principal, token_id: TokenId) -> DepositFlow<'_> {
+        DepositFlow::new(self, user, token_id)
     }
 
     pub fn user(&self) -> Principal {

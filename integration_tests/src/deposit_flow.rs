@@ -1,20 +1,13 @@
 use crate::Setup;
-use candid::Nat;
+use candid::{Nat, Principal};
 use dex_types::{DepositRequest, TokenId};
 
 /// Builder for the deposit flow in integration tests.
 ///
-/// Each step is opt-in and amounts are explicit:
-/// ```ignore
-/// DepositFlow::new(&setup, setup.base_token_id())
-///     .mint(amount + 2 * BASE_LEDGER_FEE)
-///     .approve(amount + BASE_LEDGER_FEE)
-///     .deposit(amount)
-///     .execute()
-///     .await;
-/// ```
+/// Each step is opt-in and amounts are explicit.
 pub struct DepositFlow<'a> {
     setup: &'a Setup,
+    user: Principal,
     token_id: TokenId,
     mint_amount: Option<Nat>,
     approve_amount: Option<Nat>,
@@ -22,9 +15,10 @@ pub struct DepositFlow<'a> {
 }
 
 impl<'a> DepositFlow<'a> {
-    pub fn new(setup: &'a Setup, token_id: TokenId) -> Self {
+    pub fn new(setup: &'a Setup, user: Principal, token_id: TokenId) -> Self {
         Self {
             setup,
+            user,
             token_id,
             mint_amount: None,
             approve_amount: None,
@@ -48,7 +42,6 @@ impl<'a> DepositFlow<'a> {
     }
 
     pub async fn execute(self) {
-        let user = self.setup.user();
         let ledger = self.setup.ledger_for(&self.token_id);
 
         if let Some(amount) = self.mint_amount {
@@ -56,7 +49,7 @@ impl<'a> DepositFlow<'a> {
                 .icrc1_transfer(
                     self.setup.controller(),
                     icrc_ledger_types::icrc1::account::Account {
-                        owner: user,
+                        owner: self.user,
                         subaccount: None,
                     },
                     amount,
@@ -66,13 +59,13 @@ impl<'a> DepositFlow<'a> {
 
         if let Some(amount) = self.approve_amount {
             ledger
-                .icrc2_approve(user, self.setup.dex_account(), amount)
+                .icrc2_approve(self.user, self.setup.dex_account(), amount)
                 .await;
         }
 
         if let Some(amount) = self.deposit_amount {
             self.setup
-                .dex_client()
+                .dex_client_with_caller(self.user)
                 .deposit(DepositRequest {
                     token_id: self.token_id.clone(),
                     amount,

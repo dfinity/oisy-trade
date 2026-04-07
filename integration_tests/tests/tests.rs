@@ -82,7 +82,7 @@ mod add_limit_order {
         );
 
         setup
-            .deposit_flow(token_id.clone())
+            .deposit_flow(setup.user(), token_id.clone())
             .mint(required + 2 * fee)
             .approve(required + fee)
             .deposit(required)
@@ -144,7 +144,7 @@ mod add_limit_order {
         );
 
         setup
-            .deposit_flow(token_id.clone())
+            .deposit_flow(setup.user(), token_id.clone())
             .mint(required + 2 * fee)
             .approve(required + fee)
             .deposit(required)
