@@ -10,7 +10,7 @@ use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
+    dex_canister::state::with_state(|s| s.assert_caller_is_allowed(&dex_canister::IC_RUNTIME));
     dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
         canlog::log!(
             Priority::Info,
@@ -33,7 +33,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
+    dex_canister::state::with_state(|s| s.assert_caller_is_allowed(&dex_canister::IC_RUNTIME));
     let deposit_dbg = format!("{request:?}");
     let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
     match &result {

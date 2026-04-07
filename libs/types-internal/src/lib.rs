@@ -43,3 +43,9 @@ pub enum Mode {
     /// Only the listed principals may call update endpoints.
     RestrictedTo(BTreeSet<Principal>),
 }
+
+impl Mode {
+    pub fn restricted_to<I: IntoIterator<Item = Principal>>(principals: I) -> Self {
+        Self::RestrictedTo(principals.into_iter().collect())
+    }
+}

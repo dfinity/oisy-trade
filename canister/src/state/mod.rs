@@ -1,3 +1,7 @@
+#[cfg(test)]
+mod tests;
+
+use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
@@ -64,17 +68,17 @@ impl State {
         self.mode = mode;
     }
 
-    pub fn assert_caller_is_allowed(&self) {
+    pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
         if let Mode::RestrictedTo(ref allowed) = self.mode {
-            let caller = ic_cdk::api::msg_caller();
-            if ic_cdk::api::is_controller(&caller) {
+            let caller = runtime.msg_caller();
+            if runtime.is_controller(&caller) {
                 return;
             }
             if !allowed.contains(&caller) {
-                ic_cdk::trap(format!(
+                panic!(
                     "Caller {} is not allowed to call this endpoint in restricted mode",
                     caller
-                ));
+                );
             }
         }
     }
