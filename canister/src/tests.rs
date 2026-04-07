@@ -41,7 +41,6 @@ mod add_limit_order {
     #[test]
     fn should_reject_order_with_invalid_price() {
         init_state_with_order_book();
-        fund_user(DEFAULT_USER);
         let runtime = mock_runtime_for(DEFAULT_USER);
 
         let cases = vec![(7, "not a multiple of tick size"), (0, "zero price")];
@@ -63,7 +62,6 @@ mod add_limit_order {
     #[test]
     fn should_reject_order_with_invalid_quantity() {
         init_state_with_order_book();
-        fund_user(DEFAULT_USER);
         let runtime = mock_runtime_for(DEFAULT_USER);
 
         let cases = vec![

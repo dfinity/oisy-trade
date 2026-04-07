@@ -65,6 +65,9 @@ impl State {
             .get_mut(book_id)
             .expect("BUG: trading pair registered but order book missing");
 
+        book.validate_order(pending.price, pending.quantity)
+            .map_err(AddLimitOrderError::InvalidOrder)?;
+
         let (token, required) = match pending.side {
             Side::Buy => (
                 pair.quote,

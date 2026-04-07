@@ -155,7 +155,7 @@ impl OrderBook {
         }
     }
 
-    fn validate_order(&self, price: Price, quantity: Quantity) -> Result<(), MatchOrderError> {
+    pub fn validate_order(&self, price: Price, quantity: Quantity) -> Result<(), MatchOrderError> {
         if price.is_zero() || !price.is_multiple_of(self.tick_size) {
             return Err(MatchOrderError::InvalidTickSize {
                 price,
