@@ -9,8 +9,8 @@ mod tests;
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
 
-/// Unique identifier for an order.
-pub type OrderId = u64;
+/// Unique identifier for an order, encoded as a hex string.
+pub type OrderId = String;
 
 /// Side of an order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
@@ -150,4 +150,41 @@ pub enum LedgerTransferFromError {
 pub struct DepositResponse {
     /// The block index of the transfer on the token ledger.
     pub block_index: Nat,
+}
+
+/// A user's balance for a given token.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct Balance {
+    /// Funds available for new orders or withdrawal.
+    pub free: Nat,
+    /// Funds locked by open orders.
+    pub reserved: Nat,
+}
+
+/// Request to add a new trading pair to the DEX.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct AddTradingPairRequest {
+    /// The base token of the pair (e.g. ckSOL).
+    pub base: TokenId,
+    /// The quote token of the pair (e.g. ckBTC).
+    pub quote: TokenId,
+    /// Minimum price increment. Must be greater than zero.
+    pub tick_size: u64,
+    /// Minimum order quantity. Must be greater than zero.
+    pub lot_size: u64,
+}
+
+/// Error returned by the `add_trading_pair` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum AddTradingPairError {
+    /// The caller is not a controller of the canister.
+    NotController,
+    /// The base and quote tokens are the same.
+    BaseEqualsQuote,
+    /// The tick size must be greater than zero.
+    InvalidTickSize,
+    /// The lot size must be greater than zero.
+    InvalidLotSize,
+    /// A trading pair with the same base and quote tokens already exists.
+    TradingPairAlreadyExists,
 }

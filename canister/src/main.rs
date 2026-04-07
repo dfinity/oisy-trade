@@ -1,50 +1,21 @@
+use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError,
-    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
+    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
+    OrderStatus, TokenId, TradingPairInfo,
 };
-use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
-
-#[ic_cdk::init]
-fn init(arg: DexArg) {
-    let init_arg = match arg {
-        DexArg::Init(init_arg) => init_arg,
-        DexArg::Upgrade(_) => {
-            ic_cdk::trap("ERROR: expected Init argument");
-        }
-    };
-    dex_canister::state::init_state(init_arg);
-    // TODO DEFI-2744: replace with an admin endpoint
-    dex_canister::register_default_trading_pairs();
-    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
-}
-
-#[ic_cdk::post_upgrade]
-fn post_upgrade(arg: DexArg) {
-    match arg {
-        DexArg::Init(_) => {
-            ic_cdk::trap("ERROR: expected Upgrade argument");
-        }
-        DexArg::Upgrade(upgrade_arg) => {
-            if let Some(upgrade_arg) = upgrade_arg
-                && let Some(mode) = upgrade_arg.mode
-            {
-                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
-            }
-        }
-    }
-}
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
     dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
-    let order_dbg = format!("{request:?}");
-    dex_canister::add_limit_order(request).inspect(|order_id| {
+    dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
         canlog::log!(
             Priority::Info,
-            "[add_limit_order]: created order_id={} for request {order_dbg}",
-            order_id
+            "[add_limit_order]: created order_id={} for request {:?}",
+            order_id,
+            request
         );
     })
 }
@@ -63,7 +34,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
     dex_canister::state::with_state(|s| s.assert_caller_is_allowed());
     let deposit_dbg = format!("{request:?}");
-    let result = dex_canister::deposit(request).await;
+    let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
@@ -92,8 +63,51 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 }
 
 #[ic_cdk::query]
-fn get_balance(token_id: TokenId) -> candid::Nat {
-    dex_canister::get_balance(token_id)
+fn get_balance(token_id: TokenId) -> Balance {
+    dex_canister::get_balance(token_id, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::update]
+fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
+    dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::init]
+fn init() {
+    let init_arg = match arg {
+        DexArg::Init(init_arg) => init_arg,
+        DexArg::Upgrade(_) => {
+            ic_cdk::trap("ERROR: expected Init argument");
+        }
+    };
+    dex_canister::state::init_state(init_arg);
+    // TODO DEFI-2744: replace with an admin endpoint
+    dex_canister::register_default_trading_pairs();
+    setup_timers();
+    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade() {
+    match arg {
+        DexArg::Init(_) => {
+            ic_cdk::trap("ERROR: expected Upgrade argument");
+        }
+        DexArg::Upgrade(upgrade_arg) => {
+            if let Some(upgrade_arg) = upgrade_arg
+                && let Some(mode) = upgrade_arg.mode
+            {
+                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
+            }
+        }
+    }
+    setup_timers();
+}
+
+fn setup_timers() {
+    ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
+        dex_canister::process_pending_orders();
+    });
 }
 
 #[ic_cdk::query(hidden = true)]

@@ -1,11 +1,14 @@
+use crate::Task;
+use crate::balance::Balance;
 use crate::order::{
-    MatchOrderError, OrderBook, OrderId, PendingOrder, TokenId, TokenMetadata, TradingPair,
+    LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
     static STATE: RefCell<Option<State>> = RefCell::default();
@@ -30,12 +33,14 @@ pub fn init_state(init_arg: InitArg) {
 #[derive(Debug)]
 pub struct State {
     mode: Mode,
-    next_order_id: OrderId,
+    next_book_id: OrderBookId,
     #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    order_books: BTreeMap<TradingPair, OrderBook>,
+    trading_pairs: BTreeMap<TradingPair, OrderBookId>,
+    order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    balances: BTreeMap<Principal, BTreeMap<TokenId, Nat>>,
+    balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
+    active_tasks: BTreeSet<Task>,
 }
 
 impl TryFrom<InitArg> for State {
@@ -72,9 +77,9 @@ impl State {
         }
     }
 
-    pub fn next_order_id(&mut self) -> OrderId {
-        let id = self.next_order_id;
-        self.next_order_id.increment();
+    fn next_book_id(&mut self) -> OrderBookId {
+        let id = self.next_book_id;
+        self.next_book_id.increment();
         id
     }
 
@@ -84,14 +89,16 @@ impl State {
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
         // TODO DEFI-2723: ensure the user has enough balance
-        // TODO DEFI-2723: only update ID if order is valid.
-        let order_id = self.next_order_id();
-        let order = pending.into_order(order_id);
+        let book_id = self
+            .trading_pairs
+            .get(&pair)
+            .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
-            .get_mut(&pair)
-            .ok_or(AddLimitOrderError::UnknownTradingPair)?;
-        book.add_pending_order(order)
+            .get_mut(book_id)
+            .expect("BUG: trading pair registered but order book missing");
+        let order_id = book
+            .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
         Ok(order_id)
     }
@@ -104,55 +111,70 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        for book in self.order_books.values() {
-            if let Some(status) = book.get_order_status(order_id) {
-                return status;
-            }
+        let book = self.order_books.get(&order_id.book_id());
+        match book {
+            Some(book) => book
+                .get_order_status(order_id.seq())
+                .unwrap_or(OrderStatus::NotFound),
+            None => OrderStatus::NotFound,
         }
-        OrderStatus::NotFound
     }
 
-    /// Register a new trading pair with the given order book.
-    pub fn add_order_book(&mut self, pair: TradingPair, book: OrderBook) {
-        assert!(
-            self.order_books.insert(pair, book).is_none(),
-            "ERROR: order book already exists for this pair"
-        );
-    }
-
-    #[cfg(test)]
-    pub fn add_trading_pair(&mut self, pair: TradingPair, order_book: OrderBook) {
-        self.order_books.insert(pair, order_book);
+    /// Register a new trading pair with a new order book.
+    pub fn add_trading_pair(
+        &mut self,
+        pair: TradingPair,
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        if self.trading_pairs.contains_key(&pair) {
+            return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
+        }
+        let book_id = self.next_book_id();
+        let book = OrderBook::new(book_id, tick_size, lot_size);
+        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        assert_eq!(self.order_books.insert(book_id, book), None);
+        Ok(())
     }
 
     pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
-        self.order_books
+        self.trading_pairs
             .iter()
-            .map(|(pair, book)| TradingPairInfo {
-                base_asset: dex_types::TokenId::from(pair.base),
-                quote_asset: dex_types::TokenId::from(pair.quote),
-                tick_size: book.tick_size().get(),
-                lot_size: book.lot_size().get(),
+            .map(|(pair, book_id)| {
+                let book = self
+                    .order_books
+                    .get(book_id)
+                    .expect("BUG: trading pair registered but order book missing");
+                TradingPairInfo {
+                    base_asset: dex_types::TokenId::from(pair.base),
+                    quote_asset: dex_types::TokenId::from(pair.quote),
+                    tick_size: book.tick_size().get(),
+                    lot_size: book.lot_size().get(),
+                }
             })
             .collect()
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
-        let balance = self
-            .balances
+        self.balances
             .entry(user)
             .or_default()
             .entry(token_id)
-            .or_insert_with(|| Nat::from(0u64));
-        *balance += amount;
+            .or_default()
+            .deposit(amount);
     }
 
-    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> Nat {
+    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> dex_types::Balance {
         self.balances
             .get(&user)
             .and_then(|tokens| tokens.get(&token_id))
-            .cloned()
-            .unwrap_or(Nat::from(0u64))
+            .map(dex_types::Balance::from)
+            .unwrap_or_else(|| Balance::zero().into())
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
     }
 }
 

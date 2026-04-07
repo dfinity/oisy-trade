@@ -1,5 +1,22 @@
+// TODO DEFI-2753: use mock runtime
+/// Helper to add an order via State directly (bypasses IC timer in lib::add_limit_order).
+fn add_order(
+    request: dex_types::LimitOrderRequest,
+) -> Result<dex_types::OrderId, dex_types::AddLimitOrderError> {
+    use crate::{order, state};
+    let pair = order::TradingPair::from(request.pair);
+    let pending = order::PendingOrder {
+        side: order::Side::from(request.side),
+        price: order::Price::from(request.price),
+        quantity: order::Quantity::from(request.quantity),
+    };
+    state::with_state_mut(|s| s.add_limit_order(pair, pending))
+        .map(|id| id.to_string())
+        .map_err(dex_types::AddLimitOrderError::from)
+}
+
 mod add_limit_order {
-    use crate::add_limit_order;
+    use super::add_order;
     use crate::test_fixtures::{init_state_with_order_book, limit_order_request};
     use std::collections::BTreeSet;
 
@@ -10,7 +27,7 @@ mod add_limit_order {
         let num_orders = 100;
 
         for _ in 0..num_orders {
-            let order_id = add_limit_order(limit_order_request()).unwrap();
+            let order_id = add_order(limit_order_request()).unwrap();
             assert!(order_ids.insert(order_id));
         }
     }
@@ -23,7 +40,7 @@ mod add_limit_order {
             base: candid::Principal::management_canister(),
             quote: candid::Principal::management_canister(),
         };
-        let result = add_limit_order(request);
+        let result = add_order(request);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::UnknownTradingPair)
@@ -35,7 +52,7 @@ mod add_limit_order {
         init_state_with_order_book();
         let mut request = limit_order_request();
         request.price = 7; // not a multiple of tick size (10)
-        let result = add_limit_order(request);
+        let result = add_order(request);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InvalidPrice {
@@ -50,7 +67,7 @@ mod add_limit_order {
         init_state_with_order_book();
         let mut request = limit_order_request();
         request.quantity = 500_000; // not a multiple of lot size (1_000_000)
-        let result = add_limit_order(request);
+        let result = add_order(request);
         assert_eq!(
             result,
             Err(dex_types::AddLimitOrderError::InvalidQuantity {
@@ -62,14 +79,15 @@ mod add_limit_order {
 }
 
 mod get_order_status {
+    use super::add_order;
+    use crate::get_order_status;
     use crate::test_fixtures::{init_state_with_order_book, limit_order_request};
-    use crate::{add_limit_order, get_order_status};
     use dex_types::OrderStatus;
 
     #[test]
     fn should_return_pending_for_existing_order() {
         init_state_with_order_book();
-        let order_id = add_limit_order(limit_order_request()).unwrap();
+        let order_id = add_order(limit_order_request()).unwrap();
         let status = get_order_status(order_id);
         assert_eq!(status, OrderStatus::Pending);
     }
@@ -77,8 +95,16 @@ mod get_order_status {
     #[test]
     fn should_return_not_found_for_nonexistent_order() {
         init_state_with_order_book();
-        let status = get_order_status(u64::MAX);
+        // Valid hex format but refers to a non-existent book/seq
+        let status = get_order_status("ffffffffffffffffffffffffffffffff".to_string());
         assert_eq!(status, OrderStatus::NotFound);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERROR: invalid order id")]
+    fn should_trap_on_syntactically_invalid_order_id() {
+        init_state_with_order_book();
+        get_order_status("not-a-valid-order-id".to_string());
     }
 }
 
@@ -87,7 +113,7 @@ mod get_trading_pairs {
     use crate::order::{TokenId, TradingPair};
     use crate::state;
     use crate::state::init_state;
-    use crate::test_fixtures::order_book;
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use candid::Principal;
     use dex_types::TradingPairInfo;
 
@@ -107,11 +133,9 @@ mod get_trading_pairs {
         });
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        let order_book = order_book();
-        let tick_size = order_book.tick_size().get();
-        let lot_size = order_book.lot_size().get();
         state::with_state_mut(|s| {
-            s.add_trading_pair(TradingPair { base, quote }, order_book);
+            s.add_trading_pair(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE)
+                .unwrap();
         });
 
         let pairs = get_trading_pairs();
@@ -121,8 +145,8 @@ mod get_trading_pairs {
             vec![TradingPairInfo {
                 base_asset: dex_types::TokenId::from(base),
                 quote_asset: dex_types::TokenId::from(quote),
-                tick_size,
-                lot_size,
+                tick_size: TICK_SIZE.get(),
+                lot_size: LOT_SIZE.get(),
             }]
         );
     }

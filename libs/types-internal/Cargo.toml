@@ -7,11 +7,13 @@ edition.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
+readme = "README.md"
+include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 
 [features]
-log = ["dep:canlog"]
+log = ["dep:canlog", "dep:serde"]
 
 [dependencies]
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"], optional = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"], optional = true }
