@@ -1,9 +1,11 @@
 mod add_limit_order {
-    use crate::add_limit_order;
     use crate::test_fixtures::{
-        fund_user, init_state_with_order_book, limit_order_request, mocks::MockRuntime,
+        fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
+        mocks::MockRuntime,
     };
+    use crate::{add_limit_order, get_balance, state, test_fixtures};
     use candid::Principal;
+    use dex_types::{Balance, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
 
     const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
@@ -128,21 +130,58 @@ mod add_limit_order {
     #[test]
     fn should_reserve_balance_on_buy_order() {
         init_state_with_order_book();
+        let pair = test_fixtures::icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
-        // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
-        crate::state::with_state_mut(|s| {
-            let pair = crate::test_fixtures::icp_ckbtc_trading_pair();
-            s.deposit(DEFAULT_USER, pair.quote, candid::Nat::from(100_000_000u64));
-        });
-        let quote_token = dex_types::TokenId {
-            ledger_id: candid::Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+        let order = LimitOrderRequest {
+            pair: icp_ckbtc_trading_pair().into(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000u64,
         };
+        let required = order.price * order.quantity;
+        // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
+        state::with_state_mut(|s| {
+            s.deposit(DEFAULT_USER, pair.quote, required.into());
+        });
 
-        add_limit_order(limit_order_request(), &runtime).unwrap();
+        add_limit_order(order, &runtime).unwrap();
 
-        let balance = crate::get_balance(quote_token, &runtime);
-        assert_eq!(balance.free, candid::Nat::from(0u64));
-        assert_eq!(balance.reserved, candid::Nat::from(100_000_000u64));
+        assert_eq!(get_balance(pair.base.into(), &runtime), Balance::default());
+        assert_eq!(
+            get_balance(pair.quote.into(), &runtime),
+            Balance {
+                free: 0u64.into(),
+                reserved: required.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn should_reserve_balance_on_sell_order() {
+        init_state_with_order_book();
+        let pair = test_fixtures::icp_ckbtc_trading_pair();
+        let runtime = mock_runtime_for(DEFAULT_USER);
+        let order = LimitOrderRequest {
+            pair: icp_ckbtc_trading_pair().into(),
+            side: Side::Sell,
+            price: 10,
+            quantity: 100_000_000u64,
+        };
+        // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
+        state::with_state_mut(|s| {
+            s.deposit(DEFAULT_USER, pair.base, candid::Nat::from(order.quantity));
+        });
+
+        add_limit_order(order.clone(), &runtime).unwrap();
+
+        assert_eq!(
+            get_balance(pair.base.into(), &runtime),
+            Balance {
+                free: 0u64.into(),
+                reserved: order.quantity.into(),
+            }
+        );
+        assert_eq!(get_balance(pair.quote.into(), &runtime), Balance::default());
     }
 
     fn mock_runtime_for(caller: Principal) -> MockRuntime {

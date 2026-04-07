@@ -21,10 +21,7 @@ pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
 
 pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
-        pair: dex_types::TradingPair {
-            base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-            quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
-        },
+        pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
         price: 100,
         quantity: u64::from(LOT_SIZE),

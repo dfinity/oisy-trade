@@ -160,6 +160,15 @@ impl From<dex_types::TradingPair> for TradingPair {
     }
 }
 
+impl From<TradingPair> for dex_types::TradingPair {
+    fn from(value: TradingPair) -> Self {
+        dex_types::TradingPair {
+            base: value.base.0,
+            quote: value.quote.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Price(u64);
 

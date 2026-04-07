@@ -162,7 +162,7 @@ pub struct DepositResponse {
 }
 
 /// A user's balance for a given token.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct Balance {
     /// Funds available for new orders or withdrawal.
     pub free: Nat,
