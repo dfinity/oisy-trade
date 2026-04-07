@@ -1,17 +1,9 @@
+use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
-    AddLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferFromError,
-    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
+    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId,
+    TradingPairInfo,
 };
-use dex_types_internal::log::Priority;
-use ic_http_types::{HttpRequest, HttpResponse};
-
-#[ic_cdk::init]
-fn init() {
-    dex_canister::state::init_state();
-    // TODO DEFI-2744: replace with an admin endpoint
-    dex_canister::register_default_trading_pairs();
-    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
-}
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
@@ -38,7 +30,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
     let deposit_dbg = format!("{request:?}");
-    let result = dex_canister::deposit(request).await;
+    let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
@@ -67,8 +59,33 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 }
 
 #[ic_cdk::query]
-fn get_balance(token_id: TokenId) -> candid::Nat {
-    dex_canister::get_balance(token_id)
+fn get_balance(token_id: TokenId) -> Balance {
+    dex_canister::get_balance(token_id, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::update]
+fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
+    dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::init]
+fn init() {
+    dex_canister::state::init_state();
+    // TODO DEFI-2744: replace with an admin endpoint
+    dex_canister::register_default_trading_pairs();
+    setup_timers();
+    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade() {
+    setup_timers();
+}
+
+fn setup_timers() {
+    ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
+        dex_canister::process_pending_orders();
+    });
 }
 
 #[ic_cdk::query(hidden = true)]

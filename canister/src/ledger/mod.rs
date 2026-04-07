@@ -1,7 +1,10 @@
+use crate::Runtime;
 use dex_types::{DepositError, DepositRequest, DepositResponse, LedgerTransferFromError};
 
-pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    use ic_cdk::call::Call;
+pub async fn deposit(
+    request: DepositRequest,
+    runtime: &impl Runtime,
+) -> Result<DepositResponse, DepositError> {
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
@@ -9,7 +12,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
     //  funds that are not supported by the DEX.
     let token = request.token_id;
     let amount = request.amount;
-    let caller = ic_cdk::api::msg_caller();
+    let caller = runtime.msg_caller();
 
     let transfer_args = TransferFromArgs {
         spender_subaccount: None,
@@ -18,7 +21,7 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
             subaccount: None,
         },
         to: Account {
-            owner: ic_cdk::api::canister_self(),
+            owner: runtime.canister_self(),
             subaccount: None,
         },
         amount: amount.clone(),
@@ -32,8 +35,8 @@ pub async fn deposit(request: DepositRequest) -> Result<DepositResponse, Deposit
     };
 
     // TODO(DEFI-2745): Consider switching to bounded_wait calls.
-    let response = Call::unbounded_wait(token.ledger_id, "icrc2_transfer_from")
-        .with_args(&(transfer_args,))
+    let response = runtime
+        .call_unbounded_wait(token.ledger_id, "icrc2_transfer_from", (transfer_args,))
         .await
         .map_err(|e| DepositError::CallFailed {
             ledger: token.ledger_id,

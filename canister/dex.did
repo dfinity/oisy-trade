@@ -1,5 +1,7 @@
 /// Unique identifier for an order, assigned by the canister upon submission.
-type OrderId = nat64;
+/// Opaque identifier, not meant to be interpreted by clients.
+/// Encoded as a 32-character hex string.
+type OrderId = text;
 
 /// Side of an order.
 type Side = variant {
@@ -28,6 +30,7 @@ type LimitOrderRequest = record {
     /// Order quantity in base token units.
     quantity : nat64;
 };
+
 
 /// Error returned when placing a limit order fails.
 type AddLimitOrderError = variant {
@@ -103,6 +106,42 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
+/// A user's balance for a given token.
+type Balance = record {
+    /// Funds available for new orders or withdrawal.
+    free : nat;
+    /// Funds locked by open orders.
+    reserved : nat;
+};
+
+/// Request to add a new trading pair to the DEX.
+type AddTradingPairRequest = record {
+    /// The base token of the pair.
+    base : TokenId;
+    /// The quote token of the pair.
+    quote : TokenId;
+    /// Minimum price increment. Must be greater than zero.
+    tick_size : nat64;
+    /// Minimum order quantity. Must be greater than zero.
+    lot_size : nat64;
+};
+
+/// Error returned by the add_trading_pair endpoint.
+type AddTradingPairError = variant {
+    /// The caller is not a controller of the canister.
+    NotController;
+    /// The base and quote tokens are the same.
+    BaseEqualsQuote;
+    /// The tick size must be greater than zero.
+    InvalidTickSize;
+    /// The lot size must be greater than zero.
+    InvalidLotSize;
+    /// A trading pair with the same base and quote tokens already exists.
+    TradingPairAlreadyExists;
+};
+
+type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
+
 service : () -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
@@ -122,5 +161,8 @@ service : () -> {
     deposit : (DepositRequest) -> (DepositResult);
 
     /// Query the caller's balance for a given token.
-    get_balance : (TokenId) -> (nat) query;
+    get_balance : (TokenId) -> (Balance) query;
+
+    /// Add a new trading pair to the DEX. Only callable by a controller.
+    add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 }
