@@ -10,8 +10,7 @@ use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::state::with_state(|s| s.assert_caller_is_allowed(&dex_canister::IC_RUNTIME));
-    dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
+    dex_canister::add_limit_order(request.clone(), &dex_canister::IC_RUNTIME).inspect(|order_id| {
         canlog::log!(
             Priority::Info,
             "[add_limit_order]: created order_id={} for request {:?}",
@@ -33,7 +32,6 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    dex_canister::state::with_state(|s| s.assert_caller_is_allowed(&dex_canister::IC_RUNTIME));
     let deposit_dbg = format!("{request:?}");
     let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
     match &result {
@@ -78,7 +76,7 @@ fn init(arg: DexArg) {
     let init_arg = match arg {
         DexArg::Init(init_arg) => init_arg,
         DexArg::Upgrade(_) => {
-            ic_cdk::trap("ERROR: expected Init argument");
+            panic!("ERROR: expected Init argument");
         }
     };
     dex_canister::state::init_state(init_arg);
@@ -92,7 +90,7 @@ fn init(arg: DexArg) {
 fn post_upgrade(arg: Option<DexArg>) {
     match arg {
         Some(DexArg::Init(_)) => {
-            ic_cdk::trap("ERROR: expected Upgrade argument");
+            panic!("ERROR: expected Upgrade argument");
         }
         Some(DexArg::Upgrade(upgrade_arg)) => {
             if let Some(upgrade_arg) = upgrade_arg
