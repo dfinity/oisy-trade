@@ -30,6 +30,7 @@ pub fn add_limit_order(
     request: LimitOrderRequest,
     runtime: &impl Runtime,
 ) -> Result<OrderId, AddLimitOrderError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
@@ -66,6 +67,7 @@ pub async fn deposit(
     request: DepositRequest,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let amount = request.amount.clone();

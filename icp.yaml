@@ -1,0 +1,21 @@
+canisters:
+  - name: dex
+    recipe:
+      type: "@dfinity/rust@v3.0.0"
+      sha256: 620151f0c07efc1e8a986f73b85406b78bea09a92fc899f299a431431a6a6819
+      configuration:
+        package: dex_canister
+        candid: canister/dex.did
+        shrink: true
+        compress: true
+
+environments:
+  - name: staging
+    network: ic
+    canisters: [dex]
+    init_args:
+      dex: "( variant { Init = record { mode = variant { GeneralAvailability } } } )"
+
+  - name: prod
+    network: ic
+    canisters: [dex]

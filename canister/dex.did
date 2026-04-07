@@ -144,7 +144,30 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
-service : () -> {
+/// Controls who may call update endpoints on the DEX canister.
+type Mode = variant {
+    /// Anyone may call update endpoints.
+    GeneralAvailability;
+    /// Only the listed principals may call update endpoints.
+    RestrictedTo : vec principal;
+};
+
+/// Argument for canister initialization.
+type InitArg = record {
+    /// Controls who may call update endpoints.
+    mode : Mode;
+};
+
+/// Argument for canister upgrade.
+type UpgradeArg = record {
+    /// If set, changes who may call update endpoints.
+    mode : opt Mode;
+};
+
+/// Argument passed to the DEX canister on init or upgrade.
+type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
+
+service : (DexArg) -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });

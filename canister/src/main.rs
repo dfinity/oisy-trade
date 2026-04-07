@@ -4,6 +4,7 @@ use dex_types::{
     DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
     OrderStatus, TokenId, TradingPairInfo,
 };
+use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
 
@@ -75,14 +76,33 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
 }
 
 #[ic_cdk::init]
-fn init() {
-    dex_canister::state::init_state();
+fn init(arg: DexArg) {
+    let init_arg = match arg {
+        DexArg::Init(init_arg) => init_arg,
+        DexArg::Upgrade(_) => {
+            panic!("ERROR: expected Init argument");
+        }
+    };
+    dex_canister::state::init_state(init_arg);
     setup_timers();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
 
 #[ic_cdk::post_upgrade]
-fn post_upgrade() {
+fn post_upgrade(arg: Option<DexArg>) {
+    match arg {
+        Some(DexArg::Init(_)) => {
+            panic!("ERROR: expected Upgrade argument");
+        }
+        Some(DexArg::Upgrade(upgrade_arg)) => {
+            if let Some(upgrade_arg) = upgrade_arg
+                && let Some(mode) = upgrade_arg.mode
+            {
+                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
+            }
+        }
+        None => {}
+    }
     setup_timers();
 }
 
