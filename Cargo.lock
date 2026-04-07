@@ -258,6 +258,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "canlog"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd21b4c7140d033fe006495a65ec5ae24d79219eca550a74e0ba140ff9aa71dc"
+dependencies = [
+ "candid",
+ "canlog_derive",
+ "ic-canister-log",
+ "ic0",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "canlog_derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6620814f83b784938b29ca6ca8867967a93a4f7f08c1b7ec6256d12c1b53abe8"
+dependencies = [
+ "darling 0.20.11",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -484,9 +511,12 @@ dependencies = [
  "async-trait",
  "candid",
  "candid_parser",
+ "canlog",
  "dex_types",
+ "dex_types_internal",
  "ic-cdk",
  "ic-cdk-timers",
+ "ic-http-types",
  "icrc-ledger-types",
  "mockall",
  "proptest",
@@ -510,12 +540,16 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "candid",
+ "canlog",
  "dex_client",
  "dex_types",
+ "dex_types_internal",
  "ic-cdk",
+ "ic-http-types",
  "icrc-ledger-types",
  "pocket-ic",
  "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -524,6 +558,14 @@ name = "dex_types"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "serde",
+]
+
+[[package]]
+name = "dex_types_internal"
+version = "0.1.0"
+dependencies = [
+ "canlog",
  "serde",
 ]
 
@@ -955,6 +997,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic-canister-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb82c4f617ecff6e452fe65af0489626ec7330ffe3eedd9ea14e6178eea48d1a"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ic-cdk"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1026,6 +1077,17 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
+]
+
+[[package]]
+name = "ic-http-types"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "207166ed1477b107f56c3d98f6c9ea771ed84be407567bc7099db907d98490a3"
+dependencies = [
+ "candid",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]
@@ -1962,9 +2024,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.38"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]

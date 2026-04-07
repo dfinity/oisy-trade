@@ -6,10 +6,13 @@ pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
-use candid::{CandidType, Encode, Nat, Principal, decode_args, encode_args};
+use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
+use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
 use dex_types::{AddTradingPairRequest, TokenId, TradingPair};
+use dex_types_internal::log::Priority;
 use ic_cdk::call::RejectCode;
+use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
@@ -217,6 +220,29 @@ impl Setup {
             env: self.env.as_ref().unwrap(),
             caller: self.caller,
         }
+    }
+
+    pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            url: format!("/logs?priority={priority}"),
+            headers: vec![],
+            body: Default::default(),
+        };
+        let response: HttpResponse = self
+            .env()
+            .query_call(
+                self.dex_id,
+                Principal::anonymous(),
+                "http_request",
+                Encode!(&request).unwrap(),
+            )
+            .await
+            .map(|bytes| Decode!(&bytes, HttpResponse).unwrap())
+            .expect("Failed to query http_request");
+        serde_json::from_slice::<Log<Priority>>(&response.body)
+            .expect("Failed to deserialize logs")
+            .entries
     }
 
     pub async fn drop(self) {
