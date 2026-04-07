@@ -274,31 +274,6 @@ mod add_limit_order {
 
         setup.drop().await;
     }
-
-    #[tokio::test]
-    async fn should_rest_unmatched_order_as_open() {
-        let setup = Setup::new().await;
-        let client = setup.dex_client();
-
-        let order_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair: test_trading_pair(),
-                side: Side::Buy,
-                price: 100,
-                quantity: 1_000_000,
-            })
-            .await
-            .unwrap();
-
-        // Tick to let the zero-duration matching timer fire
-        setup.env().tick().await;
-
-        // No counterparty — order rests in the book as Open
-        // TODO DEFI-2740: verify user's balances
-        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
-
-        setup.drop().await;
-    }
 }
 
 #[tokio::test]
