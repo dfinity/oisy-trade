@@ -27,12 +27,14 @@ impl FromStr for Priority {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "info" => Ok(Priority::Info),
-            "debug" => Ok(Priority::Debug),
-            _ => Err(format!(
+        if s.eq_ignore_ascii_case("info") {
+            Ok(Priority::Info)
+        } else if s.eq_ignore_ascii_case("debug") {
+            Ok(Priority::Debug)
+        } else {
+            Err(format!(
                 "unrecognized priority '{s}'; expected one of: info | debug"
-            )),
+            ))
         }
     }
 }

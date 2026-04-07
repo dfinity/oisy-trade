@@ -9,12 +9,12 @@ use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    let order_dbg = format!("{request:?}");
-    dex_canister::add_limit_order(request).inspect(|order_id| {
+    dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
         canlog::log!(
             Priority::Info,
-            "[add_limit_order]: created order_id={} for request {order_dbg}",
-            order_id
+            "[add_limit_order]: created order_id={} for request {:?}",
+            order_id,
+            request
         );
     })
 }
