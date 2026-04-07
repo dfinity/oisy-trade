@@ -11,9 +11,9 @@ readme = "README.md"
 include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 
 [features]
-log = ["dep:canlog", "dep:serde"]
+log = ["dep:canlog"]
 
 [dependencies]
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"], optional = true }
-serde = { workspace = true, features = ["derive"], optional = true }
+serde = { workspace = true, features = ["derive"] }
