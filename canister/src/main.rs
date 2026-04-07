@@ -1,9 +1,11 @@
 use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId,
-    TradingPairInfo,
+    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
+    OrderStatus, TokenId, TradingPairInfo,
 };
+use dex_types_internal::log::Priority;
+use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {

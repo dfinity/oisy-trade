@@ -20,6 +20,7 @@ dex_types = {path = "../libs/types"}
 dex_types_internal = {path = "../libs/types-internal", features = ["log"]}
 ic-cdk = { workspace = true }
 ic-cdk-timers = { workspace = true }
+ic-http-types = {workspace = true}
 icrc-ledger-types = { workspace = true }
 
 [dev-dependencies]
