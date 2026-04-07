@@ -316,11 +316,3 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
         }
     }
 }
-
-// TODO DEFI-2744: remove once admin can add trading pairs
-pub fn test_trading_pair() -> TradingPair {
-    TradingPair {
-        base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-        quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
-    }
-}

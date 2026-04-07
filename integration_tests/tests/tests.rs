@@ -51,9 +51,9 @@ async fn assert_balances<R: Runtime>(
 mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Principal};
+    use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{Setup, test_trading_pair};
-    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId};
+    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side};
     use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
@@ -184,39 +184,63 @@ mod add_limit_order {
 
     #[tokio::test]
     async fn should_match_crossing_orders() {
-        let setup = Setup::new().await;
-        let client = setup.dex_client();
-        let pair = test_trading_pair();
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.dex_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.dex_client_with_caller(seller);
 
-        let sell_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair,
-                side: Side::Sell,
-                price: 100,
-                quantity: 1_000_000,
-            })
+        // buy 1M base tokens for a price of 100 quote tokens per base token
+        // need 100M quote tokens
+        let buy_order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000,
+        };
+        let required_quote_amount = 100_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required_quote_amount + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote_amount + QUOTE_LEDGER_FEE)
+            .deposit(required_quote_amount)
+            .execute()
+            .await;
+        let buy_order_id = buyer_client
+            .add_limit_order(buy_order.clone())
             .await
             .unwrap();
-        let buy_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair,
-                side: Side::Buy,
-                price: 100,
-                quantity: 1_000_000,
-            })
-            .await
-            .unwrap();
 
-        // Tick to let the zero-duration matching timers fire
+        // sell 1M base tokens at a price of 100 quote tokens per base token
+        // need 1M base tokens
+        let sell_order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 100,
+            quantity: 1_000_000,
+        };
+        let required_base_amount = 1_000_000u64;
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(required_base_amount + 2 * BASE_LEDGER_FEE)
+            .approve(required_base_amount + BASE_LEDGER_FEE)
+            .deposit(required_base_amount)
+            .execute()
+            .await;
+        let sell_order_id = seller_client.add_limit_order(sell_order).await.unwrap();
+
         setup.env().tick().await;
 
-        // Both orders are fully filled and no longer tracked
+        // TODO DEFI-2740: Both orders are fully filled and should still be tracked
         // TODO DEFI-2740: verify user's balances
         assert_eq!(
-            client.get_order_status(sell_id).await,
+            setup.dex_client().get_order_status(buy_order_id).await,
             OrderStatus::NotFound
         );
-        assert_eq!(client.get_order_status(buy_id).await, OrderStatus::NotFound);
+        assert_eq!(
+            setup.dex_client().get_order_status(sell_order_id).await,
+            OrderStatus::NotFound
+        );
 
         setup.drop().await;
     }
