@@ -4,12 +4,13 @@ use dex_types::{
     DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
     OrderStatus, TokenId, TradingPairInfo,
 };
+use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
+    dex_canister::add_limit_order(request.clone(), &dex_canister::IC_RUNTIME).inspect(|order_id| {
         canlog::log!(
             Priority::Info,
             "[add_limit_order]: created order_id={} for request {:?}",
@@ -71,8 +72,14 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
 }
 
 #[ic_cdk::init]
-fn init() {
-    dex_canister::state::init_state();
+fn init(arg: DexArg) {
+    let init_arg = match arg {
+        DexArg::Init(init_arg) => init_arg,
+        DexArg::Upgrade(_) => {
+            panic!("ERROR: expected Init argument");
+        }
+    };
+    dex_canister::state::init_state(init_arg);
     // TODO DEFI-2744: replace with an admin endpoint
     dex_canister::register_default_trading_pairs();
     setup_timers();
@@ -80,7 +87,20 @@ fn init() {
 }
 
 #[ic_cdk::post_upgrade]
-fn post_upgrade() {
+fn post_upgrade(arg: Option<DexArg>) {
+    match arg {
+        Some(DexArg::Init(_)) => {
+            panic!("ERROR: expected Upgrade argument");
+        }
+        Some(DexArg::Upgrade(upgrade_arg)) => {
+            if let Some(upgrade_arg) = upgrade_arg
+                && let Some(mode) = upgrade_arg.mode
+            {
+                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
+            }
+        }
+        None => {}
+    }
     setup_timers();
 }
 

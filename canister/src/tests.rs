@@ -119,14 +119,18 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
-        init_state();
+        init_state(dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        });
         let pairs = get_trading_pairs();
         assert!(pairs.is_empty());
     }
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state();
+        init_state(dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        });
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
         state::with_state_mut(|s| {

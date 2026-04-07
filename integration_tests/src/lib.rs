@@ -8,7 +8,7 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_arg
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
 use dex_types::TradingPair;
-use dex_types_internal::log::Priority;
+use dex_types_internal::{DexArg, InitArg, Mode, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::Account;
@@ -48,7 +48,10 @@ impl Setup {
         env.install_canister(
             canister_id,
             dex_wasm(),
-            Encode!().unwrap(),
+            Encode!(&DexArg::Init(InitArg {
+                mode: Mode::GeneralAvailability
+            }))
+            .unwrap(),
             Some(controller),
         )
         .await;
