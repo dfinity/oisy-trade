@@ -52,16 +52,16 @@ mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Nat, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{Setup, test_trading_pair};
-    use dex_types::{
-        AddLimitOrderError, Balance, DepositRequest, LimitOrderRequest, OrderStatus, Side,
-    };
+    use dex_int_tests::{DepositFlow, Setup, test_trading_pair};
+    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId};
     use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
         let client = setup.dex_client();
+        let token_id = setup.quote_token_id();
+        let fee = QUOTE_LEDGER_FEE;
         // buy 1M base tokens for a price of 100 quote tokens per base token
         // need 100M quote tokens
         let order = LimitOrderRequest {
@@ -75,35 +75,20 @@ mod add_limit_order {
         assert_eq!(
             client.add_limit_order(order.clone()).await,
             Err(AddLimitOrderError::InsufficientBalance {
-                token: setup.quote_token_id(),
+                token: token_id.clone(),
                 available: 0u64.into(),
                 required: required.into(),
             })
         );
 
-        // Ledger fees:
-        // 1 for approval
-        // 1 for transfer_from
-        setup
-            .mint_quote_tokens(setup.user(), required + 2 * QUOTE_LEDGER_FEE)
+        DepositFlow::new(&setup, token_id.clone())
+            .mint(required + 2 * fee)
+            .approve(required + fee)
+            .deposit(required)
+            .execute()
             .await;
-        setup
-            .quote_token_ledger()
-            .icrc2_approve(
-                setup.user(),
-                setup.dex_account(),
-                required + QUOTE_LEDGER_FEE,
-            )
-            .await;
-        client
-            .deposit(DepositRequest {
-                token_id: setup.quote_token_id(),
-                amount: required.into(),
-            })
-            .await
-            .unwrap();
         assert_eq!(
-            client.get_balance(setup.quote_token_id()).await,
+            client.get_balance(token_id.clone()).await,
             Balance {
                 free: required.into(),
                 reserved: 0u64.into(),
@@ -111,7 +96,7 @@ mod add_limit_order {
         );
         assert_eq!(
             setup
-                .quote_token_ledger()
+                .ledger_for(&token_id)
                 .icrc1_balance_of(setup.user())
                 .await,
             Nat::from(0u64)
@@ -119,7 +104,7 @@ mod add_limit_order {
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
-            client.get_balance(setup.quote_token_id()).await,
+            client.get_balance(token_id).await,
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -136,6 +121,8 @@ mod add_limit_order {
     async fn should_add_limit_sell_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
         let client = setup.dex_client();
+        let token_id = setup.base_token_id();
+        let fee = BASE_LEDGER_FEE;
         // sell 1M base tokens at a price of 100 quote tokens per base token
         // need 1M base tokens
         let order = LimitOrderRequest {
@@ -149,35 +136,20 @@ mod add_limit_order {
         assert_eq!(
             client.add_limit_order(order.clone()).await,
             Err(AddLimitOrderError::InsufficientBalance {
-                token: setup.base_token_id(),
+                token: token_id.clone(),
                 available: 0u64.into(),
                 required: required.into(),
             })
         );
 
-        // Ledger fees:
-        // 1 for approval
-        // 1 for transfer_from
-        setup
-            .mint_base_tokens(setup.user(), required + 2 * BASE_LEDGER_FEE)
+        DepositFlow::new(&setup, token_id.clone())
+            .mint(required + 2 * fee)
+            .approve(required + fee)
+            .deposit(required)
+            .execute()
             .await;
-        setup
-            .base_token_ledger()
-            .icrc2_approve(
-                setup.user(),
-                setup.dex_account(),
-                required + BASE_LEDGER_FEE,
-            )
-            .await;
-        client
-            .deposit(DepositRequest {
-                token_id: setup.base_token_id(),
-                amount: required.into(),
-            })
-            .await
-            .unwrap();
         assert_eq!(
-            client.get_balance(setup.base_token_id()).await,
+            client.get_balance(token_id.clone()).await,
             Balance {
                 free: required.into(),
                 reserved: 0u64.into(),
@@ -185,7 +157,7 @@ mod add_limit_order {
         );
         assert_eq!(
             setup
-                .base_token_ledger()
+                .ledger_for(&token_id)
                 .icrc1_balance_of(setup.user())
                 .await,
             Nat::from(0u64)
@@ -193,7 +165,7 @@ mod add_limit_order {
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
-            client.get_balance(setup.base_token_id()).await,
+            client.get_balance(token_id).await,
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),

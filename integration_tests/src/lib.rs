@@ -1,5 +1,7 @@
+pub mod deposit_flow;
 pub mod icrc_ledger;
 
+pub use deposit_flow::DepositFlow;
 pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
@@ -140,6 +142,10 @@ impl Setup {
 
     pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
+    }
+
+    pub fn ledger_for(&self, token_id: &TokenId) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), token_id.ledger_id)
     }
 
     pub fn user(&self) -> Principal {
