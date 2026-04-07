@@ -6,6 +6,7 @@ use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, TokenId,
 };
+use dex_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
 
 fn expected_balance(free: u64) -> Balance {
@@ -601,6 +602,18 @@ async fn should_fail_add_trading_pair() {
         .add_trading_pair(add_trading_pair_request(&setup))
         .await;
     assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_get_logs() {
+    let setup = Setup::new().await;
+
+    let logs = setup.retrieve_logs(&Priority::Info).await;
+
+    assert_eq!(logs.len(), 1);
+    assert!(logs[0].message.contains("[init]"));
 
     setup.drop().await;
 }

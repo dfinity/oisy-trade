@@ -1,13 +1,22 @@
 use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId,
-    TradingPairInfo,
+    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
+    OrderStatus, TokenId, TradingPairInfo,
 };
+use dex_types_internal::log::Priority;
+use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::add_limit_order(request)
+    dex_canister::add_limit_order(request.clone()).inspect(|order_id| {
+        canlog::log!(
+            Priority::Info,
+            "[add_limit_order]: created order_id={} for request {:?}",
+            order_id,
+            request
+        );
+    })
 }
 
 #[ic_cdk::query]
@@ -22,7 +31,33 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await
+    let deposit_dbg = format!("{request:?}");
+    let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
+    match &result {
+        Ok(response) => canlog::log!(
+            Priority::Info,
+            "[deposit]: successful deposit for request {deposit_dbg}, block_index={}",
+            response.block_index
+        ),
+        Err(err) => match err {
+            DepositError::CallFailed { .. }
+            | DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
+            | DepositError::LedgerError(LedgerTransferFromError::InternalError(_)) => {
+                canlog::log!(
+                    Priority::Debug,
+                    "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
+                    err
+                )
+            }
+            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
+            | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
+                ..
+            }) => {
+                // do not log errors due to user actions
+            }
+        },
+    }
+    result
 }
 
 #[ic_cdk::query]
@@ -41,6 +76,7 @@ fn init() {
     // TODO DEFI-2744: replace with an admin endpoint
     dex_canister::register_default_trading_pairs();
     setup_timers();
+    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
 
 #[ic_cdk::post_upgrade]
@@ -52,6 +88,70 @@ fn setup_timers() {
     ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
         dex_canister::process_pending_orders();
     });
+}
+
+#[ic_cdk::query(hidden = true)]
+fn http_request(request: HttpRequest) -> HttpResponse {
+    use canlog::{Log, Sort};
+    use ic_http_types::HttpResponseBuilder;
+    use std::str::FromStr;
+
+    match request.path() {
+        "/logs" => {
+            let max_skip_timestamp = match request.raw_query_param("time") {
+                Some(arg) => match u64::from_str(arg) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return HttpResponseBuilder::bad_request()
+                            .with_body_and_content_length("failed to parse the 'time' parameter")
+                            .build();
+                    }
+                },
+                None => 0,
+            };
+
+            let mut log: Log<Priority> = Default::default();
+
+            match request.raw_query_param("priority").map(Priority::from_str) {
+                Some(Ok(priority)) => match priority {
+                    Priority::Info => log.push_logs(Priority::Info),
+                    Priority::Debug => log.push_logs(Priority::Debug),
+                },
+                Some(Err(_)) | None => {
+                    log.push_logs(Priority::Info);
+                    log.push_logs(Priority::Debug);
+                }
+            }
+
+            log.entries
+                .retain(|entry| entry.timestamp >= max_skip_timestamp);
+
+            fn ordering_from_query_params(sort: Option<&str>, max_skip_timestamp: u64) -> Sort {
+                match sort.map(Sort::from_str) {
+                    Some(Ok(order)) => order,
+                    Some(Err(_)) | None => {
+                        if max_skip_timestamp == 0 {
+                            Sort::Ascending
+                        } else {
+                            Sort::Descending
+                        }
+                    }
+                }
+            }
+
+            log.sort_logs(ordering_from_query_params(
+                request.raw_query_param("sort"),
+                max_skip_timestamp,
+            ));
+
+            const MAX_BODY_SIZE: usize = 2_000_000;
+            HttpResponseBuilder::ok()
+                .header("Content-Type", "application/json; charset=utf-8")
+                .with_body_and_content_length(log.serialize_logs(MAX_BODY_SIZE))
+                .build()
+        }
+        _ => HttpResponseBuilder::not_found().build(),
+    }
 }
 
 fn main() {}
