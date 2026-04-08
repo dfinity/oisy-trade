@@ -1,7 +1,8 @@
-use crate::order::{
-    LotSize, OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
-};
+use crate::order::{LotSize, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TradingPair};
+use crate::state::State;
 use canbench_rs::bench;
+use candid::{Nat, Principal};
+use dex_types_internal::{InitArg, Mode};
 use serde::Deserialize;
 use std::num::NonZeroU64;
 
@@ -9,7 +10,136 @@ use std::num::NonZeroU64;
 const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
-const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+
+const USER: Principal = Principal::anonymous();
+
+fn trading_pair() -> TradingPair {
+    TradingPair {
+        base: TokenId::new(Principal::from_slice(&[1])),
+        quote: TokenId::new(Principal::from_slice(&[2])),
+    }
+}
+
+fn new_state() -> State {
+    let mut state = State::try_from(InitArg {
+        mode: Mode::GeneralAvailability,
+    })
+    .unwrap();
+    let pair = trading_pair();
+    state
+        .add_trading_pair(pair.clone(), TICK_SIZE, LOT_SIZE)
+        .unwrap();
+    state.deposit(USER, pair.base, Nat::from(u128::MAX));
+    state.deposit(USER, pair.quote, Nat::from(u128::MAX));
+    state
+}
+
+/// Pre-populate an order book with resting orders from the Binance depth snapshot.
+/// Best bid (2.304) < best ask (2.305), so no fills occur during population.
+fn populate_state(state: &mut State, depth: &DepthSnapshot) {
+    let pair = trading_pair();
+    for (price_str, qty_str) in &depth.bids {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(parse_decimal_8(price_str)),
+                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                },
+            )
+            .expect("valid bid order");
+    }
+    for (price_str, qty_str) in &depth.asks {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(parse_decimal_8(price_str)),
+                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                },
+            )
+            .expect("valid ask order");
+    }
+    state.process_pending_orders();
+}
+
+/// Benchmark processing 1000 incoming orders against a fully populated order book
+/// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
+///
+/// Includes both matching and settlement. Use the `matching` and `settling`
+/// bench scopes to see the breakdown.
+#[bench(raw)]
+fn bench_process_1000_orders() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let trades = load_trades();
+    let mut state = new_state();
+
+    populate_state(&mut state, &depth);
+
+    // Queue 1000 pending orders from aggregated trades.
+    // Binance `m` field: true = buyer is maker, so the taker is a seller.
+    let pair = trading_pair();
+    for trade in &trades {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: if trade.m { Side::Sell } else { Side::Buy },
+                    price: Price::new(parse_decimal_8(&trade.p)),
+                    quantity: Quantity::new(parse_decimal_8(&trade.q)),
+                },
+            )
+            .expect("valid trade order");
+    }
+
+    canbench_rs::bench_fn(|| {
+        state.process_pending_orders();
+    })
+}
+
+/// Benchmark processing 1000 orders that all rest without matching.
+/// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
+#[bench(raw)]
+fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
+    let mut state = new_state();
+    let pair = trading_pair();
+
+    for i in 0..500u64 {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(200_000_000), // 2.000 USDT
+                    quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
+                },
+            )
+            .expect("valid buy order");
+    }
+    for i in 0..500u64 {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(300_000_000), // 3.000 USDT
+                    quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
+                },
+            )
+            .expect("valid sell order");
+    }
+
+    canbench_rs::bench_fn(|| {
+        state.process_pending_orders();
+    })
+}
 
 #[derive(Deserialize)]
 struct DepthSnapshot {
@@ -53,81 +183,4 @@ fn load_depth() -> DepthSnapshot {
 fn load_trades() -> Vec<AggTrade> {
     let json = include_str!("../../docs/trading_data/2026_04_04_binance_agg_trades_ICPUSDT.json");
     serde_json::from_str(json).expect("failed to parse trades")
-}
-
-/// Pre-populate an order book with resting orders from the Binance depth snapshot.
-/// Best bid (2.304) < best ask (2.305), so no fills occur during population.
-fn populate_book(book: &mut OrderBook, depth: &DepthSnapshot) {
-    for (price_str, qty_str) in &depth.bids {
-        let pending = PendingOrder {
-            side: Side::Buy,
-            price: Price::new(parse_decimal_8(price_str)),
-            quantity: Quantity::new(parse_decimal_8(qty_str)),
-        };
-        book.add_pending_order(pending).expect("valid bid order");
-    }
-    for (price_str, qty_str) in &depth.asks {
-        let pending = PendingOrder {
-            side: Side::Sell,
-            price: Price::new(parse_decimal_8(price_str)),
-            quantity: Quantity::new(parse_decimal_8(qty_str)),
-        };
-        book.add_pending_order(pending).expect("valid ask order");
-    }
-    let fills = book.process_pending_orders();
-    assert!(fills.is_empty(), "no fills expected during book population");
-}
-
-/// Benchmark processing 1000 incoming orders against a fully populated order book
-/// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
-#[bench(raw)]
-fn bench_process_1000_orders() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let trades = load_trades();
-    let mut book = OrderBook::new(BOOK_ID, TICK_SIZE, LOT_SIZE);
-
-    populate_book(&mut book, &depth);
-
-    // Queue 1000 pending orders from aggregated trades.
-    // Binance `m` field: true = buyer is maker, so the taker is a seller.
-    for trade in &trades {
-        let pending = PendingOrder {
-            side: if trade.m { Side::Sell } else { Side::Buy },
-            price: Price::new(parse_decimal_8(&trade.p)),
-            quantity: Quantity::new(parse_decimal_8(&trade.q)),
-        };
-        book.add_pending_order(pending).expect("valid trade order");
-    }
-
-    canbench_rs::bench_fn(|| {
-        book.process_pending_orders();
-    })
-}
-
-/// Benchmark processing 1000 orders that all rest without matching.
-/// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
-#[bench(raw)]
-fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
-    let mut book = OrderBook::new(BOOK_ID, TICK_SIZE, LOT_SIZE);
-
-    for i in 0..500u64 {
-        let pending = PendingOrder {
-            side: Side::Buy,
-            price: Price::new(200_000_000), // 2.000 USDT
-            quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
-        };
-        book.add_pending_order(pending).expect("valid buy order");
-    }
-    for i in 0..500u64 {
-        let pending = PendingOrder {
-            side: Side::Sell,
-            price: Price::new(300_000_000), // 3.000 USDT
-            quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
-        };
-        book.add_pending_order(pending).expect("valid sell order");
-    }
-
-    canbench_rs::bench_fn(|| {
-        book.process_pending_orders();
-    })
 }

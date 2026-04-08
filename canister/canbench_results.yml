@@ -2,15 +2,35 @@ benches:
   bench_process_1000_orders:
     total:
       calls: 1
-      instructions: 2195966
+      instructions: 14331084
       heap_increase: 1
       stable_memory_increase: 0
-    scopes: {}
+    scopes:
+      matching:
+        calls: 1
+        instructions: 2188753
+        heap_increase: 1
+        stable_memory_increase: 0
+      settling:
+        calls: 1
+        instructions: 12139156
+        heap_increase: 0
+        stable_memory_increase: 0
   bench_process_1000_orders_no_fills:
     total:
       calls: 1
-      instructions: 1482580
+      instructions: 1487340
       heap_increase: 1
       stable_memory_increase: 0
-    scopes: {}
+    scopes:
+      matching:
+        calls: 1
+        instructions: 1483881
+        heap_increase: 1
+        stable_memory_increase: 0
+      settling:
+        calls: 1
+        instructions: 291
+        heap_increase: 0
+        stable_memory_increase: 0
 version: 0.4.0
