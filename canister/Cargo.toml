@@ -22,6 +22,12 @@ ic-cdk = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
 icrc-ledger-types = { workspace = true }
+canbench-rs = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }
