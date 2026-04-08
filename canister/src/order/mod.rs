@@ -3,7 +3,7 @@ mod book;
 mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
-use candid::Principal;
+use candid::{Nat, Principal};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -189,6 +189,14 @@ impl Price {
 
     pub fn is_multiple_of(self, tick_size: TickSize) -> bool {
         self.0.is_multiple_of(tick_size.get())
+    }
+
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
+    }
+
+    pub fn checked_mul(self, quantity: Quantity) -> Nat {
+        Nat::from(self.0) * Nat::from(quantity.get())
     }
 }
 
