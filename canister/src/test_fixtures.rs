@@ -19,6 +19,13 @@ pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
 
+pub fn state() -> state::State {
+    state::State::try_from(dex_types_internal::InitArg {
+        mode: dex_types_internal::Mode::GeneralAvailability,
+    })
+    .unwrap()
+}
+
 pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),

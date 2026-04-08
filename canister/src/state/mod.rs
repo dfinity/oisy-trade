@@ -34,7 +34,7 @@ pub fn init_state(init_arg: InitArg) {
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,

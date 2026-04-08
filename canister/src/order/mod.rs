@@ -139,7 +139,7 @@ impl From<TokenId> for dex_types::TokenId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenMetadata {
     pub symbol: String,
     pub decimals: u8,
