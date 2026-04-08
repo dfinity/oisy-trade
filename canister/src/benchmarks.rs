@@ -1,4 +1,6 @@
-use crate::order::{LotSize, OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+use crate::order::{
+    LotSize, OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
+};
 use canbench_rs::bench;
 use serde::Deserialize;
 use std::num::NonZeroU64;
