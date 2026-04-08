@@ -32,6 +32,14 @@ download-external-wasms:
 integration-tests: download-external-wasms
     cargo test --package dex_int_tests -- --test-threads 2 --nocapture
 
+# Run canbench benchmarks
+bench:
+    cd canister && canbench
+
+# Run canbench and persist results for regression checks
+bench-check:
+    cd canister && canbench --persist
+
 # Deploy to staging
 deploy identity='hsm':
     icp deploy dex --identity {{identity}} --environment staging
