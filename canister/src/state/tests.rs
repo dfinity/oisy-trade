@@ -219,6 +219,144 @@ mod settle_fills {
         assert_token_conservation(&state, &totals_before);
     }
 
+    #[test]
+    fn should_settle_buy_taker_partial_fill_with_price_improvement() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Sell rests at 90 for 1 lot, buy taker at 100 for 3 lots
+        // Fills 1 lot at 90, rests 2 lots
+        place_sell_order(&mut state, 90, lot);
+        place_buy_order(&mut state, 100, 3 * lot);
+        let totals_before = snapshot_totals(&state);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        // Surplus: (100-90)*lot = 10*lot returned to free
+        // Remaining reserved: 100*2*lot = 200*lot
+        assert_eq!(buyer_base, balance(lot, 0));
+        assert_eq!(buyer_quote, balance(10 * lot, 200 * lot));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        assert_eq!(seller_base, balance(0, 0));
+        assert_eq!(seller_quote, balance(90 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_sell_taker_partial_fill() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Buy rests 1 lot at 100, sell taker 3 lots at 100
+        place_buy_order(&mut state, 100, lot);
+        place_sell_order(&mut state, 100, 3 * lot);
+        let totals_before = snapshot_totals(&state);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        assert_eq!(buyer_base, balance(lot, 0));
+        assert_eq!(buyer_quote, balance(0, 0));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        // 1 lot filled, 2 lots remain reserved
+        assert_eq!(seller_base, balance(0, 2 * lot));
+        assert_eq!(seller_quote, balance(100 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_sell_taker_multi_level_sweep() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Two buys at different prices, sell taker sweeps both
+        // Sell at 100 matches buy at 110 first, then buy at 100
+        place_buy_order(&mut state, 100, lot);
+        place_buy_order(&mut state, 110, lot);
+        place_sell_order(&mut state, 100, 2 * lot);
+        let totals_before = snapshot_totals(&state);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        // Buyer deposited 100*lot + 110*lot = 210*lot quote, all consumed
+        assert_eq!(buyer_base, balance(2 * lot, 0));
+        assert_eq!(buyer_quote, balance(0, 0));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        assert_eq!(seller_base, balance(0, 0));
+        // Seller receives 110*lot + 100*lot = 210*lot quote
+        assert_eq!(seller_quote, balance(210 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_self_trade() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let user = Principal::from_slice(&[0x42]);
+
+        // Same user places both buy and sell
+        state.deposit(user, pair.quote, (100 * lot).into());
+        state
+            .add_limit_order(
+                user,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(100),
+                    quantity: Quantity::new(lot),
+                },
+            )
+            .unwrap();
+        state.deposit(user, pair.base, lot.into());
+        state
+            .add_limit_order(
+                user,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(100),
+                    quantity: Quantity::new(lot),
+                },
+            )
+            .unwrap();
+
+        let base_before = state.get_balance(user, pair.base);
+        let quote_before = state.get_balance(user, pair.quote);
+        state.process_pending_orders();
+        let base_after = state.get_balance(user, pair.base);
+        let quote_after = state.get_balance(user, pair.quote);
+
+        // Total tokens unchanged: base and quote just move between free/reserved
+        assert_eq!(
+            base_before.free.clone() + base_before.reserved.clone(),
+            base_after.free.clone() + base_after.reserved.clone(),
+            "base token total changed"
+        );
+        assert_eq!(
+            quote_before.free.clone() + quote_before.reserved.clone(),
+            quote_after.free.clone() + quote_after.reserved.clone(),
+            "quote token total changed"
+        );
+        // After self-trade: all reserved released, net balances same as deposited
+        assert_eq!(base_after, balance(lot, 0));
+        assert_eq!(quote_after, balance(100 * lot, 0));
+    }
+
     fn setup() -> State {
         let mut state = State::try_from(InitArg {
             mode: Mode::GeneralAvailability,
