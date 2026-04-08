@@ -35,7 +35,7 @@ pub struct UpgradeArg {
 }
 
 /// Controls who may call update endpoints on the DEX canister.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum Mode {
     /// Anyone may call update endpoints.
     #[default]

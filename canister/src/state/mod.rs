@@ -34,7 +34,7 @@ pub fn init_state(init_arg: InitArg) {
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
@@ -97,6 +97,8 @@ impl State {
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
+        use crate::order::Side;
+
         let book_id = self
             .trading_pairs
             .get(&pair)
@@ -110,20 +112,34 @@ impl State {
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
         let (token, required) = match pending.side {
-            Side::Buy => (pair.quote, pending.price.checked_mul(pending.quantity)),
+            Side::Buy => (
+                pair.quote,
+                Nat::from(pending.price.get()) * Nat::from(pending.quantity.get()),
+            ),
             Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
         };
-        self.balances
-            .entry(user)
-            .or_default()
-            .entry(token)
-            .or_default()
-            .reserve(required)
-            .map_err(|e| AddLimitOrderError::InsufficientBalance {
-                token,
-                available: e.available,
-                required: e.required,
-            })?;
+        match self
+            .balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token))
+        {
+            Some(balance) => {
+                balance
+                    .reserve(required)
+                    .map_err(|e| AddLimitOrderError::InsufficientBalance {
+                        token,
+                        available: e.available,
+                        required: e.required,
+                    })?;
+            }
+            None => {
+                return Err(AddLimitOrderError::InsufficientBalance {
+                    token,
+                    available: Nat::from(0u64),
+                    required,
+                });
+            }
+        }
 
         let order_id = book
             .add_pending_order(pending)
