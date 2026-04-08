@@ -182,12 +182,16 @@ impl OrderBook {
     }
 
     /// Drain the pending queue and match each order against the book.
-    pub fn process_pending_orders(&mut self) {
+    ///
+    /// Returns every [`Fill`] produced, carrying full taker/maker context
+    /// so the caller can settle balances.
+    pub fn process_pending_orders(&mut self) -> Vec<Fill> {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
+        let mut all_fills = Vec::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
-                Ok(_result) => {
-                    // TODO DEFI-2740: settle fills (credit/debit balances)
+                Ok(result) => {
+                    all_fills.extend(result.into_fills());
                 }
                 Err(err) => {
                     panic!(
@@ -199,6 +203,7 @@ impl OrderBook {
                 }
             }
         }
+        all_fills
     }
 
     /// Returns the status of an order in this book, or `None` if not found.
@@ -283,6 +288,13 @@ impl MatchResult {
         match self {
             MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
             MatchResult::Resting { .. } => &[],
+        }
+    }
+
+    pub fn into_fills(self) -> Vec<Fill> {
+        match self {
+            MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
+            MatchResult::Resting { .. } => Vec::new(),
         }
     }
 }

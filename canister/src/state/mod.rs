@@ -137,7 +137,8 @@ impl State {
     pub fn process_pending_orders(&mut self) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         for book in self.order_books.values_mut() {
-            book.process_pending_orders();
+            let _fills = book.process_pending_orders();
+            // TODO DEFI-2740: settle fills (credit/debit balances)
         }
     }
 
