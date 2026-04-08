@@ -44,6 +44,7 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
+    // TODO DEFI-2752: Keep track or filled orders.
     order_owners: BTreeMap<OrderId, Principal>,
     active_tasks: BTreeSet<Task>,
 }
