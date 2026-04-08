@@ -22,6 +22,7 @@ strip = true
 opt-level = 's'
 
 [workspace.dependencies]
+assert_matches = "1"
 async-trait = "0.1.89"
 mockall = "0.14.0"
 candid = "0.10.26"
