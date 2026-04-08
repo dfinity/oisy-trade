@@ -84,10 +84,10 @@ mod add_limit_order {
 }
 
 mod settle_fills {
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{PendingOrder, Price, Quantity, Side, TokenId};
     use crate::state::State;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, icp_ckbtc_trading_pair};
-    use candid::Principal;
+    use candid::{Nat, Principal};
     use dex_types_internal::{InitArg, Mode};
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -102,6 +102,7 @@ mod settle_fills {
 
         place_buy_order(&mut state, price, lot);
         place_sell_order(&mut state, price, lot);
+        let totals_before = snapshot_totals(&state);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -113,6 +114,8 @@ mod settle_fills {
         let seller_quote = state.get_balance(SELLER, pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(price * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
     }
 
     #[test]
@@ -124,6 +127,7 @@ mod settle_fills {
         // Sell rests at 90, buy taker at 100 → fills at maker's 90
         place_sell_order(&mut state, 90, lot);
         place_buy_order(&mut state, 100, lot);
+        let totals_before = snapshot_totals(&state);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -136,6 +140,8 @@ mod settle_fills {
         let seller_quote = state.get_balance(SELLER, pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(90 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
     }
 
     #[test]
@@ -147,6 +153,7 @@ mod settle_fills {
         // Buy rests at 110, sell taker at 100 → fills at maker's 110
         place_buy_order(&mut state, 110, lot);
         place_sell_order(&mut state, 100, lot);
+        let totals_before = snapshot_totals(&state);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -159,6 +166,8 @@ mod settle_fills {
         assert_eq!(seller_base, balance(0, 0));
         // Seller gets 110*lot quote (better than their limit of 100)
         assert_eq!(seller_quote, balance(110 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
     }
 
     #[test]
@@ -170,6 +179,7 @@ mod settle_fills {
         // Buy 3 lots at 100, only 1 lot of sell available
         place_buy_order(&mut state, 100, 3 * lot);
         place_sell_order(&mut state, 100, lot);
+        let totals_before = snapshot_totals(&state);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -182,6 +192,8 @@ mod settle_fills {
         let seller_quote = state.get_balance(SELLER, pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(100 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
     }
 
     #[test]
@@ -194,6 +206,7 @@ mod settle_fills {
         place_sell_order(&mut state, 90, lot);
         place_sell_order(&mut state, 100, lot);
         place_buy_order(&mut state, 100, 2 * lot);
+        let totals_before = snapshot_totals(&state);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -202,6 +215,8 @@ mod settle_fills {
         // Paid 90*lot + 100*lot = 190*lot, surplus = 10*lot
         assert_eq!(buyer_base, balance(2 * lot, 0));
         assert_eq!(buyer_quote, balance(10 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
     }
 
     fn setup() -> State {
@@ -251,5 +266,29 @@ mod settle_fills {
             free: free.into(),
             reserved: reserved.into(),
         }
+    }
+
+    /// Sum free + reserved across both users for a given token.
+    fn total_token(state: &State, token: TokenId) -> Nat {
+        [BUYER, SELLER].iter().fold(Nat::from(0u64), |acc, user| {
+            let b = state.get_balance(*user, token);
+            acc + b.free + b.reserved
+        })
+    }
+
+    /// Snapshot the total supply of base and quote tokens across both users.
+    fn snapshot_totals(state: &State) -> (Nat, Nat) {
+        let pair = icp_ckbtc_trading_pair();
+        (
+            total_token(state, pair.base),
+            total_token(state, pair.quote),
+        )
+    }
+
+    /// Assert that the total base and quote tokens across both users are unchanged.
+    fn assert_token_conservation(state: &State, before: &(Nat, Nat)) {
+        let after = snapshot_totals(state);
+        assert_eq!(before.0, after.0, "base token total changed");
+        assert_eq!(before.1, after.1, "quote token total changed");
     }
 }
