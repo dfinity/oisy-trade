@@ -109,9 +109,9 @@ impl OrderBook {
                     if *entry.key() > order.price() {
                         break;
                     }
-                    let price = *entry.key();
+                    let maker_price = *entry.key();
                     fill_against_queue(
-                        price,
+                        maker_price,
                         entry,
                         &mut order,
                         &mut fills,
@@ -124,12 +124,12 @@ impl OrderBook {
                     let Some(entry) = self.bids.first_entry() else {
                         break;
                     };
-                    let Reverse(price) = *entry.key();
-                    if price < order.price() {
+                    let Reverse(maker_price) = *entry.key();
+                    if maker_price < order.price() {
                         break;
                     }
                     fill_against_queue(
-                        price,
+                        maker_price,
                         entry,
                         &mut order,
                         &mut fills,
@@ -229,7 +229,7 @@ impl OrderBook {
 }
 
 fn fill_against_queue<K: Ord>(
-    price: Price,
+    maker_price: Price,
     mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<RestingOrder>>,
     order: &mut Order,
     fills: &mut Vec<Fill>,
@@ -246,8 +246,11 @@ fn fill_against_queue<K: Ord>(
         resting.reduce_quantity(fill_qty);
 
         fills.push(Fill {
+            taker_order_seq: order.id(),
+            taker_side: order.side(),
+            taker_price: order.price(),
             maker_order_seq: resting.id(),
-            price,
+            maker_price,
             quantity: fill_qty,
         });
 
@@ -287,10 +290,16 @@ impl MatchResult {
 /// A single fill produced when an incoming order matches a resting order.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fill {
+    /// The sequence of the incoming (taker) order.
+    pub taker_order_seq: OrderSeq,
+    /// The side of the taker order.
+    pub taker_side: Side,
+    /// The limit price of the taker order.
+    pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
-    pub price: Price,
+    pub maker_price: Price,
     /// The quantity filled.
     pub quantity: Quantity,
 }

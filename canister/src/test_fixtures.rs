@@ -1,5 +1,5 @@
 use crate::order::{
-    LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
     TickSize, TokenId, TradingPair,
 };
 use crate::state;
@@ -54,6 +54,26 @@ pub fn buy(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
 
 pub fn sell(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Sell, price, quantity)
+}
+
+/// Construct a [`Fill`] for use in test assertions.
+///
+/// `taker` provides the taker context (seq, side, price).
+/// `maker_order_seq`, `maker_price`, and `quantity` describe the fill itself.
+pub fn fill(
+    taker: &Order,
+    maker_order_seq: OrderSeq,
+    maker_price: impl Into<u64>,
+    quantity: impl Into<u64>,
+) -> Fill {
+    Fill {
+        taker_order_seq: taker.id(),
+        taker_side: taker.side(),
+        taker_price: taker.price(),
+        maker_order_seq,
+        maker_price: Price::new(maker_price.into()),
+        quantity: Quantity::new(quantity.into()),
+    }
 }
 
 pub fn all_order_types(
