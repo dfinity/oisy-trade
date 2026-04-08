@@ -102,6 +102,35 @@ fn bench_process_1000_orders() -> canbench_rs::BenchResult {
     })
 }
 
+/// Benchmark a single large sell order that sweeps all 697 bid levels from the
+/// Binance depth snapshot, producing one fill per price level.
+#[bench(raw)]
+fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let mut state = new_state();
+
+    populate_state(&mut state, &depth);
+
+    // Place a single sell at the minimum price with quantity exceeding total bid depth
+    // (~924,901 ICP). This crosses every bid level.
+    let pair = trading_pair();
+    state
+        .add_limit_order(
+            USER,
+            pair,
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
+                quantity: Quantity::new(100_000_000_000_000), // 1,000,000 ICP
+            },
+        )
+        .expect("valid sell order");
+
+    canbench_rs::bench_fn(|| {
+        state.process_pending_orders();
+    })
+}
+
 /// Benchmark processing 1000 orders that all rest without matching.
 /// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
 #[bench(raw)]
