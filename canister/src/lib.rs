@@ -31,18 +31,15 @@ pub fn add_limit_order(
     runtime: &impl Runtime,
 ) -> Result<OrderId, AddLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder {
         side: order::Side::from(request.side),
         price: order::Price::from(request.price),
         quantity: order::Quantity::from(request.quantity),
     };
-    let order_id = state::with_state_mut(|s| s.add_limit_order(pair, pending))
+    let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending))
         .map_err(AddLimitOrderError::from)?;
-    // Trigger matching, no need to wait for the timer to fire
-    ic_cdk_timers::set_timer(Duration::ZERO, async {
-        process_pending_orders();
-    });
     Ok(order_id.to_string())
 }
 
@@ -53,24 +50,6 @@ pub fn process_pending_orders() {
     };
 
     state::with_state_mut(|s| s.process_pending_orders());
-}
-
-/// Register default trading pairs for testing.
-/// TODO DEFI-2744: replace with an admin endpoint.
-pub fn register_default_trading_pairs() {
-    use candid::Principal;
-    let pair = order::TradingPair {
-        base: order::TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
-        quote: order::TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
-    };
-    state::with_state_mut(|s| {
-        s.add_trading_pair(
-            pair,
-            order::TickSize::new(NonZeroU64::new(10).unwrap()),
-            order::LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-        )
-        .unwrap()
-    });
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {

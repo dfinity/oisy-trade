@@ -34,7 +34,7 @@ pub fn init_state(init_arg: InitArg) {
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
@@ -91,10 +91,12 @@ impl State {
 
     pub fn add_limit_order(
         &mut self,
+        user: Principal,
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
-        // TODO DEFI-2723: ensure the user has enough balance
+        use crate::order::Side;
+
         let book_id = self
             .trading_pairs
             .get(&pair)
@@ -103,6 +105,40 @@ impl State {
             .order_books
             .get_mut(book_id)
             .expect("BUG: trading pair registered but order book missing");
+
+        book.validate_order(pending.price, pending.quantity)
+            .map_err(AddLimitOrderError::InvalidOrder)?;
+
+        let (token, required) = match pending.side {
+            Side::Buy => (
+                pair.quote,
+                Nat::from(pending.price.get()) * Nat::from(pending.quantity.get()),
+            ),
+            Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
+        };
+        match self
+            .balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token))
+        {
+            Some(balance) => {
+                balance
+                    .reserve(required)
+                    .map_err(|e| AddLimitOrderError::InsufficientBalance {
+                        token,
+                        available: e.available,
+                        required: e.required,
+                    })?;
+            }
+            None => {
+                return Err(AddLimitOrderError::InsufficientBalance {
+                    token,
+                    available: Nat::from(0u64),
+                    required,
+                });
+            }
+        }
+
         let order_id = book
             .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
@@ -188,6 +224,11 @@ impl State {
 pub enum AddLimitOrderError {
     UnknownTradingPair,
     InvalidOrder(MatchOrderError),
+    InsufficientBalance {
+        token: TokenId,
+        available: Nat,
+        required: Nat,
+    },
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
@@ -209,6 +250,15 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             }) => dex_types::AddLimitOrderError::InvalidQuantity {
                 quantity: quantity.get(),
                 lot_size: lot_size.get(),
+            },
+            AddLimitOrderError::InsufficientBalance {
+                token,
+                available,
+                required,
+            } => dex_types::AddLimitOrderError::InsufficientBalance {
+                token: dex_types::TokenId::from(token),
+                available,
+                required,
             },
         }
     }

@@ -19,12 +19,16 @@ pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
 
+pub fn state() -> state::State {
+    state::State::try_from(dex_types_internal::InitArg {
+        mode: dex_types_internal::Mode::GeneralAvailability,
+    })
+    .unwrap()
+}
+
 pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
-        pair: dex_types::TradingPair {
-            base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-            quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
-        },
+        pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
         price: 100,
         quantity: u64::from(LOT_SIZE),
@@ -75,6 +79,18 @@ pub fn init_state_with_order_book() {
     state::with_state_mut(|s| {
         s.add_trading_pair(icp_ckbtc_trading_pair(), TICK_SIZE, LOT_SIZE)
             .unwrap();
+    });
+}
+
+/// Fund the given user with a large balance for both tokens of the default
+/// trading pair so that balance checks pass in tests that don't care about
+/// balance validation.
+pub fn fund_user(user: Principal) {
+    state::with_state_mut(|s| {
+        let pair = icp_ckbtc_trading_pair();
+        let amount = candid::Nat::from(u64::MAX);
+        s.deposit(user, pair.base, amount.clone());
+        s.deposit(user, pair.quote, amount);
     });
 }
 

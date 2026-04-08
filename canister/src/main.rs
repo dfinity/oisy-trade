@@ -10,14 +10,18 @@ use ic_http_types::{HttpRequest, HttpResponse};
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    dex_canister::add_limit_order(request.clone(), &dex_canister::IC_RUNTIME).inspect(|order_id| {
-        canlog::log!(
-            Priority::Info,
-            "[add_limit_order]: created order_id={} for request {:?}",
-            order_id,
-            request
-        );
-    })
+    let order_id = dex_canister::add_limit_order(request.clone(), &dex_canister::IC_RUNTIME)?;
+    canlog::log!(
+        Priority::Info,
+        "[add_limit_order]: created order_id={} for request {:?}",
+        order_id,
+        request
+    );
+    // Trigger matching immediately, no need to wait for the periodic timer.
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        dex_canister::process_pending_orders();
+    });
+    Ok(order_id)
 }
 
 #[ic_cdk::query]
@@ -80,8 +84,6 @@ fn init(arg: DexArg) {
         }
     };
     dex_canister::state::init_state(init_arg);
-    // TODO DEFI-2744: replace with an admin endpoint
-    dex_canister::register_default_trading_pairs();
     setup_timers();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }

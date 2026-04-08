@@ -6,6 +6,9 @@ use pocket_ic::nonblocking::PocketIc;
 use pocket_ic::{CanisterId, CanisterSettings};
 use serde::{Deserialize, Serialize};
 
+pub const BASE_LEDGER_FEE: u64 = 5_000u64;
+pub const QUOTE_LEDGER_FEE: u64 = 10u64;
+
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct ArchiveOptions {
     pub num_blocks_to_archive: u64,
@@ -131,7 +134,7 @@ pub fn cksol_init_args(controller: Principal) -> InitArgs {
             subaccount: None,
         },
         fee_collector_account: None,
-        transfer_fee: Nat::from(5_000u64),
+        transfer_fee: Nat::from(BASE_LEDGER_FEE),
         decimals: Some(9),
         max_memo_length: Some(256),
         token_symbol: "ckSOL".to_string(),
@@ -182,7 +185,13 @@ impl<'a> LedgerClient<'a> {
         Decode!(&response, Nat).expect("Failed to decode icrc1_fee response")
     }
 
-    pub async fn icrc1_transfer(&self, caller: Principal, to: Account, amount: Nat) -> Nat {
+    pub async fn icrc1_transfer(
+        &self,
+        caller: Principal,
+        to: Account,
+        amount: impl Into<Nat>,
+    ) -> Nat {
+        let amount = amount.into();
         let args = TransferArg {
             from_subaccount: None,
             to,
@@ -206,7 +215,13 @@ impl<'a> LedgerClient<'a> {
             .expect("icrc1_transfer failed")
     }
 
-    pub async fn icrc2_approve(&self, caller: Principal, spender: Account, amount: Nat) -> Nat {
+    pub async fn icrc2_approve(
+        &self,
+        caller: Principal,
+        spender: Account,
+        amount: impl Into<Nat>,
+    ) -> Nat {
+        let amount = amount.into();
         let args = ApproveArgs {
             from_subaccount: None,
             spender,
@@ -231,6 +246,21 @@ impl<'a> LedgerClient<'a> {
             .expect("Failed to decode icrc2_approve response")
             .expect("icrc2_approve failed")
     }
+
+    pub async fn icrc1_balance_of(&self, account: impl Into<Account>) -> Nat {
+        let account = account.into();
+        let response = self
+            .env
+            .query_call(
+                self.canister_id,
+                Principal::anonymous(),
+                "icrc1_balance_of",
+                Encode!(&account).unwrap(),
+            )
+            .await
+            .expect("Failed to call icrc1_balance_of");
+        Decode!(&response, Nat).expect("Failed to decode icrc1_balance_of response")
+    }
 }
 
 pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
@@ -240,7 +270,7 @@ pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
             subaccount: None,
         },
         fee_collector_account: None,
-        transfer_fee: Nat::from(10u64),
+        transfer_fee: Nat::from(QUOTE_LEDGER_FEE),
         decimals: Some(8),
         max_memo_length: Some(256),
         token_symbol: "ckBTC".to_string(),

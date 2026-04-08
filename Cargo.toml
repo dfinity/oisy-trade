@@ -21,11 +21,8 @@ lto = true
 strip = true
 opt-level = 's'
 
-# Required by `ic-test-utilities-load-wasm`
-[profile.canister-release]
-inherits = "release"
-
 [workspace.dependencies]
+assert_matches = "1"
 async-trait = "0.1.89"
 mockall = "0.14.0"
 candid = "0.10.26"
@@ -34,7 +31,6 @@ canlog = "0.2.0"
 ic-cdk = "0.20.0"
 ic-cdk-timers = "1.0.0"
 ic-http-types = "0.1.0"
-ic-test-utilities-load-wasm = { git = "https://github.com/dfinity/ic", tag = "release-2026-01-29_23-28-base" }
 icrc-ledger-types = "0.1.13"
 pocket-ic = "13.0.0"
 proptest = "1"

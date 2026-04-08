@@ -139,7 +139,7 @@ impl From<TokenId> for dex_types::TokenId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenMetadata {
     pub symbol: String,
     pub decimals: u8,
@@ -156,6 +156,15 @@ impl From<dex_types::TradingPair> for TradingPair {
         Self {
             base: TokenId::new(pair.base),
             quote: TokenId::new(pair.quote),
+        }
+    }
+}
+
+impl From<TradingPair> for dex_types::TradingPair {
+    fn from(value: TradingPair) -> Self {
+        dex_types::TradingPair {
+            base: value.base.0,
+            quote: value.quote.0,
         }
     }
 }

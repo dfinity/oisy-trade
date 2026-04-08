@@ -1,5 +1,7 @@
+pub mod deposit_flow;
 pub mod icrc_ledger;
 
+pub use deposit_flow::DepositFlow;
 pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
@@ -7,7 +9,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
-use dex_types::TradingPair;
+use dex_types::{AddTradingPairRequest, TokenId, TradingPair};
 use dex_types_internal::{DexArg, InitArg, Mode, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -15,6 +17,9 @@ use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
+
+pub const TICK_SIZE: u64 = 10;
+pub const LOT_SIZE: u64 = 1_000_000;
 
 pub struct Setup {
     env: Option<PocketIc>,
@@ -84,6 +89,55 @@ impl Setup {
         }
     }
 
+    pub async fn with_trading_pair(self) -> Self {
+        let controller_client = self.dex_client_with_caller(self.controller());
+        let result = controller_client
+            .add_trading_pair(self.add_trading_pair_request())
+            .await;
+        assert_eq!(result, Ok(()));
+        self
+    }
+
+    pub fn add_trading_pair_request(&self) -> AddTradingPairRequest {
+        let trading_pair = self.trading_pair();
+        AddTradingPairRequest {
+            base: TokenId {
+                ledger_id: trading_pair.base,
+            },
+            quote: TokenId {
+                ledger_id: trading_pair.quote,
+            },
+            tick_size: TICK_SIZE,
+            lot_size: LOT_SIZE,
+        }
+    }
+
+    pub fn trading_pair(&self) -> TradingPair {
+        TradingPair {
+            base: self.base_ledger_id,
+            quote: self.quote_ledger_id,
+        }
+    }
+
+    pub fn base_token_id(&self) -> TokenId {
+        TokenId {
+            ledger_id: self.base_ledger_id,
+        }
+    }
+
+    pub fn quote_token_id(&self) -> TokenId {
+        TokenId {
+            ledger_id: self.quote_ledger_id,
+        }
+    }
+
+    pub fn dex_account(&self) -> Account {
+        Account {
+            owner: self.dex_id,
+            subaccount: None,
+        }
+    }
+
     pub fn dex_client(&self) -> DexClient<PocketIcRuntime<'_>> {
         DexClient::new(self.new_pocket_ic(), self.dex_id)
     }
@@ -94,6 +148,18 @@ impl Setup {
 
     pub fn quote_token_ledger(&self) -> LedgerClient<'_> {
         LedgerClient::new(self.env.as_ref().unwrap(), self.quote_ledger_id)
+    }
+
+    pub fn ledger_for(&self, token_id: &TokenId) -> LedgerClient<'_> {
+        LedgerClient::new(self.env.as_ref().unwrap(), token_id.ledger_id)
+    }
+
+    pub fn deposit_flow(&self, user: Principal, token_id: TokenId) -> DepositFlow<'_> {
+        DepositFlow::new(self, user, token_id)
+    }
+
+    pub fn user(&self) -> Principal {
+        self.caller
     }
 
     pub fn controller(&self) -> Principal {
@@ -116,7 +182,7 @@ impl Setup {
         self.env.as_ref().unwrap()
     }
 
-    pub async fn mint_base_tokens(&self, to: Principal, amount: Nat) -> Nat {
+    pub async fn mint_base_tokens(&self, to: Principal, amount: impl Into<Nat>) -> Nat {
         self.base_token_ledger()
             .icrc1_transfer(
                 self.controller,
@@ -129,7 +195,7 @@ impl Setup {
             .await
     }
 
-    pub async fn mint_quote_tokens(&self, to: Principal, amount: Nat) -> Nat {
+    pub async fn mint_quote_tokens(&self, to: Principal, amount: impl Into<Nat>) -> Nat {
         self.quote_token_ledger()
             .icrc1_transfer(
                 self.controller,
@@ -192,18 +258,26 @@ impl Setup {
 
 impl Drop for Setup {
     fn drop(&mut self) {
-        if self.env.is_some() {
+        if self.env.is_some() && !std::thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
     }
 }
 
 fn dex_wasm() -> Vec<u8> {
-    ic_test_utilities_load_wasm::load_wasm(
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../canister"),
-        "dex_canister",
-        &[],
-    )
+    let path = std::env::var("DEX_CANISTER_WASM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join("../wasms/dex_canister.wasm.gz")
+        });
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read DEX WASM at {}: {}\nRun `just build` first.",
+            path.display(),
+            e
+        )
+    })
 }
 
 pub fn ledger_wasm() -> Vec<u8> {
@@ -269,13 +343,5 @@ impl<'a> Runtime for PocketIcRuntime<'a> {
                 Err((rejection_code, e.reject_message))
             }
         }
-    }
-}
-
-// TODO DEFI-2744: remove once admin can add trading pairs
-pub fn test_trading_pair() -> TradingPair {
-    TradingPair {
-        base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-        quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
     }
 }
