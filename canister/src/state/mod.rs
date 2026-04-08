@@ -188,13 +188,12 @@ impl State {
         // which is price-independent. They see the price improvement in the deposit
         // of quote tokens (maker_price * quantity instead of taker_price * quantity, where
         // in the case of sell maker_price >= taker_price).
-        if fill.taker_side == Side::Buy {
-            if let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price) {
-                if !price_diff.is_zero() {
-                    let surplus = price_diff.checked_mul(fill.quantity);
-                    self.balance_mut(taker, pair.quote).unreserve(surplus);
-                }
-            }
+        if fill.taker_side == Side::Buy
+            && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
+            && !price_diff.is_zero()
+        {
+            let surplus = price_diff.checked_mul(fill.quantity);
+            self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
 

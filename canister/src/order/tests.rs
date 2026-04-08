@@ -231,7 +231,12 @@ mod order_book {
                 assert_eq!(
                     result,
                     MatchResult::Filled {
-                        fills: vec![fill(&taker, maker_order_seq, 100u64, 2 * u64::from(LOT_SIZE))],
+                        fills: vec![fill(
+                            &taker,
+                            maker_order_seq,
+                            100u64,
+                            2 * u64::from(LOT_SIZE)
+                        )],
                     }
                 );
                 assert!(book.is_empty());
@@ -264,7 +269,12 @@ mod order_book {
                 assert_eq!(
                     result,
                     MatchResult::Filled {
-                        fills: vec![fill(&taker, maker_order_seq, expected_price, u64::from(LOT_SIZE))],
+                        fills: vec![fill(
+                            &taker,
+                            maker_order_seq,
+                            expected_price,
+                            u64::from(LOT_SIZE)
+                        )],
                     }
                 );
                 assert!(book.is_empty());
@@ -355,7 +365,12 @@ mod order_book {
             assert_eq!(
                 result,
                 MatchResult::Filled {
-                    fills: vec![fill(&taker2, OrderSeq::new(1), 100u64, 2 * u64::from(LOT_SIZE))],
+                    fills: vec![fill(
+                        &taker2,
+                        OrderSeq::new(1),
+                        100u64,
+                        2 * u64::from(LOT_SIZE)
+                    )],
                 }
             );
             assert!(book.is_empty());

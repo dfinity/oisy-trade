@@ -245,21 +245,33 @@ mod add_limit_order {
         // Buyer: received 1M base tokens, spent 100M quote tokens
         assert_eq!(
             buyer_client.get_balance(setup.base_token_id()).await,
-            Balance { free: required_base_amount.into(), reserved: 0u64.into() },
+            Balance {
+                free: required_base_amount.into(),
+                reserved: 0u64.into()
+            },
         );
         assert_eq!(
             buyer_client.get_balance(setup.quote_token_id()).await,
-            Balance { free: 0u64.into(), reserved: 0u64.into() },
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
         );
 
         // Seller: spent 1M base tokens, received 100M quote tokens
         assert_eq!(
             seller_client.get_balance(setup.base_token_id()).await,
-            Balance { free: 0u64.into(), reserved: 0u64.into() },
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
         );
         assert_eq!(
             seller_client.get_balance(setup.quote_token_id()).await,
-            Balance { free: required_quote_amount.into(), reserved: 0u64.into() },
+            Balance {
+                free: required_quote_amount.into(),
+                reserved: 0u64.into()
+            },
         );
 
         setup.drop().await;
