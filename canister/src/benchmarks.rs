@@ -11,10 +11,22 @@ const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
-const USER: Principal = Principal::anonymous();
+/// Generate a unique principal from a sequential counter.
+fn user(id: u64) -> Principal {
+    // Principal::from_slice accepts up to 29 bytes; 8 bytes is plenty for unique IDs.
+    Principal::from_slice(&id.to_be_bytes())
+}
+
+/// Fund a user with a large balance for both tokens of the trading pair.
+fn fund_user(state: &mut State, principal: Principal) {
+    let pair = trading_pair();
+    state.deposit(principal, pair.base, Nat::from(u128::MAX));
+    state.deposit(principal, pair.quote, Nat::from(u128::MAX));
+}
 
 /// Benchmark processing 1000 incoming orders against a fully populated order book
 /// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
+/// Each order is placed by a different user (worst case for balance lookups).
 #[bench(raw)]
 fn bench_process_1000_orders() -> canbench_rs::BenchResult {
     let depth = load_depth();
@@ -26,10 +38,13 @@ fn bench_process_1000_orders() -> canbench_rs::BenchResult {
     // Queue 1000 pending orders from aggregated trades.
     // Binance `m` field: true = buyer is maker, so the taker is a seller.
     let pair = trading_pair();
-    for trade in &trades {
+    let taker_id_offset = depth.bids.len() + depth.asks.len();
+    for (i, trade) in trades.iter().enumerate() {
+        let principal = user((taker_id_offset + i) as u64);
+        fund_user(&mut state, principal);
         state
             .add_limit_order(
-                USER,
+                principal,
                 pair.clone(),
                 PendingOrder {
                     side: if trade.m { Side::Sell } else { Side::Buy },
@@ -57,9 +72,11 @@ fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResul
     // Place a single sell at the minimum price with quantity exceeding total bid depth
     // (~924,901 ICP). This crosses every bid level.
     let pair = trading_pair();
+    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, taker);
     state
         .add_limit_order(
-            USER,
+            taker,
             pair,
             PendingOrder {
                 side: Side::Sell,
@@ -76,15 +93,18 @@ fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResul
 
 /// Benchmark processing 1000 orders that all rest without matching.
 /// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
+/// Each order is placed by a different user (worst case for balance lookups).
 #[bench(raw)]
 fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     let pair = trading_pair();
 
     for i in 0..500u64 {
+        let principal = user(i);
+        fund_user(&mut state, principal);
         state
             .add_limit_order(
-                USER,
+                principal,
                 pair.clone(),
                 PendingOrder {
                     side: Side::Buy,
@@ -95,9 +115,11 @@ fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
             .expect("valid buy order");
     }
     for i in 0..500u64 {
+        let principal = user(500 + i);
+        fund_user(&mut state, principal);
         state
             .add_limit_order(
-                USER,
+                principal,
                 pair.clone(),
                 PendingOrder {
                     side: Side::Sell,
@@ -173,12 +195,9 @@ fn new_state() -> State {
         mode: Mode::GeneralAvailability,
     })
     .unwrap();
-    let pair = trading_pair();
     state
-        .add_trading_pair(pair.clone(), TICK_SIZE, LOT_SIZE)
+        .add_trading_pair(trading_pair(), TICK_SIZE, LOT_SIZE)
         .unwrap();
-    state.deposit(USER, pair.base, Nat::from(u128::MAX));
-    state.deposit(USER, pair.quote, Nat::from(u128::MAX));
     state
 }
 
@@ -190,13 +209,16 @@ fn trading_pair() -> TradingPair {
 }
 
 /// Pre-populate an order book with resting orders from the Binance depth snapshot.
+/// Each depth level is placed by a different user (IDs 0..bids+asks).
 /// Best bid (2.304) < best ask (2.305), so no fills occur during population.
 fn populate_state(state: &mut State, depth: &DepthSnapshot) {
     let pair = trading_pair();
-    for (price_str, qty_str) in &depth.bids {
+    for (i, (price_str, qty_str)) in depth.bids.iter().enumerate() {
+        let principal = user(i as u64);
+        fund_user(state, principal);
         state
             .add_limit_order(
-                USER,
+                principal,
                 pair.clone(),
                 PendingOrder {
                     side: Side::Buy,
@@ -206,10 +228,12 @@ fn populate_state(state: &mut State, depth: &DepthSnapshot) {
             )
             .expect("valid bid order");
     }
-    for (price_str, qty_str) in &depth.asks {
+    for (i, (price_str, qty_str)) in depth.asks.iter().enumerate() {
+        let principal = user((depth.bids.len() + i) as u64);
+        fund_user(state, principal);
         state
             .add_limit_order(
-                USER,
+                principal,
                 pair.clone(),
                 PendingOrder {
                     side: Side::Sell,

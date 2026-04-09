@@ -2,30 +2,30 @@ benches:
   bench_process_1000_orders:
     total:
       calls: 1
-      instructions: 14331084
+      instructions: 32291388
       heap_increase: 1
       stable_memory_increase: 0
     scopes:
       matching:
         calls: 1
-        instructions: 2188753
+        instructions: 2199061
         heap_increase: 1
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 12139156
+        instructions: 30089221
         heap_increase: 0
         stable_memory_increase: 0
   bench_process_1000_orders_no_fills:
     total:
       calls: 1
-      instructions: 1487340
+      instructions: 1485275
       heap_increase: 1
       stable_memory_increase: 0
     scopes:
       matching:
         calls: 1
-        instructions: 1483881
+        instructions: 1482009
         heap_increase: 1
         stable_memory_increase: 0
       settling:
@@ -36,18 +36,18 @@ benches:
   bench_process_single_order_sweeps_697_bid_levels:
     total:
       calls: 1
-      instructions: 11448425
+      instructions: 27389734
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       matching:
         calls: 1
-        instructions: 1776952
+        instructions: 1799997
         heap_increase: 0
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 9667855
+        instructions: 25586464
         heap_increase: 0
         stable_memory_increase: 0
 version: 0.4.0
