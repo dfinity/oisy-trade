@@ -183,7 +183,7 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.checked_mul(fill.quantity);
+        let quote_amount = fill.maker_price.mul_quantity(fill.quantity);
         let base_amount = Nat::from(fill.quantity.get());
 
         // Buyer: pay quote, receive base
@@ -209,7 +209,7 @@ impl State {
             && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !price_diff.is_zero()
         {
-            let surplus = price_diff.checked_mul(fill.quantity);
+            let surplus = price_diff.mul_quantity(fill.quantity);
             self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
