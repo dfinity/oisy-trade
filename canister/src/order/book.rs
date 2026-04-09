@@ -245,10 +245,8 @@ fn fill_against_queue<K: Ord>(
         let Some(resting) = resting_orders.front_mut() else {
             break;
         };
-        let fill_qty = order
-            .remaining_quantity()
-            .clone()
-            .min(resting.remaining_quantity().clone());
+        let fill_qty =
+            std::cmp::min(order.remaining_quantity(), resting.remaining_quantity()).clone();
 
         order.reduce_quantity(&fill_qty);
         resting.reduce_quantity(&fill_qty);

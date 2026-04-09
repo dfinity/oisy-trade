@@ -273,10 +273,6 @@ impl Quantity {
         self.as_big_uint() % lot_size.get() == BigUint::ZERO
     }
 
-    pub fn min(self, other: Self) -> Self {
-        if self <= other { self } else { other }
-    }
-
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
         if self >= other {
             Some(Quantity(self.0.clone() - other.0.clone()))
