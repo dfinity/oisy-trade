@@ -44,6 +44,35 @@ impl Balance {
         self.free += amount;
     }
 
+    /// Debit `amount` from the reserved balance.
+    ///
+    /// # Panics
+    /// Panics if `amount` exceeds the reserved balance (invariant violation).
+    pub fn debit_reserved(&mut self, amount: Nat) {
+        assert!(
+            self.reserved >= amount,
+            "BUG: debit_reserved underflow: reserved={}, amount={}",
+            self.reserved,
+            amount
+        );
+        self.reserved -= amount;
+    }
+
+    /// Move `amount` from reserved back to free.
+    ///
+    /// # Panics
+    /// Panics if `amount` exceeds the reserved balance (invariant violation).
+    pub fn unreserve(&mut self, amount: Nat) {
+        assert!(
+            self.reserved >= amount,
+            "BUG: unreserve underflow: reserved={}, amount={}",
+            self.reserved,
+            amount
+        );
+        self.reserved -= amount.clone();
+        self.free += amount;
+    }
+
     pub fn reserve(&mut self, required: Nat) -> Result<(), InsufficientBalanceError> {
         if self.free < required {
             return Err(InsufficientBalanceError {

@@ -232,8 +232,7 @@ mod add_limit_order {
 
         setup.env().tick().await;
 
-        // TODO DEFI-2740: Both orders are fully filled and should still be tracked
-        // TODO DEFI-2740: verify user's balances
+        // Both orders are fully filled
         assert_eq!(
             setup.dex_client().get_order_status(buy_order_id).await,
             OrderStatus::NotFound
@@ -241,6 +240,38 @@ mod add_limit_order {
         assert_eq!(
             setup.dex_client().get_order_status(sell_order_id).await,
             OrderStatus::NotFound
+        );
+
+        // Buyer: received 1M base tokens, spent 100M quote tokens
+        assert_eq!(
+            buyer_client.get_balance(setup.base_token_id()).await,
+            Balance {
+                free: required_base_amount.into(),
+                reserved: 0u64.into()
+            },
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+        );
+
+        // Seller: spent 1M base tokens, received 100M quote tokens
+        assert_eq!(
+            seller_client.get_balance(setup.base_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+        );
+        assert_eq!(
+            seller_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: required_quote_amount.into(),
+                reserved: 0u64.into()
+            },
         );
 
         setup.drop().await;

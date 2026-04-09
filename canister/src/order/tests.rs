@@ -31,8 +31,8 @@ mod order_id {
 }
 
 mod order_book {
-    use crate::order::{Fill, MatchOrderError, MatchResult, OrderSeq, Price, Quantity};
-    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, order_book, sell};
+    use crate::order::{MatchOrderError, MatchResult, OrderSeq, Price, Quantity};
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, fill, order_book, sell};
 
     mod validation {
         use super::*;
@@ -168,7 +168,7 @@ mod order_book {
 
                 let result = book.match_order(taker).unwrap();
 
-                let prices: Vec<u64> = result.fills().iter().map(|f| f.price.get()).collect();
+                let prices: Vec<u64> = result.fills().iter().map(|f| f.maker_price.get()).collect();
                 assert_eq!(prices, expected_prices);
                 assert!(book.is_empty());
             }
@@ -226,16 +226,17 @@ mod order_book {
                 let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
-                let result = book.match_order(taker).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
                     MatchResult::Filled {
-                        fills: vec![Fill {
+                        fills: vec![fill(
+                            &taker,
                             maker_order_seq,
-                            price: Price::new(100),
-                            quantity: Quantity::new(2 * u64::from(LOT_SIZE)),
-                        }],
+                            100u64,
+                            2 * u64::from(LOT_SIZE)
+                        )],
                     }
                 );
                 assert!(book.is_empty());
@@ -263,16 +264,17 @@ mod order_book {
                 let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
-                let result = book.match_order(taker).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
                     MatchResult::Filled {
-                        fills: vec![Fill {
+                        fills: vec![fill(
+                            &taker,
                             maker_order_seq,
-                            price: Price::new(expected_price),
-                            quantity: Quantity::new(u64::from(LOT_SIZE)),
-                        }],
+                            expected_price,
+                            u64::from(LOT_SIZE)
+                        )],
                     }
                 );
                 assert!(book.is_empty());
@@ -284,18 +286,13 @@ mod order_book {
             let mut book = order_book();
             book.match_order(sell(1u64, 100u64, LOT_SIZE)).unwrap();
 
-            let result = book
-                .match_order(buy(2u64, 100u64, 3 * u64::from(LOT_SIZE)))
-                .unwrap();
+            let taker = buy(2u64, 100u64, 3 * u64::from(LOT_SIZE));
+            let result = book.match_order(taker.clone()).unwrap();
 
             assert_eq!(
                 result,
                 MatchResult::PartiallyFilled {
-                    fills: vec![Fill {
-                        maker_order_seq: OrderSeq::new(1),
-                        price: Price::new(100),
-                        quantity: Quantity::new(u64::from(LOT_SIZE)),
-                    }],
+                    fills: vec![fill(&taker, OrderSeq::new(1), 100u64, u64::from(LOT_SIZE))],
                     resting_order_seq: OrderSeq::new(2),
                 }
             );
@@ -315,16 +312,16 @@ mod order_book {
                     sell(1u64, 100u64, LOT_SIZE),
                     sell(2u64, 100u64, LOT_SIZE),
                     buy(3u64, 100u64, 2 * u64::from(LOT_SIZE)),
-                    100,
-                    100,
+                    100u64,
+                    100u64,
                 ),
                 // Across price levels: asks at 100 and 110
                 (
                     sell(1u64, 100u64, LOT_SIZE),
                     sell(2u64, 110u64, LOT_SIZE),
                     buy(3u64, 110u64, 2 * u64::from(LOT_SIZE)),
-                    100,
-                    110,
+                    100u64,
+                    110u64,
                 ),
             ];
             for (maker1, maker2, taker, price_fill_1, price_fill_2) in cases {
@@ -334,22 +331,14 @@ mod order_book {
                 book.match_order(maker1).unwrap();
                 book.match_order(maker2).unwrap();
 
-                let result = book.match_order(taker).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
                     MatchResult::Filled {
                         fills: vec![
-                            Fill {
-                                maker_order_seq: maker1_id,
-                                price: Price::new(price_fill_1),
-                                quantity: Quantity::new(u64::from(LOT_SIZE)),
-                            },
-                            Fill {
-                                maker_order_seq: maker2_id,
-                                price: Price::new(price_fill_2),
-                                quantity: Quantity::new(u64::from(LOT_SIZE)),
-                            },
+                            fill(&taker, maker1_id, price_fill_1, u64::from(LOT_SIZE)),
+                            fill(&taker, maker2_id, price_fill_2, u64::from(LOT_SIZE)),
                         ],
                     }
                 );
@@ -362,29 +351,26 @@ mod order_book {
             let mut book = order_book();
             book.match_order(sell(1u64, 100u64, 3 * u64::from(LOT_SIZE)))
                 .unwrap();
-            let result = book.match_order(buy(2u64, 100u64, LOT_SIZE)).unwrap();
+            let taker1 = buy(2u64, 100u64, LOT_SIZE);
+            let result = book.match_order(taker1.clone()).unwrap();
             assert_eq!(
                 result,
                 MatchResult::Filled {
-                    fills: vec![Fill {
-                        maker_order_seq: OrderSeq::new(1),
-                        price: Price::new(100),
-                        quantity: Quantity::new(u64::from(LOT_SIZE)),
-                    }],
+                    fills: vec![fill(&taker1, OrderSeq::new(1), 100u64, u64::from(LOT_SIZE))],
                 }
             );
             // The remaining 2 lots should still be matchable
-            let result = book
-                .match_order(buy(3u64, 100u64, 2 * u64::from(LOT_SIZE)))
-                .unwrap();
+            let taker2 = buy(3u64, 100u64, 2 * u64::from(LOT_SIZE));
+            let result = book.match_order(taker2.clone()).unwrap();
             assert_eq!(
                 result,
                 MatchResult::Filled {
-                    fills: vec![Fill {
-                        maker_order_seq: OrderSeq::new(1),
-                        price: Price::new(100),
-                        quantity: Quantity::new(2 * u64::from(LOT_SIZE)),
-                    }],
+                    fills: vec![fill(
+                        &taker2,
+                        OrderSeq::new(1),
+                        100u64,
+                        2 * u64::from(LOT_SIZE)
+                    )],
                 }
             );
             assert!(book.is_empty());
