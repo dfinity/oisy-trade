@@ -40,7 +40,7 @@ pub struct LimitOrderRequest {
     /// Limit price in quote token units per base token unit.
     pub price: u64,
     /// Order quantity in base token units.
-    pub quantity: u64,
+    pub quantity: Nat,
 }
 
 /// Error returned when placing a limit order fails.
@@ -58,7 +58,7 @@ pub enum AddLimitOrderError {
     /// The quantity is not a positive multiple of the lot size.
     InvalidQuantity {
         /// The rejected quantity.
-        quantity: u64,
+        quantity: Nat,
         /// The required lot size.
         lot_size: u64,
     },

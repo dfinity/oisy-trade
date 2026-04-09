@@ -4,6 +4,7 @@ mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
 use candid::{Nat, Principal};
+use num_bigint::BigUint;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -195,9 +196,8 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    // TODO DEFI-2740: should return a Quantity, which currently wraps a u64, have it wrap a Nat.
-    pub fn mul_quantity(self, quantity: Quantity) -> Nat {
-        Nat::from(self.0) * Nat::from(quantity.get())
+    pub fn mul_quantity(self, quantity: Quantity) -> Quantity {
+        Quantity::from(self.0) * quantity
     }
 }
 
@@ -253,42 +253,78 @@ impl From<Price> for u64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Quantity(u64);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Quantity(Nat);
+
+impl Default for Quantity {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
 
 impl Quantity {
-    pub const ZERO: Self = Self(0);
+    pub const ZERO: Self = Self(Nat(BigUint::ZERO));
 
-    pub fn new(value: u64) -> Self {
-        Self(value)
+    pub fn is_zero(&self) -> bool {
+        self == &Self::ZERO
     }
 
-    pub fn get(self) -> u64 {
-        self.0
+    pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
+        self.as_big_uint() % lot_size.get() == BigUint::ZERO
     }
 
-    pub const fn is_zero(self) -> bool {
-        self.0 == 0
+    pub fn min(self, other: Self) -> Self {
+        if self <= other { self } else { other }
     }
 
-    pub fn is_multiple_of(self, lot_size: LotSize) -> bool {
-        self.0.is_multiple_of(lot_size.get())
+    pub fn checked_sub(&self, other: &Self) -> Option<Self> {
+        if self >= other {
+            Some(Quantity(self.0.clone() - other.0.clone()))
+        } else {
+            None
+        }
     }
 
-    pub fn checked_sub(self, other: Self) -> Option<Self> {
-        self.0.checked_sub(other.0).map(Self)
+    fn as_big_uint(&self) -> &BigUint {
+        &self.0.0
     }
 }
 
 impl From<u64> for Quantity {
     fn from(value: u64) -> Self {
+        Self(Nat::from(value))
+    }
+}
+
+impl From<Nat> for Quantity {
+    fn from(value: Nat) -> Self {
         Self(value)
     }
 }
 
-impl From<Quantity> for u64 {
+impl From<Quantity> for Nat {
     fn from(quantity: Quantity) -> Self {
         quantity.0
+    }
+}
+
+impl std::ops::Add for Quantity {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Quantity(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::AddAssign for Quantity {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl std::ops::Mul for Quantity {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        Quantity(self.0 * rhs.0)
     }
 }
 
@@ -331,11 +367,11 @@ impl Order {
         self.price
     }
 
-    pub fn remaining_quantity(&self) -> Quantity {
-        self.remaining_quantity
+    pub fn remaining_quantity(&self) -> &Quantity {
+        &self.remaining_quantity
     }
 
-    pub fn reduce_quantity(&mut self, amount: Quantity) {
+    pub fn reduce_quantity(&mut self, amount: &Quantity) {
         self.remaining_quantity = self
             .remaining_quantity
             .checked_sub(amount)
@@ -368,7 +404,7 @@ impl RestingOrder {
             id: self.id,
             side,
             price,
-            remaining_quantity: self.remaining_quantity,
+            remaining_quantity: self.remaining_quantity.clone(),
         }
     }
 
@@ -376,11 +412,11 @@ impl RestingOrder {
         self.id
     }
 
-    pub fn remaining_quantity(&self) -> Quantity {
-        self.remaining_quantity
+    pub fn remaining_quantity(&self) -> &Quantity {
+        &self.remaining_quantity
     }
 
-    pub fn reduce_quantity(&mut self, amount: Quantity) {
+    pub fn reduce_quantity(&mut self, amount: &Quantity) {
         self.remaining_quantity = self
             .remaining_quantity
             .checked_sub(amount)

@@ -155,7 +155,7 @@ impl OrderBook {
         }
     }
 
-    pub fn validate_order(&self, price: Price, quantity: Quantity) -> Result<(), MatchOrderError> {
+    pub fn validate_order(&self, price: Price, quantity: &Quantity) -> Result<(), MatchOrderError> {
         if price.is_zero() || !price.is_multiple_of(self.tick_size) {
             return Err(MatchOrderError::InvalidTickSize {
                 price,
@@ -164,7 +164,7 @@ impl OrderBook {
         }
         if quantity.is_zero() || !quantity.is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity,
+                quantity: quantity.clone(),
                 lot_size: self.lot_size,
             });
         }
@@ -174,7 +174,7 @@ impl OrderBook {
     /// Validate and enqueue a pending order for matching.
     /// The order ID is only assigned if validation succeeds.
     pub fn add_pending_order(&mut self, pending: PendingOrder) -> Result<OrderId, MatchOrderError> {
-        self.validate_order(pending.price, pending.quantity)?;
+        self.validate_order(pending.price, &pending.quantity)?;
         let seq = self.next_order_seq();
         let order = pending.into_order(seq);
         self.pending_orders.push_back(order);
@@ -245,10 +245,13 @@ fn fill_against_queue<K: Ord>(
         let Some(resting) = resting_orders.front_mut() else {
             break;
         };
-        let fill_qty = order.remaining_quantity().min(resting.remaining_quantity());
+        let fill_qty = order
+            .remaining_quantity()
+            .clone()
+            .min(resting.remaining_quantity().clone());
 
-        order.reduce_quantity(fill_qty);
-        resting.reduce_quantity(fill_qty);
+        order.reduce_quantity(&fill_qty);
+        resting.reduce_quantity(&fill_qty);
 
         fills.push(Fill {
             taker_order_seq: order.id(),

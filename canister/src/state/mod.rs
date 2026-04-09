@@ -5,10 +5,10 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Side, TickSize,
-    TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Quantity, Side,
+    TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use candid::{Nat, Principal};
+use candid::Principal;
 use dex_types::{OrderStatus, TradingPairInfo};
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
@@ -109,15 +109,15 @@ impl State {
             .get_mut(book_id)
             .expect("BUG: trading pair registered but order book missing");
 
-        book.validate_order(pending.price, pending.quantity)
+        book.validate_order(pending.price, &pending.quantity)
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
         let (token, required) = match pending.side {
             Side::Buy => (
                 pair.quote,
-                Nat::from(pending.price.get()) * Nat::from(pending.quantity.get()),
+                pending.price.mul_quantity(pending.quantity.clone()),
             ),
-            Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
+            Side::Sell => (pair.base, pending.quantity.clone()),
         };
         match self
             .balances
@@ -136,7 +136,7 @@ impl State {
             None => {
                 return Err(AddLimitOrderError::InsufficientBalance {
                     token,
-                    available: Nat::from(0u64),
+                    available: Quantity::ZERO,
                     required,
                 });
             }
@@ -183,8 +183,8 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.mul_quantity(fill.quantity);
-        let base_amount = Nat::from(fill.quantity.get());
+        let quote_amount = fill.maker_price.mul_quantity(fill.quantity.clone());
+        let base_amount = fill.quantity.clone();
 
         // Buyer: pay quote, receive base
         self.balance_mut(buyer, pair.quote)
@@ -209,7 +209,7 @@ impl State {
             && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !price_diff.is_zero()
         {
-            let surplus = price_diff.mul_quantity(fill.quantity);
+            let surplus = price_diff.mul_quantity(fill.quantity.clone());
             self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
@@ -267,7 +267,7 @@ impl State {
             .collect()
     }
 
-    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
         self.balances
             .entry(user)
             .or_default()
@@ -296,8 +296,8 @@ pub enum AddLimitOrderError {
     InvalidOrder(MatchOrderError),
     InsufficientBalance {
         token: TokenId,
-        available: Nat,
-        required: Nat,
+        available: Quantity,
+        required: Quantity,
     },
 }
 
@@ -318,7 +318,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 quantity,
                 lot_size,
             }) => dex_types::AddLimitOrderError::InvalidQuantity {
-                quantity: quantity.get(),
+                quantity: quantity.into(),
                 lot_size: lot_size.get(),
             },
             AddLimitOrderError::InsufficientBalance {
@@ -327,8 +327,8 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 required,
             } => dex_types::AddLimitOrderError::InsufficientBalance {
                 token: dex_types::TokenId::from(token),
-                available,
-                required,
+                available: available.into(),
+                required: required.into(),
             },
         }
     }

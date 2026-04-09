@@ -72,7 +72,7 @@ mod add_limit_order {
         let pending = PendingOrder {
             side: Side::Buy,
             price: Price::new(100),
-            quantity: Quantity::new(LOT_SIZE.get()),
+            quantity: Quantity::from(LOT_SIZE.get()),
         };
         let state_before_reservation = state.clone();
 
@@ -404,7 +404,7 @@ mod settle_fills {
                 PendingOrder {
                     side: Side::Buy,
                     price: Price::new(price),
-                    quantity: Quantity::new(quantity),
+                    quantity: Quantity::from(quantity),
                 },
             )
             .unwrap();
@@ -420,7 +420,7 @@ mod settle_fills {
                 PendingOrder {
                     side: Side::Sell,
                     price: Price::new(price),
-                    quantity: Quantity::new(quantity),
+                    quantity: Quantity::from(quantity),
                 },
             )
             .unwrap();

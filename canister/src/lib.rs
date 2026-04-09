@@ -70,7 +70,7 @@ pub async fn deposit(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let amount = request.amount.clone();
+    let amount = order::Quantity::from(request.amount.clone());
     let caller = runtime.msg_caller();
 
     let deposit_response = ledger::deposit(request, runtime).await?;
