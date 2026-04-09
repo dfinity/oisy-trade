@@ -179,8 +179,11 @@ struct DepthSnapshot {
 #[allow(dead_code)]
 #[derive(Deserialize)]
 struct AggTrade {
+    /// Price as a decimal string (e.g. "2.30400000").
     p: String,
+    /// Quantity as a decimal string (e.g. "56.45000000").
     q: String,
+    /// `true` if the buyer is the maker (i.e. the taker is a seller).
     m: bool,
 }
 
