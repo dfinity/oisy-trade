@@ -376,6 +376,35 @@ mod settle_fills {
         assert_token_conservation(&state, &totals_before);
     }
 
+    #[test]
+    fn should_settle_trade_with_quantity_exceeding_u64_max() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let price = 100u64;
+        // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
+        let quantity = Quantity::from(u64::from(LOT_SIZE)) * Quantity::from(u64::MAX);
+
+        place_buy_order(&mut state, price, quantity.clone());
+        place_sell_order(&mut state, price, quantity.clone());
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
+        state.process_pending_orders();
+
+        let quantity_nat: Nat = quantity.clone().into();
+        let quote_total: Nat = Price::new(price).mul_quantity(quantity).into();
+
+        // Buyer received all base tokens
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        assert_eq!(buyer_base.free, quantity_nat);
+        assert_eq!(buyer_base.reserved, Nat::from(0u64));
+
+        // Seller received price * quantity quote tokens
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        assert_eq!(seller_quote.free, quote_total);
+        assert_eq!(seller_quote.reserved, Nat::from(0u64));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
     fn setup() -> State {
         let mut state = State::try_from(InitArg {
             mode: Mode::GeneralAvailability,
@@ -386,17 +415,27 @@ mod settle_fills {
         state
     }
 
-    fn place_buy_order(state: &mut State, price: u64, quantity: u64) {
+    fn place_buy_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
         place_buy_order_for(state, BUYER, price, quantity);
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: u64) {
+    fn place_sell_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
         place_sell_order_for(state, SELLER, price, quantity);
     }
 
-    fn place_buy_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
+    fn place_buy_order_for(
+        state: &mut State,
+        user: Principal,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(user, pair.quote, (price * quantity).into());
+        let quantity = quantity.into();
+        state.deposit(
+            user,
+            pair.quote,
+            Price::new(price).mul_quantity(quantity.clone()),
+        );
         state
             .add_limit_order(
                 user,
@@ -404,15 +443,21 @@ mod settle_fills {
                 PendingOrder {
                     side: Side::Buy,
                     price: Price::new(price),
-                    quantity: Quantity::from(quantity),
+                    quantity,
                 },
             )
             .unwrap();
     }
 
-    fn place_sell_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
+    fn place_sell_order_for(
+        state: &mut State,
+        user: Principal,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(user, pair.base, quantity.into());
+        let quantity = quantity.into();
+        state.deposit(user, pair.base, quantity.clone());
         state
             .add_limit_order(
                 user,
@@ -420,7 +465,7 @@ mod settle_fills {
                 PendingOrder {
                     side: Side::Sell,
                     price: Price::new(price),
-                    quantity: Quantity::from(quantity),
+                    quantity,
                 },
             )
             .unwrap();
