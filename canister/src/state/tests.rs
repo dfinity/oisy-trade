@@ -310,30 +310,8 @@ mod settle_fills {
         let user = Principal::from_slice(&[0x42]);
 
         // Same user places both buy and sell
-        state.deposit(user, pair.quote, (100 * lot).into());
-        state
-            .add_limit_order(
-                user,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(100),
-                    quantity: Quantity::new(lot),
-                },
-            )
-            .unwrap();
-        state.deposit(user, pair.base, lot.into());
-        state
-            .add_limit_order(
-                user,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(100),
-                    quantity: Quantity::new(lot),
-                },
-            )
-            .unwrap();
+        place_buy_order_for(&mut state, user, 100, lot);
+        place_sell_order_for(&mut state, user, 100, lot);
 
         let base_before = state.get_balance(user, pair.base);
         let quote_before = state.get_balance(user, pair.quote);
@@ -357,6 +335,42 @@ mod settle_fills {
         assert_eq!(quote_after, balance(100 * lot, 0));
     }
 
+    #[test]
+    fn should_settle_taker_against_multiple_different_makers() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        let seller_a = Principal::from_slice(&[0x0A]);
+        let seller_b = Principal::from_slice(&[0x0B]);
+
+        // Two sellers place 1 lot each at different prices
+        place_sell_order_for(&mut state, seller_a, 90, lot);
+        place_sell_order_for(&mut state, seller_b, 100, lot);
+
+        // Buy taker sweeps both
+        place_buy_order(&mut state, 100, 2 * lot);
+        state.process_pending_orders();
+
+        // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
+        assert_eq!(state.get_balance(BUYER, pair.base), balance(2 * lot, 0));
+        assert_eq!(state.get_balance(BUYER, pair.quote), balance(10 * lot, 0));
+
+        // Seller A: sold 1 lot at 90
+        assert_eq!(state.get_balance(seller_a, pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(seller_a, pair.quote),
+            balance(90 * lot, 0)
+        );
+
+        // Seller B: sold 1 lot at 100
+        assert_eq!(state.get_balance(seller_b, pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(seller_b, pair.quote),
+            balance(100 * lot, 0)
+        );
+    }
+
     fn setup() -> State {
         let mut state = State::try_from(InitArg {
             mode: Mode::GeneralAvailability,
@@ -368,11 +382,19 @@ mod settle_fills {
     }
 
     fn place_buy_order(state: &mut State, price: u64, quantity: u64) {
+        place_buy_order_for(state, BUYER, price, quantity);
+    }
+
+    fn place_sell_order(state: &mut State, price: u64, quantity: u64) {
+        place_sell_order_for(state, SELLER, price, quantity);
+    }
+
+    fn place_buy_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(BUYER, pair.quote, (price * quantity).into());
+        state.deposit(user, pair.quote, (price * quantity).into());
         state
             .add_limit_order(
-                BUYER,
+                user,
                 pair,
                 PendingOrder {
                     side: Side::Buy,
@@ -383,12 +405,12 @@ mod settle_fills {
             .unwrap();
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: u64) {
+    fn place_sell_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(SELLER, pair.base, quantity.into());
+        state.deposit(user, pair.base, quantity.into());
         state
             .add_limit_order(
-                SELLER,
+                user,
                 pair,
                 PendingOrder {
                     side: Side::Sell,
