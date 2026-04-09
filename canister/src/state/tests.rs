@@ -84,11 +84,12 @@ mod add_limit_order {
 }
 
 mod settle_fills {
-    use crate::order::{PendingOrder, Price, Quantity, Side, TokenId};
+    use crate::order::{PendingOrder, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, icp_ckbtc_trading_pair};
     use candid::{Nat, Principal};
     use dex_types_internal::{InitArg, Mode};
+    use std::collections::BTreeMap;
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -102,7 +103,7 @@ mod settle_fills {
 
         place_buy_order(&mut state, price, lot);
         place_sell_order(&mut state, price, lot);
-        let totals_before = snapshot_totals(&state);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -127,7 +128,7 @@ mod settle_fills {
         // Sell rests at 90, buy taker at 100 → fills at maker's 90
         place_sell_order(&mut state, 90, lot);
         place_buy_order(&mut state, 100, lot);
-        let totals_before = snapshot_totals(&state);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -153,7 +154,7 @@ mod settle_fills {
         // Buy rests at 110, sell taker at 100 → fills at maker's 110
         place_buy_order(&mut state, 110, lot);
         place_sell_order(&mut state, 100, lot);
-        let totals_before = snapshot_totals(&state);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -179,7 +180,7 @@ mod settle_fills {
         // Buy 3 lots at 100, only 1 lot of sell available
         place_buy_order(&mut state, 100, 3 * lot);
         place_sell_order(&mut state, 100, lot);
-        let totals_before = snapshot_totals(&state);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -206,7 +207,7 @@ mod settle_fills {
         place_sell_order(&mut state, 90, lot);
         place_sell_order(&mut state, 100, lot);
         place_buy_order(&mut state, 100, 2 * lot);
-        let totals_before = snapshot_totals(&state);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
         let buyer_base = state.get_balance(BUYER, pair.base);
@@ -215,6 +216,162 @@ mod settle_fills {
         // Paid 90*lot + 100*lot = 190*lot, surplus = 10*lot
         assert_eq!(buyer_base, balance(2 * lot, 0));
         assert_eq!(buyer_quote, balance(10 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_buy_taker_partial_fill_with_price_improvement() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Sell rests at 90 for 1 lot, buy taker at 100 for 3 lots
+        // Fills 1 lot at 90, rests 2 lots
+        place_sell_order(&mut state, 90, lot);
+        place_buy_order(&mut state, 100, 3 * lot);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        // Surplus: (100-90)*lot = 10*lot returned to free
+        // Remaining reserved: 100*2*lot = 200*lot
+        assert_eq!(buyer_base, balance(lot, 0));
+        assert_eq!(buyer_quote, balance(10 * lot, 200 * lot));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        assert_eq!(seller_base, balance(0, 0));
+        assert_eq!(seller_quote, balance(90 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_sell_taker_partial_fill() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Buy rests 1 lot at 100, sell taker 3 lots at 100
+        place_buy_order(&mut state, 100, lot);
+        place_sell_order(&mut state, 100, 3 * lot);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        assert_eq!(buyer_base, balance(lot, 0));
+        assert_eq!(buyer_quote, balance(0, 0));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        // 1 lot filled, 2 lots remain reserved
+        assert_eq!(seller_base, balance(0, 2 * lot));
+        assert_eq!(seller_quote, balance(100 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_sell_taker_multi_level_sweep() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Two buys at different prices, sell taker sweeps both
+        // Sell at 100 matches buy at 110 first, then buy at 100
+        place_buy_order(&mut state, 100, lot);
+        place_buy_order(&mut state, 110, lot);
+        place_sell_order(&mut state, 100, 2 * lot);
+        let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
+        state.process_pending_orders();
+
+        let buyer_base = state.get_balance(BUYER, pair.base);
+        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        // Buyer deposited 100*lot + 110*lot = 210*lot quote, all consumed
+        assert_eq!(buyer_base, balance(2 * lot, 0));
+        assert_eq!(buyer_quote, balance(0, 0));
+
+        let seller_base = state.get_balance(SELLER, pair.base);
+        let seller_quote = state.get_balance(SELLER, pair.quote);
+        assert_eq!(seller_base, balance(0, 0));
+        // Seller receives 110*lot + 100*lot = 210*lot quote
+        assert_eq!(seller_quote, balance(210 * lot, 0));
+
+        assert_token_conservation(&state, &totals_before);
+    }
+
+    #[test]
+    fn should_settle_self_trade() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let user = Principal::from_slice(&[0x42]);
+
+        // Same user places both buy and sell
+        place_buy_order_for(&mut state, user, 100, lot);
+        place_sell_order_for(&mut state, user, 100, lot);
+
+        let base_before = state.get_balance(user, pair.base);
+        let quote_before = state.get_balance(user, pair.quote);
+        state.process_pending_orders();
+        let base_after = state.get_balance(user, pair.base);
+        let quote_after = state.get_balance(user, pair.quote);
+
+        // Total tokens unchanged: base and quote just move between free/reserved
+        assert_eq!(
+            base_before.free.clone() + base_before.reserved.clone(),
+            base_after.free.clone() + base_after.reserved.clone(),
+            "base token total changed"
+        );
+        assert_eq!(
+            quote_before.free.clone() + quote_before.reserved.clone(),
+            quote_after.free.clone() + quote_after.reserved.clone(),
+            "quote token total changed"
+        );
+        // After self-trade: all reserved released, net balances same as deposited
+        assert_eq!(base_after, balance(lot, 0));
+        assert_eq!(quote_after, balance(100 * lot, 0));
+    }
+
+    #[test]
+    fn should_settle_taker_against_multiple_different_makers() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        let seller_a = Principal::from_slice(&[0x0A]);
+        let seller_b = Principal::from_slice(&[0x0B]);
+
+        // Two sellers place 1 lot each at different prices
+        place_sell_order_for(&mut state, seller_a, 90, lot);
+        place_sell_order_for(&mut state, seller_b, 100, lot);
+
+        // Buy taker sweeps both
+        place_buy_order(&mut state, 100, 2 * lot);
+        let participants = [BUYER, seller_a, seller_b];
+        let totals_before = snapshot_balances(&state, &participants);
+        state.process_pending_orders();
+
+        // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
+        assert_eq!(state.get_balance(BUYER, pair.base), balance(2 * lot, 0));
+        assert_eq!(state.get_balance(BUYER, pair.quote), balance(10 * lot, 0));
+
+        // Seller A: sold 1 lot at 90
+        assert_eq!(state.get_balance(seller_a, pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(seller_a, pair.quote),
+            balance(90 * lot, 0)
+        );
+
+        // Seller B: sold 1 lot at 100
+        assert_eq!(state.get_balance(seller_b, pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(seller_b, pair.quote),
+            balance(100 * lot, 0)
+        );
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -230,11 +387,19 @@ mod settle_fills {
     }
 
     fn place_buy_order(state: &mut State, price: u64, quantity: u64) {
+        place_buy_order_for(state, BUYER, price, quantity);
+    }
+
+    fn place_sell_order(state: &mut State, price: u64, quantity: u64) {
+        place_sell_order_for(state, SELLER, price, quantity);
+    }
+
+    fn place_buy_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(BUYER, pair.quote, (price * quantity).into());
+        state.deposit(user, pair.quote, (price * quantity).into());
         state
             .add_limit_order(
-                BUYER,
+                user,
                 pair,
                 PendingOrder {
                     side: Side::Buy,
@@ -245,12 +410,12 @@ mod settle_fills {
             .unwrap();
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: u64) {
+    fn place_sell_order_for(state: &mut State, user: Principal, price: u64, quantity: u64) {
         let pair = icp_ckbtc_trading_pair();
-        state.deposit(SELLER, pair.base, quantity.into());
+        state.deposit(user, pair.base, quantity.into());
         state
             .add_limit_order(
-                SELLER,
+                user,
                 pair,
                 PendingOrder {
                     side: Side::Sell,
@@ -268,27 +433,45 @@ mod settle_fills {
         }
     }
 
-    /// Sum free + reserved across both users for a given token.
-    fn total_token(state: &State, token: TokenId) -> Nat {
-        [BUYER, SELLER].iter().fold(Nat::from(0u64), |acc, user| {
-            let b = state.get_balance(*user, token);
-            acc + b.free + b.reserved
-        })
-    }
+    type BalanceSnapshot = BTreeMap<Principal, (dex_types::Balance, dex_types::Balance)>;
 
-    /// Snapshot the total supply of base and quote tokens across both users.
-    fn snapshot_totals(state: &State) -> (Nat, Nat) {
+    /// Snapshot base and quote balances for each principal.
+    fn snapshot_balances(state: &State, principals: &[Principal]) -> BalanceSnapshot {
         let pair = icp_ckbtc_trading_pair();
-        (
-            total_token(state, pair.base),
-            total_token(state, pair.quote),
-        )
+        principals
+            .iter()
+            .map(|&p| {
+                (
+                    p,
+                    (
+                        state.get_balance(p, pair.base),
+                        state.get_balance(p, pair.quote),
+                    ),
+                )
+            })
+            .collect()
     }
 
-    /// Assert that the total base and quote tokens across both users are unchanged.
-    fn assert_token_conservation(state: &State, before: &(Nat, Nat)) {
-        let after = snapshot_totals(state);
-        assert_eq!(before.0, after.0, "base token total changed");
-        assert_eq!(before.1, after.1, "quote token total changed");
+    /// Assert that the total base and quote tokens across all principals are unchanged.
+    fn assert_token_conservation(state: &State, before: &BalanceSnapshot) {
+        let principals: Vec<Principal> = before.keys().copied().collect();
+        let after = snapshot_balances(state, &principals);
+
+        let sum = |snap: &BalanceSnapshot| -> (Nat, Nat) {
+            snap.values().fold(
+                (Nat::from(0u64), Nat::from(0u64)),
+                |(base_acc, quote_acc), (base, quote)| {
+                    (
+                        base_acc + base.free.clone() + base.reserved.clone(),
+                        quote_acc + quote.free.clone() + quote.reserved.clone(),
+                    )
+                },
+            )
+        };
+
+        let (base_before, quote_before) = sum(before);
+        let (base_after, quote_after) = sum(&after);
+        assert_eq!(base_before, base_after, "base token total changed");
+        assert_eq!(quote_before, quote_after, "quote token total changed");
     }
 }

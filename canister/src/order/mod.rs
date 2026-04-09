@@ -195,7 +195,8 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn checked_mul(self, quantity: Quantity) -> Nat {
+    // TODO DEFI-2740: should return a Quantity, which currently wraps a u64, have it wrap a Nat.
+    pub fn mul_quantity(self, quantity: Quantity) -> Nat {
         Nat::from(self.0) * Nat::from(quantity.get())
     }
 }
