@@ -2,7 +2,7 @@ use crate::{
     AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, Token, TokenId,
     TokenMetadata, TradingPair, TradingPairInfo,
 };
-use candid::Principal;
+use candid::{Nat, Principal};
 
 fn test_trading_pair() -> TradingPair {
     TradingPair {
@@ -17,7 +17,7 @@ fn should_serialize_limit_order_request() {
         pair: test_trading_pair(),
         side: Side::Buy,
         price: 100,
-        quantity: 1_000_000,
+        quantity: Nat::from(1_000_000u64),
     };
     let encoded = candid::encode_one(&request).unwrap();
     let decoded: LimitOrderRequest = candid::decode_one(&encoded).unwrap();
@@ -132,7 +132,7 @@ fn should_serialize_add_limit_order_error() {
             tick_size: 10,
         },
         AddLimitOrderError::InvalidQuantity {
-            quantity: 500_000,
+            quantity: Nat::from(500_000u64),
             lot_size: 1_000_000,
         },
     ] {

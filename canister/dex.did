@@ -28,7 +28,7 @@ type LimitOrderRequest = record {
     /// Limit price in quote token units per base token unit.
     price : nat64;
     /// Order quantity in base token units.
-    quantity : nat64;
+    quantity : nat;
 };
 
 
@@ -39,7 +39,7 @@ type AddLimitOrderError = variant {
     /// The price is not a positive multiple of the tick size.
     InvalidPrice : record { price : nat64; tick_size : nat64 };
     /// The quantity is not a positive multiple of the lot size.
-    InvalidQuantity : record { quantity : nat64; lot_size : nat64 };
+    InvalidQuantity : record { quantity : nat; lot_size : nat64 };
     /// The user does not have enough balance to place the order.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
