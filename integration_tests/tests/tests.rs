@@ -4,7 +4,7 @@ use dex_client::{DexClient, Runtime};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, Token, TokenId, TradingPairInfo,
+    LedgerTransferFromError, Token, TokenId, TokenMetadata, TradingPairInfo,
 };
 use dex_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
@@ -261,13 +261,17 @@ async fn should_return_empty_trading_pairs() {
         vec![TradingPairInfo {
             base: Token {
                 id: setup.base_token_id(),
-                symbol: "ckSOL".to_string(),
-                decimals: 9,
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             quote: Token {
                 id: setup.quote_token_id(),
-                symbol: "ckBTC".to_string(),
-                decimals: 8,
+                metadata: TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
             },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,
@@ -548,15 +552,19 @@ async fn should_fail_add_trading_pair() {
                 id: TokenId {
                     ledger_id: setup.base_ledger_id(),
                 },
-                symbol: "ckSOL".to_string(),
-                decimals: 9,
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             quote: Token {
                 id: TokenId {
                     ledger_id: setup.base_ledger_id(),
                 },
-                symbol: "ckSOL".to_string(),
-                decimals: 9,
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             ..setup.add_trading_pair_request()
         })

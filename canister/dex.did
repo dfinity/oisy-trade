@@ -88,10 +88,8 @@ type TokenMetadata = record {
 type Token = record {
     /// The token's unique identifier.
     id : TokenId;
-    /// The token's ticker symbol (e.g. "ckBTC").
-    symbol : text;
-    /// The number of decimal places used by the token.
-    decimals : nat8;
+    /// The token's metadata.
+    metadata : TokenMetadata;
 };
 
 /// Errors that can be returned by icrc2_transfer_from.

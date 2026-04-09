@@ -257,13 +257,17 @@ mod get_trading_pairs {
             vec![TradingPairInfo {
                 base: dex_types::Token {
                     id: dex_types::TokenId::from(icp_token_id()),
-                    symbol: "ICP".to_string(),
-                    decimals: 8,
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ICP".to_string(),
+                        decimals: 8,
+                    },
                 },
                 quote: dex_types::Token {
                     id: dex_types::TokenId::from(ckbtc_token_id()),
-                    symbol: "ckBTC".to_string(),
-                    decimals: 8,
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ckBTC".to_string(),
+                        decimals: 8,
+                    },
                 },
                 tick_size: TICK_SIZE.get(),
                 lot_size: LOT_SIZE.get(),

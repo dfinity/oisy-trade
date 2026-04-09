@@ -9,7 +9,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
-use dex_types::{AddTradingPairRequest, Token, TokenId, TradingPair};
+use dex_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair};
 use dex_types_internal::{DexArg, InitArg, Mode, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
@@ -105,15 +105,19 @@ impl Setup {
                 id: TokenId {
                     ledger_id: trading_pair.base,
                 },
-                symbol: "ckSOL".to_string(),
-                decimals: 9,
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             quote: Token {
                 id: TokenId {
                     ledger_id: trading_pair.quote,
                 },
-                symbol: "ckBTC".to_string(),
-                decimals: 8,
+                metadata: TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
             },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,

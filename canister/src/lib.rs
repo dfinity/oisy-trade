@@ -76,13 +76,11 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 TradingPairInfo {
                     base: dex_types::Token {
                         id: dex_types::TokenId::from(pair.base),
-                        symbol: base_meta.symbol.clone(),
-                        decimals: base_meta.decimals,
+                        metadata: base_meta.clone().into(),
                     },
                     quote: dex_types::Token {
                         id: dex_types::TokenId::from(pair.quote),
-                        symbol: quote_meta.symbol.clone(),
-                        decimals: quote_meta.decimals,
+                        metadata: quote_meta.clone().into(),
                     },
                     tick_size: book.tick_size().get(),
                     lot_size: book.lot_size().get(),
@@ -128,14 +126,8 @@ pub fn add_trading_pair(
         base: TokenId::from(request.base.id),
         quote: TokenId::from(request.quote.id),
     };
-    let base_metadata = order::TokenMetadata {
-        symbol: request.base.symbol,
-        decimals: request.base.decimals,
-    };
-    let quote_metadata = order::TokenMetadata {
-        symbol: request.quote.symbol,
-        decimals: request.quote.decimals,
-    };
+    let base_metadata = order::TokenMetadata::from(request.base.metadata);
+    let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
     let tick_size = order::TickSize::new(
         NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
     );

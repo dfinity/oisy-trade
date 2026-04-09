@@ -124,10 +124,8 @@ pub struct TokenMetadata {
 pub struct Token {
     /// The token's unique identifier.
     pub id: TokenId,
-    /// The token's ticker symbol (e.g. "ckBTC").
-    pub symbol: String,
-    /// The number of decimal places used by the token.
-    pub decimals: u8,
+    /// The token's metadata.
+    pub metadata: TokenMetadata,
 }
 
 /// Request to deposit tokens into the DEX.

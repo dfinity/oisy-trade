@@ -162,6 +162,10 @@ impl State {
     }
 
     /// Register a new trading pair with a new order book.
+    ///
+    /// Also validates and stores the token metadata for both the base and quote
+    /// tokens. If a token is already registered with different metadata, returns
+    /// [`AddTradingPairError::InconsistentTokenMetadata`].
     pub fn add_trading_pair(
         &mut self,
         pair: TradingPair,

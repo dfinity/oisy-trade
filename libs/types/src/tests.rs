@@ -46,15 +46,19 @@ fn should_serialize_trading_pair_info() {
             id: TokenId {
                 ledger_id: Principal::from_slice(&[0x01]),
             },
-            symbol: "ckSOL".to_string(),
-            decimals: 9,
+            metadata: TokenMetadata {
+                symbol: "ckSOL".to_string(),
+                decimals: 9,
+            },
         },
         quote: Token {
             id: TokenId {
                 ledger_id: Principal::from_slice(&[0x02]),
             },
-            symbol: "ckBTC".to_string(),
-            decimals: 8,
+            metadata: TokenMetadata {
+                symbol: "ckBTC".to_string(),
+                decimals: 8,
+            },
         },
         tick_size: 10,
         lot_size: 1_000_000,
@@ -70,8 +74,10 @@ fn should_serialize_token() {
         id: TokenId {
             ledger_id: Principal::from_slice(&[0x01]),
         },
-        symbol: "ckBTC".to_string(),
-        decimals: 8,
+        metadata: TokenMetadata {
+            symbol: "ckBTC".to_string(),
+            decimals: 8,
+        },
     };
     let encoded = candid::encode_one(&token).unwrap();
     let decoded: Token = candid::decode_one(&encoded).unwrap();
