@@ -84,10 +84,11 @@ mod add_limit_order {
 }
 
 mod settle_fills {
+    use crate::balance::Balance;
     use crate::order::{PendingOrder, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, icp_ckbtc_trading_pair};
-    use candid::{Nat, Principal};
+    use candid::Principal;
     use dex_types_internal::{InitArg, Mode};
     use std::collections::BTreeMap;
 
@@ -106,13 +107,13 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(0, 0));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(price * lot, 0));
 
@@ -131,14 +132,14 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*lot quote, paid 90*lot, surplus 10*lot returned to free
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(10 * lot, 0));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(90 * lot, 0));
 
@@ -157,13 +158,13 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(0, 0));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         // Seller gets 110*lot quote (better than their limit of 100)
         assert_eq!(seller_quote, balance(110 * lot, 0));
@@ -183,14 +184,14 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer filled 1 lot, 2 lots remain reserved
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(0, 200 * lot));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(100 * lot, 0));
 
@@ -210,8 +211,8 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*2*lot = 200*lot quote
         // Paid 90*lot + 100*lot = 190*lot, surplus = 10*lot
         assert_eq!(buyer_base, balance(2 * lot, 0));
@@ -233,15 +234,15 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Surplus: (100-90)*lot = 10*lot returned to free
         // Remaining reserved: 100*2*lot = 200*lot
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(10 * lot, 200 * lot));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         assert_eq!(seller_quote, balance(90 * lot, 0));
 
@@ -260,13 +261,13 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         assert_eq!(buyer_base, balance(lot, 0));
         assert_eq!(buyer_quote, balance(0, 0));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         // 1 lot filled, 2 lots remain reserved
         assert_eq!(seller_base, balance(0, 2 * lot));
         assert_eq!(seller_quote, balance(100 * lot, 0));
@@ -288,14 +289,14 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        let buyer_quote = state.get_balance(BUYER, pair.quote);
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*lot + 110*lot = 210*lot quote, all consumed
         assert_eq!(buyer_base, balance(2 * lot, 0));
         assert_eq!(buyer_quote, balance(0, 0));
 
-        let seller_base = state.get_balance(SELLER, pair.base);
-        let seller_quote = state.get_balance(SELLER, pair.quote);
+        let seller_base = state.get_balance(&SELLER, &pair.base);
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
         assert_eq!(seller_base, balance(0, 0));
         // Seller receives 110*lot + 100*lot = 210*lot quote
         assert_eq!(seller_quote, balance(210 * lot, 0));
@@ -314,21 +315,21 @@ mod settle_fills {
         place_buy_order_for(&mut state, user, 100, lot);
         place_sell_order_for(&mut state, user, 100, lot);
 
-        let base_before = state.get_balance(user, pair.base);
-        let quote_before = state.get_balance(user, pair.quote);
+        let base_before = state.get_balance(&user, &pair.base);
+        let quote_before = state.get_balance(&user, &pair.quote);
         state.process_pending_orders();
-        let base_after = state.get_balance(user, pair.base);
-        let quote_after = state.get_balance(user, pair.quote);
+        let base_after = state.get_balance(&user, &pair.base);
+        let quote_after = state.get_balance(&user, &pair.quote);
 
         // Total tokens unchanged: base and quote just move between free/reserved
         assert_eq!(
-            base_before.free.clone() + base_before.reserved.clone(),
-            base_after.free.clone() + base_after.reserved.clone(),
+            base_before.free().clone() + base_before.reserved().clone(),
+            base_after.free().clone() + base_after.reserved().clone(),
             "base token total changed"
         );
         assert_eq!(
-            quote_before.free.clone() + quote_before.reserved.clone(),
-            quote_after.free.clone() + quote_after.reserved.clone(),
+            quote_before.free().clone() + quote_before.reserved().clone(),
+            quote_after.free().clone() + quote_after.reserved().clone(),
             "quote token total changed"
         );
         // After self-trade: all reserved released, net balances same as deposited
@@ -356,20 +357,20 @@ mod settle_fills {
         state.process_pending_orders();
 
         // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
-        assert_eq!(state.get_balance(BUYER, pair.base), balance(2 * lot, 0));
-        assert_eq!(state.get_balance(BUYER, pair.quote), balance(10 * lot, 0));
+        assert_eq!(state.get_balance(&BUYER, &pair.base), balance(2 * lot, 0));
+        assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(10 * lot, 0));
 
         // Seller A: sold 1 lot at 90
-        assert_eq!(state.get_balance(seller_a, pair.base), balance(0, 0));
+        assert_eq!(state.get_balance(&seller_a, &pair.base), balance(0, 0));
         assert_eq!(
-            state.get_balance(seller_a, pair.quote),
+            state.get_balance(&seller_a, &pair.quote),
             balance(90 * lot, 0)
         );
 
         // Seller B: sold 1 lot at 100
-        assert_eq!(state.get_balance(seller_b, pair.base), balance(0, 0));
+        assert_eq!(state.get_balance(&seller_b, &pair.base), balance(0, 0));
         assert_eq!(
-            state.get_balance(seller_b, pair.quote),
+            state.get_balance(&seller_b, &pair.quote),
             balance(100 * lot, 0)
         );
 
@@ -389,18 +390,17 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let quantity_nat: Nat = quantity.clone().into();
-        let quote_total: Nat = Price::new(price).mul_quantity(quantity).into();
+        let quote_total = Price::new(price).mul_quantity(quantity.clone());
 
         // Buyer received all base tokens
-        let buyer_base = state.get_balance(BUYER, pair.base);
-        assert_eq!(buyer_base.free, quantity_nat);
-        assert_eq!(buyer_base.reserved, Nat::from(0u64));
+        let buyer_base = state.get_balance(&BUYER, &pair.base);
+        assert_eq!(buyer_base.free(), &quantity);
+        assert_eq!(buyer_base.reserved(), &Quantity::ZERO);
 
         // Seller received price * quantity quote tokens
-        let seller_quote = state.get_balance(SELLER, pair.quote);
-        assert_eq!(seller_quote.free, quote_total);
-        assert_eq!(seller_quote.reserved, Nat::from(0u64));
+        let seller_quote = state.get_balance(&SELLER, &pair.quote);
+        assert_eq!(seller_quote.free(), &quote_total);
+        assert_eq!(seller_quote.reserved(), &Quantity::ZERO);
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -471,26 +471,23 @@ mod settle_fills {
             .unwrap();
     }
 
-    fn balance(free: u64, reserved: u64) -> dex_types::Balance {
-        dex_types::Balance {
-            free: free.into(),
-            reserved: reserved.into(),
-        }
+    fn balance(free: u64, reserved: u64) -> Balance {
+        Balance::new(free, reserved)
     }
 
-    type BalanceSnapshot = BTreeMap<Principal, (dex_types::Balance, dex_types::Balance)>;
+    type BalanceSnapshot = BTreeMap<Principal, (Balance, Balance)>;
 
     /// Snapshot base and quote balances for each principal.
     fn snapshot_balances(state: &State, principals: &[Principal]) -> BalanceSnapshot {
         let pair = icp_ckbtc_trading_pair();
         principals
             .iter()
-            .map(|&p| {
+            .map(|p| {
                 (
-                    p,
+                    *p,
                     (
-                        state.get_balance(p, pair.base),
-                        state.get_balance(p, pair.quote),
+                        state.get_balance(p, &pair.base),
+                        state.get_balance(p, &pair.quote),
                     ),
                 )
             })
@@ -502,13 +499,13 @@ mod settle_fills {
         let principals: Vec<Principal> = before.keys().copied().collect();
         let after = snapshot_balances(state, &principals);
 
-        let sum = |snap: &BalanceSnapshot| -> (Nat, Nat) {
+        let sum = |snap: &BalanceSnapshot| -> (Quantity, Quantity) {
             snap.values().fold(
-                (Nat::from(0u64), Nat::from(0u64)),
+                (Quantity::ZERO, Quantity::ZERO),
                 |(base_acc, quote_acc), (base, quote)| {
                     (
-                        base_acc + base.free.clone() + base.reserved.clone(),
-                        quote_acc + quote.free.clone() + quote.reserved.clone(),
+                        base_acc + base.free().clone() + base.reserved().clone(),
+                        quote_acc + quote.free().clone() + quote.reserved().clone(),
                     )
                 },
             )

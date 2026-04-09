@@ -276,12 +276,12 @@ impl State {
             .deposit(amount);
     }
 
-    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> dex_types::Balance {
+    pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
         self.balances
-            .get(&user)
-            .and_then(|tokens| tokens.get(&token_id))
-            .map(dex_types::Balance::from)
-            .unwrap_or_else(|| Balance::zero().into())
+            .get(user)
+            .and_then(|tokens| tokens.get(token_id))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Set of currently active tasks to avoid parallel execution.
