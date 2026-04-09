@@ -68,10 +68,10 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
 
@@ -95,10 +95,10 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
 
@@ -109,10 +109,10 @@ mod add_trading_pair {
                     base: icp_token_id(),
                     quote: token_c,
                 },
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 token_c_metadata,
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
     }
@@ -125,10 +125,10 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
 
@@ -141,13 +141,13 @@ mod add_trading_pair {
                 base: icp_token_id(),
                 quote: token_c,
             },
-            TICK_SIZE,
-            LOT_SIZE,
             wrong_metadata.clone(),
             TokenMetadata {
                 symbol: "ckETH".to_string(),
                 decimals: 18,
             },
+            TICK_SIZE,
+            LOT_SIZE,
         );
 
         assert_eq!(
@@ -168,10 +168,10 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
 
@@ -184,13 +184,13 @@ mod add_trading_pair {
                 base: token_c,
                 quote: ckbtc_token_id(),
             },
-            TICK_SIZE,
-            LOT_SIZE,
             TokenMetadata {
                 symbol: "ckETH".to_string(),
                 decimals: 18,
             },
             wrong_metadata.clone(),
+            TICK_SIZE,
+            LOT_SIZE,
         );
 
         assert_eq!(
@@ -209,10 +209,10 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
         let state_before = state.clone();
@@ -223,8 +223,6 @@ mod add_trading_pair {
                 base: icp_token_id(),
                 quote: token_c,
             },
-            TICK_SIZE,
-            LOT_SIZE,
             TokenMetadata {
                 symbol: "WRONG".to_string(),
                 decimals: 99,
@@ -233,6 +231,8 @@ mod add_trading_pair {
                 symbol: "ckETH".to_string(),
                 decimals: 18,
             },
+            TICK_SIZE,
+            LOT_SIZE,
         );
 
         assert!(result.is_err());
@@ -245,19 +245,19 @@ mod add_trading_pair {
         state
             .add_trading_pair(
                 icp_ckbtc_trading_pair(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
 
         let result = state.add_trading_pair(
             icp_ckbtc_trading_pair(),
-            TickSize::new(std::num::NonZeroU64::new(20).unwrap()),
-            LotSize::new(std::num::NonZeroU64::new(2_000_000).unwrap()),
             icp_metadata(),
             ckbtc_metadata(),
+            TickSize::new(std::num::NonZeroU64::new(20).unwrap()),
+            LotSize::new(std::num::NonZeroU64::new(2_000_000).unwrap()),
         );
 
         assert_eq!(
@@ -284,10 +284,10 @@ mod add_limit_order {
         state
             .add_trading_pair(
                 pair.clone(),
-                TICK_SIZE,
-                LOT_SIZE,
                 icp_metadata(),
                 ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
             )
             .unwrap();
         let user = Principal::from_slice(&[0x01]);

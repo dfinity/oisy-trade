@@ -165,10 +165,10 @@ impl State {
     pub fn add_trading_pair(
         &mut self,
         pair: TradingPair,
-        tick_size: TickSize,
-        lot_size: LotSize,
         base_metadata: TokenMetadata,
         quote_metadata: TokenMetadata,
+        tick_size: TickSize,
+        lot_size: LotSize,
     ) -> Result<(), dex_types::AddTradingPairError> {
         self.check_token_metadata_consistency(pair.base, &base_metadata)?;
         self.check_token_metadata_consistency(pair.quote, &quote_metadata)?;

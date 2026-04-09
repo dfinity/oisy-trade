@@ -101,10 +101,10 @@ pub fn init_state_with_order_book() {
     state::with_state_mut(|s| {
         s.add_trading_pair(
             icp_ckbtc_trading_pair(),
-            TICK_SIZE,
-            LOT_SIZE,
             icp_metadata(),
             ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
         )
         .unwrap();
     });

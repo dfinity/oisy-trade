@@ -143,6 +143,6 @@ pub fn add_trading_pair(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
     state::with_state_mut(|s| {
-        s.add_trading_pair(pair, tick_size, lot_size, base_metadata, quote_metadata)
+        s.add_trading_pair(pair, base_metadata, quote_metadata, tick_size, lot_size)
     })
 }
