@@ -295,6 +295,12 @@ impl State {
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
         &mut self.active_tasks
     }
+
+    pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
+        self.trading_pairs
+            .get(trading_pair)
+            .and_then(|book_id| self.order_books.get(book_id))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

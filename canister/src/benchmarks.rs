@@ -11,59 +11,10 @@ const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
-/// Generate a unique principal from a sequential counter.
-fn user(id: u64) -> Principal {
-    // Principal::from_slice accepts up to 29 bytes; 8 bytes is plenty for unique IDs.
-    Principal::from_slice(&id.to_be_bytes())
-}
-
-/// Fund a user with a large balance for both tokens of the trading pair.
-fn fund_user(state: &mut State, principal: Principal) {
-    let pair = trading_pair();
-    state.deposit(principal, pair.base, Nat::from(u128::MAX));
-    state.deposit(principal, pair.quote, Nat::from(u128::MAX));
-}
-
-/// Benchmark processing 1000 incoming orders against a fully populated order book
-/// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
-/// Each order is placed by a different user (worst case for balance lookups).
-#[bench(raw)]
-fn bench_process_1000_orders() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let trades = load_trades();
-    let mut state = new_state();
-
-    populate_state(&mut state, &depth);
-
-    // Queue 1000 pending orders from aggregated trades.
-    // Binance `m` field: true = buyer is maker, so the taker is a seller.
-    let pair = trading_pair();
-    let taker_id_offset = depth.bids.len() + depth.asks.len();
-    for (i, trade) in trades.iter().enumerate() {
-        let principal = user((taker_id_offset + i) as u64);
-        fund_user(&mut state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: if trade.m { Side::Sell } else { Side::Buy },
-                    price: Price::new(parse_decimal_8(&trade.p)),
-                    quantity: Quantity::new(parse_decimal_8(&trade.q)),
-                },
-            )
-            .expect("valid trade order");
-    }
-
-    canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
-    })
-}
-
 /// Benchmark a single large sell order that sweeps all 697 bid levels from the
 /// Binance depth snapshot, producing one fill per price level.
 #[bench(raw)]
-fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResult {
+fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     let depth = load_depth();
     let mut state = new_state();
 
@@ -77,7 +28,7 @@ fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResul
     state
         .add_limit_order(
             taker,
-            pair,
+            pair.clone(),
             PendingOrder {
                 side: Side::Sell,
                 price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
@@ -86,20 +37,75 @@ fn bench_process_single_order_sweeps_697_bid_levels() -> canbench_rs::BenchResul
         )
         .expect("valid sell order");
 
-    canbench_rs::bench_fn(|| {
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 1);
+    assert_eq!(book.bids_len(), depth.bids.len());
+
+    let res = canbench_rs::bench_fn(|| {
         state.process_pending_orders();
-    })
+    });
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+    assert_eq!(book.bids_len(), 0);
+
+    res
+}
+
+/// Benchmark processing 1000 incoming orders against a fully populated order book
+/// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
+/// Each order is placed by a different user (worst case for balance lookups).
+#[bench(raw)]
+fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
+    let depth = crate::benchmarks::load_depth();
+    let trades = crate::benchmarks::load_trades();
+    let mut state = crate::benchmarks::new_state();
+
+    crate::benchmarks::populate_state(&mut state, &depth);
+
+    // Queue 1000 pending orders from aggregated trades.
+    // Binance `m` field: true = buyer is maker, so the taker is a seller.
+    let pair = crate::benchmarks::trading_pair();
+    let taker_id_offset = depth.bids.len() + depth.asks.len();
+    for (i, trade) in trades.iter().enumerate() {
+        let principal = crate::benchmarks::user((taker_id_offset + i) as u64);
+        crate::benchmarks::fund_user(&mut state, principal);
+        state
+            .add_limit_order(
+                principal,
+                pair.clone(),
+                PendingOrder {
+                    side: if trade.m { Side::Sell } else { Side::Buy },
+                    price: Price::new(crate::benchmarks::parse_decimal_8(&trade.p)),
+                    quantity: Quantity::new(crate::benchmarks::parse_decimal_8(&trade.q)),
+                },
+            )
+            .expect("valid trade order");
+    }
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), trades.len());
+
+    let res = canbench_rs::bench_fn(|| {
+        state.process_pending_orders();
+    });
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+
+    res
 }
 
 /// Benchmark processing 1000 orders that all rest without matching.
 /// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
 /// Each order is placed by a different user (worst case for balance lookups).
 #[bench(raw)]
-fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
+fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     let pair = trading_pair();
+    let num_orders = 1_000u64;
 
-    for i in 0..500u64 {
+    for i in 0..num_orders / 2 {
         let principal = user(i);
         fund_user(&mut state, principal);
         state
@@ -114,7 +120,7 @@ fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
             )
             .expect("valid buy order");
     }
-    for i in 0..500u64 {
+    for i in 0..num_orders / 2 {
         let principal = user(500 + i);
         fund_user(&mut state, principal);
         state
@@ -130,9 +136,22 @@ fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
             .expect("valid sell order");
     }
 
-    canbench_rs::bench_fn(|| {
+    let book = state.get_order_book(&pair).unwrap();
+    let num_resting_orders_before = book.resting_orders_len();
+    assert_eq!(book.pending_orders_len(), num_orders as usize);
+
+    let res = canbench_rs::bench_fn(|| {
         state.process_pending_orders();
-    })
+    });
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+    assert_eq!(
+        book.resting_orders_len(),
+        num_resting_orders_before + num_orders as usize
+    );
+
+    res
 }
 
 #[derive(Deserialize)]
@@ -243,5 +262,28 @@ fn populate_state(state: &mut State, depth: &DepthSnapshot) {
             )
             .expect("valid ask order");
     }
+    assert_eq!(
+        state.get_order_book(&pair).unwrap().pending_orders_len(),
+        depth.bids.len() + depth.asks.len()
+    );
+
     state.process_pending_orders();
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+    assert_eq!(book.bids_len(), depth.bids.len());
+    assert_eq!(book.asks_len(), depth.asks.len());
+}
+
+/// Generate a unique principal from a sequential counter.
+fn user(id: u64) -> Principal {
+    // Principal::from_slice accepts up to 29 bytes; 8 bytes is plenty for unique IDs.
+    Principal::from_slice(&id.to_be_bytes())
+}
+
+/// Fund a user with a large balance for both tokens of the trading pair.
+fn fund_user(state: &mut State, principal: Principal) {
+    let pair = trading_pair();
+    state.deposit(principal, pair.base, Nat::from(u128::MAX));
+    state.deposit(principal, pair.quote, Nat::from(u128::MAX));
 }
