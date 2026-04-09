@@ -57,7 +57,9 @@ mod add_limit_order {
     use crate::order::{PendingOrder, Price, Quantity, Side};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
-    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, icp_ckbtc_trading_pair};
+    use crate::test_fixtures::{
+        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
     use assert_matches::assert_matches;
     use candid::Principal;
 
@@ -66,7 +68,13 @@ mod add_limit_order {
         let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();
         state
-            .add_trading_pair(pair.clone(), TICK_SIZE, LOT_SIZE)
+            .add_trading_pair(
+                pair.clone(),
+                TICK_SIZE,
+                LOT_SIZE,
+                icp_metadata(),
+                ckbtc_metadata(),
+            )
             .unwrap();
         let user = Principal::from_slice(&[0x01]);
         let pending = PendingOrder {

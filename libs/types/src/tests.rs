@@ -1,6 +1,6 @@
 use crate::{
-    AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TokenId, TradingPair,
-    TradingPairInfo,
+    AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, Token, TokenId,
+    TokenMetadata, TradingPair, TradingPairInfo,
 };
 use candid::Principal;
 
@@ -42,11 +42,19 @@ fn should_serialize_order_status() {
 #[test]
 fn should_serialize_trading_pair_info() {
     let info = TradingPairInfo {
-        base_asset: TokenId {
-            ledger_id: Principal::from_slice(&[0x01]),
+        base: Token {
+            id: TokenId {
+                ledger_id: Principal::from_slice(&[0x01]),
+            },
+            symbol: "ckSOL".to_string(),
+            decimals: 9,
         },
-        quote_asset: TokenId {
-            ledger_id: Principal::from_slice(&[0x02]),
+        quote: Token {
+            id: TokenId {
+                ledger_id: Principal::from_slice(&[0x02]),
+            },
+            symbol: "ckBTC".to_string(),
+            decimals: 8,
         },
         tick_size: 10,
         lot_size: 1_000_000,
@@ -54,6 +62,31 @@ fn should_serialize_trading_pair_info() {
     let encoded = candid::encode_one(&info).unwrap();
     let decoded: TradingPairInfo = candid::decode_one(&encoded).unwrap();
     assert_eq!(info, decoded);
+}
+
+#[test]
+fn should_serialize_token() {
+    let token = Token {
+        id: TokenId {
+            ledger_id: Principal::from_slice(&[0x01]),
+        },
+        symbol: "ckBTC".to_string(),
+        decimals: 8,
+    };
+    let encoded = candid::encode_one(&token).unwrap();
+    let decoded: Token = candid::decode_one(&encoded).unwrap();
+    assert_eq!(token, decoded);
+}
+
+#[test]
+fn should_serialize_token_metadata() {
+    let metadata = TokenMetadata {
+        symbol: "ckBTC".to_string(),
+        decimals: 8,
+    };
+    let encoded = candid::encode_one(&metadata).unwrap();
+    let decoded: TokenMetadata = candid::decode_one(&encoded).unwrap();
+    assert_eq!(metadata, decoded);
 }
 
 #[test]

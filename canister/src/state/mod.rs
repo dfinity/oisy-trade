@@ -189,14 +189,14 @@ impl State {
         token_id: TokenId,
         submitted: &TokenMetadata,
     ) -> Result<(), dex_types::AddTradingPairError> {
-        if let Some(existing) = self.tokens.get(&token_id) {
-            if existing != submitted {
-                return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                    token: token_id.into(),
-                    expected: existing.clone().into(),
-                    submitted: submitted.clone().into(),
-                });
-            }
+        if let Some(existing) = self.tokens.get(&token_id)
+            && existing != submitted
+        {
+            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
+                token: token_id.into(),
+                expected: existing.clone().into(),
+                submitted: submitted.clone().into(),
+            });
         }
         Ok(())
     }
