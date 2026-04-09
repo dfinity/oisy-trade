@@ -11,7 +11,7 @@ CANISTER_PATH=$1
 CANBENCH_JOB_NAME=$2
 
 # Must match the file path specified in the GitHub Action.
-COMMENT_MESSAGE_PATH=/tmp/canbench_result_${CANBENCH_JOB_NAME}
+COMMENT_MESSAGE_PATH=/tmp/canbench_result_${CANBENCH_JOB_NAME}.md
 
 # GitHub CI is expected to have the baseline branch checked out in this folder.
 BASELINE_BRANCH_DIR=_canbench_baseline_branch

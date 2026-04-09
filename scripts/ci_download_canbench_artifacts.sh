@@ -10,7 +10,7 @@ json_array="["
 for file in canbench_result_*; do
   if [ -e "$file" ]; then
     # Read the contents of the result file, escape double quotes, and format with escaped newlines
-    content=$(<"$file/$file" sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//')
+    content=$(<"$file/$file.md" sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//')
 
     # Construct a JSON object for the current result
     json_object="{\"title\":\"$file\",\"result\":\"$content\"},"
