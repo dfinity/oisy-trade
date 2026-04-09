@@ -13,65 +13,8 @@ const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
 const USER: Principal = Principal::anonymous();
 
-fn trading_pair() -> TradingPair {
-    TradingPair {
-        base: TokenId::new(Principal::from_slice(&[1])),
-        quote: TokenId::new(Principal::from_slice(&[2])),
-    }
-}
-
-fn new_state() -> State {
-    let mut state = State::try_from(InitArg {
-        mode: Mode::GeneralAvailability,
-    })
-    .unwrap();
-    let pair = trading_pair();
-    state
-        .add_trading_pair(pair.clone(), TICK_SIZE, LOT_SIZE)
-        .unwrap();
-    state.deposit(USER, pair.base, Nat::from(u128::MAX));
-    state.deposit(USER, pair.quote, Nat::from(u128::MAX));
-    state
-}
-
-/// Pre-populate an order book with resting orders from the Binance depth snapshot.
-/// Best bid (2.304) < best ask (2.305), so no fills occur during population.
-fn populate_state(state: &mut State, depth: &DepthSnapshot) {
-    let pair = trading_pair();
-    for (price_str, qty_str) in &depth.bids {
-        state
-            .add_limit_order(
-                USER,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::new(parse_decimal_8(qty_str)),
-                },
-            )
-            .expect("valid bid order");
-    }
-    for (price_str, qty_str) in &depth.asks {
-        state
-            .add_limit_order(
-                USER,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::new(parse_decimal_8(qty_str)),
-                },
-            )
-            .expect("valid ask order");
-    }
-    state.process_pending_orders();
-}
-
 /// Benchmark processing 1000 incoming orders against a fully populated order book
 /// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
-///
-/// Includes both matching and settlement. Use the `matching` and `settling`
-/// bench scopes to see the breakdown.
 #[bench(raw)]
 fn bench_process_1000_orders() -> canbench_rs::BenchResult {
     let depth = load_depth();
@@ -172,7 +115,9 @@ fn bench_process_1000_orders_no_fills() -> canbench_rs::BenchResult {
 
 #[derive(Deserialize)]
 struct DepthSnapshot {
+    /// Bid levels as `(price, quantity)` decimal strings, sorted by price descending.
     bids: Vec<(String, String)>,
+    /// Ask levels as `(price, quantity)` decimal strings, sorted by price ascending.
     asks: Vec<(String, String)>,
 }
 
@@ -209,10 +154,70 @@ fn parse_decimal_8(s: &str) -> u64 {
 
 fn load_depth() -> DepthSnapshot {
     let json = include_str!("../../docs/trading_data/2026_04_04_binance_depth_ICPUSDT.json");
-    serde_json::from_str(json).expect("failed to parse depth snapshot")
+    let snapshot: DepthSnapshot =
+        serde_json::from_str(json).expect("failed to parse depth snapshot");
+    assert_eq!(snapshot.bids.len(), 697);
+    assert_eq!(snapshot.asks.len(), 5_000);
+    snapshot
 }
 
 fn load_trades() -> Vec<AggTrade> {
     let json = include_str!("../../docs/trading_data/2026_04_04_binance_agg_trades_ICPUSDT.json");
-    serde_json::from_str(json).expect("failed to parse trades")
+    let trades: Vec<AggTrade> = serde_json::from_str(json).expect("failed to parse trades");
+    assert_eq!(trades.len(), 1_000);
+    trades
+}
+
+fn new_state() -> State {
+    let mut state = State::try_from(InitArg {
+        mode: Mode::GeneralAvailability,
+    })
+    .unwrap();
+    let pair = trading_pair();
+    state
+        .add_trading_pair(pair.clone(), TICK_SIZE, LOT_SIZE)
+        .unwrap();
+    state.deposit(USER, pair.base, Nat::from(u128::MAX));
+    state.deposit(USER, pair.quote, Nat::from(u128::MAX));
+    state
+}
+
+fn trading_pair() -> TradingPair {
+    TradingPair {
+        base: TokenId::new(Principal::from_slice(&[1])),
+        quote: TokenId::new(Principal::from_slice(&[2])),
+    }
+}
+
+/// Pre-populate an order book with resting orders from the Binance depth snapshot.
+/// Best bid (2.304) < best ask (2.305), so no fills occur during population.
+fn populate_state(state: &mut State, depth: &DepthSnapshot) {
+    let pair = trading_pair();
+    for (price_str, qty_str) in &depth.bids {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(parse_decimal_8(price_str)),
+                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                },
+            )
+            .expect("valid bid order");
+    }
+    for (price_str, qty_str) in &depth.asks {
+        state
+            .add_limit_order(
+                USER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(parse_decimal_8(price_str)),
+                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                },
+            )
+            .expect("valid ask order");
+    }
+    state.process_pending_orders();
 }
