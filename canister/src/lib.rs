@@ -60,7 +60,36 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 }
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
-    state::with_state(|s| s.get_trading_pairs())
+    state::with_state(|s| {
+        s.trading_pairs()
+            .iter()
+            .map(|(pair, book_id)| {
+                let book = s
+                    .order_book(book_id)
+                    .expect("BUG: trading pair registered but order book missing");
+                let base_meta = s
+                    .token_metadata(&pair.base)
+                    .expect("BUG: trading pair registered but base token metadata missing");
+                let quote_meta = s
+                    .token_metadata(&pair.quote)
+                    .expect("BUG: trading pair registered but quote token metadata missing");
+                TradingPairInfo {
+                    base: dex_types::Token {
+                        id: dex_types::TokenId::from(pair.base),
+                        symbol: base_meta.symbol.clone(),
+                        decimals: base_meta.decimals,
+                    },
+                    quote: dex_types::Token {
+                        id: dex_types::TokenId::from(pair.quote),
+                        symbol: quote_meta.symbol.clone(),
+                        decimals: quote_meta.decimals,
+                    },
+                    tick_size: book.tick_size().get(),
+                    lot_size: book.lot_size().get(),
+                }
+            })
+            .collect()
+    })
 }
 
 pub async fn deposit(
@@ -92,12 +121,20 @@ pub fn add_trading_pair(
     if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(AddTradingPairError::NotController);
     }
-    if request.base == request.quote {
+    if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
     let pair = order::TradingPair {
-        base: TokenId::from(request.base),
-        quote: TokenId::from(request.quote),
+        base: TokenId::from(request.base.id),
+        quote: TokenId::from(request.quote.id),
+    };
+    let base_metadata = order::TokenMetadata {
+        symbol: request.base.symbol,
+        decimals: request.base.decimals,
+    };
+    let quote_metadata = order::TokenMetadata {
+        symbol: request.quote.symbol,
+        decimals: request.quote.decimals,
     };
     let tick_size = order::TickSize::new(
         NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
@@ -105,5 +142,7 @@ pub fn add_trading_pair(
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    state::with_state_mut(|s| s.add_trading_pair(pair, tick_size, lot_size))
+    state::with_state_mut(|s| {
+        s.add_trading_pair(pair, tick_size, lot_size, base_metadata, quote_metadata)
+    })
 }

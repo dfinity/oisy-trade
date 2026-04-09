@@ -9,7 +9,7 @@ use crate::order::{
     TokenMetadata, TradingPair,
 };
 use candid::{Nat, Principal};
-use dex_types::{OrderStatus, TradingPairInfo};
+use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +38,6 @@ pub fn init_state(init_arg: InitArg) {
 pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
-    #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: BTreeMap<TradingPair, OrderBookId>,
     order_books: BTreeMap<OrderBookId, OrderBook>,
@@ -168,10 +167,16 @@ impl State {
         pair: TradingPair,
         tick_size: TickSize,
         lot_size: LotSize,
+        base_metadata: TokenMetadata,
+        quote_metadata: TokenMetadata,
     ) -> Result<(), dex_types::AddTradingPairError> {
+        self.check_token_metadata_consistency(pair.base, &base_metadata)?;
+        self.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
         if self.trading_pairs.contains_key(&pair) {
             return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
         }
+        self.tokens.entry(pair.base).or_insert(base_metadata);
+        self.tokens.entry(pair.quote).or_insert(quote_metadata);
         let book_id = self.next_book_id();
         let book = OrderBook::new(book_id, tick_size, lot_size);
         assert_eq!(self.trading_pairs.insert(pair, book_id), None);
@@ -179,22 +184,33 @@ impl State {
         Ok(())
     }
 
-    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
-        self.trading_pairs
-            .iter()
-            .map(|(pair, book_id)| {
-                let book = self
-                    .order_books
-                    .get(book_id)
-                    .expect("BUG: trading pair registered but order book missing");
-                TradingPairInfo {
-                    base_asset: dex_types::TokenId::from(pair.base),
-                    quote_asset: dex_types::TokenId::from(pair.quote),
-                    tick_size: book.tick_size().get(),
-                    lot_size: book.lot_size().get(),
-                }
-            })
-            .collect()
+    fn check_token_metadata_consistency(
+        &self,
+        token_id: TokenId,
+        submitted: &TokenMetadata,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        if let Some(existing) = self.tokens.get(&token_id) {
+            if existing != submitted {
+                return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
+                    token: token_id.into(),
+                    expected: existing.clone().into(),
+                    submitted: submitted.clone().into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn trading_pairs(&self) -> &BTreeMap<TradingPair, OrderBookId> {
+        &self.trading_pairs
+    }
+
+    pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
+        self.order_books.get(id)
+    }
+
+    pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
+        self.tokens.get(token_id)
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
