@@ -31,7 +31,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
         price: 100,
-        quantity: u64::from(LOT_SIZE),
+        quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
 
@@ -50,7 +50,7 @@ fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -
     PendingOrder {
         side,
         price: Price::new(price.into()),
-        quantity: Quantity::new(quantity.into()),
+        quantity: Quantity::from(quantity.into()),
     }
     .into_order(OrderSeq::new(id))
 }
@@ -79,7 +79,7 @@ pub fn fill(
         taker_price: taker.price(),
         maker_order_seq,
         maker_price: Price::new(maker_price.into()),
-        quantity: Quantity::new(quantity.into()),
+        quantity: Quantity::from(quantity.into()),
     }
 }
 
@@ -108,7 +108,7 @@ pub fn init_state_with_order_book() {
 pub fn fund_user(user: Principal) {
     state::with_state_mut(|s| {
         let pair = icp_ckbtc_trading_pair();
-        let amount = candid::Nat::from(u64::MAX);
+        let amount = Quantity::from(u64::MAX);
         s.deposit(user, pair.base, amount.clone());
         s.deposit(user, pair.quote, amount);
     });

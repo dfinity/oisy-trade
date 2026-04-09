@@ -69,7 +69,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Buy,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
 
         let required = 100_000_000u64;
@@ -117,7 +117,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Sell,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
 
         let required = 1_000_000u64;
@@ -197,7 +197,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Buy,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
         let required_quote_amount = 100_000_000u64;
         setup
@@ -218,7 +218,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Sell,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
         setup

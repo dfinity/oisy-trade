@@ -61,7 +61,7 @@ mod order_book {
                     TICK_SIZE.get(),
                     LOT_SIZE.get() / 2,
                     MatchOrderError::InvalidLotSize {
-                        quantity: Quantity::new(LOT_SIZE.get() / 2),
+                        quantity: Quantity::from(LOT_SIZE.get() / 2),
                         lot_size: LOT_SIZE,
                     },
                 ),
@@ -300,7 +300,7 @@ mod order_book {
             assert_eq!(resting.id(), OrderSeq::new(2));
             assert_eq!(
                 resting.remaining_quantity(),
-                Quantity::new(2 * u64::from(LOT_SIZE))
+                &Quantity::from(2 * u64::from(LOT_SIZE))
             );
         }
 

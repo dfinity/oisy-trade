@@ -1,12 +1,12 @@
 use super::{Balance, InsufficientBalanceError};
-use candid::Nat;
+use crate::order::Quantity;
 
 #[test]
 fn should_reserve_from_free_balance() {
     let mut balance = Balance::zero();
-    balance.deposit(Nat::from(100u64));
+    balance.deposit(Quantity::from(100));
 
-    balance.reserve(Nat::from(40u64)).unwrap();
+    balance.reserve(Quantity::from(40)).unwrap();
 
     assert_eq!(balance, Balance::new(60u64, 40u64));
 }
@@ -14,14 +14,14 @@ fn should_reserve_from_free_balance() {
 #[test]
 fn should_fail_to_reserve_more_than_free() {
     let mut balance = Balance::zero();
-    balance.deposit(Nat::from(50u64));
+    balance.deposit(Quantity::from(50));
     let balance_before_reserve = balance.clone();
 
     assert_eq!(
-        balance.reserve(Nat::from(100u64)).unwrap_err(),
+        balance.reserve(Quantity::from(100)).unwrap_err(),
         InsufficientBalanceError {
-            available: Nat::from(50u64),
-            required: Nat::from(100u64),
+            available: Quantity::from(50),
+            required: Quantity::from(100),
         }
     );
     assert_eq!(
@@ -34,7 +34,7 @@ fn should_fail_to_reserve_more_than_free() {
 fn should_debit_reserved() {
     let mut balance = Balance::new(10u64, 90u64);
 
-    balance.debit_reserved(Nat::from(30u64));
+    balance.debit_reserved(Quantity::from(30));
 
     assert_eq!(balance, Balance::new(10u64, 60u64));
 }
@@ -43,14 +43,14 @@ fn should_debit_reserved() {
 #[should_panic(expected = "BUG: debit_reserved underflow")]
 fn should_panic_on_debit_reserved_underflow() {
     let mut balance = Balance::new(0u64, 10u64);
-    balance.debit_reserved(Nat::from(20u64));
+    balance.debit_reserved(Quantity::from(20));
 }
 
 #[test]
 fn should_unreserve() {
     let mut balance = Balance::new(10u64, 90u64);
 
-    balance.unreserve(Nat::from(40u64));
+    balance.unreserve(Quantity::from(40));
 
     assert_eq!(balance, Balance::new(50u64, 50u64));
 }
@@ -59,5 +59,5 @@ fn should_unreserve() {
 #[should_panic(expected = "BUG: unreserve underflow")]
 fn should_panic_on_unreserve_underflow() {
     let mut balance = Balance::new(100u64, 10u64);
-    balance.unreserve(Nat::from(20u64));
+    balance.unreserve(Quantity::from(20));
 }
