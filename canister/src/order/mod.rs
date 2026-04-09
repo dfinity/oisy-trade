@@ -196,8 +196,8 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn mul_quantity(self, quantity: Quantity) -> Quantity {
-        Quantity::from(self.0) * quantity
+    pub fn mul_quantity(self, quantity: &Quantity) -> Quantity {
+        quantity * self.0
     }
 }
 
@@ -321,6 +321,14 @@ impl std::ops::Mul for Quantity {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self {
         Quantity(self.0 * rhs.0)
+    }
+}
+
+impl std::ops::Mul<u64> for &Quantity {
+    type Output = Quantity;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        Quantity(Nat(self.as_big_uint() * rhs))
     }
 }
 

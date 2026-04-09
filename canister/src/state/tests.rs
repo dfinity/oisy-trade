@@ -390,7 +390,7 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let quote_total = Price::new(price).mul_quantity(quantity.clone());
+        let quote_total = Price::new(price).mul_quantity(&quantity);
 
         // Buyer received all base tokens
         let buyer_base = state.get_balance(&BUYER, &pair.base);
@@ -431,11 +431,7 @@ mod settle_fills {
     ) {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
-        state.deposit(
-            user,
-            pair.quote,
-            Price::new(price).mul_quantity(quantity.clone()),
-        );
+        state.deposit(user, pair.quote, Price::new(price).mul_quantity(&quantity));
         state
             .add_limit_order(
                 user,

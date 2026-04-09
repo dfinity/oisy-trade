@@ -113,10 +113,7 @@ impl State {
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
         let (token, required) = match pending.side {
-            Side::Buy => (
-                pair.quote,
-                pending.price.mul_quantity(pending.quantity.clone()),
-            ),
+            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
             Side::Sell => (pair.base, pending.quantity.clone()),
         };
         match self
@@ -183,7 +180,7 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.mul_quantity(fill.quantity.clone());
+        let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
         let base_amount = fill.quantity.clone();
 
         // Buyer: pay quote, receive base
@@ -209,7 +206,7 @@ impl State {
             && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !price_diff.is_zero()
         {
-            let surplus = price_diff.mul_quantity(fill.quantity.clone());
+            let surplus = price_diff.mul_quantity(&fill.quantity);
             self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
