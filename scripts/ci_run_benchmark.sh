@@ -4,6 +4,11 @@ set -Eexuo pipefail
 # This script runs `canbench` in a given directory and outputs a comment
 # intended to be posted on the pull request.
 
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <canister_path> <job_name>"
+    exit 1
+fi
+
 # Path to run `canbench` from.
 CANISTER_PATH=$1
 
@@ -16,16 +21,15 @@ COMMENT_MESSAGE_PATH=/tmp/canbench_result_${CANBENCH_JOB_NAME}.md
 # GitHub CI is expected to have the baseline branch checked out in this folder.
 BASELINE_BRANCH_DIR=_canbench_baseline_branch
 
-CANBENCH_OUTPUT=/tmp/canbench_output.txt
+CANBENCH_OUTPUT=/tmp/canbench_output_${CANBENCH_JOB_NAME}.txt
 
 CANBENCH_RESULTS_FILE="$CANISTER_PATH/canbench_results.yml"
-CANBENCH_RESULTS_PERSISTED_FILE="/tmp/canbench_results_persisted_${CANBENCH_JOB_NAME}.yml"
 BASELINE_BRANCH_RESULTS_FILE="$BASELINE_BRANCH_DIR/$CANBENCH_RESULTS_FILE"
 
 CANBENCH_RESULTS_CSV_FILE="/tmp/canbench_results_${CANBENCH_JOB_NAME}.csv"
 
 # Install canbench.
-cargo install --version 0.4.0 --locked canbench
+cargo install --version 0.4.1 --locked canbench
 
 # Verify that the canbench results file exists.
 if [ ! -f "$CANBENCH_RESULTS_FILE" ]; then
@@ -59,7 +63,6 @@ has_updates() {
 # Check if the canbench results file is up to date.
 pushd "$CANISTER_PATH"
 canbench --less-verbose --hide-results --show-summary --csv --persist > "$CANBENCH_OUTPUT"
-cp "./canbench_results.yml" "$CANBENCH_RESULTS_PERSISTED_FILE"
 cp "./canbench_results.csv" "$CANBENCH_RESULTS_CSV_FILE"
 if has_updates; then
   UPDATED_MSG="**❌ \`$CANBENCH_RESULTS_FILE\` is not up to date**
@@ -82,8 +85,9 @@ echo "# \`canbench\` 🏋 (dir: $CANISTER_PATH) $commit_hash $time" > "$COMMENT_
 
 # Check for performance changes relative to the baseline branch.
 if [ -f "$BASELINE_BRANCH_RESULTS_FILE" ]; then
-  # Replace the current results with the baseline branch results.
-  mv "$BASELINE_BRANCH_RESULTS_FILE" "$CANBENCH_RESULTS_FILE"
+  # Copy the baseline branch results into place for comparison without
+  # mutating the baseline checkout.
+  cp "$BASELINE_BRANCH_RESULTS_FILE" "$CANBENCH_RESULTS_FILE"
 
   # Run canbench to compare results with the baseline branch.
   pushd "$CANISTER_PATH"

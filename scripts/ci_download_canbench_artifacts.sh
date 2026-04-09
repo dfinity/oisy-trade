@@ -4,26 +4,33 @@ set -Eexuo pipefail
 # Collects benchmark results from artifact files and outputs them as a JSON array
 # to be used in a GitHub Actions matrix.
 
-json_array="["
+matrix_json=$(
+  python3 - <<'PY'
+import glob
+import json
+import os
 
-# Loop through each directory matching the prefix "canbench_result_"
-for file in canbench_result_*; do
-  if [ -e "$file" ]; then
-    # Read the contents of the result file, escape double quotes, and format with escaped newlines
-    content=$(<"$file/$file.md" sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed '$ s/\\n$//')
+benchmarks = []
 
-    # Construct a JSON object for the current result
-    json_object="{\"title\":\"$file\",\"result\":\"$content\"},"
+for directory in sorted(glob.glob("canbench_result_*")):
+    if os.path.isdir(directory):
+        result_path = os.path.join(directory, f"{directory}.md")
+        if os.path.exists(result_path):
+            with open(result_path, encoding="utf-8") as fh:
+                benchmarks.append({
+                    "title": directory,
+                    "result": fh.read(),
+                })
 
-    # Append it to the array
-    json_array+="$json_object"
-  fi
-done
-
-# Remove the trailing comma and close the JSON array
-json_array=${json_array%,}
-json_array+="]"
+print(json.dumps({"benchmark": benchmarks}))
+PY
+)
 
 # Output the benchmark matrix and PR number to be used by the next job
-echo "matrix={\"benchmark\": $json_array}" >> "$GITHUB_OUTPUT"
-echo "pr_number=$(cat ./pr_number/pr_number)" >> "$GITHUB_OUTPUT"
+echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+
+if [ -f ./pr_number/pr_number ]; then
+  echo "pr_number=$(cat ./pr_number/pr_number)" >> "$GITHUB_OUTPUT"
+else
+  echo "pr_number=" >> "$GITHUB_OUTPUT"
+fi

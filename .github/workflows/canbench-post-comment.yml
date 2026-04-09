@@ -6,8 +6,12 @@ on:
     types:
       - completed
 
+permissions:
+  pull-requests: write
+
 jobs:
   download-results:
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-benchmarks.outputs.matrix }}
