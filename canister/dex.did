@@ -46,10 +46,10 @@ type AddLimitOrderError = variant {
 
 /// Information about a listed trading pair.
 type TradingPairInfo = record {
-    /// Token ID of the base asset.
-    base_asset : TokenId;
-    /// Token ID of the quote asset.
-    quote_asset : TokenId;
+    /// The base token.
+    base : Token;
+    /// The quote token.
+    quote : Token;
     /// Minimum price increment. All order prices must be a positive multiple of this value.
     tick_size : nat64;
     /// Minimum order quantity. All order quantities must be a positive multiple of this value.
@@ -74,6 +74,24 @@ type OrderStatus = variant {
 type TokenId = record {
     /// The canister ID of the token's ledger.
     ledger_id : principal;
+};
+
+/// Metadata associated with a token.
+type TokenMetadata = record {
+    /// The token's ticker symbol (e.g. "ckBTC").
+    symbol : text;
+    /// The number of decimal places used by the token.
+    decimals : nat8;
+};
+
+/// A token with its identity and metadata.
+type Token = record {
+    /// The token's unique identifier.
+    id : TokenId;
+    /// The token's ticker symbol (e.g. "ckBTC").
+    symbol : text;
+    /// The number of decimal places used by the token.
+    decimals : nat8;
 };
 
 /// Errors that can be returned by icrc2_transfer_from.
@@ -119,9 +137,9 @@ type Balance = record {
 /// Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
     /// The base token of the pair.
-    base : TokenId;
+    base : Token;
     /// The quote token of the pair.
-    quote : TokenId;
+    quote : Token;
     /// Minimum price increment. Must be greater than zero.
     tick_size : nat64;
     /// Minimum order quantity. Must be greater than zero.
@@ -140,6 +158,8 @@ type AddTradingPairError = variant {
     InvalidLotSize;
     /// A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists;
+    /// The submitted token metadata does not match the previously registered metadata.
+    InconsistentTokenMetadata : record { token : TokenId; expected : TokenMetadata; submitted : TokenMetadata };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
