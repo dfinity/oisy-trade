@@ -144,7 +144,7 @@ impl State {
         let order_id = book
             .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
-        self.order_history.insert(
+        self.order_history.insert_once(
             order_id,
             OrderRecord {
                 owner: user,

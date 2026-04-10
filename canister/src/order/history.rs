@@ -29,7 +29,7 @@ impl OrderHistory {
     }
 
     /// Insert a new order record. Panics if the order ID already exists.
-    pub fn insert(&mut self, id: OrderId, record: OrderRecord) {
+    pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
         assert_eq!(
             self.orders.insert(id, record),
             None,
