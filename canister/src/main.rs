@@ -94,11 +94,11 @@ fn get_events(
         }
     }
 
+    let start = usize::try_from(args.start).expect("BUG: start index exceeds usize::MAX");
+    let length = usize::try_from(args.length.min(MAX_EVENTS_PER_RESPONSE))
+        .expect("BUG: length exceeds usize::MAX");
     let events = dex_canister::storage::with_event_iter(|it| {
-        it.skip(args.start as usize)
-            .take(args.length.min(MAX_EVENTS_PER_RESPONSE) as usize)
-            .map(map_event)
-            .collect()
+        it.skip(start).take(length).map(map_event).collect()
     });
     event::GetEventsResult {
         events,
