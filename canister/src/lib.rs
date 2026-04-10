@@ -7,6 +7,7 @@ use std::{num::NonZeroU64, time::Duration};
 pub use runtime::{IC_RUNTIME, Runtime};
 
 pub mod balance;
+pub mod cbor;
 pub mod guard;
 pub mod lifecycle;
 pub mod order;

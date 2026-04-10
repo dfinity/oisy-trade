@@ -220,8 +220,8 @@ impl Price {
 }
 
 /// Minimum price increment for a trading pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TickSize(NonZeroU64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
+pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
 
 impl TickSize {
     pub const fn new(value: NonZeroU64) -> Self {
@@ -240,8 +240,8 @@ impl From<TickSize> for u64 {
 }
 
 /// Minimum order quantity for a trading pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LotSize(NonZeroU64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
+pub struct LotSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
 
 impl LotSize {
     pub const fn new(value: NonZeroU64) -> Self {
