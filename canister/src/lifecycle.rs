@@ -22,6 +22,7 @@ pub fn post_upgrade(arg: Option<DexArg>) {
 
     let state = storage::with_event_iter(|events| audit::replay_events(events));
     state::init_state(state);
+    let replayed_events = storage::total_event_count();
 
     match arg {
         Some(DexArg::Init(_)) => {
@@ -36,8 +37,8 @@ pub fn post_upgrade(arg: Option<DexArg>) {
     let instructions_used = ic_cdk::api::instruction_counter() - start;
     canlog::log!(
         Priority::Info,
-        "[post_upgrade]: replaying {} events consumed {} instructions",
-        storage::total_event_count(),
+        "[post_upgrade]: replayed {} events, total instructions used: {}",
+        replayed_events,
         instructions_used,
     );
     setup_timers();
