@@ -6,9 +6,10 @@ use dex_types::{
 
 pub(crate) struct WithdrawOutcome {
     pub result: Result<WithdrawResponse, WithdrawError>,
-    /// The ledger fee learned during this attempt, if any.
-    /// The caller should persist this so that future withdrawals skip the
-    /// BadFee round-trip. `None` when the ledger was unreachable.
+    /// Set when a `BadFee` response revealed a fee that differs from the
+    /// cached value. The caller should persist this so that future withdrawals
+    /// skip the BadFee round-trip. `None` when the cached fee was already
+    /// correct or the ledger was unreachable.
     pub ledger_fee: Option<candid::Nat>,
 }
 
@@ -91,7 +92,7 @@ pub async fn withdraw(
     match icrc1_transfer(token, to, transfer_amount, cached_fee.clone(), runtime).await {
         Ok(response) => WithdrawOutcome {
             result: Ok(response),
-            ledger_fee: Some(cached_fee),
+            ledger_fee: None,
         },
         Err(TransferError::BadFee { expected_fee }) => {
             if amount <= expected_fee {
