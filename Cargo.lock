@@ -599,6 +599,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "canlog",
+ "dex_types",
  "icrc-cbor",
  "minicbor",
  "serde",

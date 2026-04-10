@@ -187,8 +187,8 @@ type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
 /// Event payload for adding a trading pair.
 type AddTradingPairEvent = record {
-    base : principal;
-    quote : principal;
+    base : TokenId;
+    quote : TokenId;
     tick_size : nat64;
     lot_size : nat64;
     base_metadata : TokenMetadata;

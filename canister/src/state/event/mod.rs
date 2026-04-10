@@ -1,5 +1,4 @@
-use crate::order::{LotSize, TickSize, TokenMetadata};
-use candid::Principal;
+use crate::order::{LotSize, TickSize, TokenId, TokenMetadata};
 use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -29,10 +28,10 @@ pub enum EventType {
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddTradingPairEvent {
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub base: Principal,
-    #[cbor(n(1), with = "icrc_cbor::principal")]
-    pub quote: Principal,
+    #[n(0)]
+    pub base: TokenId,
+    #[n(1)]
+    pub quote: TokenId,
     #[n(2)]
     pub tick_size: TickSize,
     #[n(3)]

@@ -92,18 +92,12 @@ fn get_events(
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
                 EventType::AddTradingPair(e) => {
                     event::EventType::AddTradingPair(event::AddTradingPairEvent {
-                        base: e.base,
-                        quote: e.quote,
+                        base: dex_types::TokenId::from(e.base),
+                        quote: dex_types::TokenId::from(e.quote),
                         tick_size: e.tick_size.get(),
                         lot_size: e.lot_size.get(),
-                        base_metadata: event::TokenMetadata {
-                            symbol: e.base_metadata.symbol,
-                            decimals: e.base_metadata.decimals,
-                        },
-                        quote_metadata: event::TokenMetadata {
-                            symbol: e.quote_metadata.symbol,
-                            decimals: e.quote_metadata.decimals,
-                        },
+                        base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
+                        quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
                     })
                 }
             },

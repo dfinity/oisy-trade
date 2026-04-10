@@ -115,8 +115,10 @@ impl From<OrderId> for String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TokenId(Principal);
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
+pub struct TokenId(#[cbor(n(0), with = "icrc_cbor::principal")] Principal);
 
 impl TokenId {
     pub const fn new(principal: Principal) -> Self {

@@ -40,8 +40,8 @@ fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
         .prop_map(
             |(base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
                 AddTradingPairEvent {
-                    base,
-                    quote,
+                    base: crate::order::TokenId::new(base),
+                    quote: crate::order::TokenId::new(quote),
                     tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),
                     lot_size: LotSize::new(std::num::NonZeroU64::new(lot_size).unwrap()),
                     base_metadata,

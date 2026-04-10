@@ -1,5 +1,6 @@
 use crate::{InitArg, UpgradeArg};
-use candid::{CandidType, Principal};
+use candid::CandidType;
+use dex_types::{TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -17,18 +18,12 @@ pub enum EventType {
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct AddTradingPairEvent {
-    pub base: Principal,
-    pub quote: Principal,
+    pub base: TokenId,
+    pub quote: TokenId,
     pub tick_size: u64,
     pub lot_size: u64,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct TokenMetadata {
-    pub symbol: String,
-    pub decimals: u8,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]

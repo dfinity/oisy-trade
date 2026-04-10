@@ -24,8 +24,8 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         }
         EventType::AddTradingPair(event) => {
             let pair = order::TradingPair {
-                base: order::TokenId::new(event.base),
-                quote: order::TokenId::new(event.quote),
+                base: event.base,
+                quote: event.quote,
             };
             state
                 .add_trading_pair(
