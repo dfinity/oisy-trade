@@ -80,24 +80,16 @@ pub async fn deposit(
 /// Transfer tokens from the DEX canister to `to` via `icrc1_transfer`.
 ///
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
-/// `BadFee`, the correct fee is used for a single retry. The amount shall be larger
-/// than zero (checked by caller).
-pub async fn withdraw(
+/// `BadFee`, the correct fee is used for a single retry. The amount shall
+/// be larger than zero (checked by caller).
+pub(crate) async fn withdraw(
     token: &dex_types::TokenId,
     to: candid::Principal,
     amount: candid::Nat,
     cached_fee: candid::Nat,
     runtime: &impl Runtime,
 ) -> WithdrawOutcome {
-    debug_assert_ne!(amount, 0u64, "Amount cannot be zero");
-    if amount == 0u64 {
-        return WithdrawOutcome {
-            result: Err(WithdrawError::AmountTooSmall {
-                min_amount: candid::Nat::from(1u64),
-            }),
-            ledger_fee: None,
-        };
-    }
+    debug_assert_ne!(amount, 0u64, "withdrawal amount must be greater than zero");
     // When the cached fee exceeds the amount (e.g. the ledger fee was lowered
     // since the last withdrawal), cap it to amount - 1 so the subtraction
     // doesn't underflow. The ledger will reply with BadFee and the retry will
