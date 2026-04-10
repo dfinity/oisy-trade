@@ -100,6 +100,11 @@ fn get_events(
                         quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
                     })
                 }
+                EventType::Deposit(e) => event::EventType::Deposit(event::DepositEvent {
+                    user: e.user,
+                    token: dex_types::TokenId::from(e.token),
+                    amount: e.amount.into(),
+                }),
             },
         }
     }

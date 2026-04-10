@@ -105,7 +105,14 @@ pub async fn deposit(
     let caller = runtime.msg_caller();
 
     let deposit_response = ledger::deposit(request, runtime).await?;
-    state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
+    let event = state::event::DepositEvent {
+        user: caller,
+        token: order::TokenId::from(token_id),
+        amount,
+    };
+    state::with_state_mut(|s| {
+        state::audit::process_event(s, state::event::EventType::Deposit(event))
+    });
 
     Ok(deposit_response)
 }

@@ -275,8 +275,8 @@ impl From<Price> for u64 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Quantity(Nat);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode)]
+pub struct Quantity(#[cbor(n(0), with = "icrc_cbor::nat")] Nat);
 
 impl Default for Quantity {
     fn default() -> Self {

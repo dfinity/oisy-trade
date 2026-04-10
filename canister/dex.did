@@ -195,11 +195,19 @@ type AddTradingPairEvent = record {
     quote_metadata : TokenMetadata;
 };
 
+/// Event payload for a deposit.
+type DepositEvent = record {
+    user : principal;
+    token : TokenId;
+    amount : nat;
+};
+
 /// Type of a canister event.
 type EventType = variant {
     Init : InitArg;
     Upgrade : UpgradeArg;
     AddTradingPair : AddTradingPairEvent;
+    Deposit : DepositEvent;
 };
 
 /// A canister event with a timestamp.
