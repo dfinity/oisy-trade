@@ -611,6 +611,18 @@ async fn should_fail_add_trading_pair() {
 }
 
 #[tokio::test]
+async fn should_get_events() {
+    let setup = Setup::new().await;
+
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 1);
+        assert_matches!(events[0], dex_types_internal::event::EventType::Init(_));
+    });
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_get_logs() {
     let setup = Setup::new().await;
 

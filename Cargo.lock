@@ -553,6 +553,7 @@ dependencies = [
  "ic-http-types",
  "icrc-ledger-types",
  "pocket-ic",
+ "scopeguard",
  "serde",
  "serde_json",
  "tokio",
