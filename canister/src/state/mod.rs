@@ -166,13 +166,31 @@ impl State {
             .map(|(pair, &book_id)| (pair.clone(), book_id))
             .collect();
         for (pair, book_id) in pairs {
-            let fills = self
+            let book = self
                 .order_books
                 .get_mut(&book_id)
-                .expect("BUG: trading pair registered but order book missing")
-                .process_pending_orders();
-            for fill in &fills {
+                .expect("BUG: trading pair registered but order book missing");
+            let output = book.process_pending_orders();
+            let filled_seqs = book.take_filled_orders();
+
+            for fill in &output.fills {
                 self.settle_fill(book_id, &pair, fill);
+            }
+            for seq in output.resting_order_seqs {
+                let order_id = OrderId::new(book_id, seq);
+                *self
+                    .order_history
+                    .get_status_mut(&order_id)
+                    .expect("BUG: resting order not found in order_history") =
+                    OrderStatus::Open;
+            }
+            for seq in filled_seqs {
+                let order_id = OrderId::new(book_id, seq);
+                *self
+                    .order_history
+                    .get_status_mut(&order_id)
+                    .expect("BUG: filled order not found in order_history") =
+                    OrderStatus::Filled;
             }
         }
     }

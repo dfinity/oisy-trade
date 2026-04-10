@@ -189,14 +189,18 @@ impl OrderBook {
 
     /// Drain the pending queue and match each order against the book.
     ///
-    /// Returns every [`Fill`] produced, carrying full taker/maker context
-    /// so the caller can settle balances.
-    pub fn process_pending_orders(&mut self) -> Vec<Fill> {
+    /// Returns fills (for settlement) and the sequences of orders that
+    /// transitioned to resting (for status tracking).
+    pub fn process_pending_orders(&mut self) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
+        let mut resting_order_seqs = Vec::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
                 Ok(result) => {
+                    if let Some(seq) = result.resting_order_seq() {
+                        resting_order_seqs.push(seq);
+                    }
                     all_fills.extend(result.into_fills());
                 }
                 Err(err) => {
@@ -209,7 +213,10 @@ impl OrderBook {
                 }
             }
         }
-        all_fills
+        MatchingOutput {
+            fills: all_fills,
+            resting_order_seqs,
+        }
     }
 
     /// Returns the status of an order in this book, or `None` if not found.
@@ -284,6 +291,13 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
+/// Output of a matching round: fills produced and orders that began resting.
+#[derive(Debug)]
+pub struct MatchingOutput {
+    pub fills: Vec<Fill>,
+    pub resting_order_seqs: Vec<OrderSeq>,
+}
+
 /// The result of matching an incoming order against the book.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MatchResult {
@@ -303,6 +317,16 @@ impl MatchResult {
         match self {
             MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
             MatchResult::Resting { .. } => &[],
+        }
+    }
+
+    pub fn resting_order_seq(&self) -> Option<OrderSeq> {
+        match self {
+            MatchResult::PartiallyFilled {
+                resting_order_seq, ..
+            }
+            | MatchResult::Resting { resting_order_seq } => Some(*resting_order_seq),
+            MatchResult::Filled { .. } => None,
         }
     }
 

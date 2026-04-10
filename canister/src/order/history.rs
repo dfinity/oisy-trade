@@ -41,8 +41,8 @@ impl OrderHistory {
         self.orders.get(id)
     }
 
-    pub fn get_mut(&mut self, id: &OrderId) -> Option<&mut OrderRecord> {
-        self.orders.get_mut(id)
+    pub fn get_status_mut(&mut self, id: &OrderId) -> Option<&mut OrderStatus> {
+        self.orders.get_mut(id).map(|r| &mut r.status)
     }
 
     /// Returns the status of the given order, or [`OrderStatus::NotFound`] if absent.
