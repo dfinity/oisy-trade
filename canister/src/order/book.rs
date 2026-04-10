@@ -231,6 +231,22 @@ impl OrderBook {
             Side::Sell => self.asks.entry(price).or_default().push_back(resting),
         }
     }
+
+    pub fn pending_orders_len(&self) -> usize {
+        self.pending_orders.len()
+    }
+
+    pub fn bids_len(&self) -> usize {
+        self.bids.len()
+    }
+
+    pub fn asks_len(&self) -> usize {
+        self.asks.len()
+    }
+
+    pub fn resting_orders_len(&self) -> usize {
+        self.resting_orders.len()
+    }
 }
 
 fn fill_against_queue<K: Ord>(

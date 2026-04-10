@@ -1,0 +1,7 @@
+build_cmd:
+  cargo build --target wasm32-unknown-unknown --release --features canbench-rs -p dex_canister
+wasm_path:
+  ../target/wasm32-unknown-unknown/release/dex_canister.wasm
+init_args:
+  # DexArg::Init(InitArg { mode: GeneralAvailability })
+  hex: 4449444c076b02fcb88b840301b0ced18403066e026c01e3a683c304036e046b0296bab03c058390999e057f6d686c01e3a683c3040401000101
