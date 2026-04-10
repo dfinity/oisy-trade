@@ -214,7 +214,7 @@ impl OrderBook {
         }
         MatchingOutput {
             fills: all_fills,
-            resting_order_seqs,
+            resting_orders: resting_order_seqs,
         }
     }
 
@@ -283,7 +283,7 @@ fn fill_against_queue<K: Ord>(
 #[derive(Debug)]
 pub struct MatchingOutput {
     pub fills: Vec<Fill>,
-    pub resting_order_seqs: Vec<OrderSeq>,
+    pub resting_orders: Vec<OrderSeq>,
 }
 
 /// The result of matching an incoming order against the book.

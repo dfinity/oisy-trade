@@ -176,7 +176,7 @@ impl State {
             for fill in &output.fills {
                 self.settle_fill(book_id, &pair, fill);
             }
-            for seq in output.resting_order_seqs {
+            for seq in output.resting_orders {
                 let order_id = OrderId::new(book_id, seq);
                 *self
                     .order_history
