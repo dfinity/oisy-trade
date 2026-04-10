@@ -16,7 +16,7 @@ pub mod state;
 #[cfg(feature = "canbench-rs")]
 mod benchmarks;
 mod ledger;
-#[cfg(any(test, feature = "canbench-rs"))]
+#[cfg(test)]
 pub mod test_fixtures;
 #[cfg(test)]
 mod tests;
