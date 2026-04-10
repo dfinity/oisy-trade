@@ -37,6 +37,14 @@ pub struct AddTradingPairEvent {
     pub tick_size: TickSize,
     #[n(3)]
     pub lot_size: LotSize,
+    #[n(4)]
+    pub base_symbol: String,
+    #[n(5)]
+    pub base_decimals: u8,
+    #[n(6)]
+    pub quote_symbol: String,
+    #[n(7)]
+    pub quote_decimals: u8,
 }
 
 impl Storable for Event {

@@ -140,6 +140,10 @@ pub fn add_trading_pair(
         quote: request.quote.id.ledger_id,
         tick_size,
         lot_size,
+        base_symbol: request.base.metadata.symbol,
+        base_decimals: request.base.metadata.decimals,
+        quote_symbol: request.quote.metadata.symbol,
+        quote_decimals: request.quote.metadata.decimals,
     };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {

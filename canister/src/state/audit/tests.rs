@@ -27,6 +27,10 @@ fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             quote,
             tick_size: TickSize::new(NonZeroU64::new(10).unwrap()),
             lot_size: LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
+            base_symbol: "BASE".to_string(),
+            base_decimals: 8,
+            quote_symbol: "QUOTE".to_string(),
+            quote_decimals: 8,
         }),
     }
 }
@@ -77,7 +81,7 @@ fn should_replay_add_trading_pair() {
         init_event(Mode::GeneralAvailability),
         add_trading_pair_event(base, quote),
     ]);
-    assert_eq!(state.get_trading_pairs().len(), 1);
+    assert_eq!(state.trading_pairs().len(), 1);
 }
 
 #[test]

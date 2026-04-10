@@ -191,6 +191,10 @@ type AddTradingPairEvent = record {
     quote : principal;
     tick_size : nat64;
     lot_size : nat64;
+    base_symbol : text;
+    base_decimals : nat8;
+    quote_symbol : text;
+    quote_decimals : nat8;
 };
 
 /// Type of a canister event.

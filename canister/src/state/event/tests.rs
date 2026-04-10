@@ -24,14 +24,39 @@ fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
 }
 
 fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
-    (arb_principal(), arb_principal(), 1..u64::MAX, 1..u64::MAX).prop_map(
-        |(base, quote, tick_size, lot_size)| AddTradingPairEvent {
-            base,
-            quote,
-            tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),
-            lot_size: LotSize::new(std::num::NonZeroU64::new(lot_size).unwrap()),
-        },
+    (
+        arb_principal(),
+        arb_principal(),
+        1..u64::MAX,
+        1..u64::MAX,
+        "[a-zA-Z]{1,10}",
+        any::<u8>(),
+        "[a-zA-Z]{1,10}",
+        any::<u8>(),
     )
+        .prop_map(
+            |(
+                base,
+                quote,
+                tick_size,
+                lot_size,
+                base_symbol,
+                base_decimals,
+                quote_symbol,
+                quote_decimals,
+            )| {
+                AddTradingPairEvent {
+                    base,
+                    quote,
+                    tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),
+                    lot_size: LotSize::new(std::num::NonZeroU64::new(lot_size).unwrap()),
+                    base_symbol,
+                    base_decimals,
+                    quote_symbol,
+                    quote_decimals,
+                }
+            },
+        )
 }
 
 fn arb_event_type() -> impl Strategy<Value = EventType> {

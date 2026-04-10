@@ -27,8 +27,22 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 base: order::TokenId::new(event.base),
                 quote: order::TokenId::new(event.quote),
             };
+            let base_metadata = order::TokenMetadata {
+                symbol: event.base_symbol.clone(),
+                decimals: event.base_decimals,
+            };
+            let quote_metadata = order::TokenMetadata {
+                symbol: event.quote_symbol.clone(),
+                decimals: event.quote_decimals,
+            };
             state
-                .add_trading_pair(pair, event.tick_size, event.lot_size)
+                .add_trading_pair(
+                    pair,
+                    base_metadata,
+                    quote_metadata,
+                    event.tick_size,
+                    event.lot_size,
+                )
                 .expect("BUG: replaying AddTradingPair event should succeed");
         }
     }
