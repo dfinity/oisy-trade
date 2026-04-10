@@ -89,10 +89,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: 'Checkout baseline branch'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: main
           path: _canbench_baseline_branch
@@ -103,12 +103,12 @@ jobs:
       - name: 'Benchmark'
         run: bash ./scripts/ci_run_benchmark.sh canister ${{ github.job }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: canbench_result_${{ github.job }}
           path: /tmp/canbench_result_${{ github.job }}.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: canbench_results_${{ github.job }}_csv
           path: /tmp/canbench_results_${{ github.job }}.csv
@@ -125,7 +125,7 @@ jobs:
           mkdir -p ./pr_number
           echo ${{ github.event.pull_request.number }} > ./pr_number/pr_number
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pr_number
           path: pr_number/
