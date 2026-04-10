@@ -1,6 +1,6 @@
 use crate::state::audit;
 use crate::state::event::EventType;
-use crate::{MATCHING_INTERVAL, state, storage};
+use crate::{MATCHING_INTERVAL, Runtime, state, storage};
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 
@@ -17,8 +17,8 @@ pub fn init(arg: DexArg) {
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
 
-pub fn post_upgrade(arg: Option<DexArg>) {
-    let start = ic_cdk::api::instruction_counter();
+pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
+    let start = runtime.instruction_counter();
 
     let state = storage::with_event_iter(|events| audit::replay_events(events));
     state::init_state(state);
@@ -34,7 +34,7 @@ pub fn post_upgrade(arg: Option<DexArg>) {
         Some(DexArg::Upgrade(None)) | None => {}
     }
 
-    let instructions_used = ic_cdk::api::instruction_counter() - start;
+    let instructions_used = runtime.instruction_counter() - start;
     canlog::log!(
         Priority::Info,
         "[post_upgrade]: replayed {} events, total instructions used: {}",

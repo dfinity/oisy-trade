@@ -113,7 +113,7 @@ fn init(arg: DexArg) {
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade(arg: Option<DexArg>) {
-    dex_canister::lifecycle::post_upgrade(arg);
+    dex_canister::lifecycle::post_upgrade(arg, &dex_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::query(hidden = true)]

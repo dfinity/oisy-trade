@@ -171,6 +171,7 @@ pub mod mocks {
             fn msg_caller(&self) -> Principal;
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
+            fn instruction_counter(&self) -> u64;
         }
     }
 }
