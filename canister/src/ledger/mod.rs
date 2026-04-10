@@ -1,5 +1,8 @@
 use crate::Runtime;
-use dex_types::{DepositError, DepositRequest, DepositResponse, LedgerTransferFromError};
+use dex_types::{
+    DepositError, DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
+    WithdrawError, WithdrawResponse,
+};
 
 pub async fn deposit(
     request: DepositRequest,
@@ -56,6 +59,96 @@ pub async fn deposit(
     let block_index = result.map_err(to_ledger_error)?;
 
     Ok(DepositResponse { block_index })
+}
+
+pub async fn query_icrc1_fee(
+    token: &dex_types::TokenId,
+    runtime: &impl Runtime,
+) -> Result<candid::Nat, WithdrawError> {
+    let response = runtime
+        .call_unbounded_wait(token.ledger_id, "icrc1_fee", ())
+        .await
+        .map_err(|e| WithdrawError::CallFailed {
+            ledger: token.ledger_id,
+            method: "icrc1_fee".to_string(),
+            reason: format!("{e}"),
+        })?;
+
+    let (fee,): (candid::Nat,) =
+        response
+            .candid_tuple()
+            .map_err(|e| WithdrawError::CallFailed {
+                ledger: token.ledger_id,
+                method: "icrc1_fee".to_string(),
+                reason: e.to_string(),
+            })?;
+
+    Ok(fee)
+}
+
+pub async fn withdraw(
+    token: &dex_types::TokenId,
+    to: candid::Principal,
+    transfer_amount: candid::Nat,
+    fee: candid::Nat,
+    runtime: &impl Runtime,
+) -> Result<WithdrawResponse, WithdrawError> {
+    use icrc_ledger_types::icrc1::account::Account;
+    use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+
+    let transfer_args = TransferArg {
+        from_subaccount: None,
+        to: Account {
+            owner: to,
+            subaccount: None,
+        },
+        amount: transfer_amount,
+        fee: Some(fee),
+        memo: None,
+        created_at_time: None,
+    };
+
+    let response = runtime
+        .call_unbounded_wait(token.ledger_id, "icrc1_transfer", (transfer_args,))
+        .await
+        .map_err(|e| WithdrawError::CallFailed {
+            ledger: token.ledger_id,
+            method: "icrc1_transfer".to_string(),
+            reason: format!("{e}"),
+        })?;
+
+    let (result,): (Result<candid::Nat, TransferError>,) =
+        response
+            .candid_tuple()
+            .map_err(|e| WithdrawError::CallFailed {
+                ledger: token.ledger_id,
+                method: "icrc1_transfer".to_string(),
+                reason: e.to_string(),
+            })?;
+
+    let block_index = result.map_err(to_ledger_transfer_error)?;
+
+    Ok(WithdrawResponse { block_index })
+}
+
+fn to_ledger_transfer_error(e: icrc_ledger_types::icrc1::transfer::TransferError) -> WithdrawError {
+    use icrc_ledger_types::icrc1::transfer::TransferError;
+    match e {
+        TransferError::InsufficientFunds { balance } => {
+            WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { balance })
+        }
+        TransferError::TemporarilyUnavailable => {
+            WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
+        }
+        TransferError::BadFee { .. }
+        | TransferError::BadBurn { .. }
+        | TransferError::CreatedInFuture { .. }
+        | TransferError::Duplicate { .. }
+        | TransferError::GenericError { .. }
+        | TransferError::TooOld => {
+            WithdrawError::LedgerError(LedgerTransferError::InternalError(format!("{e}")))
+        }
+    }
 }
 
 fn to_ledger_error(e: icrc_ledger_types::icrc2::transfer_from::TransferFromError) -> DepositError {

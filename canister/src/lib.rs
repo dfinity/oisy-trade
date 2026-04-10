@@ -1,7 +1,8 @@
 use crate::order::TokenId;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -77,6 +78,51 @@ pub async fn deposit(
     state::with_state_mut(|s| s.deposit(caller, order::TokenId::from(token_id), amount));
 
     Ok(deposit_response)
+}
+
+pub async fn withdraw(
+    request: WithdrawRequest,
+    runtime: &impl Runtime,
+) -> Result<WithdrawResponse, WithdrawError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let caller = runtime.msg_caller();
+    let token_id = request.token_id.clone();
+    let amount = order::Quantity::from(request.amount.clone());
+
+    // Query the ledger fee before debiting, so we can validate and avoid
+    // an unnecessary debit+credit cycle for a predictably failing transfer.
+    let fee = ledger::query_icrc1_fee(&token_id, runtime).await?;
+    if request.amount <= fee {
+        return Err(WithdrawError::AmountTooSmall {
+            min_amount: fee + 1u64,
+        });
+    }
+    let transfer_amount = request.amount - fee.clone();
+
+    // Debit the full amount from the user's free balance.
+    state::with_state_mut(|s| {
+        s.withdraw(
+            caller,
+            order::TokenId::from(token_id.clone()),
+            amount.clone(),
+        )
+    })
+    .map_err(|e| WithdrawError::InsufficientBalance {
+        available: e.available.into(),
+    })?;
+
+    // Transfer (amount - fee) to the user on the ledger.
+    // The ledger charges `transfer_amount + fee = amount` from the DEX canister.
+    match ledger::withdraw(&token_id, caller, transfer_amount, fee, runtime).await {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            // Credit back on failure so the user doesn't lose funds.
+            state::with_state_mut(|s| {
+                s.deposit(caller, order::TokenId::from(token_id), amount);
+            });
+            Err(e)
+        }
+    }
 }
 
 pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {

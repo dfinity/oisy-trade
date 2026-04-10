@@ -1,8 +1,9 @@
 use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo,
+    DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
+    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -58,6 +59,35 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
                 ..
             }) => {
+                // do not log errors due to user actions
+            }
+        },
+    }
+    result
+}
+
+#[ic_cdk::update]
+async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
+    let withdraw_dbg = format!("{request:?}");
+    let result = dex_canister::withdraw(request, &dex_canister::IC_RUNTIME).await;
+    match &result {
+        Ok(response) => canlog::log!(
+            Priority::Info,
+            "[withdraw]: successful withdrawal for request {withdraw_dbg}, block_index={}",
+            response.block_index
+        ),
+        Err(err) => match err {
+            WithdrawError::CallFailed { .. }
+            | WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
+            | WithdrawError::LedgerError(LedgerTransferError::InternalError(_))
+            | WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { .. }) => {
+                canlog::log!(
+                    Priority::Debug,
+                    "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
+                    err
+                )
+            }
+            WithdrawError::InsufficientBalance { .. } | WithdrawError::AmountTooSmall { .. } => {
                 // do not log errors due to user actions
             }
         },

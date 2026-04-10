@@ -264,6 +264,25 @@ impl State {
             .collect()
     }
 
+    pub fn withdraw(
+        &mut self,
+        user: Principal,
+        token_id: TokenId,
+        amount: Quantity,
+    ) -> Result<(), crate::balance::InsufficientBalanceError> {
+        match self
+            .balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token_id))
+        {
+            Some(balance) => balance.withdraw(amount),
+            None => Err(crate::balance::InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: amount,
+            }),
+        }
+    }
+
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
         self.balances
             .entry(user)

@@ -183,6 +183,64 @@ pub struct AddTradingPairRequest {
     pub lot_size: u64,
 }
 
+/// Request to withdraw tokens from the DEX.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct WithdrawRequest {
+    /// The token to withdraw.
+    pub token_id: TokenId,
+    /// The amount to withdraw from the caller's free balance.
+    /// The ledger transfer fee is deducted from this amount,
+    /// so the caller receives `amount - fee` on the ledger.
+    pub amount: Nat,
+}
+
+/// Response after a successful withdrawal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct WithdrawResponse {
+    /// The block index of the transfer on the token ledger.
+    pub block_index: Nat,
+}
+
+/// Error returned by the withdraw endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum WithdrawError {
+    /// The caller does not have enough free balance.
+    InsufficientBalance {
+        /// The caller's available free balance.
+        available: Nat,
+    },
+    /// The requested amount is too small to cover the ledger transfer fee.
+    AmountTooSmall {
+        /// The minimum withdrawal amount (ledger fee + 1).
+        min_amount: Nat,
+    },
+    /// The inter-canister call to the token ledger failed.
+    CallFailed {
+        /// The ledger canister that was called.
+        ledger: Principal,
+        /// The name of the method that was called.
+        method: String,
+        /// The reason the call failed.
+        reason: String,
+    },
+    /// The icrc1_transfer call to the token ledger returned an error.
+    LedgerError(LedgerTransferError),
+}
+
+/// Errors that can be returned by the ICRC-1 `transfer` endpoint on a ledger canister.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum LedgerTransferError {
+    /// The source account does not hold enough funds.
+    InsufficientFunds {
+        /// The current balance of the source account.
+        balance: Nat,
+    },
+    /// The ledger is temporarily unavailable.
+    TemporarilyUnavailable,
+    /// Internal error.
+    InternalError(String),
+}
+
 /// Error returned by the `add_trading_pair` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum AddTradingPairError {

@@ -71,6 +71,17 @@ impl Balance {
         self.free += amount;
     }
 
+    pub fn withdraw(&mut self, amount: Quantity) -> Result<(), InsufficientBalanceError> {
+        self.free = self
+            .free
+            .checked_sub(&amount)
+            .ok_or_else(|| InsufficientBalanceError {
+                available: self.free.clone(),
+                required: amount,
+            })?;
+        Ok(())
+    }
+
     pub fn reserve(&mut self, required: Quantity) -> Result<(), InsufficientBalanceError> {
         self.free = self
             .free
