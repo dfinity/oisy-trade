@@ -2,7 +2,6 @@ use super::{
     LotSize, Order, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, RestingOrder,
     Side, TickSize,
 };
-use dex_types::OrderStatus;
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -217,17 +216,6 @@ impl OrderBook {
             fills: all_fills,
             resting_order_seqs,
         }
-    }
-
-    /// Returns the status of an order in this book, or `None` if not found.
-    pub fn get_order_status(&self, seq: OrderSeq) -> Option<OrderStatus> {
-        if self.pending_orders.iter().any(|o| o.id() == seq) {
-            return Some(OrderStatus::Pending);
-        }
-        if self.resting_orders.contains_key(&seq) {
-            return Some(OrderStatus::Open);
-        }
-        None
     }
 
     /// Drain and return the set of order sequences that were fully filled
