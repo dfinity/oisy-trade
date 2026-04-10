@@ -737,8 +737,8 @@ async fn should_withdraw_twice_and_cache_fee() {
         expected_balance(deposit_amount - first_amount - second_amount),
     );
 
-    // Third attempt with amount <= fee: hits the early cached-fee check in lib.rs
-    // (no balance debit, no ledger call).
+    // Third attempt with amount <= fee: the amount is too small to cover the
+    // ledger transfer fee, so the withdrawal is rejected.
     let result = client
         .withdraw(WithdrawRequest {
             token_id: cksol,

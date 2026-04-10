@@ -116,18 +116,18 @@ pub async fn withdraw(
     runtime: &impl Runtime,
 ) -> Result<WithdrawResponse, WithdrawError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    if request.amount == 0u64 {
+        return Err(WithdrawError::AmountTooSmall {
+            min_amount: candid::Nat::from(1u64),
+        });
+    }
+
     let caller = runtime.msg_caller();
     let token_id = request.token_id.clone();
     let amount = order::Quantity::from(request.amount.clone());
     let internal_token = order::TokenId::from(token_id.clone());
 
-    // Early rejection when the cached fee already rules out this amount.
     let cached_fee = state::with_state(|s| s.get_cached_fee(&internal_token));
-    if request.amount <= cached_fee {
-        return Err(WithdrawError::AmountTooSmall {
-            min_amount: cached_fee + 1u64,
-        });
-    }
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {

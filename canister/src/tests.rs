@@ -413,6 +413,118 @@ mod withdraw {
         );
         assert_balance(deposit);
     }
+
+    #[tokio::test]
+    async fn should_succeed_when_cached_fee_is_stale_high() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        // Simulate a previously cached fee that is higher than the current ledger fee.
+        let stale_fee = 500_000u64;
+        let real_fee = 100u64;
+        state::with_state_mut(|s| {
+            s.set_cached_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+        });
+
+        // Withdraw an amount between the real fee and the stale cached fee.
+        let withdraw_amount = 200_000u64;
+        // First call: cached fee (500_000) > amount (200_000), so the fee is
+        // capped to amount - 1. The ledger rejects with BadFee(real_fee).
+        // Retry: amount (200_000) > real_fee (100), so transfer succeeds.
+        let block_index = Nat::from(42u64);
+        let runtime = mock_runtime_returning(vec![
+            transfer_response(Err(TransferError::BadFee {
+                expected_fee: Nat::from(real_fee),
+            })),
+            transfer_response(Ok(block_index.clone())),
+        ]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(withdraw_amount),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Ok(dex_types::WithdrawResponse {
+                block_index: block_index.clone()
+            })
+        );
+        assert_balance(deposit - withdraw_amount);
+        assert_cached_fee(real_fee);
+    }
+
+    #[tokio::test]
+    async fn should_reject_zero_amount() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No call_unbounded_wait expectations — the ledger should never be called.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(0u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::AmountTooSmall {
+                min_amount: Nat::from(1u64),
+            })
+        );
+        // Balance untouched — no debit happened.
+        assert_balance(deposit);
+    }
+
+    #[tokio::test]
+    async fn should_reject_when_amount_below_real_fee_and_cached_fee_is_stale_high() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let stale_fee = 10_000u64;
+        let real_fee = 100u64;
+        state::with_state_mut(|s| {
+            s.set_cached_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+        });
+
+        // Withdraw an amount below the real fee.
+        let withdraw_amount = 50u64;
+        // First call: capped_fee = min(10_000, 49) = 49, transfer_amount = 1.
+        // Ledger returns BadFee(100). amount(50) <= expected_fee(100) → AmountTooSmall.
+        let runtime = mock_runtime_returning(vec![transfer_response(Err(TransferError::BadFee {
+            expected_fee: Nat::from(real_fee),
+        }))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(withdraw_amount),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::AmountTooSmall {
+                min_amount: Nat::from(real_fee + 1),
+            })
+        );
+        // Balance credited back.
+        assert_balance(deposit);
+        // Fee cache updated to the real fee from the BadFee response.
+        assert_cached_fee(real_fee);
+    }
 }
 
 mod get_trading_pairs {
