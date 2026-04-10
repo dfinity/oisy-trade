@@ -5,8 +5,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Quantity, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord,
+    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use candid::Principal;
 use dex_types::{OrderStatus, TradingPairInfo};
@@ -44,8 +44,7 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
-    // TODO DEFI-2752: Keep track of filled orders.
-    order_owners: BTreeMap<OrderId, Principal>,
+    order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -60,7 +59,7 @@ impl TryFrom<InitArg> for State {
             trading_pairs: BTreeMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
-            order_owners: BTreeMap::default(),
+            order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
         })
     }
@@ -139,10 +138,23 @@ impl State {
             }
         }
 
+        let side = pending.side;
+        let price = pending.price;
+        let quantity = pending.quantity.clone();
         let order_id = book
             .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
-        assert_eq!(self.order_owners.insert(order_id, user), None);
+        self.order_history.insert(
+            order_id,
+            OrderRecord {
+                owner: user,
+                pair,
+                side,
+                price,
+                quantity,
+                status: dex_types::OrderStatus::Pending,
+            },
+        );
         Ok(order_id)
     }
 
@@ -166,14 +178,16 @@ impl State {
     }
 
     fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
-        let taker = *self
-            .order_owners
+        let taker = self
+            .order_history
             .get(&OrderId::new(book_id, fill.taker_order_seq))
-            .expect("BUG: taker not found in order_owners");
-        let maker = *self
-            .order_owners
+            .expect("BUG: taker not found in order_history")
+            .owner;
+        let maker = self
+            .order_history
             .get(&OrderId::new(book_id, fill.maker_order_seq))
-            .expect("BUG: maker not found in order_owners");
+            .expect("BUG: maker not found in order_history")
+            .owner;
 
         let (buyer, seller) = match fill.taker_side {
             Side::Buy => (taker, maker),
@@ -220,13 +234,7 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        let book = self.order_books.get(&order_id.book_id());
-        match book {
-            Some(book) => book
-                .get_order_status(order_id.seq())
-                .unwrap_or(OrderStatus::NotFound),
-            None => OrderStatus::NotFound,
-        }
+        self.order_history.get_status(&order_id)
     }
 
     /// Register a new trading pair with a new order book.
