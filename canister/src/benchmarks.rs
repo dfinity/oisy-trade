@@ -1,4 +1,6 @@
-use crate::order::{LotSize, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TradingPair};
+use crate::order::{
+    LotSize, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+};
 use crate::state::State;
 use canbench_rs::bench;
 use candid::{Nat, Principal};
@@ -32,7 +34,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
             PendingOrder {
                 side: Side::Sell,
                 price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-                quantity: Quantity::new(100_000_000_000_000), // 1,000,000 ICP
+                quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
             },
         )
         .expect("valid sell order");
@@ -77,7 +79,7 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
                 PendingOrder {
                     side: if trade.m { Side::Sell } else { Side::Buy },
                     price: Price::new(crate::benchmarks::parse_decimal_8(&trade.p)),
-                    quantity: Quantity::new(crate::benchmarks::parse_decimal_8(&trade.q)),
+                    quantity: Quantity::from(crate::benchmarks::parse_decimal_8(&trade.q)),
                 },
             )
             .expect("valid trade order");
@@ -115,7 +117,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
                 PendingOrder {
                     side: Side::Buy,
                     price: Price::new(200_000_000), // 2.000 USDT
-                    quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
+                    quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
                 },
             )
             .expect("valid buy order");
@@ -130,7 +132,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
                 PendingOrder {
                     side: Side::Sell,
                     price: Price::new(300_000_000), // 3.000 USDT
-                    quantity: Quantity::new((i + 1) * LOT_SIZE.get()),
+                    quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
                 },
             )
             .expect("valid sell order");
@@ -215,7 +217,19 @@ fn new_state() -> State {
     })
     .unwrap();
     state
-        .add_trading_pair(trading_pair(), TICK_SIZE, LOT_SIZE)
+        .add_trading_pair(
+            trading_pair(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            TokenMetadata {
+                symbol: "USDT".to_string(),
+                decimals: 8,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+        )
         .unwrap();
     state
 }
@@ -242,7 +256,7 @@ fn populate_state(state: &mut State, depth: &DepthSnapshot) {
                 PendingOrder {
                     side: Side::Buy,
                     price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                    quantity: Quantity::from(parse_decimal_8(qty_str)),
                 },
             )
             .expect("valid bid order");
@@ -257,7 +271,7 @@ fn populate_state(state: &mut State, depth: &DepthSnapshot) {
                 PendingOrder {
                     side: Side::Sell,
                     price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::new(parse_decimal_8(qty_str)),
+                    quantity: Quantity::from(parse_decimal_8(qty_str)),
                 },
             )
             .expect("valid ask order");
@@ -284,6 +298,6 @@ fn user(id: u64) -> Principal {
 /// Fund a user with a large balance for both tokens of the trading pair.
 fn fund_user(state: &mut State, principal: Principal) {
     let pair = trading_pair();
-    state.deposit(principal, pair.base, Nat::from(u128::MAX));
-    state.deposit(principal, pair.quote, Nat::from(u128::MAX));
+    state.deposit(principal, pair.base, Quantity::from(Nat::from(u128::MAX)));
+    state.deposit(principal, pair.quote, Quantity::from(Nat::from(u128::MAX)));
 }
