@@ -1,8 +1,11 @@
 use dex_types_internal::{InitArg, UpgradeArg};
-use ic_stable_structures::storable::Bound;
 use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
 use minicbor::{Decode, Encode};
 use std::borrow::Cow;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct Event {

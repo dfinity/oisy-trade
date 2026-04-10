@@ -2,6 +2,9 @@ use super::State;
 use crate::state::event::{Event, EventType};
 use crate::storage;
 
+#[cfg(test)]
+mod tests;
+
 pub fn process_event(state: &mut State, payload: EventType) {
     apply_state_transition(state, &payload);
     storage::record_event(payload);
