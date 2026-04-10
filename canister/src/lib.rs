@@ -9,6 +9,7 @@ pub use runtime::{IC_RUNTIME, Runtime};
 
 pub mod balance;
 pub mod guard;
+pub mod lifecycle;
 pub mod order;
 pub mod runtime;
 pub mod state;

@@ -237,24 +237,21 @@ mod get_trading_pairs {
     use crate::order::{TokenId, TradingPair};
     use crate::state;
     use crate::state::init_state;
+    use crate::test_fixtures;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use candid::Principal;
     use dex_types::TradingPairInfo;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
+        init_state(test_fixtures::state());
         let pairs = get_trading_pairs();
         assert!(pairs.is_empty());
     }
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
+        init_state(test_fixtures::state());
         let base = TokenId::new(Principal::from_slice(&[0x01]));
         let quote = TokenId::new(Principal::from_slice(&[0x02]));
         state::with_state_mut(|s| {
