@@ -415,12 +415,20 @@ mod settle_fills {
         state
     }
 
-    fn place_buy_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_buy_order_for(state, BUYER, price, quantity);
+    fn place_buy_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_buy_order_for(state, BUYER, price, quantity)
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_sell_order_for(state, SELLER, price, quantity);
+    fn place_sell_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_sell_order_for(state, SELLER, price, quantity)
     }
 
     fn place_buy_order_for(
@@ -428,7 +436,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.quote, Price::new(price).mul_quantity(&quantity));
@@ -442,7 +450,7 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
     }
 
     fn place_sell_order_for(
@@ -450,7 +458,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.base, quantity.clone());
@@ -464,7 +472,76 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
+    }
+
+    mod order_status {
+        use super::*;
+        use dex_types::OrderStatus;
+
+        #[test]
+        fn should_return_pending_before_matching() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Pending);
+        }
+
+        #[test]
+        fn should_return_open_for_resting_order() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
+        fn should_return_filled_after_exact_match() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_open_for_partially_filled_maker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
+            let sell_id = place_sell_order(&mut state, 100, 3 * lot);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_filled_after_multi_fill_maker_depletion() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell rests with 2 lots; two successive buys deplete it
+            let sell_id = place_sell_order(&mut state, 100, 2 * lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+
+            let buy1_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy1_id), OrderStatus::Filled);
+
+            let buy2_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy2_id), OrderStatus::Filled);
+        }
     }
 
     fn balance(free: u64, reserved: u64) -> Balance {

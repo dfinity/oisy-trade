@@ -235,11 +235,11 @@ mod add_limit_order {
         // Both orders are fully filled
         assert_eq!(
             setup.dex_client().get_order_status(buy_order_id).await,
-            OrderStatus::NotFound
+            OrderStatus::Filled
         );
         assert_eq!(
             setup.dex_client().get_order_status(sell_order_id).await,
-            OrderStatus::NotFound
+            OrderStatus::Filled
         );
 
         // Buyer: received 1M base tokens, spent 100M quote tokens
