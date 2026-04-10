@@ -152,7 +152,7 @@ impl State {
                 side,
                 price,
                 quantity,
-                status: dex_types::OrderStatus::Pending,
+                status: OrderStatus::Pending,
             },
         );
         Ok(order_id)
