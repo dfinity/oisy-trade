@@ -51,7 +51,11 @@ pub enum Mode {
     /// Only the listed principals may call update endpoints.
     #[cfg_attr(feature = "event", n(1))]
     RestrictedTo(
-        #[cfg_attr(feature = "event", n(0), cbor(with = "crate::cbor::btreeset_principal"))]
+        #[cfg_attr(
+            feature = "event",
+            n(0),
+            cbor(with = "crate::cbor::btreeset_principal")
+        )]
         BTreeSet<Principal>,
     ),
 }
