@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 #[cfg(feature = "event")]
 pub mod cbor;
+pub mod event;
 #[cfg(feature = "log")]
 pub mod log;
 

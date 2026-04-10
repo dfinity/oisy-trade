@@ -74,6 +74,38 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
     dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
 }
 
+/// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
+#[ic_cdk::query]
+fn get_events(
+    args: dex_types_internal::event::GetEventsArgs,
+) -> dex_types_internal::event::GetEventsResult {
+    use dex_canister::state::event::{Event, EventType};
+    use dex_types_internal::event;
+
+    const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
+
+    fn map_event(event: Event) -> event::Event {
+        event::Event {
+            timestamp: event.timestamp,
+            payload: match event.payload {
+                EventType::Init(args) => event::EventType::Init(args),
+                EventType::Upgrade(args) => event::EventType::Upgrade(args),
+            },
+        }
+    }
+
+    let events = dex_canister::storage::with_event_iter(|it| {
+        it.skip(args.start as usize)
+            .take(args.length.min(MAX_EVENTS_PER_RESPONSE) as usize)
+            .map(map_event)
+            .collect()
+    });
+    event::GetEventsResult {
+        events,
+        total_event_count: dex_canister::storage::total_event_count(),
+    }
+}
+
 #[ic_cdk::init]
 fn init(arg: DexArg) {
     dex_canister::lifecycle::init(arg);
