@@ -153,13 +153,20 @@ impl State {
             .map(|(pair, &book_id)| (pair.clone(), book_id))
             .collect();
         for (pair, book_id) in pairs {
-            let fills = self
-                .order_books
-                .get_mut(&book_id)
-                .expect("BUG: trading pair registered but order book missing")
-                .process_pending_orders();
-            for fill in &fills {
-                self.settle_fill(book_id, &pair, fill);
+            let fills = {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("matching");
+                self.order_books
+                    .get_mut(&book_id)
+                    .expect("BUG: trading pair registered but order book missing")
+                    .process_pending_orders()
+            };
+            {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("settling");
+                for fill in &fills {
+                    self.settle_fill(book_id, &pair, fill);
+                }
             }
         }
     }
@@ -304,6 +311,12 @@ impl State {
     /// Set of currently active tasks to avoid parallel execution.
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
         &mut self.active_tasks
+    }
+
+    pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
+        self.trading_pairs
+            .get(trading_pair)
+            .and_then(|book_id| self.order_books.get(book_id))
     }
 }
 

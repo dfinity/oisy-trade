@@ -35,6 +35,14 @@ integration-tests: download-external-wasms _maybe-build
 _maybe-build:
     {{ if env("DEX_CANISTER_WASM_PATH", "") == "" { "just build" } else { "true" } }}
 
+# Run canbench benchmarks
+bench:
+    cd canister && canbench
+
+# Run canbench and persist results for regression checks
+bench-check:
+    cd canister && canbench --persist
+
 # Deploy to staging
 deploy identity='hsm':
     icp deploy dex --identity {{identity}} --environment staging

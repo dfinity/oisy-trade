@@ -142,6 +142,7 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+#[cfg(test)]
 pub mod mocks {
     use crate::Runtime;
     use candid::Principal;

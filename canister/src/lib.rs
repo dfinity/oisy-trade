@@ -13,9 +13,11 @@ pub mod order;
 pub mod runtime;
 pub mod state;
 
+#[cfg(feature = "canbench-rs")]
+mod benchmarks;
 mod ledger;
 #[cfg(test)]
-mod test_fixtures;
+pub mod test_fixtures;
 #[cfg(test)]
 mod tests;
 

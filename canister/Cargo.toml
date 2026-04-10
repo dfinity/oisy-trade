@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true }
 dex_types = { path = "../libs/types" }
@@ -23,6 +24,11 @@ ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
 icrc-ledger-types = { workspace = true }
 num-bigint = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }
