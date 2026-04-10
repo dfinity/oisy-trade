@@ -18,6 +18,8 @@ pub fn init(arg: DexArg) {
 }
 
 pub fn post_upgrade(arg: Option<DexArg>) {
+    let start = ic_cdk::api::instruction_counter();
+
     let state = storage::with_event_iter(|events| audit::replay_events(events));
     state::init_state(state);
 
@@ -30,6 +32,14 @@ pub fn post_upgrade(arg: Option<DexArg>) {
         }
         Some(DexArg::Upgrade(None)) | None => {}
     }
+
+    let instructions_used = ic_cdk::api::instruction_counter() - start;
+    canlog::log!(
+        Priority::Info,
+        "[post_upgrade]: replaying {} events consumed {} instructions",
+        storage::total_event_count(),
+        instructions_used,
+    );
     setup_timers();
 }
 
