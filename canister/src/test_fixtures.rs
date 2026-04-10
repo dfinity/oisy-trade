@@ -1,6 +1,6 @@
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
-    TickSize, TokenId, TradingPair,
+    TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state;
 use candid::Principal;
@@ -19,6 +19,20 @@ pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
 
+pub fn icp_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "ICP".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn ckbtc_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "ckBTC".to_string(),
+        decimals: 8,
+    }
+}
+
 pub fn state() -> state::State {
     state::State::try_from(dex_types_internal::InitArg {
         mode: dex_types_internal::Mode::GeneralAvailability,
@@ -31,7 +45,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
         price: 100,
-        quantity: u64::from(LOT_SIZE),
+        quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
 
@@ -41,16 +55,24 @@ pub fn order_book() -> OrderBook {
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {
     TradingPair {
-        base: TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()),
-        quote: TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap()),
+        base: icp_token_id(),
+        quote: ckbtc_token_id(),
     }
+}
+
+pub fn ckbtc_token_id() -> TokenId {
+    TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
+}
+
+pub fn icp_token_id() -> TokenId {
+    TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
 }
 
 fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
         price: Price::new(price.into()),
-        quantity: Quantity::new(quantity.into()),
+        quantity: Quantity::from(quantity.into()),
     }
     .into_order(OrderSeq::new(id))
 }
@@ -79,7 +101,7 @@ pub fn fill(
         taker_price: taker.price(),
         maker_order_seq,
         maker_price: Price::new(maker_price.into()),
-        quantity: Quantity::new(quantity.into()),
+        quantity: Quantity::from(quantity.into()),
     }
 }
 
@@ -97,8 +119,14 @@ pub fn init_state_with_order_book() {
         mode: dex_types_internal::Mode::GeneralAvailability,
     });
     state::with_state_mut(|s| {
-        s.add_trading_pair(icp_ckbtc_trading_pair(), TICK_SIZE, LOT_SIZE)
-            .unwrap();
+        s.add_trading_pair(
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        )
+        .unwrap();
     });
 }
 
@@ -108,7 +136,7 @@ pub fn init_state_with_order_book() {
 pub fn fund_user(user: Principal) {
     state::with_state_mut(|s| {
         let pair = icp_ckbtc_trading_pair();
-        let amount = candid::Nat::from(u64::MAX);
+        let amount = Quantity::from(u64::MAX);
         s.deposit(user, pair.base, amount.clone());
         s.deposit(user, pair.quote, amount);
     });

@@ -4,7 +4,7 @@ use dex_client::{DexClient, Runtime};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, TokenId, TradingPairInfo,
+    LedgerTransferFromError, Token, TokenId, TokenMetadata, TradingPairInfo,
 };
 use dex_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
@@ -69,7 +69,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Buy,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
 
         let required = 100_000_000u64;
@@ -117,7 +117,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Sell,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
 
         let required = 1_000_000u64;
@@ -197,7 +197,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Buy,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
         let required_quote_amount = 100_000_000u64;
         setup
@@ -218,7 +218,7 @@ mod add_limit_order {
             pair: setup.trading_pair(),
             side: Side::Sell,
             price: 100,
-            quantity: 1_000_000,
+            quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
         setup
@@ -290,8 +290,20 @@ async fn should_return_empty_trading_pairs() {
     assert_eq!(
         client.get_trading_pairs().await,
         vec![TradingPairInfo {
-            base_asset: setup.base_token_id(),
-            quote_asset: setup.quote_token_id(),
+            base: Token {
+                id: setup.base_token_id(),
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
+            },
+            quote: Token {
+                id: setup.quote_token_id(),
+                metadata: TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
+            },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,
         }]
@@ -567,11 +579,23 @@ async fn should_fail_add_trading_pair() {
     // base equals quote
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            base: TokenId {
-                ledger_id: setup.base_ledger_id(),
+            base: Token {
+                id: TokenId {
+                    ledger_id: setup.base_ledger_id(),
+                },
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
-            quote: TokenId {
-                ledger_id: setup.base_ledger_id(),
+            quote: Token {
+                id: TokenId {
+                    ledger_id: setup.base_ledger_id(),
+                },
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             ..setup.add_trading_pair_request()
         })

@@ -544,6 +544,7 @@ dependencies = [
  "ic-http-types",
  "icrc-ledger-types",
  "mockall",
+ "num-bigint",
  "proptest",
  "serde",
  "serde_json",

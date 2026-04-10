@@ -5,11 +5,11 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Side, TickSize,
-    TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Quantity, Side,
+    TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use candid::{Nat, Principal};
-use dex_types::{OrderStatus, TradingPairInfo};
+use candid::Principal;
+use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +38,6 @@ pub fn init_state(init_arg: InitArg) {
 pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
-    #[allow(dead_code)] //TODO DEFI-2744: add trading pairs
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: BTreeMap<TradingPair, OrderBookId>,
     order_books: BTreeMap<OrderBookId, OrderBook>,
@@ -109,15 +108,12 @@ impl State {
             .get_mut(book_id)
             .expect("BUG: trading pair registered but order book missing");
 
-        book.validate_order(pending.price, pending.quantity)
+        book.validate_order(pending.price, &pending.quantity)
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
         let (token, required) = match pending.side {
-            Side::Buy => (
-                pair.quote,
-                Nat::from(pending.price.get()) * Nat::from(pending.quantity.get()),
-            ),
-            Side::Sell => (pair.base, Nat::from(pending.quantity.get())),
+            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
+            Side::Sell => (pair.base, pending.quantity.clone()),
         };
         match self
             .balances
@@ -136,7 +132,7 @@ impl State {
             None => {
                 return Err(AddLimitOrderError::InsufficientBalance {
                     token,
-                    available: Nat::from(0u64),
+                    available: Quantity::ZERO,
                     required,
                 });
             }
@@ -190,8 +186,8 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.mul_quantity(fill.quantity);
-        let base_amount = Nat::from(fill.quantity.get());
+        let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
+        let base_amount = fill.quantity.clone();
 
         // Buyer: pay quote, receive base
         self.balance_mut(buyer, pair.quote)
@@ -216,7 +212,7 @@ impl State {
             && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !price_diff.is_zero()
         {
-            let surplus = price_diff.mul_quantity(fill.quantity);
+            let surplus = price_diff.mul_quantity(&fill.quantity);
             self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
@@ -240,15 +236,25 @@ impl State {
     }
 
     /// Register a new trading pair with a new order book.
+    ///
+    /// Also validates and stores the token metadata for both the base and quote
+    /// tokens. If a token is already registered with different metadata, returns
+    /// [`AddTradingPairError::InconsistentTokenMetadata`].
     pub fn add_trading_pair(
         &mut self,
         pair: TradingPair,
+        base_metadata: TokenMetadata,
+        quote_metadata: TokenMetadata,
         tick_size: TickSize,
         lot_size: LotSize,
     ) -> Result<(), dex_types::AddTradingPairError> {
+        self.check_token_metadata_consistency(pair.base, &base_metadata)?;
+        self.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
         if self.trading_pairs.contains_key(&pair) {
             return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
         }
+        self.tokens.entry(pair.base).or_insert(base_metadata);
+        self.tokens.entry(pair.quote).or_insert(quote_metadata);
         let book_id = self.next_book_id();
         let book = OrderBook::new(book_id, tick_size, lot_size);
         assert_eq!(self.trading_pairs.insert(pair, book_id), None);
@@ -256,25 +262,36 @@ impl State {
         Ok(())
     }
 
-    pub fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
-        self.trading_pairs
-            .iter()
-            .map(|(pair, book_id)| {
-                let book = self
-                    .order_books
-                    .get(book_id)
-                    .expect("BUG: trading pair registered but order book missing");
-                TradingPairInfo {
-                    base_asset: dex_types::TokenId::from(pair.base),
-                    quote_asset: dex_types::TokenId::from(pair.quote),
-                    tick_size: book.tick_size().get(),
-                    lot_size: book.lot_size().get(),
-                }
-            })
-            .collect()
+    fn check_token_metadata_consistency(
+        &self,
+        token_id: TokenId,
+        submitted: &TokenMetadata,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        if let Some(existing) = self.tokens.get(&token_id)
+            && existing != submitted
+        {
+            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
+                token: token_id.into(),
+                expected: existing.clone().into(),
+                submitted: submitted.clone().into(),
+            });
+        }
+        Ok(())
     }
 
-    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Nat) {
+    pub fn trading_pairs(&self) -> &BTreeMap<TradingPair, OrderBookId> {
+        &self.trading_pairs
+    }
+
+    pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
+        self.order_books.get(id)
+    }
+
+    pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
+        self.tokens.get(token_id)
+    }
+
+    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
         self.balances
             .entry(user)
             .or_default()
@@ -283,12 +300,12 @@ impl State {
             .deposit(amount);
     }
 
-    pub fn get_balance(&self, user: Principal, token_id: TokenId) -> dex_types::Balance {
+    pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
         self.balances
-            .get(&user)
-            .and_then(|tokens| tokens.get(&token_id))
-            .map(dex_types::Balance::from)
-            .unwrap_or_else(|| Balance::zero().into())
+            .get(user)
+            .and_then(|tokens| tokens.get(token_id))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Set of currently active tasks to avoid parallel execution.
@@ -309,8 +326,8 @@ pub enum AddLimitOrderError {
     InvalidOrder(MatchOrderError),
     InsufficientBalance {
         token: TokenId,
-        available: Nat,
-        required: Nat,
+        available: Quantity,
+        required: Quantity,
     },
 }
 
@@ -331,7 +348,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 quantity,
                 lot_size,
             }) => dex_types::AddLimitOrderError::InvalidQuantity {
-                quantity: quantity.get(),
+                quantity: quantity.into(),
                 lot_size: lot_size.get(),
             },
             AddLimitOrderError::InsufficientBalance {
@@ -340,8 +357,8 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 required,
             } => dex_types::AddLimitOrderError::InsufficientBalance {
                 token: dex_types::TokenId::from(token),
-                available,
-                required,
+                available: available.into(),
+                required: required.into(),
             },
         }
     }

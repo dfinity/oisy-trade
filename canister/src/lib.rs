@@ -62,7 +62,34 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
 }
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
-    state::with_state(|s| s.get_trading_pairs())
+    state::with_state(|s| {
+        s.trading_pairs()
+            .iter()
+            .map(|(pair, book_id)| {
+                let book = s
+                    .order_book(book_id)
+                    .expect("BUG: trading pair registered but order book missing");
+                let base_meta = s
+                    .token_metadata(&pair.base)
+                    .expect("BUG: trading pair registered but base token metadata missing");
+                let quote_meta = s
+                    .token_metadata(&pair.quote)
+                    .expect("BUG: trading pair registered but quote token metadata missing");
+                TradingPairInfo {
+                    base: dex_types::Token {
+                        id: dex_types::TokenId::from(pair.base),
+                        metadata: base_meta.clone().into(),
+                    },
+                    quote: dex_types::Token {
+                        id: dex_types::TokenId::from(pair.quote),
+                        metadata: quote_meta.clone().into(),
+                    },
+                    tick_size: book.tick_size().get(),
+                    lot_size: book.lot_size().get(),
+                }
+            })
+            .collect()
+    })
 }
 
 pub async fn deposit(
@@ -72,7 +99,7 @@ pub async fn deposit(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let token_id = request.token_id.clone();
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let amount = request.amount.clone();
+    let amount = order::Quantity::from(request.amount.clone());
     let caller = runtime.msg_caller();
 
     let deposit_response = ledger::deposit(request, runtime).await?;
@@ -84,7 +111,10 @@ pub async fn deposit(
 pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {
     // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
     let caller = runtime.msg_caller();
-    state::with_state(|s| s.get_balance(caller, order::TokenId::from(token_id)))
+    state::with_state(|s| {
+        s.get_balance(&caller, &order::TokenId::from(token_id))
+            .into()
+    })
 }
 
 pub fn add_trading_pair(
@@ -94,18 +124,22 @@ pub fn add_trading_pair(
     if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(AddTradingPairError::NotController);
     }
-    if request.base == request.quote {
+    if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
     let pair = order::TradingPair {
-        base: TokenId::from(request.base),
-        quote: TokenId::from(request.quote),
+        base: TokenId::from(request.base.id),
+        quote: TokenId::from(request.quote.id),
     };
+    let base_metadata = order::TokenMetadata::from(request.base.metadata);
+    let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
     let tick_size = order::TickSize::new(
         NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    state::with_state_mut(|s| s.add_trading_pair(pair, tick_size, lot_size))
+    state::with_state_mut(|s| {
+        s.add_trading_pair(pair, base_metadata, quote_metadata, tick_size, lot_size)
+    })
 }

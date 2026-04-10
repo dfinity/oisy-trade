@@ -67,18 +67,18 @@ mod add_limit_order {
         let runtime = mock_runtime_for(DEFAULT_USER);
 
         let cases = vec![
-            (500_000, "not a multiple of lot size"),
+            (500_000u64, "not a multiple of lot size"),
             (0, "zero quantity"),
         ];
         for (quantity, name) in cases {
             let mut request = limit_order_request();
             request.side = dex_types::Side::Sell;
-            request.quantity = quantity;
+            request.quantity = candid::Nat::from(quantity);
             let result = add_limit_order(request, &runtime);
             assert_eq!(
                 result,
                 Err(dex_types::AddLimitOrderError::InvalidQuantity {
-                    quantity,
+                    quantity: candid::Nat::from(quantity),
                     lot_size: 1_000_000,
                 }),
                 "case: {name}"
@@ -132,13 +132,15 @@ mod add_limit_order {
         init_state_with_order_book();
         let pair = test_fixtures::icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let required = price * quantity;
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Buy,
-            price: 100,
-            quantity: 1_000_000u64,
+            price,
+            quantity: candid::Nat::from(quantity),
         };
-        let required = order.price * order.quantity;
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
         state::with_state_mut(|s| {
             s.deposit(DEFAULT_USER, pair.quote, required.into());
@@ -161,24 +163,25 @@ mod add_limit_order {
         init_state_with_order_book();
         let pair = test_fixtures::icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
+        let quantity = 100_000_000u64;
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Sell,
             price: 10,
-            quantity: 100_000_000u64,
+            quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
         state::with_state_mut(|s| {
-            s.deposit(DEFAULT_USER, pair.base, candid::Nat::from(order.quantity));
+            s.deposit(DEFAULT_USER, pair.base, quantity.into());
         });
 
-        add_limit_order(order.clone(), &runtime).unwrap();
+        add_limit_order(order, &runtime).unwrap();
 
         assert_eq!(
             get_balance(pair.base.into(), &runtime),
             Balance {
                 free: 0u64.into(),
-                reserved: order.quantity.into(),
+                reserved: quantity.into(),
             }
         );
         assert_eq!(get_balance(pair.quote.into(), &runtime), Balance::default());
@@ -231,11 +234,10 @@ mod get_order_status {
 
 mod get_trading_pairs {
     use crate::get_trading_pairs;
-    use crate::order::{TokenId, TradingPair};
-    use crate::state;
     use crate::state::init_state;
-    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
-    use candid::Principal;
+    use crate::test_fixtures::{
+        LOT_SIZE, TICK_SIZE, ckbtc_token_id, icp_token_id, init_state_with_order_book,
+    };
     use dex_types::TradingPairInfo;
 
     #[test]
@@ -249,23 +251,27 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
-        let base = TokenId::new(Principal::from_slice(&[0x01]));
-        let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        state::with_state_mut(|s| {
-            s.add_trading_pair(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE)
-                .unwrap();
-        });
+        init_state_with_order_book();
 
         let pairs = get_trading_pairs();
 
         assert_eq!(
             pairs,
             vec![TradingPairInfo {
-                base_asset: dex_types::TokenId::from(base),
-                quote_asset: dex_types::TokenId::from(quote),
+                base: dex_types::Token {
+                    id: dex_types::TokenId::from(icp_token_id()),
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ICP".to_string(),
+                        decimals: 8,
+                    },
+                },
+                quote: dex_types::Token {
+                    id: dex_types::TokenId::from(ckbtc_token_id()),
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ckBTC".to_string(),
+                        decimals: 8,
+                    },
+                },
                 tick_size: TICK_SIZE.get(),
                 lot_size: LOT_SIZE.get(),
             }]
