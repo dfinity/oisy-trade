@@ -115,9 +115,12 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
-    state::init_state(dex_types_internal::InitArg {
-        mode: dex_types_internal::Mode::GeneralAvailability,
-    });
+    state::init_state(
+        state::State::try_from(dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        })
+        .unwrap(),
+    );
     state::with_state_mut(|s| {
         s.add_trading_pair(
             icp_ckbtc_trading_pair(),
@@ -168,6 +171,7 @@ pub mod mocks {
             fn msg_caller(&self) -> Principal;
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
+            fn instruction_counter(&self) -> u64;
         }
     }
 }

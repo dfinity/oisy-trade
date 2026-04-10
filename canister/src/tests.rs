@@ -235,6 +235,7 @@ mod get_order_status {
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::state::init_state;
+    use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_token_id, icp_token_id, init_state_with_order_book,
     };
@@ -242,9 +243,7 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
+        init_state(test_fixtures::state());
         let pairs = get_trading_pairs();
         assert!(pairs.is_empty());
     }

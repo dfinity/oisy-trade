@@ -542,7 +542,10 @@ dependencies = [
  "ic-cdk 0.20.0",
  "ic-cdk-timers",
  "ic-http-types",
+ "ic-stable-structures 0.7.2",
+ "icrc-cbor",
  "icrc-ledger-types",
+ "minicbor",
  "mockall",
  "num-bigint",
  "proptest",
@@ -576,6 +579,7 @@ dependencies = [
  "ic-http-types",
  "icrc-ledger-types",
  "pocket-ic",
+ "scopeguard",
  "serde",
  "serde_json",
  "tokio",
@@ -595,6 +599,8 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "canlog",
+ "icrc-cbor",
+ "minicbor",
  "serde",
 ]
 
@@ -1172,6 +1178,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic-stable-structures"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ee3372ddc0cf2a747fc26ce2d075a240ed6bfab151e63bc70109e8967f7ce6f"
+dependencies = [
+ "ic_principal",
+]
+
+[[package]]
 name = "ic-transport-types"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1231,7 +1246,7 @@ dependencies = [
  "candid",
  "crc32fast",
  "hex",
- "ic-stable-structures",
+ "ic-stable-structures 0.6.9",
  "icrc-cbor",
  "minicbor",
  "num-bigint",

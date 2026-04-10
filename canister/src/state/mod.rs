@@ -1,3 +1,6 @@
+pub mod audit;
+pub mod event;
+
 #[cfg(test)]
 mod tests;
 
@@ -26,11 +29,11 @@ pub fn with_state_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
 }
 
-pub fn init_state(init_arg: InitArg) {
+pub fn init_state(state: State) {
     STATE.with(|s| {
-        let mut state = s.borrow_mut();
-        assert!(state.is_none(), "State already initialized!");
-        *state = Some(State::try_from(init_arg).expect("Failed to initialize state"));
+        let mut current = s.borrow_mut();
+        assert!(current.is_none(), "State already initialized!");
+        *current = Some(state);
     });
 }
 

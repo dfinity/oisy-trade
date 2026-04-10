@@ -1,7 +1,9 @@
 pub mod deposit_flow;
+pub mod events;
 pub mod icrc_ledger;
 
 pub use deposit_flow::DepositFlow;
+pub use events::DexEventAssert;
 pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
@@ -258,6 +260,47 @@ impl Setup {
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("Failed to deserialize logs")
             .entries
+    }
+
+    pub async fn assert_that_events(&self) -> DexEventAssert {
+        DexEventAssert::new(self.get_all_events().await)
+    }
+
+    pub async fn get_all_events(&self) -> Vec<dex_types_internal::event::Event> {
+        use dex_types_internal::event::GetEventsResult;
+
+        const FIRST_BATCH_SIZE: u64 = 100;
+
+        let GetEventsResult {
+            mut events,
+            total_event_count,
+        } = self.get_events(0, FIRST_BATCH_SIZE).await;
+        while events.len() < total_event_count as usize {
+            let mut next_batch = self
+                .get_events(events.len() as u64, total_event_count - events.len() as u64)
+                .await;
+            events.append(&mut next_batch.events);
+        }
+        events
+    }
+
+    async fn get_events(
+        &self,
+        start: u64,
+        length: u64,
+    ) -> dex_types_internal::event::GetEventsResult {
+        use dex_types_internal::event::{GetEventsArgs, GetEventsResult};
+
+        self.env()
+            .query_call(
+                self.dex_id,
+                Principal::anonymous(),
+                "get_events",
+                Encode!(&GetEventsArgs { start, length }).unwrap(),
+            )
+            .await
+            .map(|bytes| Decode!(&bytes, GetEventsResult).unwrap())
+            .expect("BUG: failed to call get_events")
     }
 
     pub async fn drop(self) {

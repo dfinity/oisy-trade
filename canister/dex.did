@@ -185,6 +185,30 @@ type UpgradeArg = record {
 /// Argument passed to the DEX canister on init or upgrade.
 type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
+/// Type of a canister event.
+type EventType = variant {
+    Init : InitArg;
+    Upgrade : UpgradeArg;
+};
+
+/// A canister event with a timestamp.
+type Event = record {
+    timestamp : nat64;
+    payload : EventType;
+};
+
+/// Arguments for the get_events query.
+type GetEventsArgs = record {
+    start : nat64;
+    length : nat64;
+};
+
+/// Result of the get_events query.
+type GetEventsResult = record {
+    events : vec Event;
+    total_event_count : nat64;
+};
+
 service : (DexArg) -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
@@ -208,4 +232,9 @@ service : (DexArg) -> {
 
     /// Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
+
+    /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
+    /// Returns events from the event log starting at the given index.
+    /// The response contains at most 2000 events.
+    get_events : (GetEventsArgs) -> (GetEventsResult) query;
 }
