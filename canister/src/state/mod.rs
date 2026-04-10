@@ -1,4 +1,3 @@
-pub mod audit;
 pub mod event;
 
 #[cfg(test)]
