@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: 'Install just'
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
       - name: 'Check code'
         run: just lint
 
@@ -28,15 +28,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 #        TODO DEFI-2722: setup reproducible build with Docker
       - name: 'Install just'
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
       - name: Docker build
         run: just build
 
       - name: 'Archive Artifact'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dex_canister.wasm.gz
           path: ./wasms/dex_canister.wasm.gz
@@ -51,9 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: 'Install just'
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
       - name: 'Run unit tests'
         run: just unit-tests
 
@@ -62,13 +62,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: 'Install just'
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2.0.0
 
       - name: 'Download Artifacts'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dex_canister.wasm.gz
 
@@ -77,7 +77,7 @@ jobs:
           echo "DEX_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/dex_canister.wasm.gz" >> "$GITHUB_ENV"
 
       - name: 'Install PocketIC server'
-        uses: dfinity/pocketic@main
+        uses: dfinity/pocketic@20c33db1aa87cc6ece50857ac632c37acf5e0322 # main 2026-04-10
         with:
           pocket-ic-server-version: "13.0.0"
 
