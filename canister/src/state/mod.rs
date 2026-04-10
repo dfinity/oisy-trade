@@ -238,6 +238,10 @@ impl State {
         }
     }
 
+    pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
+        self.trading_pairs.contains_key(pair)
+    }
+
     /// Register a new trading pair with a new order book.
     ///
     /// Also validates and stores the token metadata for both the base and quote

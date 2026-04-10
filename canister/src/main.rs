@@ -90,6 +90,14 @@ fn get_events(
             payload: match event.payload {
                 EventType::Init(args) => event::EventType::Init(args),
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
+                EventType::AddTradingPair(e) => {
+                    event::EventType::AddTradingPair(event::AddTradingPairEvent {
+                        base: e.base,
+                        quote: e.quote,
+                        tick_size: e.tick_size.get(),
+                        lot_size: e.lot_size.get(),
+                    })
+                }
             },
         }
     }

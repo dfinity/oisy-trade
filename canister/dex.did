@@ -185,10 +185,19 @@ type UpgradeArg = record {
 /// Argument passed to the DEX canister on init or upgrade.
 type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
+/// Event payload for adding a trading pair.
+type AddTradingPairEvent = record {
+    base : principal;
+    quote : principal;
+    tick_size : nat64;
+    lot_size : nat64;
+};
+
 /// Type of a canister event.
 type EventType = variant {
     Init : InitArg;
     Upgrade : UpgradeArg;
+    AddTradingPair : AddTradingPairEvent;
 };
 
 /// A canister event with a timestamp.

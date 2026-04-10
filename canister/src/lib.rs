@@ -1,4 +1,3 @@
-use crate::order::TokenId;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
     DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
@@ -129,19 +128,27 @@ pub fn add_trading_pair(
     if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
-    let pair = order::TradingPair {
-        base: TokenId::from(request.base.id),
-        quote: TokenId::from(request.quote.id),
-    };
-    let base_metadata = order::TokenMetadata::from(request.base.metadata);
-    let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
     let tick_size = order::TickSize::new(
         NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    state::with_state_mut(|s| {
-        s.add_trading_pair(pair, base_metadata, quote_metadata, tick_size, lot_size)
+    let event = state::event::AddTradingPairEvent {
+        base: request.base.id.ledger_id,
+        quote: request.quote.id.ledger_id,
+        tick_size,
+        lot_size,
+    };
+    state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
+        let pair = order::TradingPair {
+            base: order::TokenId::new(event.base),
+            quote: order::TokenId::new(event.quote),
+        };
+        if s.has_trading_pair(&pair) {
+            return Err(AddTradingPairError::TradingPairAlreadyExists);
+        }
+        state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
+        Ok(())
     })
 }

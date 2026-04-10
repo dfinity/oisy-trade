@@ -11,6 +11,8 @@ pub fn process_event(state: &mut State, payload: EventType) {
 }
 
 fn apply_state_transition(state: &mut State, payload: &EventType) {
+    use crate::order;
+
     match payload {
         EventType::Init(_) => {
             panic!("BUG: state re-initialization is not allowed");
@@ -19,6 +21,15 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             if let Some(mode) = upgrade_arg.mode.clone() {
                 state.set_mode(mode);
             }
+        }
+        EventType::AddTradingPair(event) => {
+            let pair = order::TradingPair {
+                base: order::TokenId::new(event.base),
+                quote: order::TokenId::new(event.quote),
+            };
+            state
+                .add_trading_pair(pair, event.tick_size, event.lot_size)
+                .expect("BUG: replaying AddTradingPair event should succeed");
         }
     }
 }

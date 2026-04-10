@@ -1,5 +1,5 @@
 use crate::{InitArg, UpgradeArg};
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -12,6 +12,15 @@ pub struct Event {
 pub enum EventType {
     Init(InitArg),
     Upgrade(UpgradeArg),
+    AddTradingPair(AddTradingPairEvent),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct AddTradingPairEvent {
+    pub base: Principal,
+    pub quote: Principal,
+    pub tick_size: u64,
+    pub lot_size: u64,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]

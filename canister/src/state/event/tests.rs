@@ -23,10 +23,22 @@ fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
     prop::option::of(arb_mode()).prop_map(|mode| UpgradeArg { mode })
 }
 
+fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
+    (arb_principal(), arb_principal(), 1..u64::MAX, 1..u64::MAX).prop_map(
+        |(base, quote, tick_size, lot_size)| AddTradingPairEvent {
+            base,
+            quote,
+            tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),
+            lot_size: LotSize::new(std::num::NonZeroU64::new(lot_size).unwrap()),
+        },
+    )
+}
+
 fn arb_event_type() -> impl Strategy<Value = EventType> {
     prop_oneof![
         arb_init_arg().prop_map(EventType::Init),
         arb_upgrade_arg().prop_map(EventType::Upgrade),
+        arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
     ]
 }
 
