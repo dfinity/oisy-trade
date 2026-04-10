@@ -8,7 +8,7 @@ use crate::order::{
     Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Quantity, Side,
     TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use candid::Principal;
+use candid::{Nat, Principal};
 use dex_types::{OrderStatus, TradingPairInfo};
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
@@ -47,6 +47,9 @@ pub struct State {
     // TODO DEFI-2752: Keep track of filled orders.
     order_owners: BTreeMap<OrderId, Principal>,
     active_tasks: BTreeSet<Task>,
+    /// Cached ledger transfer fees, learned from `BadFee` responses.
+    /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
+    fee_cache: BTreeMap<TokenId, Nat>,
 }
 
 impl TryFrom<InitArg> for State {
@@ -62,6 +65,7 @@ impl TryFrom<InitArg> for State {
             balances: BTreeMap::default(),
             order_owners: BTreeMap::default(),
             active_tasks: BTreeSet::default(),
+            fee_cache: BTreeMap::default(),
         })
     }
 }
@@ -290,6 +294,17 @@ impl State {
             .entry(token_id)
             .or_default()
             .deposit(amount);
+    }
+
+    pub fn get_cached_fee(&self, token_id: &TokenId) -> Nat {
+        self.fee_cache
+            .get(token_id)
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn set_cached_fee(&mut self, token_id: TokenId, fee: Nat) {
+        self.fee_cache.insert(token_id, fee);
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {

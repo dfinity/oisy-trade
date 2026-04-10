@@ -88,33 +88,31 @@ pub async fn withdraw(
     let caller = runtime.msg_caller();
     let token_id = request.token_id.clone();
     let amount = order::Quantity::from(request.amount.clone());
+    let internal_token = order::TokenId::from(token_id.clone());
 
-    // Query the ledger fee before debiting, so we can validate and avoid
-    // an unnecessary debit+credit cycle for a predictably failing transfer.
-    let fee = ledger::query_icrc1_fee(&token_id, runtime).await?;
-    if request.amount <= fee {
+    // Early rejection when the cached fee already rules out this amount.
+    let cached_fee = state::with_state(|s| s.get_cached_fee(&internal_token));
+    if request.amount <= cached_fee {
         return Err(WithdrawError::AmountTooSmall {
-            min_amount: fee + 1u64,
+            min_amount: cached_fee + 1u64,
         });
     }
-    let transfer_amount = request.amount - fee.clone();
 
     // Debit the full amount from the user's free balance.
-    state::with_state_mut(|s| {
-        s.withdraw(
-            caller,
-            order::TokenId::from(token_id.clone()),
-            amount.clone(),
-        )
-    })
-    .map_err(|e| WithdrawError::InsufficientBalance {
-        available: e.available.into(),
+    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
+        WithdrawError::InsufficientBalance {
+            available: e.available.into(),
+        }
     })?;
 
-    // Transfer (amount - fee) to the user on the ledger.
-    // The ledger charges `transfer_amount + fee = amount` from the DEX canister.
-    match ledger::withdraw(&token_id, caller, transfer_amount, fee, runtime).await {
-        Ok(response) => Ok(response),
+    // Perform the ledger transfer (with automatic BadFee retry).
+    match ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await {
+        Ok(ok) => {
+            state::with_state_mut(|s| {
+                s.set_cached_fee(order::TokenId::from(token_id), ok.ledger_fee);
+            });
+            Ok(ok.response)
+        }
         Err(e) => {
             // Credit back on failure so the user doesn't lose funds.
             state::with_state_mut(|s| {
