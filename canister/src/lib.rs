@@ -12,6 +12,7 @@ pub mod guard;
 pub mod order;
 pub mod runtime;
 pub mod state;
+pub mod storage;
 
 mod ledger;
 #[cfg(test)]
