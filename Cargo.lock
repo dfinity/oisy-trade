@@ -522,6 +522,7 @@ dependencies = [
  "mockall",
  "num-bigint",
  "proptest",
+ "tokio",
 ]
 
 [[package]]
