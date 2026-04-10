@@ -635,6 +635,40 @@ async fn should_fail_add_trading_pair() {
 }
 
 #[tokio::test]
+async fn should_replay_events_on_upgrade() {
+    use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+
+    // 1) Init -> Upgrade -> no trading pairs
+    let setup = Setup::new().await;
+    setup.upgrade(None).await;
+    assert_eq!(setup.dex_client().get_trading_pairs().await, vec![]);
+
+    // 2) Add trading pair -> Upgrade -> trading pair preserved
+    setup.add_trading_pair().await;
+    let pairs_before = setup.dex_client().get_trading_pairs().await;
+    assert_eq!(pairs_before.len(), 1);
+    setup.upgrade(None).await;
+    assert_eq!(setup.dex_client().get_trading_pairs().await, pairs_before);
+
+    // 3) Deposit -> Upgrade -> balance preserved
+    let deposit_amount: u64 = 1_000_000;
+    setup
+        .deposit_flow(setup.user(), setup.base_token_id())
+        .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+        .approve(deposit_amount + BASE_LEDGER_FEE)
+        .deposit(deposit_amount)
+        .execute()
+        .await;
+    let balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(balance_before.free, Nat::from(deposit_amount));
+    setup.upgrade(None).await;
+    let balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(balance_after, balance_before);
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_get_events() {
     let setup = Setup::new().await;
 
