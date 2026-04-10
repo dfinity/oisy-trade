@@ -135,24 +135,22 @@ pub fn add_trading_pair(
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    let event = state::event::AddTradingPairEvent {
-        base: request.base.id.ledger_id,
-        quote: request.quote.id.ledger_id,
-        tick_size,
-        lot_size,
-        base_symbol: request.base.metadata.symbol,
-        base_decimals: request.base.metadata.decimals,
-        quote_symbol: request.quote.metadata.symbol,
-        quote_decimals: request.quote.metadata.decimals,
-    };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
-            base: order::TokenId::new(event.base),
-            quote: order::TokenId::new(event.quote),
+            base: order::TokenId::new(request.base.id.ledger_id),
+            quote: order::TokenId::new(request.quote.id.ledger_id),
         };
         if s.has_trading_pair(&pair) {
             return Err(AddTradingPairError::TradingPairAlreadyExists);
         }
+        let event = state::event::AddTradingPairEvent {
+            base: pair.base,
+            quote: pair.quote,
+            tick_size,
+            lot_size,
+            base_metadata: order::TokenMetadata::from(request.base.metadata),
+            quote_metadata: order::TokenMetadata::from(request.quote.metadata),
+        };
         state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
         Ok(())
     })

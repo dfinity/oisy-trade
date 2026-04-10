@@ -21,10 +21,14 @@ pub struct AddTradingPairEvent {
     pub quote: Principal,
     pub tick_size: u64,
     pub lot_size: u64,
-    pub base_symbol: String,
-    pub base_decimals: u8,
-    pub quote_symbol: String,
-    pub quote_decimals: u8,
+    pub base_metadata: TokenMetadata,
+    pub quote_metadata: TokenMetadata,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct TokenMetadata {
+    pub symbol: String,
+    pub decimals: u8,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]

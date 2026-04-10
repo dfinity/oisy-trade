@@ -20,6 +20,7 @@ fn upgrade_event(mode: Option<Mode>) -> Event {
 }
 
 fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
+    use crate::order::TokenMetadata;
     Event {
         timestamp: 2,
         payload: EventType::AddTradingPair(AddTradingPairEvent {
@@ -27,10 +28,14 @@ fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             quote,
             tick_size: TickSize::new(NonZeroU64::new(10).unwrap()),
             lot_size: LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-            base_symbol: "BASE".to_string(),
-            base_decimals: 8,
-            quote_symbol: "QUOTE".to_string(),
-            quote_decimals: 8,
+            base_metadata: TokenMetadata {
+                symbol: "BASE".to_string(),
+                decimals: 8,
+            },
+            quote_metadata: TokenMetadata {
+                symbol: "QUOTE".to_string(),
+                decimals: 8,
+            },
         }),
     }
 }

@@ -1,4 +1,4 @@
-use crate::order::{LotSize, TickSize};
+use crate::order::{LotSize, TickSize, TokenMetadata};
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
@@ -38,13 +38,9 @@ pub struct AddTradingPairEvent {
     #[n(3)]
     pub lot_size: LotSize,
     #[n(4)]
-    pub base_symbol: String,
+    pub base_metadata: TokenMetadata,
     #[n(5)]
-    pub base_decimals: u8,
-    #[n(6)]
-    pub quote_symbol: String,
-    #[n(7)]
-    pub quote_decimals: u8,
+    pub quote_metadata: TokenMetadata,
 }
 
 impl Storable for Event {

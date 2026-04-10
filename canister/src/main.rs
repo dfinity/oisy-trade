@@ -96,10 +96,14 @@ fn get_events(
                         quote: e.quote,
                         tick_size: e.tick_size.get(),
                         lot_size: e.lot_size.get(),
-                        base_symbol: e.base_symbol,
-                        base_decimals: e.base_decimals,
-                        quote_symbol: e.quote_symbol,
-                        quote_decimals: e.quote_decimals,
+                        base_metadata: event::TokenMetadata {
+                            symbol: e.base_metadata.symbol,
+                            decimals: e.base_metadata.decimals,
+                        },
+                        quote_metadata: event::TokenMetadata {
+                            symbol: e.quote_metadata.symbol,
+                            decimals: e.quote_metadata.decimals,
+                        },
                     })
                 }
             },
