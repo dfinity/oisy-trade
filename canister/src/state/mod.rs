@@ -181,16 +181,14 @@ impl State {
                 *self
                     .order_history
                     .get_status_mut(&order_id)
-                    .expect("BUG: resting order not found in order_history") =
-                    OrderStatus::Open;
+                    .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
             }
             for seq in filled_seqs {
                 let order_id = OrderId::new(book_id, seq);
                 *self
                     .order_history
                     .get_status_mut(&order_id)
-                    .expect("BUG: filled order not found in order_history") =
-                    OrderStatus::Filled;
+                    .expect("BUG: filled order not found in order_history") = OrderStatus::Filled;
             }
         }
     }

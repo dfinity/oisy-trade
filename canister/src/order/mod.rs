@@ -4,8 +4,8 @@ mod history;
 mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
-pub use history::{OrderHistory, OrderRecord};
 use candid::{Nat, Principal};
+pub use history::{OrderHistory, OrderRecord};
 use num_bigint::BigUint;
 use std::fmt;
 use std::num::NonZeroU64;
