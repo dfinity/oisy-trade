@@ -29,8 +29,19 @@ download-external-wasms:
     bash scripts/download-external-wasms.sh
 
 # Run integration tests
-integration-tests: download-external-wasms
+integration-tests: download-external-wasms _maybe-build
     cargo test --package dex_int_tests -- --test-threads 2 --nocapture
+
+_maybe-build:
+    {{ if env("DEX_CANISTER_WASM_PATH", "") == "" { "just build" } else { "true" } }}
+
+# Run canbench benchmarks
+bench:
+    cd canister && canbench
+
+# Run canbench and persist results for regression checks
+bench-check:
+    cd canister && canbench --persist
 
 # Deploy to staging
 deploy identity='hsm':

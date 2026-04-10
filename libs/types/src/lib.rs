@@ -76,10 +76,10 @@ pub enum AddLimitOrderError {
 /// Information about a listed trading pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct TradingPairInfo {
-    /// Token ID of the base asset.
-    pub base_asset: TokenId,
-    /// Token ID of the quote asset.
-    pub quote_asset: TokenId,
+    /// The base token.
+    pub base: Token,
+    /// The quote token.
+    pub quote: Token,
     /// Minimum price increment.
     pub tick_size: u64,
     /// Minimum order quantity.
@@ -108,6 +108,24 @@ pub enum OrderStatus {
 pub struct TokenId {
     /// The canister ID of the token's ledger.
     pub ledger_id: Principal,
+}
+
+/// Metadata associated with a token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct TokenMetadata {
+    /// The token's ticker symbol (e.g. "ckBTC").
+    pub symbol: String,
+    /// The number of decimal places used by the token.
+    pub decimals: u8,
+}
+
+/// A token with its identity and metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct Token {
+    /// The token's unique identifier.
+    pub id: TokenId,
+    /// The token's metadata.
+    pub metadata: TokenMetadata,
 }
 
 /// Request to deposit tokens into the DEX.
@@ -174,9 +192,9 @@ pub struct Balance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct AddTradingPairRequest {
     /// The base token of the pair (e.g. ckSOL).
-    pub base: TokenId,
+    pub base: Token,
     /// The quote token of the pair (e.g. ckBTC).
-    pub quote: TokenId,
+    pub quote: Token,
     /// Minimum price increment. Must be greater than zero.
     pub tick_size: u64,
     /// Minimum order quantity. Must be greater than zero.
@@ -254,4 +272,13 @@ pub enum AddTradingPairError {
     InvalidLotSize,
     /// A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists,
+    /// The submitted token metadata does not match the previously registered metadata.
+    InconsistentTokenMetadata {
+        /// The token whose metadata is inconsistent.
+        token: TokenId,
+        /// The previously registered metadata.
+        expected: TokenMetadata,
+        /// The metadata that was submitted.
+        submitted: TokenMetadata,
+    },
 }

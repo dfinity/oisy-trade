@@ -8,6 +8,9 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+#[cfg(feature = "event")]
+pub mod cbor;
+pub mod event;
 #[cfg(feature = "log")]
 pub mod log;
 
@@ -22,26 +25,40 @@ pub enum DexArg {
 
 /// Argument for canister initialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct InitArg {
     /// Controls who may call update endpoints.
+    #[cfg_attr(feature = "event", n(0))]
     pub mode: Mode,
 }
 
 /// Argument for canister upgrade.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub struct UpgradeArg {
     /// If set, changes who may call update endpoints.
+    #[cfg_attr(feature = "event", n(0))]
     pub mode: Option<Mode>,
 }
 
 /// Controls who may call update endpoints on the DEX canister.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub enum Mode {
     /// Anyone may call update endpoints.
     #[default]
+    #[cfg_attr(feature = "event", n(0))]
     GeneralAvailability,
     /// Only the listed principals may call update endpoints.
-    RestrictedTo(BTreeSet<Principal>),
+    #[cfg_attr(feature = "event", n(1))]
+    RestrictedTo(
+        #[cfg_attr(
+            feature = "event",
+            n(0),
+            cbor(with = "crate::cbor::btreeset_principal")
+        )]
+        BTreeSet<Principal>,
+    ),
 }
 
 impl Mode {

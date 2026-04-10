@@ -14,15 +14,24 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true }
 dex_types = { path = "../libs/types" }
-dex_types_internal = { path = "../libs/types-internal", features = ["log"] }
+dex_types_internal = { path = "../libs/types-internal", features = ["event", "log"] }
 ic-cdk = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
+ic-stable-structures = { workspace = true }
+icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
+minicbor = { workspace = true, features = ["derive"] }
 num-bigint = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }

@@ -252,9 +252,12 @@ mod withdraw {
     }
 
     fn init_state_with_balance(amount: u64) {
-        state::init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
+        state::init_state(
+            state::State::try_from(dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            })
+            .unwrap(),
+        );
         state::with_state_mut(|s| {
             s.deposit(USER, TokenId::from(token_id()), Quantity::from(amount));
         });
@@ -414,41 +417,43 @@ mod withdraw {
 
 mod get_trading_pairs {
     use crate::get_trading_pairs;
-    use crate::order::{TokenId, TradingPair};
-    use crate::state;
     use crate::state::init_state;
-    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
-    use candid::Principal;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{
+        LOT_SIZE, TICK_SIZE, ckbtc_token_id, icp_token_id, init_state_with_order_book,
+    };
     use dex_types::TradingPairInfo;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
+        init_state(test_fixtures::state());
         let pairs = get_trading_pairs();
         assert!(pairs.is_empty());
     }
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        });
-        let base = TokenId::new(Principal::from_slice(&[0x01]));
-        let quote = TokenId::new(Principal::from_slice(&[0x02]));
-        state::with_state_mut(|s| {
-            s.add_trading_pair(TradingPair { base, quote }, TICK_SIZE, LOT_SIZE)
-                .unwrap();
-        });
+        init_state_with_order_book();
 
         let pairs = get_trading_pairs();
 
         assert_eq!(
             pairs,
             vec![TradingPairInfo {
-                base_asset: dex_types::TokenId::from(base),
-                quote_asset: dex_types::TokenId::from(quote),
+                base: dex_types::Token {
+                    id: dex_types::TokenId::from(icp_token_id()),
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ICP".to_string(),
+                        decimals: 8,
+                    },
+                },
+                quote: dex_types::Token {
+                    id: dex_types::TokenId::from(ckbtc_token_id()),
+                    metadata: dex_types::TokenMetadata {
+                        symbol: "ckBTC".to_string(),
+                        decimals: 8,
+                    },
+                },
                 tick_size: TICK_SIZE.get(),
                 lot_size: LOT_SIZE.get(),
             }]

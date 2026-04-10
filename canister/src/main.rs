@@ -1,4 +1,3 @@
-use dex_canister::MATCHING_INTERVAL;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
     DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
@@ -105,41 +104,46 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
     dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
 }
 
+/// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
+#[ic_cdk::query]
+fn get_events(
+    args: dex_types_internal::event::GetEventsArgs,
+) -> dex_types_internal::event::GetEventsResult {
+    use dex_canister::state::event::{Event, EventType};
+    use dex_types_internal::event;
+
+    const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
+
+    fn map_event(event: Event) -> event::Event {
+        event::Event {
+            timestamp: event.timestamp,
+            payload: match event.payload {
+                EventType::Init(args) => event::EventType::Init(args),
+                EventType::Upgrade(args) => event::EventType::Upgrade(args),
+            },
+        }
+    }
+
+    let start = usize::try_from(args.start).expect("BUG: start index exceeds usize::MAX");
+    let length = usize::try_from(args.length.min(MAX_EVENTS_PER_RESPONSE))
+        .expect("BUG: length exceeds usize::MAX");
+    let events = dex_canister::storage::with_event_iter(|it| {
+        it.skip(start).take(length).map(map_event).collect()
+    });
+    event::GetEventsResult {
+        events,
+        total_event_count: dex_canister::storage::total_event_count(),
+    }
+}
+
 #[ic_cdk::init]
 fn init(arg: DexArg) {
-    let init_arg = match arg {
-        DexArg::Init(init_arg) => init_arg,
-        DexArg::Upgrade(_) => {
-            panic!("ERROR: expected Init argument");
-        }
-    };
-    dex_canister::state::init_state(init_arg);
-    setup_timers();
-    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
+    dex_canister::lifecycle::init(arg);
 }
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade(arg: Option<DexArg>) {
-    match arg {
-        Some(DexArg::Init(_)) => {
-            panic!("ERROR: expected Upgrade argument");
-        }
-        Some(DexArg::Upgrade(upgrade_arg)) => {
-            if let Some(upgrade_arg) = upgrade_arg
-                && let Some(mode) = upgrade_arg.mode
-            {
-                dex_canister::state::with_state_mut(|s| s.set_mode(mode));
-            }
-        }
-        None => {}
-    }
-    setup_timers();
-}
-
-fn setup_timers() {
-    ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
-        dex_canister::process_pending_orders();
-    });
+    dex_canister::lifecycle::post_upgrade(arg, &dex_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::query(hidden = true)]

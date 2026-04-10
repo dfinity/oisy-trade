@@ -5,7 +5,8 @@ use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, TokenId, TradingPairInfo, WithdrawError, WithdrawRequest,
+    LedgerTransferFromError, Token, TokenId, TokenMetadata, TradingPairInfo, WithdrawError,
+    WithdrawRequest,
 };
 use dex_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
@@ -291,8 +292,20 @@ async fn should_return_empty_trading_pairs() {
     assert_eq!(
         client.get_trading_pairs().await,
         vec![TradingPairInfo {
-            base_asset: setup.base_token_id(),
-            quote_asset: setup.quote_token_id(),
+            base: Token {
+                id: setup.base_token_id(),
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
+            },
+            quote: Token {
+                id: setup.quote_token_id(),
+                metadata: TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
+            },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,
         }]
@@ -568,11 +581,23 @@ async fn should_fail_add_trading_pair() {
     // base equals quote
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            base: TokenId {
-                ledger_id: setup.base_ledger_id(),
+            base: Token {
+                id: TokenId {
+                    ledger_id: setup.base_ledger_id(),
+                },
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
-            quote: TokenId {
-                ledger_id: setup.base_ledger_id(),
+            quote: Token {
+                id: TokenId {
+                    ledger_id: setup.base_ledger_id(),
+                },
+                metadata: TokenMetadata {
+                    symbol: "ckSOL".to_string(),
+                    decimals: 9,
+                },
             },
             ..setup.add_trading_pair_request()
         })
@@ -947,6 +972,18 @@ async fn should_fail_withdraw_when_ledger_is_stopped() {
         setup.dex_client_with_caller(user).get_balance(cksol).await,
         expected_balance(deposit_amount)
     );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_get_events() {
+    let setup = Setup::new().await;
+
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 1);
+        assert_matches!(events[0], dex_types_internal::event::EventType::Init(_));
+    });
 
     setup.drop().await;
 }
