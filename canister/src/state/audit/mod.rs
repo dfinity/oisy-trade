@@ -1,6 +1,7 @@
 use super::State;
-use crate::state::event::{Event, EventType};
+use crate::state::event::{AddTradingPairEvent, Event, EventType};
 use crate::storage;
+use dex_types_internal::UpgradeArg;
 
 #[cfg(test)]
 mod tests;
@@ -17,23 +18,30 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
         EventType::Init(_) => {
             panic!("BUG: state re-initialization is not allowed");
         }
-        EventType::Upgrade(upgrade_arg) => {
-            if let Some(mode) = upgrade_arg.mode.clone() {
-                state.set_mode(mode);
+        EventType::Upgrade(UpgradeArg { mode }) => {
+            if let Some(mode) = mode {
+                state.set_mode(mode.clone());
             }
         }
-        EventType::AddTradingPair(event) => {
+        EventType::AddTradingPair(AddTradingPairEvent {
+            base,
+            quote,
+            tick_size,
+            lot_size,
+            base_metadata,
+            quote_metadata,
+        }) => {
             let pair = order::TradingPair {
-                base: event.base,
-                quote: event.quote,
+                base: *base,
+                quote: *quote,
             };
             state
                 .add_trading_pair(
                     pair,
-                    event.base_metadata.clone(),
-                    event.quote_metadata.clone(),
-                    event.tick_size,
-                    event.lot_size,
+                    base_metadata.clone(),
+                    quote_metadata.clone(),
+                    *tick_size,
+                    *lot_size,
                 )
                 .expect("BUG: replaying AddTradingPair event should succeed");
         }
