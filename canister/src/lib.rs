@@ -106,13 +106,17 @@ pub async fn withdraw(
     })?;
 
     // Perform the ledger transfer (with automatic BadFee retry).
-    match ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await {
-        Ok(ok) => {
-            state::with_state_mut(|s| {
-                s.set_cached_fee(order::TokenId::from(token_id), ok.ledger_fee);
-            });
-            Ok(ok.response)
-        }
+    let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
+
+    // Update the fee cache whenever a fee was learned, regardless of success/failure.
+    if let Some(fee) = outcome.ledger_fee {
+        state::with_state_mut(|s| {
+            s.set_cached_fee(order::TokenId::from(token_id.clone()), fee);
+        });
+    }
+
+    match outcome.result {
+        Ok(response) => Ok(response),
         Err(e) => {
             // Credit back on failure so the user doesn't lose funds.
             state::with_state_mut(|s| {

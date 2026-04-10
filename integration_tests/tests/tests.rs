@@ -659,6 +659,163 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
 }
 
 #[tokio::test]
+async fn should_withdraw_twice_and_cache_fee() {
+    let setup = Setup::new().await;
+    let user = Principal::from_slice(&[0x01]);
+    let client = setup.dex_client_with_caller(user);
+    let cksol = TokenId {
+        ledger_id: setup.base_ledger_id(),
+    };
+    let fee = setup.base_token_ledger().icrc1_fee().await;
+
+    let deposit_amount = 10_000_000u64;
+    setup
+        .deposit_flow(user, cksol.clone())
+        .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+        .approve(deposit_amount + BASE_LEDGER_FEE)
+        .deposit(deposit_amount)
+        .execute()
+        .await;
+
+    // First withdrawal: fee cache is empty (0), so the ledger rejects with BadFee
+    // and the retry succeeds. The fee gets cached.
+    let first_amount = 3_000_000u64;
+    client
+        .withdraw(WithdrawRequest {
+            token_id: cksol.clone(),
+            amount: Nat::from(first_amount),
+        })
+        .await
+        .expect("first withdrawal failed");
+
+    let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
+    assert_eq!(ledger_balance, Nat::from(first_amount) - fee.clone());
+
+    // Second withdrawal: fee is now cached, so the first icrc1_transfer attempt
+    // succeeds immediately (no BadFee round-trip).
+    let second_amount = 2_000_000u64;
+    client
+        .withdraw(WithdrawRequest {
+            token_id: cksol.clone(),
+            amount: Nat::from(second_amount),
+        })
+        .await
+        .expect("second withdrawal failed");
+
+    let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
+    assert_eq!(
+        ledger_balance,
+        Nat::from(first_amount + second_amount) - fee.clone() * 2u64
+    );
+    assert_eq!(
+        client.get_balance(cksol.clone()).await,
+        expected_balance(deposit_amount - first_amount - second_amount),
+    );
+
+    // Third attempt with amount <= fee: hits the early cached-fee check in lib.rs
+    // (no balance debit, no ledger call).
+    let result = client
+        .withdraw(WithdrawRequest {
+            token_id: cksol,
+            amount: fee.clone(),
+        })
+        .await;
+    assert_eq!(
+        result,
+        Err(WithdrawError::AmountTooSmall {
+            min_amount: fee + 1u64,
+        })
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_cache_fee_on_failed_withdrawal() {
+    let setup = Setup::new().await;
+    let user = Principal::from_slice(&[0x01]);
+    let client = setup.dex_client_with_caller(user);
+    let cksol = TokenId {
+        ledger_id: setup.base_ledger_id(),
+    };
+    let fee = setup.base_token_ledger().icrc1_fee().await;
+
+    // Deposit exactly the fee amount.
+    setup
+        .deposit_flow(user, cksol.clone())
+        .mint(fee.clone() + 2 * BASE_LEDGER_FEE)
+        .approve(fee.clone() + BASE_LEDGER_FEE)
+        .deposit(fee.clone())
+        .execute()
+        .await;
+
+    // First attempt: cache is 0, passes early check, debits balance,
+    // calls ledger which returns BadFee, amount <= real fee → AmountTooSmall.
+    // The fee should still be cached from the BadFee response.
+    let result = client
+        .withdraw(WithdrawRequest {
+            token_id: cksol.clone(),
+            amount: fee.clone(),
+        })
+        .await;
+    assert_eq!(
+        result,
+        Err(WithdrawError::AmountTooSmall {
+            min_amount: fee.clone() + 1u64,
+        })
+    );
+
+    // Balance should be restored (credit-back after failure).
+    assert_eq!(
+        client.get_balance(cksol.clone()).await,
+        Balance {
+            free: fee.clone(),
+            reserved: Nat::from(0u64),
+        }
+    );
+
+    // Second attempt with the same too-small amount: this time the cached fee
+    // causes an early rejection in lib.rs (no balance debit, no ledger call).
+    // The error is identical, proving the fee was cached.
+    let result = client
+        .withdraw(WithdrawRequest {
+            token_id: cksol.clone(),
+            amount: fee.clone(),
+        })
+        .await;
+    assert_eq!(
+        result,
+        Err(WithdrawError::AmountTooSmall {
+            min_amount: fee.clone() + 1u64,
+        })
+    );
+
+    // Deposit more and withdraw successfully, proving the fee cache is correct.
+    let extra = 1_000_000u64;
+    setup
+        .deposit_flow(user, cksol.clone())
+        .mint(extra + 2 * BASE_LEDGER_FEE)
+        .approve(extra + BASE_LEDGER_FEE)
+        .deposit(extra)
+        .execute()
+        .await;
+
+    let withdraw_amount = fee.clone() + extra;
+    client
+        .withdraw(WithdrawRequest {
+            token_id: cksol,
+            amount: withdraw_amount.clone(),
+        })
+        .await
+        .expect("withdrawal after fee cache should succeed");
+
+    let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
+    assert_eq!(ledger_balance, withdraw_amount - fee);
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_fail_withdraw_with_insufficient_balance() {
     let setup = Setup::new().await;
     let user = Principal::from_slice(&[0x01]);
@@ -807,7 +964,7 @@ async fn should_not_withdraw_reserved_balance() {
     // Withdrawal should fail — cannot withdraw reserved funds
     let result = client
         .withdraw(WithdrawRequest {
-            token_id: cksol,
+            token_id: cksol.clone(),
             amount: Nat::from(deposit_amount),
         })
         .await;
@@ -817,6 +974,15 @@ async fn should_not_withdraw_reserved_balance() {
         Err(WithdrawError::InsufficientBalance {
             available: Nat::from(0u64),
         })
+    );
+
+    // Reserved balance must be untouched after the failed withdrawal.
+    assert_eq!(
+        client.get_balance(cksol).await,
+        Balance {
+            free: 0u64.into(),
+            reserved: deposit_amount.into(),
+        }
     );
 
     setup.drop().await;

@@ -4,11 +4,12 @@ use dex_types::{
     WithdrawError, WithdrawResponse,
 };
 
-pub(crate) struct WithdrawOk {
-    pub response: WithdrawResponse,
-    /// The ledger fee used for the successful transfer. The caller should
-    /// persist this so that future withdrawals skip the BadFee round-trip.
-    pub ledger_fee: candid::Nat,
+pub(crate) struct WithdrawOutcome {
+    pub result: Result<WithdrawResponse, WithdrawError>,
+    /// The ledger fee learned during this attempt, if any.
+    /// The caller should persist this so that future withdrawals skip the
+    /// BadFee round-trip. `None` when the ledger was unreachable.
+    pub ledger_fee: Option<candid::Nat>,
 }
 
 /// Result of a single `icrc1_transfer` call, keeping `BadFee` separate so
@@ -78,29 +79,31 @@ pub async fn deposit(
 /// Transfer tokens from the DEX canister to `to` via `icrc1_transfer`.
 ///
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
-/// `BadFee`, the correct fee is used for a single retry. Returns the fee
-/// that was accepted so the caller can update its cache.
+/// `BadFee`, the correct fee is used for a single retry.
 pub async fn withdraw(
     token: &dex_types::TokenId,
     to: candid::Principal,
     amount: candid::Nat,
     cached_fee: candid::Nat,
     runtime: &impl Runtime,
-) -> Result<WithdrawOk, WithdrawError> {
+) -> WithdrawOutcome {
     let transfer_amount = amount.clone() - cached_fee.clone();
     match icrc1_transfer(token, to, transfer_amount, cached_fee.clone(), runtime).await {
-        Ok(response) => Ok(WithdrawOk {
-            response,
-            ledger_fee: cached_fee,
-        }),
+        Ok(response) => WithdrawOutcome {
+            result: Ok(response),
+            ledger_fee: Some(cached_fee),
+        },
         Err(TransferError::BadFee { expected_fee }) => {
             if amount <= expected_fee {
-                return Err(WithdrawError::AmountTooSmall {
-                    min_amount: expected_fee + 1u64,
-                });
+                return WithdrawOutcome {
+                    result: Err(WithdrawError::AmountTooSmall {
+                        min_amount: expected_fee.clone() + 1u64,
+                    }),
+                    ledger_fee: Some(expected_fee),
+                };
             }
             let retry_transfer_amount = amount - expected_fee.clone();
-            let response = icrc1_transfer(
+            match icrc1_transfer(
                 token,
                 to,
                 retry_transfer_amount,
@@ -108,20 +111,29 @@ pub async fn withdraw(
                 runtime,
             )
             .await
-            .map_err(|e| match e {
-                TransferError::BadFee { .. } => {
-                    WithdrawError::LedgerError(LedgerTransferError::InternalError(
-                        "ledger fee changed between retries".to_string(),
-                    ))
-                }
-                TransferError::Other(e) => e,
-            })?;
-            Ok(WithdrawOk {
-                response,
-                ledger_fee: expected_fee,
-            })
+            {
+                Ok(response) => WithdrawOutcome {
+                    result: Ok(response),
+                    ledger_fee: Some(expected_fee),
+                },
+                Err(TransferError::BadFee { .. }) => WithdrawOutcome {
+                    result: Err(WithdrawError::LedgerError(
+                        LedgerTransferError::InternalError(
+                            "ledger fee changed between retries".to_string(),
+                        ),
+                    )),
+                    ledger_fee: Some(expected_fee),
+                },
+                Err(TransferError::Other(e)) => WithdrawOutcome {
+                    result: Err(e),
+                    ledger_fee: Some(expected_fee),
+                },
+            }
         }
-        Err(TransferError::Other(e)) => Err(e),
+        Err(TransferError::Other(e)) => WithdrawOutcome {
+            result: Err(e),
+            ledger_fee: None,
+        },
     }
 }
 
