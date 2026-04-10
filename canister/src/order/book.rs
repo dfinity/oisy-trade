@@ -5,7 +5,7 @@ use super::{
 use dex_types::OrderStatus;
 use std::cmp::Reverse;
 use std::collections::btree_map;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Central limit order book for a single trading pair.
 ///
@@ -30,6 +30,8 @@ pub struct OrderBook {
     asks: BTreeMap<Price, VecDeque<RestingOrder>>,
     /// Index mapping order sequences to their location (side, price) for O(log n) lookup.
     resting_orders: BTreeMap<OrderSeq, (Side, Price)>,
+    /// Sequences of orders that were fully filled since the last drain.
+    filled_orders: BTreeSet<OrderSeq>,
 }
 
 impl OrderBook {
@@ -44,6 +46,7 @@ impl OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             resting_orders: BTreeMap::new(),
+            filled_orders: BTreeSet::new(),
         }
     }
 
@@ -116,6 +119,7 @@ impl OrderBook {
                         &mut order,
                         &mut fills,
                         &mut self.resting_orders,
+                        &mut self.filled_orders,
                     );
                 }
             }
@@ -134,12 +138,14 @@ impl OrderBook {
                         &mut order,
                         &mut fills,
                         &mut self.resting_orders,
+                        &mut self.filled_orders,
                     );
                 }
             }
         }
 
         if order.remaining_quantity().is_zero() {
+            self.filled_orders.insert(order.id());
             Ok(MatchResult::Filled { fills })
         } else {
             let resting_order_seq = order.id();
@@ -217,6 +223,12 @@ impl OrderBook {
         None
     }
 
+    /// Drain and return the set of order sequences that were fully filled
+    /// since the last call.
+    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
+        std::mem::take(&mut self.filled_orders)
+    }
+
     fn insert_order(&mut self, order: Order) {
         let side = order.side();
         let price = order.price();
@@ -239,6 +251,7 @@ fn fill_against_queue<K: Ord>(
     order: &mut Order,
     fills: &mut Vec<Fill>,
     orders_index: &mut BTreeMap<OrderSeq, (Side, Price)>,
+    filled_orders: &mut BTreeSet<OrderSeq>,
 ) {
     let resting_orders = entry.get_mut();
     while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
@@ -263,6 +276,7 @@ fn fill_against_queue<K: Ord>(
         if resting.remaining_quantity().is_zero() {
             let filled = resting_orders.pop_front().expect("front exists");
             assert!(orders_index.remove(&filled.id()).is_some());
+            filled_orders.insert(filled.id());
         }
     }
     if resting_orders.is_empty() {
