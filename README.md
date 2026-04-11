@@ -4,11 +4,20 @@
 
 ## Table of Contents
 
-- [Architecture](#architecture-building_construction)
-- [Deployment](#deployment-rocket)
-- [Development](#development-hammer_and_wrench)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Deployment](#deployment)
+- [Development](#development)
 
-## Architecture :building_construction:
+<a id="key-features"></a>
+## :sparkles: Key Features
+
+- **CEX-like experience** — deposit once, trade as much as you want, withdraw anytime
+- **Fully onchain order book** — central limit order book (CLOB) running entirely within a single canister
+- **Permissionless trading** — any principal can trade on any active pair, no allowlisting required
+
+<a id="architecture"></a>
+## :building_construction: Architecture
 
 - **Single canister**: all order book state, matching, and settlement live in one canister.
 - **Synchronous matching engine**: token transfers only happen at the deposit/withdrawal edges; the matching engine operates entirely on internal balances, with no async complexity.
@@ -16,13 +25,15 @@
 
 See the [design document](docs/design.md) for the full architecture.
 
-## Deployment :rocket:
+<a id="deployment"></a>
+## :rocket: Deployment
 
-| Environment | Canister ID                    | Dashboard                                                                            |
-|-------------|--------------------------------|--------------------------------------------------------------------------------------|
-| Staging     | `proc5-daaaa-aaaar-qb5va-cai` | [View](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) |
+| Environment         | Canister ID                                                                                                  | Listings          |
+|---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
+| :test_tube: Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
 
-## Development :hammer_and_wrench:
+<a id="development"></a>
+## :hammer_and_wrench: Development
 
 ### Prerequisites
 
