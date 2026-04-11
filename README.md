@@ -2,6 +2,12 @@
 
 > Order book DEX on the [Internet Computer](https://internetcomputer.org/).
 
+## Table of Contents
+
+- [Architecture](#architecture-building_construction)
+- [Deployment](#deployment-rocket)
+- [Development](#development-hammer_and_wrench)
+
 ## Architecture :building_construction:
 
 - **Single canister**: all order book state, matching, and settlement live in one canister.
