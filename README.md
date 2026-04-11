@@ -1,5 +1,10 @@
 # DEX
 
+[![CI](https://github.com/dfinity/dex/actions/workflows/ci.yml/badge.svg)](https://github.com/dfinity/dex/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Internet Computer](https://img.shields.io/badge/Internet%20Computer-mainnet-blueviolet.svg)](https://internetcomputer.org/)
+
 > Order book DEX on the [Internet Computer](https://internetcomputer.org/).
 
 ## Table of Contents
