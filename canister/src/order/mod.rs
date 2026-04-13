@@ -24,14 +24,31 @@ impl From<dex_types::Side> for Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrderBookId(u64);
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct OrderBookId(#[n(0)] u64);
 
 impl OrderBookId {
     pub const ZERO: Self = Self(0);
+    pub const ONE: Self = Self(1);
 
     pub const fn new(id: u64) -> Self {
         Self(id)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
     }
 
     pub fn increment(&mut self) {
@@ -115,8 +132,10 @@ impl From<OrderId> for String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TokenId(Principal);
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
+pub struct TokenId(#[cbor(n(0), with = "icrc_cbor::principal")] Principal);
 
 impl TokenId {
     pub const fn new(principal: Principal) -> Self {
@@ -140,9 +159,11 @@ impl From<TokenId> for dex_types::TokenId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct TokenMetadata {
+    #[n(0)]
     pub symbol: String,
+    #[n(1)]
     pub decimals: u8,
 }
 
@@ -220,8 +241,8 @@ impl Price {
 }
 
 /// Minimum price increment for a trading pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TickSize(NonZeroU64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
+pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
 
 impl TickSize {
     pub const fn new(value: NonZeroU64) -> Self {
@@ -240,8 +261,8 @@ impl From<TickSize> for u64 {
 }
 
 /// Minimum order quantity for a trading pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LotSize(NonZeroU64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
+pub struct LotSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
 
 impl LotSize {
     pub const fn new(value: NonZeroU64) -> Self {

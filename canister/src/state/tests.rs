@@ -53,8 +53,8 @@ mod assert_caller_is_allowed {
     }
 }
 
-mod add_trading_pair {
-    use crate::order::{LotSize, TickSize, TokenId, TokenMetadata, TradingPair};
+mod record_trading_pair {
+    use crate::order::{OrderBookId, TokenId, TokenMetadata, TradingPair};
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata,
@@ -63,17 +63,16 @@ mod add_trading_pair {
     use candid::Principal;
 
     #[test]
-    fn should_add_trading_pair_and_store_token_metadata() {
+    fn should_store_token_metadata() {
         let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
 
         assert_eq!(state.token_metadata(&icp_token_id()), Some(&icp_metadata()));
         assert_eq!(
@@ -92,183 +91,66 @@ mod add_trading_pair {
         };
 
         // First pair: ICP/ckBTC
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        // Second pair: ICP/ckETH — ICP already registered with same metadata
-        state
-            .add_trading_pair(
-                TradingPair {
-                    base: icp_token_id(),
-                    quote: token_c,
-                },
-                icp_metadata(),
-                token_c_metadata,
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn should_reject_inconsistent_metadata_for_base_token() {
-        let mut state = test_fixtures::state();
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let wrong_metadata = TokenMetadata {
-            symbol: "WRONG".to_string(),
-            decimals: 99,
-        };
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: icp_token_id(),
-                quote: token_c,
-            },
-            wrong_metadata.clone(),
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: icp_token_id().into(),
-                expected: icp_metadata().into(),
-                submitted: wrong_metadata.into(),
-            })
-        );
-    }
-
-    #[test]
-    fn should_reject_inconsistent_metadata_for_quote_token() {
-        let mut state = test_fixtures::state();
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let wrong_metadata = TokenMetadata {
-            symbol: "WRONG".to_string(),
-            decimals: 99,
-        };
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: token_c,
-                quote: ckbtc_token_id(),
-            },
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            wrong_metadata.clone(),
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: ckbtc_token_id().into(),
-                expected: ckbtc_metadata().into(),
-                submitted: wrong_metadata.into(),
-            })
-        );
-    }
-
-    #[test]
-    fn should_not_mutate_state_on_inconsistent_metadata_error() {
-        let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-        let state_before = state.clone();
-
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: icp_token_id(),
-                quote: token_c,
-            },
-            TokenMetadata {
-                symbol: "WRONG".to_string(),
-                decimals: 99,
-            },
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert!(result.is_err());
-        assert_eq!(state_before, state);
-    }
-
-    #[test]
-    fn should_reject_duplicate_trading_pair() {
-        let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let result = state.add_trading_pair(
+        state.record_trading_pair(
+            OrderBookId::ZERO,
             icp_ckbtc_trading_pair(),
             icp_metadata(),
             ckbtc_metadata(),
-            TickSize::new(std::num::NonZeroU64::new(20).unwrap()),
-            LotSize::new(std::num::NonZeroU64::new(2_000_000).unwrap()),
+            TICK_SIZE,
+            LOT_SIZE,
         );
 
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::TradingPairAlreadyExists)
+        // Second pair: ICP/ckETH — ICP already registered with same metadata
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            token_c_metadata,
+            TICK_SIZE,
+            LOT_SIZE,
         );
+    }
+
+    #[test]
+    fn should_assign_distinct_order_book_ids() {
+        let mut state = test_fixtures::state();
+        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
+
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        let book_ids: Vec<_> = state.trading_pairs().values().collect();
+        assert_eq!(book_ids.len(), 2);
+        assert_ne!(book_ids[0], book_ids[1]);
     }
 }
 
 mod add_limit_order {
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
@@ -281,15 +163,14 @@ mod add_limit_order {
     fn should_not_insert_empty_balance_on_failed_reservation() {
         let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();
-        state
-            .add_trading_pair(
-                pair.clone(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair.clone(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
         let user = Principal::from_slice(&[0x01]);
         let pending = PendingOrder {
             side: Side::Buy,
@@ -307,7 +188,7 @@ mod add_limit_order {
 
 mod settle_fills {
     use crate::balance::Balance;
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
@@ -635,9 +516,14 @@ mod settle_fills {
         })
         .unwrap();
         let pair = icp_ckbtc_trading_pair();
-        state
-            .add_trading_pair(pair, icp_metadata(), ckbtc_metadata(), TICK_SIZE, LOT_SIZE)
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair,
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
         state
     }
 

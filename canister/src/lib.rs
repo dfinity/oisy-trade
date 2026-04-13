@@ -1,4 +1,3 @@
-use crate::order::TokenId;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
     DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
@@ -8,6 +7,7 @@ use std::{num::NonZeroU64, time::Duration};
 pub use runtime::{IC_RUNTIME, Runtime};
 
 pub mod balance;
+pub mod cbor;
 pub mod guard;
 pub mod lifecycle;
 pub mod order;
@@ -129,19 +129,35 @@ pub fn add_trading_pair(
     if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
-    let pair = order::TradingPair {
-        base: TokenId::from(request.base.id),
-        quote: TokenId::from(request.quote.id),
-    };
-    let base_metadata = order::TokenMetadata::from(request.base.metadata);
-    let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
     let tick_size = order::TickSize::new(
         NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    state::with_state_mut(|s| {
-        s.add_trading_pair(pair, base_metadata, quote_metadata, tick_size, lot_size)
+    state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
+        let pair = order::TradingPair {
+            base: order::TokenId::from(request.base.id),
+            quote: order::TokenId::from(request.quote.id),
+        };
+        if s.has_trading_pair(&pair) {
+            return Err(AddTradingPairError::TradingPairAlreadyExists);
+        }
+        let base_metadata = order::TokenMetadata::from(request.base.metadata);
+        let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
+        s.check_token_metadata_consistency(pair.base, &base_metadata)?;
+        s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
+        let book_id = s.next_book_id();
+        let event = state::event::AddTradingPairEvent {
+            book_id,
+            base: pair.base,
+            quote: pair.quote,
+            tick_size,
+            lot_size,
+            base_metadata,
+            quote_metadata,
+        };
+        state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
+        Ok(())
     })
 }
