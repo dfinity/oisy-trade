@@ -24,14 +24,21 @@ impl From<dex_types::Side> for Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrderBookId(u64);
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct OrderBookId(#[n(0)] u64);
 
 impl OrderBookId {
     pub const ZERO: Self = Self(0);
 
     pub const fn new(id: u64) -> Self {
         Self(id)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
     }
 
     pub fn increment(&mut self) {

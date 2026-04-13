@@ -20,10 +20,11 @@ fn upgrade_event(mode: Option<Mode>) -> Event {
 }
 
 fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
-    use crate::order::{self, TokenMetadata};
+    use crate::order::{self, OrderBookId, TokenMetadata};
     Event {
         timestamp: 2,
         payload: EventType::AddTradingPair(AddTradingPairEvent {
+            book_id: OrderBookId::ZERO,
             base: order::TokenId::new(base),
             quote: order::TokenId::new(quote),
             tick_size: TickSize::new(NonZeroU64::new(10).unwrap()),

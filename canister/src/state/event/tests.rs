@@ -30,6 +30,7 @@ fn arb_token_metadata() -> impl Strategy<Value = crate::order::TokenMetadata> {
 
 fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
     (
+        any::<u64>(),
         arb_principal(),
         arb_principal(),
         1..u64::MAX,
@@ -38,8 +39,9 @@ fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
         arb_token_metadata(),
     )
         .prop_map(
-            |(base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
+            |(book_id, base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
                 AddTradingPairEvent {
+                    book_id: crate::order::OrderBookId::new(book_id),
                     base: crate::order::TokenId::new(base),
                     quote: crate::order::TokenId::new(quote),
                     tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),

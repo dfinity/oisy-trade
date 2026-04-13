@@ -1,4 +1,4 @@
-use crate::order::{LotSize, TickSize, TokenId, TokenMetadata};
+use crate::order::{LotSize, OrderBookId, TickSize, TokenId, TokenMetadata};
 use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -29,16 +29,18 @@ pub enum EventType {
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddTradingPairEvent {
     #[n(0)]
-    pub base: TokenId,
+    pub book_id: OrderBookId,
     #[n(1)]
-    pub quote: TokenId,
+    pub base: TokenId,
     #[n(2)]
-    pub tick_size: TickSize,
+    pub quote: TokenId,
     #[n(3)]
-    pub lot_size: LotSize,
+    pub tick_size: TickSize,
     #[n(4)]
-    pub base_metadata: TokenMetadata,
+    pub lot_size: LotSize,
     #[n(5)]
+    pub base_metadata: TokenMetadata,
+    #[n(6)]
     pub quote_metadata: TokenMetadata,
 }
 

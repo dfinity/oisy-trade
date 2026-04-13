@@ -143,13 +143,19 @@ pub fn add_trading_pair(
         if s.has_trading_pair(&pair) {
             return Err(AddTradingPairError::TradingPairAlreadyExists);
         }
+        let base_metadata = order::TokenMetadata::from(request.base.metadata);
+        let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
+        s.check_token_metadata_consistency(pair.base, &base_metadata)?;
+        s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
+        let book_id = s.peek_next_book_id();
         let event = state::event::AddTradingPairEvent {
+            book_id,
             base: pair.base,
             quote: pair.quote,
             tick_size,
             lot_size,
-            base_metadata: order::TokenMetadata::from(request.base.metadata),
-            quote_metadata: order::TokenMetadata::from(request.quote.metadata),
+            base_metadata,
+            quote_metadata,
         };
         state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
         Ok(())

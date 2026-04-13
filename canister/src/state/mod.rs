@@ -238,6 +238,10 @@ impl State {
         }
     }
 
+    pub fn peek_next_book_id(&self) -> OrderBookId {
+        self.next_book_id
+    }
+
     pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
         self.trading_pairs.contains_key(pair)
     }
@@ -294,7 +298,7 @@ impl State {
         }
     }
 
-    fn check_token_metadata_consistency(
+    pub fn check_token_metadata_consistency(
         &self,
         token_id: TokenId,
         submitted: &TokenMetadata,

@@ -24,6 +24,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {
+            book_id,
             base,
             quote,
             tick_size,
@@ -35,15 +36,14 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 base: *base,
                 quote: *quote,
             };
-            state
-                .add_trading_pair(
-                    pair,
-                    base_metadata.clone(),
-                    quote_metadata.clone(),
-                    *tick_size,
-                    *lot_size,
-                )
-                .expect("BUG: replaying AddTradingPair event should succeed");
+            state.record_trading_pair(
+                *book_id,
+                pair,
+                base_metadata.clone(),
+                quote_metadata.clone(),
+                *tick_size,
+                *lot_size,
+            );
         }
     }
 }

@@ -18,6 +18,7 @@ pub enum EventType {
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct AddTradingPairEvent {
+    pub book_id: u64,
     pub base: TokenId,
     pub quote: TokenId,
     pub tick_size: u64,
