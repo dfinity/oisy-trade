@@ -441,6 +441,7 @@ mod order_book {
 mod process_pending_orders {
     use crate::order::{PendingOrder, Price, Quantity, Side};
     use crate::test_fixtures::{LOT_SIZE, order_book};
+    use std::collections::BTreeSet;
 
     fn buy_pending(price: u64, quantity: u64) -> PendingOrder {
         PendingOrder {
@@ -477,7 +478,7 @@ mod process_pending_orders {
         let output = book.process_pending_orders();
 
         assert!(output.fills.is_empty());
-        assert_eq!(output.resting_orders, vec![buy_id.seq()]);
+        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()]));
         assert!(book.take_filled_orders().is_empty());
     }
 
@@ -494,8 +495,6 @@ mod process_pending_orders {
         assert_eq!(output.fills.len(), 1);
         assert!(filled.contains(&sell_id.seq())); // maker
         assert!(filled.contains(&buy_id.seq())); // taker
-        // BUG: sell_id currently appears in resting_orders too, because it rested
-        // before being filled in the same batch. It should not.
         assert!(output.resting_orders.is_empty());
     }
 
@@ -513,9 +512,7 @@ mod process_pending_orders {
         assert_eq!(output.fills.len(), 1);
         assert!(filled.contains(&sell_id.seq())); // maker fully filled
         assert!(!filled.contains(&buy_id.seq())); // taker not fully filled
-        // BUG: sell_id currently also appears in resting_orders because it rested
-        // before being filled in the same batch. Only buy_id should be here.
-        assert_eq!(output.resting_orders, vec![buy_id.seq()]); // taker rests
+        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()])); // taker rests
     }
 
     #[test]
