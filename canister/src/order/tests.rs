@@ -437,3 +437,66 @@ mod order_book {
         }
     }
 }
+
+mod history {
+    use crate::order::{
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side,
+        TokenId, TradingPair,
+    };
+    use candid::Principal;
+    use dex_types::OrderStatus;
+
+    fn test_id(seq: u64) -> OrderId {
+        OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
+    }
+
+    fn test_record() -> OrderRecord {
+        OrderRecord {
+            owner: Principal::anonymous(),
+            pair: TradingPair {
+                base: TokenId::new(Principal::anonymous()),
+                quote: TokenId::new(Principal::anonymous()),
+            },
+            side: Side::Buy,
+            price: Price::new(100),
+            quantity: Quantity::from(1_000_000u64),
+            status: OrderStatus::Pending,
+        }
+    }
+
+    #[test]
+    fn insert_once_and_get() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        let record = test_record();
+        history.insert_once(id, record.clone());
+
+        assert_eq!(history.get(&id), Some(&record));
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate order ID")]
+    fn insert_once_panics_on_duplicate() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        history.insert_once(id, test_record());
+        history.insert_once(id, test_record());
+    }
+
+    #[test]
+    fn get_status_returns_not_found_for_missing() {
+        let history = OrderHistory::new();
+        assert_eq!(history.get_status(&test_id(42)), OrderStatus::NotFound);
+    }
+
+    #[test]
+    fn get_status_mut_updates_status() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        history.insert_once(id, test_record());
+
+        assert_eq!(history.get_status(&id), OrderStatus::Pending);
+        *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
+        assert_eq!(history.get_status(&id), OrderStatus::Filled);
+    }
+}
