@@ -269,6 +269,31 @@ impl State {
         Ok(())
     }
 
+    pub fn record_trading_pair(
+        &mut self,
+        book_id: OrderBookId,
+        pair: TradingPair,
+        base_metadata: TokenMetadata,
+        quote_metadata: TokenMetadata,
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) {
+        self.record_token(pair.base, base_metadata);
+        self.record_token(pair.quote, quote_metadata);
+        assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
+        let book = OrderBook::new(book_id, tick_size, lot_size);
+        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        assert_eq!(self.order_books.insert(book_id, book), None);
+        self.next_book_id.increment();
+    }
+
+    fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
+        let prev_metadata = self.tokens.insert(token_id, metadata.clone());
+        if let Some(prev_metadata) = prev_metadata {
+            assert_eq!(prev_metadata, metadata);
+        }
+    }
+
     fn check_token_metadata_consistency(
         &self,
         token_id: TokenId,
