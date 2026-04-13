@@ -524,6 +524,19 @@ mod settle_fills {
         }
 
         #[test]
+        fn should_return_open_for_partially_filled_taker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            let buy_id = place_buy_order(&mut state, 100, 3 * lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
         fn should_return_filled_after_multi_fill_maker_depletion() {
             let mut state = setup();
             let lot = u64::from(LOT_SIZE);
