@@ -350,7 +350,7 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
     pub taker_order_seq: OrderSeq,

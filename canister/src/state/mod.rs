@@ -193,7 +193,7 @@ impl State {
         }
     }
 
-    fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
+    pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
         let taker = self
             .order_history
             .get(&OrderId::new(book_id, fill.taker_order_seq))

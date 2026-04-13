@@ -557,6 +557,94 @@ mod settle_fills {
         }
     }
 
+    mod settle_fill_ordering {
+        use super::*;
+        use crate::order::{OrderBookId, OrderId, OrderRecord};
+        use crate::test_fixtures::arbitrary::arb_fill;
+        use dex_types::OrderStatus;
+        use proptest::prelude::*;
+
+        const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+
+        proptest! {
+            #[test]
+            fn should_produce_same_state_regardless_of_fill_order(
+                fill1 in arb_fill(0),
+                fill2 in arb_fill(1),
+                // Small range so principals can collide (self-trade, shared maker/taker)
+                buyer1_id in 1..=4u8,
+                seller1_id in 1..=4u8,
+                buyer2_id in 1..=4u8,
+                seller2_id in 1..=4u8,
+            ) {
+                let mut state = setup();
+                let pair = icp_ckbtc_trading_pair();
+                let principals: [(Principal, Principal); 2] = [
+                    (Principal::from_slice(&[buyer1_id]), Principal::from_slice(&[seller1_id])),
+                    (Principal::from_slice(&[buyer2_id]), Principal::from_slice(&[seller2_id])),
+                ];
+
+                // Register orders and fund balances for each fill
+                for (i, fill) in [&fill1, &fill2].iter().enumerate() {
+                    let (buyer, seller) = principals[i];
+                    let (taker_owner, maker_owner) = match fill.taker_side {
+                        Side::Buy => (buyer, seller),
+                        Side::Sell => (seller, buyer),
+                    };
+
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.taker_order_seq),
+                        OrderRecord {
+                            owner: taker_owner,
+                            pair: pair.clone(),
+                            side: fill.taker_side,
+                            price: fill.taker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+                    let maker_side = match fill.taker_side {
+                        Side::Buy => Side::Sell,
+                        Side::Sell => Side::Buy,
+                    };
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.maker_order_seq),
+                        OrderRecord {
+                            owner: maker_owner,
+                            pair: pair.clone(),
+                            side: maker_side,
+                            price: fill.maker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+
+                    // Buyer reserved at their order price (taker_price for buy
+                    // takers, maker_price for sell takers where maker is buyer).
+                    let buyer_price = match fill.taker_side {
+                        Side::Buy => fill.taker_price,
+                        Side::Sell => fill.maker_price,
+                    };
+                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
+                    state.deposit(buyer, pair.quote, buy_reserve.clone());
+                    state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
+                    state.deposit(seller, pair.base, fill.quantity.clone());
+                    state.balance_mut(seller, pair.base).reserve(fill.quantity.clone()).unwrap();
+                }
+
+                let mut state1 = state.clone();
+                state1.settle_fill(BOOK_ID, &pair, &fill1);
+                state1.settle_fill(BOOK_ID, &pair, &fill2);
+
+                let mut state2 = state;
+                state2.settle_fill(BOOK_ID, &pair, &fill2);
+                state2.settle_fill(BOOK_ID, &pair, &fill1);
+
+                prop_assert_eq!(state1, state2);
+            }
+        }
+    }
+
     fn balance(free: u64, reserved: u64) -> Balance {
         Balance::new(free, reserved)
     }
