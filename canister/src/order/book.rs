@@ -192,35 +192,23 @@ impl OrderBook {
     /// transitioned to resting (for status tracking).
     pub fn process_pending_orders(&mut self) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
-        let mut all_fills = Vec::new();
+        let mut all_fills = BTreeSet::new();
         let mut resting_order_seqs = BTreeSet::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
-                Ok(result) => match result {
-                    MatchResult::Filled { fills } => {
-                        for fill in &fills {
-                            if self.filled_orders.contains(&fill.maker_order_seq) {
-                                resting_order_seqs.remove(&fill.maker_order_seq);
-                            }
-                        }
-                        all_fills.extend(fills);
-                    }
-                    MatchResult::PartiallyFilled {
-                        fills,
-                        resting_order_seq,
-                    } => {
-                        for fill in &fills {
-                            if self.filled_orders.contains(&fill.maker_order_seq) {
-                                resting_order_seqs.remove(&fill.maker_order_seq);
-                            }
-                        }
-                        resting_order_seqs.insert(resting_order_seq);
-                        all_fills.extend(fills);
-                    }
-                    MatchResult::Resting { resting_order_seq } => {
-                        resting_order_seqs.insert(resting_order_seq);
-                    }
-                },
+                Ok(MatchResult::Filled { fills }) => {
+                    all_fills.extend(fills);
+                }
+                Ok(MatchResult::PartiallyFilled {
+                    fills,
+                    resting_order_seq,
+                }) => {
+                    resting_order_seqs.insert(resting_order_seq);
+                    all_fills.extend(fills);
+                }
+                Ok(MatchResult::Resting { resting_order_seq }) => {
+                    resting_order_seqs.insert(resting_order_seq);
+                }
                 Err(err) => {
                     panic!(
                         "BUG: failed to match order: {:?}. Order was validated when inserted; \
@@ -231,13 +219,16 @@ impl OrderBook {
                 }
             }
         }
+        // An order may rest and then get fully filled within the same batch.
+        // Remove those from resting so each order appears in exactly one set.
+        let resting_orders = &resting_order_seqs - &self.filled_orders;
         debug_assert!(
-            resting_order_seqs.is_disjoint(&self.filled_orders),
+            resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
         MatchingOutput {
             fills: all_fills,
-            resting_orders: resting_order_seqs,
+            resting_orders,
         }
     }
 
@@ -305,7 +296,7 @@ fn fill_against_queue<K: Ord>(
 /// Output of a matching round: fills produced and orders that began resting.
 #[derive(Debug)]
 pub struct MatchingOutput {
-    pub fills: Vec<Fill>,
+    pub fills: BTreeSet<Fill>,
     pub resting_orders: BTreeSet<OrderSeq>,
 }
 
@@ -350,7 +341,7 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
     pub taker_order_seq: OrderSeq,
