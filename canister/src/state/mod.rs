@@ -259,10 +259,10 @@ impl State {
     }
 
     fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
-        let prev_metadata = self.tokens.insert(token_id, metadata.clone());
-        if let Some(prev_metadata) = prev_metadata {
-            assert_eq!(prev_metadata, metadata);
-        }
+        self.tokens
+            .entry(token_id)
+            .and_modify(|existing| assert_eq!(existing, &metadata))
+            .or_insert(metadata);
     }
 
     pub fn check_token_metadata_consistency(
