@@ -25,6 +25,9 @@ pub trait Runtime {
 
     /// Checks if the given principal is a controller of the canister.
     fn is_controller(&self, principal: &Principal) -> bool;
+
+    /// Returns the number of instructions consumed since the beginning of the current message execution.
+    fn instruction_counter(&self) -> u64;
 }
 
 #[derive(Copy, Clone)]
@@ -56,5 +59,9 @@ impl Runtime for IcRuntime {
 
     fn is_controller(&self, principal: &Principal) -> bool {
         ic_cdk::api::is_controller(principal)
+    }
+
+    fn instruction_counter(&self) -> u64 {
+        ic_cdk::api::instruction_counter()
     }
 }

@@ -18,6 +18,7 @@ ic-cdk = { workspace = true }
 ic-http-types = { workspace = true }
 icrc-ledger-types = { workspace = true }
 pocket-ic = { workspace = true }
+scopeguard = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

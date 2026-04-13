@@ -148,6 +148,24 @@ pub struct TokenMetadata {
     pub decimals: u8,
 }
 
+impl From<dex_types::TokenMetadata> for TokenMetadata {
+    fn from(value: dex_types::TokenMetadata) -> Self {
+        Self {
+            symbol: value.symbol,
+            decimals: value.decimals,
+        }
+    }
+}
+
+impl From<TokenMetadata> for dex_types::TokenMetadata {
+    fn from(value: TokenMetadata) -> Self {
+        Self {
+            symbol: value.symbol,
+            decimals: value.decimals,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TradingPair {
     pub base: TokenId,
