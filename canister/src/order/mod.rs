@@ -25,7 +25,16 @@ impl From<dex_types::Side> for Side {
 }
 
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
     minicbor::Decode,
 )]
 pub struct OrderBookId(#[n(0)] u64);

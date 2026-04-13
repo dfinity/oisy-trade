@@ -4,7 +4,7 @@ use crate::order::{
 };
 use crate::state;
 use candid::Principal;
-use dex_types::LimitOrderRequest;
+use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -46,6 +46,26 @@ pub fn limit_order_request() -> LimitOrderRequest {
         side: dex_types::Side::Buy,
         price: 100,
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+    }
+}
+
+pub fn trading_pair_request(
+    base_id: impl Into<dex_types::TokenId>,
+    base_meta: dex_types::TokenMetadata,
+    quote_id: impl Into<dex_types::TokenId>,
+    quote_meta: dex_types::TokenMetadata,
+) -> AddTradingPairRequest {
+    AddTradingPairRequest {
+        base: Token {
+            id: base_id.into(),
+            metadata: base_meta,
+        },
+        quote: Token {
+            id: quote_id.into(),
+            metadata: quote_meta,
+        },
+        tick_size: TICK_SIZE.get(),
+        lot_size: LOT_SIZE.get(),
     }
 }
 
@@ -122,14 +142,14 @@ pub fn init_state_with_order_book() {
         .unwrap(),
     );
     state::with_state_mut(|s| {
-        s.add_trading_pair(
+        s.record_trading_pair(
+            TEST_BOOK_ID,
             icp_ckbtc_trading_pair(),
             icp_metadata(),
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
-        )
-        .unwrap();
+        );
     });
 }
 

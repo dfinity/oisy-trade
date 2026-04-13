@@ -88,12 +88,6 @@ impl State {
         }
     }
 
-    fn next_book_id(&mut self) -> OrderBookId {
-        let id = self.next_book_id;
-        self.next_book_id.increment();
-        id
-    }
-
     pub fn add_limit_order(
         &mut self,
         user: Principal,
@@ -244,33 +238,6 @@ impl State {
 
     pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
         self.trading_pairs.contains_key(pair)
-    }
-
-    /// Register a new trading pair with a new order book.
-    ///
-    /// Also validates and stores the token metadata for both the base and quote
-    /// tokens. If a token is already registered with different metadata, returns
-    /// [`AddTradingPairError::InconsistentTokenMetadata`].
-    pub fn add_trading_pair(
-        &mut self,
-        pair: TradingPair,
-        base_metadata: TokenMetadata,
-        quote_metadata: TokenMetadata,
-        tick_size: TickSize,
-        lot_size: LotSize,
-    ) -> Result<(), dex_types::AddTradingPairError> {
-        self.check_token_metadata_consistency(pair.base, &base_metadata)?;
-        self.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
-        if self.trading_pairs.contains_key(&pair) {
-            return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
-        }
-        self.tokens.entry(pair.base).or_insert(base_metadata);
-        self.tokens.entry(pair.quote).or_insert(quote_metadata);
-        let book_id = self.next_book_id();
-        let book = OrderBook::new(book_id, tick_size, lot_size);
-        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
-        assert_eq!(self.order_books.insert(book_id, book), None);
-        Ok(())
     }
 
     pub fn record_trading_pair(
