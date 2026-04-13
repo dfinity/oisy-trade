@@ -232,7 +232,7 @@ impl State {
         }
     }
 
-    pub fn peek_next_book_id(&self) -> OrderBookId {
+    pub fn next_book_id(&self) -> OrderBookId {
         self.next_book_id
     }
 

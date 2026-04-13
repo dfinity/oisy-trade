@@ -147,7 +147,7 @@ pub fn add_trading_pair(
         let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
         s.check_token_metadata_consistency(pair.base, &base_metadata)?;
         s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
-        let book_id = s.peek_next_book_id();
+        let book_id = s.next_book_id();
         let event = state::event::AddTradingPairEvent {
             book_id,
             base: pair.base,
