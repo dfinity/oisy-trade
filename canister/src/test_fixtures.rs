@@ -133,10 +133,10 @@ pub mod arbitrary {
         let tick = TICK_SIZE.get();
         let lot = u64::from(LOT_SIZE);
         (
-            any::<bool>(),   // side: true = Buy
-            1..100u64,       // price_a (in ticks)
-            1..100u64,       // price_b (in ticks)
-            1..10u64,        // quantity (in lots)
+            any::<bool>(), // side: true = Buy
+            1..100u64,     // price_a (in ticks)
+            1..100u64,     // price_b (in ticks)
+            1..10u64,      // quantity (in lots)
         )
             .prop_map(move |(is_buy, pa, pb, qty_lots)| {
                 let (taker_side, taker_price, maker_price) = if is_buy {

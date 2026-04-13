@@ -196,18 +196,11 @@ impl OrderBook {
         let mut resting_order_seqs = BTreeSet::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
-                Ok(MatchResult::Filled { fills }) => {
-                    all_fills.extend(fills);
-                }
-                Ok(MatchResult::PartiallyFilled {
-                    fills,
-                    resting_order_seq,
-                }) => {
-                    resting_order_seqs.insert(resting_order_seq);
-                    all_fills.extend(fills);
-                }
-                Ok(MatchResult::Resting { resting_order_seq }) => {
-                    resting_order_seqs.insert(resting_order_seq);
+                Ok(result) => {
+                    if let Some(resting_order_seq) = result.resting_order_seq() {
+                        resting_order_seqs.insert(resting_order_seq);
+                    }
+                    all_fills.extend(result.into_fills());
                 }
                 Err(err) => {
                     panic!(

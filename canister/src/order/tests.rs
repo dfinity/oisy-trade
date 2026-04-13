@@ -533,8 +533,8 @@ mod process_pending_orders {
 
 mod history {
     use crate::order::{
-        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side,
-        TokenId, TradingPair,
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side, TokenId,
+        TradingPair,
     };
     use candid::Principal;
     use dex_types::OrderStatus;
