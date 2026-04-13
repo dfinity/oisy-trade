@@ -12,6 +12,14 @@ proptest! {
     }
 }
 
+#[test]
+fn should_fail_to_decode_zero() {
+    let mut buf = vec![];
+    minicbor::encode(0u64, &mut buf).unwrap();
+    let result = minicbor::decode::<CborNonZeroU64>(&buf);
+    assert!(result.is_err());
+}
+
 #[derive(minicbor::Encode, minicbor::Decode)]
 #[cbor(transparent)]
 struct CborNonZeroU64(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
