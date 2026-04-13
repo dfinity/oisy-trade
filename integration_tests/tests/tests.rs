@@ -644,7 +644,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
-    let fee = setup.base_token_ledger().icrc1_fee().await;
+    let fee = Nat::from(BASE_LEDGER_FEE);
 
     // Deposit tokens first
     let deposit_amount = 10_000_000u64;
@@ -691,7 +691,7 @@ async fn should_withdraw_twice_and_cache_fee() {
     let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
-    let fee = setup.base_token_ledger().icrc1_fee().await;
+    let fee = Nat::from(BASE_LEDGER_FEE);
 
     let deposit_amount = 10_000_000u64;
     setup
@@ -759,7 +759,7 @@ async fn should_withdraw_twice_and_cache_fee() {
 async fn should_fail_withdraw_on_negative_cases() {
     let setup = Setup::new().await.with_trading_pair().await;
     let cksol = setup.base_token_id();
-    let fee = setup.base_token_ledger().icrc1_fee().await;
+    let fee = Nat::from(BASE_LEDGER_FEE);
 
     // --- Zero balance: withdraw should fail with InsufficientBalance ---
     {
