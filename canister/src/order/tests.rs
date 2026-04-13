@@ -438,6 +438,102 @@ mod order_book {
     }
 }
 
+mod process_pending_orders {
+    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::test_fixtures::{LOT_SIZE, order_book};
+
+    fn buy_pending(price: u64, quantity: u64) -> PendingOrder {
+        PendingOrder {
+            side: Side::Buy,
+            price: Price::new(price),
+            quantity: Quantity::from(quantity),
+        }
+    }
+
+    fn sell_pending(price: u64, quantity: u64) -> PendingOrder {
+        PendingOrder {
+            side: Side::Sell,
+            price: Price::new(price),
+            quantity: Quantity::from(quantity),
+        }
+    }
+
+    #[test]
+    fn should_return_empty_output_when_no_pending_orders() {
+        let mut book = order_book();
+        let output = book.process_pending_orders();
+
+        assert!(output.fills.is_empty());
+        assert!(output.resting_orders.is_empty());
+        assert!(book.take_filled_orders().is_empty());
+    }
+
+    #[test]
+    fn should_report_resting_order_when_no_match() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+
+        let output = book.process_pending_orders();
+
+        assert!(output.fills.is_empty());
+        assert_eq!(output.resting_orders, vec![buy_id.seq()]);
+        assert!(book.take_filled_orders().is_empty());
+    }
+
+    #[test]
+    fn should_report_filled_orders_after_exact_match() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
+        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+
+        let output = book.process_pending_orders();
+        let filled = book.take_filled_orders();
+
+        assert_eq!(output.fills.len(), 1);
+        assert!(filled.contains(&sell_id.seq())); // maker
+        assert!(filled.contains(&buy_id.seq())); // taker
+        // BUG: sell_id currently appears in resting_orders too, because it rested
+        // before being filled in the same batch. It should not.
+        assert!(output.resting_orders.is_empty());
+    }
+
+    #[test]
+    fn should_report_partial_fill_with_resting_remainder() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        // Sell 1 lot (maker), buy 3 lots (taker) -> taker partially fills, rests with 2
+        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
+        let buy_id = book.add_pending_order(buy_pending(100, 3 * lot)).unwrap();
+
+        let output = book.process_pending_orders();
+        let filled = book.take_filled_orders();
+
+        assert_eq!(output.fills.len(), 1);
+        assert!(filled.contains(&sell_id.seq())); // maker fully filled
+        assert!(!filled.contains(&buy_id.seq())); // taker not fully filled
+        // BUG: sell_id currently also appears in resting_orders because it rested
+        // before being filled in the same batch. Only buy_id should be here.
+        assert_eq!(output.resting_orders, vec![buy_id.seq()]); // taker rests
+    }
+
+    #[test]
+    fn take_filled_orders_should_drain() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.add_pending_order(sell_pending(100, lot)).unwrap();
+        book.add_pending_order(buy_pending(100, lot)).unwrap();
+        book.process_pending_orders();
+
+        let first_call = book.take_filled_orders();
+        let second_call = book.take_filled_orders();
+
+        assert_eq!(first_call.len(), 2);
+        assert!(second_call.is_empty());
+    }
+}
+
 mod history {
     use crate::order::{
         OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side,
