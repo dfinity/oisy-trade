@@ -137,8 +137,8 @@ pub fn add_trading_pair(
     );
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
-            base: order::TokenId::new(request.base.id.ledger_id),
-            quote: order::TokenId::new(request.quote.id.ledger_id),
+            base: order::TokenId::from(request.base.id),
+            quote: order::TokenId::from(request.quote.id),
         };
         if s.has_trading_pair(&pair) {
             return Err(AddTradingPairError::TradingPairAlreadyExists);
