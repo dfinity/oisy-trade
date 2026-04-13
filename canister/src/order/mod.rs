@@ -41,6 +41,7 @@ pub struct OrderBookId(#[n(0)] u64);
 
 impl OrderBookId {
     pub const ZERO: Self = Self(0);
+    pub const ONE: Self = Self(1);
 
     pub const fn new(id: u64) -> Self {
         Self(id)

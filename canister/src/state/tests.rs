@@ -102,7 +102,7 @@ mod record_trading_pair {
 
         // Second pair: ICP/ckETH — ICP already registered with same metadata
         state.record_trading_pair(
-            state.peek_next_book_id(),
+            OrderBookId::ONE,
             TradingPair {
                 base: icp_token_id(),
                 quote: token_c,
@@ -112,6 +112,40 @@ mod record_trading_pair {
             TICK_SIZE,
             LOT_SIZE,
         );
+    }
+
+    #[test]
+    fn should_assign_distinct_order_book_ids() {
+        let mut state = test_fixtures::state();
+        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
+
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        let book_ids: Vec<_> = state.trading_pairs().values().collect();
+        assert_eq!(book_ids.len(), 2);
+        assert_ne!(book_ids[0], book_ids[1]);
     }
 }
 
