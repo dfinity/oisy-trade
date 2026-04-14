@@ -639,10 +639,20 @@ async fn should_replay_events_on_upgrade() {
     use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
     use dex_types_internal::event::EventType;
 
+    /// Asserts that the values produced by each `$observe` expression are unchanged after
+    /// a single canister upgrade. Accepts one or more expressions separated by commas.
+    macro_rules! assert_preserved_after_upgrade {
+    ($setup:expr, $($observe:expr),+ $(,)?) => {{
+        let before = ($($observe.await,)+);
+        $setup.upgrade(None).await;
+        let after = ($($observe.await,)+);
+        assert_eq!(before, after);
+    }};
+}
+
     // 1) Init -> Upgrade -> no trading pairs
     let setup = Setup::new().await;
-    setup.upgrade(None).await;
-    assert_eq!(setup.dex_client().get_trading_pairs().await, vec![]);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 1);
         assert_matches!(&events[0], EventType::Init(_));
@@ -650,10 +660,7 @@ async fn should_replay_events_on_upgrade() {
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
     setup.add_trading_pair().await;
-    let pairs_before = setup.dex_client().get_trading_pairs().await;
-    assert_eq!(pairs_before.len(), 1);
-    setup.upgrade(None).await;
-    assert_eq!(setup.dex_client().get_trading_pairs().await, pairs_before);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
         assert_matches!(&events[1], EventType::AddTradingPair(e) => {
@@ -675,11 +682,7 @@ async fn should_replay_events_on_upgrade() {
         .deposit(deposit_amount)
         .execute()
         .await;
-    let balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(balance_before.free, Nat::from(deposit_amount));
-    setup.upgrade(None).await;
-    let balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(balance_after, balance_before);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_balance(setup.base_token_id()));
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 3);
         assert_matches!(&events[2], EventType::Deposit(e) => {
@@ -701,15 +704,11 @@ async fn should_replay_events_on_upgrade() {
         })
         .await
         .unwrap();
-    let status_before = setup.dex_client().get_order_status(order_id.clone()).await;
-    assert_eq!(status_before, dex_types::OrderStatus::Pending);
-    let base_balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(base_balance_before.reserved, Nat::from(deposit_amount));
-    setup.upgrade(None).await;
-    let status_after = setup.dex_client().get_order_status(order_id).await;
-    assert_eq!(status_after, dex_types::OrderStatus::Pending);
-    let base_balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(base_balance_after, base_balance_before);
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.dex_client().get_order_status(order_id.clone()),
+        setup.dex_client().get_balance(setup.base_token_id()),
+    );
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
