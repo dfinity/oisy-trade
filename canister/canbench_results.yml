@@ -65,32 +65,58 @@ benches:
         instructions: 627104
         heap_increase: 0
         stable_memory_increase: 0
-  bench_read_event_add_trading_pair:
+  bench_read_events:
     total:
       calls: 1
-      instructions: 8944
+      instructions: 55015
       heap_increase: 0
       stable_memory_increase: 0
-    scopes: {}
-  bench_read_event_deposit:
+    scopes:
+      AddTradingPair:
+        calls: 1
+        instructions: 8908
+        heap_increase: 0
+        stable_memory_increase: 0
+      Deposit:
+        calls: 1
+        instructions: 7915
+        heap_increase: 0
+        stable_memory_increase: 0
+      Init:
+        calls: 1
+        instructions: 16909
+        heap_increase: 0
+        stable_memory_increase: 0
+      Upgrade:
+        calls: 1
+        instructions: 17101
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_write_events:
     total:
       calls: 1
-      instructions: 7978
+      instructions: 69405
       heap_increase: 0
       stable_memory_increase: 0
-    scopes: {}
-  bench_record_event_add_trading_pair:
-    total:
-      calls: 1
-      instructions: 13468
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes: {}
-  bench_record_event_deposit:
-    total:
-      calls: 1
-      instructions: 11449
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes: {}
+    scopes:
+      AddTradingPair:
+        calls: 1
+        instructions: 12439
+        heap_increase: 0
+        stable_memory_increase: 0
+      Deposit:
+        calls: 1
+        instructions: 9756
+        heap_increase: 0
+        stable_memory_increase: 0
+      Init:
+        calls: 1
+        instructions: 22674
+        heap_increase: 0
+        stable_memory_increase: 0
+      Upgrade:
+        calls: 1
+        instructions: 20225
+        heap_increase: 0
+        stable_memory_increase: 0
 version: 0.4.0
