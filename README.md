@@ -15,14 +15,14 @@
 - [Development](#development)
 
 <a id="key-features"></a>
-## :sparkles: Key Features
+## ✨ Key Features
 
 - **CEX-like experience** — deposit once, trade as much as you want, withdraw anytime
 - **Fully onchain order book** — central limit order book (CLOB) running entirely within a single canister
 - **Permissionless trading** — any principal can trade on any active pair, no allowlisting required
 
 <a id="architecture"></a>
-## :building_construction: Architecture
+## 🏗️ Architecture
 
 - **Single canister**: all order book state, matching, and settlement live in one canister.
 - **Synchronous matching engine**: token transfers only happen at the deposit/withdrawal edges; the matching engine operates entirely on internal balances, with no async complexity.
@@ -31,14 +31,14 @@
 See the [design document](docs/design.md) for the full architecture.
 
 <a id="deployment"></a>
-## :rocket: Deployment
+## 🚀 Deployment
 
 | Environment         | Canister ID                                                                                                  | Listings          |
 |---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
-| :test_tube: Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
+| 🧪 Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
 
 <a id="development"></a>
-## :hammer_and_wrench: Development
+## 🛠️ Development
 
 ### Prerequisites
 
@@ -54,6 +54,7 @@ List all available recipes with `just`.
 |--------------|----------------------------------|
 | `just lint`  | Run linter                       |
 | `just build` | Build the canister WASM          |
+| `just test`  | Run unit and integration tests   |
 | `just ci`    | Run all checks, build, and tests |
 
 ### Deploy to staging
