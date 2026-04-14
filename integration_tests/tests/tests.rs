@@ -689,6 +689,37 @@ async fn should_replay_events_on_upgrade() {
         });
     });
 
+    // 4) AddLimitOrder -> Upgrade -> order status and reserved balance preserved
+    // Reuse the base token deposit from step 3 to place a sell order.
+    let order_id = setup
+        .dex_client()
+        .add_limit_order(dex_types::LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: dex_types::Side::Sell,
+            price: 100,
+            quantity: Nat::from(deposit_amount),
+        })
+        .await
+        .unwrap();
+    let status_before = setup.dex_client().get_order_status(order_id.clone()).await;
+    assert_eq!(status_before, dex_types::OrderStatus::Pending);
+    let base_balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(base_balance_before.reserved, Nat::from(deposit_amount));
+    setup.upgrade(None).await;
+    let status_after = setup.dex_client().get_order_status(order_id).await;
+    assert_eq!(status_after, dex_types::OrderStatus::Pending);
+    let base_balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(base_balance_after, base_balance_before);
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
+        assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
+            assert_eq!(e.user, setup.user());
+            assert_eq!(e.side, dex_types::Side::Sell);
+            assert_eq!(e.price, 100);
+            assert_eq!(e.quantity, Nat::from(deposit_amount));
+        });
+    });
+
     setup.drop().await;
 }
 
