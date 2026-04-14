@@ -17,6 +17,7 @@ log = ["dep:canlog"]
 [dependencies]
 candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"], optional = true }
+dex_types = { path = "../types" }
 icrc-cbor = { workspace = true, optional = true }
 minicbor = { workspace = true, features = ["derive"], optional = true }
 serde = { workspace = true, features = ["derive"] }

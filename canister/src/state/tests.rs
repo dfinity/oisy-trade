@@ -53,8 +53,8 @@ mod assert_caller_is_allowed {
     }
 }
 
-mod add_trading_pair {
-    use crate::order::{LotSize, TickSize, TokenId, TokenMetadata, TradingPair};
+mod record_trading_pair {
+    use crate::order::{OrderBookId, TokenId, TokenMetadata, TradingPair};
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata,
@@ -63,17 +63,16 @@ mod add_trading_pair {
     use candid::Principal;
 
     #[test]
-    fn should_add_trading_pair_and_store_token_metadata() {
+    fn should_store_token_metadata() {
         let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
 
         assert_eq!(state.token_metadata(&icp_token_id()), Some(&icp_metadata()));
         assert_eq!(
@@ -92,183 +91,66 @@ mod add_trading_pair {
         };
 
         // First pair: ICP/ckBTC
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        // Second pair: ICP/ckETH — ICP already registered with same metadata
-        state
-            .add_trading_pair(
-                TradingPair {
-                    base: icp_token_id(),
-                    quote: token_c,
-                },
-                icp_metadata(),
-                token_c_metadata,
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn should_reject_inconsistent_metadata_for_base_token() {
-        let mut state = test_fixtures::state();
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let wrong_metadata = TokenMetadata {
-            symbol: "WRONG".to_string(),
-            decimals: 99,
-        };
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: icp_token_id(),
-                quote: token_c,
-            },
-            wrong_metadata.clone(),
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: icp_token_id().into(),
-                expected: icp_metadata().into(),
-                submitted: wrong_metadata.into(),
-            })
-        );
-    }
-
-    #[test]
-    fn should_reject_inconsistent_metadata_for_quote_token() {
-        let mut state = test_fixtures::state();
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let wrong_metadata = TokenMetadata {
-            symbol: "WRONG".to_string(),
-            decimals: 99,
-        };
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: token_c,
-                quote: ckbtc_token_id(),
-            },
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            wrong_metadata.clone(),
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: ckbtc_token_id().into(),
-                expected: ckbtc_metadata().into(),
-                submitted: wrong_metadata.into(),
-            })
-        );
-    }
-
-    #[test]
-    fn should_not_mutate_state_on_inconsistent_metadata_error() {
-        let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-        let state_before = state.clone();
-
-        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
-        let result = state.add_trading_pair(
-            TradingPair {
-                base: icp_token_id(),
-                quote: token_c,
-            },
-            TokenMetadata {
-                symbol: "WRONG".to_string(),
-                decimals: 99,
-            },
-            TokenMetadata {
-                symbol: "ckETH".to_string(),
-                decimals: 18,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-
-        assert!(result.is_err());
-        assert_eq!(state_before, state);
-    }
-
-    #[test]
-    fn should_reject_duplicate_trading_pair() {
-        let mut state = test_fixtures::state();
-        state
-            .add_trading_pair(
-                icp_ckbtc_trading_pair(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
-
-        let result = state.add_trading_pair(
+        state.record_trading_pair(
+            OrderBookId::ZERO,
             icp_ckbtc_trading_pair(),
             icp_metadata(),
             ckbtc_metadata(),
-            TickSize::new(std::num::NonZeroU64::new(20).unwrap()),
-            LotSize::new(std::num::NonZeroU64::new(2_000_000).unwrap()),
+            TICK_SIZE,
+            LOT_SIZE,
         );
 
-        assert_eq!(
-            result,
-            Err(dex_types::AddTradingPairError::TradingPairAlreadyExists)
+        // Second pair: ICP/ckETH — ICP already registered with same metadata
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            token_c_metadata,
+            TICK_SIZE,
+            LOT_SIZE,
         );
+    }
+
+    #[test]
+    fn should_assign_distinct_order_book_ids() {
+        let mut state = test_fixtures::state();
+        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
+
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        let book_ids: Vec<_> = state.trading_pairs().values().collect();
+        assert_eq!(book_ids.len(), 2);
+        assert_ne!(book_ids[0], book_ids[1]);
     }
 }
 
 mod add_limit_order {
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
@@ -281,15 +163,14 @@ mod add_limit_order {
     fn should_not_insert_empty_balance_on_failed_reservation() {
         let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();
-        state
-            .add_trading_pair(
-                pair.clone(),
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-            )
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair.clone(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
         let user = Principal::from_slice(&[0x01]);
         let pending = PendingOrder {
             side: Side::Buy,
@@ -307,7 +188,7 @@ mod add_limit_order {
 
 mod settle_fills {
     use crate::balance::Balance;
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
@@ -635,18 +516,31 @@ mod settle_fills {
         })
         .unwrap();
         let pair = icp_ckbtc_trading_pair();
-        state
-            .add_trading_pair(pair, icp_metadata(), ckbtc_metadata(), TICK_SIZE, LOT_SIZE)
-            .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair,
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
         state
     }
 
-    fn place_buy_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_buy_order_for(state, BUYER, price, quantity);
+    fn place_buy_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_buy_order_for(state, BUYER, price, quantity)
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_sell_order_for(state, SELLER, price, quantity);
+    fn place_sell_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_sell_order_for(state, SELLER, price, quantity)
     }
 
     fn place_buy_order_for(
@@ -654,7 +548,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.quote, Price::new(price).mul_quantity(&quantity));
@@ -668,7 +562,7 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
     }
 
     fn place_sell_order_for(
@@ -676,7 +570,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.base, quantity.clone());
@@ -690,7 +584,177 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
+    }
+
+    mod order_status {
+        use super::*;
+        use dex_types::OrderStatus;
+
+        #[test]
+        fn should_return_pending_before_matching() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Pending);
+        }
+
+        #[test]
+        fn should_return_open_for_resting_order() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
+        fn should_return_filled_after_exact_match() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_open_for_partially_filled_maker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
+            let sell_id = place_sell_order(&mut state, 100, 3 * lot);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_open_for_partially_filled_taker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            let buy_id = place_buy_order(&mut state, 100, 3 * lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
+        fn should_return_filled_after_multi_fill_maker_depletion() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell rests with 2 lots; two successive buys deplete it
+            let sell_id = place_sell_order(&mut state, 100, 2 * lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+
+            let buy1_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy1_id), OrderStatus::Filled);
+
+            let buy2_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy2_id), OrderStatus::Filled);
+        }
+    }
+
+    mod settle_fill_ordering {
+        use super::*;
+        use crate::order::{OrderBookId, OrderId, OrderRecord};
+        use crate::test_fixtures::arbitrary::arb_fill;
+        use dex_types::OrderStatus;
+        use proptest::prelude::*;
+
+        const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+
+        proptest! {
+            #[test]
+            fn should_produce_same_state_regardless_of_fill_order(
+                fill1 in arb_fill(0),
+                fill2 in arb_fill(1),
+                // Small range so principals can collide (self-trade, shared maker/taker)
+                buyer1_id in 1..=4u8,
+                seller1_id in 1..=4u8,
+                buyer2_id in 1..=4u8,
+                seller2_id in 1..=4u8,
+            ) {
+                let mut state = setup();
+                let pair = icp_ckbtc_trading_pair();
+                let principals: [(Principal, Principal); 2] = [
+                    (Principal::from_slice(&[buyer1_id]), Principal::from_slice(&[seller1_id])),
+                    (Principal::from_slice(&[buyer2_id]), Principal::from_slice(&[seller2_id])),
+                ];
+
+                // Register orders and fund balances for each fill
+                for (i, fill) in [&fill1, &fill2].iter().enumerate() {
+                    let (buyer, seller) = principals[i];
+                    let (taker_owner, maker_owner) = match fill.taker_side {
+                        Side::Buy => (buyer, seller),
+                        Side::Sell => (seller, buyer),
+                    };
+
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.taker_order_seq),
+                        OrderRecord {
+                            owner: taker_owner,
+                            pair: pair.clone(),
+                            side: fill.taker_side,
+                            price: fill.taker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+                    let maker_side = match fill.taker_side {
+                        Side::Buy => Side::Sell,
+                        Side::Sell => Side::Buy,
+                    };
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.maker_order_seq),
+                        OrderRecord {
+                            owner: maker_owner,
+                            pair: pair.clone(),
+                            side: maker_side,
+                            price: fill.maker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+
+                    // Buyer reserved at their order price (taker_price for buy
+                    // takers, maker_price for sell takers where maker is buyer).
+                    let buyer_price = match fill.taker_side {
+                        Side::Buy => fill.taker_price,
+                        Side::Sell => fill.maker_price,
+                    };
+                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
+                    state.deposit(buyer, pair.quote, buy_reserve.clone());
+                    state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
+                    state.deposit(seller, pair.base, fill.quantity.clone());
+                    state.balance_mut(seller, pair.base).reserve(fill.quantity.clone()).unwrap();
+                }
+
+                let mut state1 = state.clone();
+                state1.settle_fill(BOOK_ID, &pair, &fill1);
+                state1.settle_fill(BOOK_ID, &pair, &fill2);
+
+                let mut state2 = state;
+                state2.settle_fill(BOOK_ID, &pair, &fill2);
+                state2.settle_fill(BOOK_ID, &pair, &fill1);
+
+                prop_assert_eq!(state1, state2);
+            }
+        }
     }
 
     fn balance(free: u64, reserved: u64) -> Balance {

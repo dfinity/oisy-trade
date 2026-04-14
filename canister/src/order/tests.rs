@@ -437,3 +437,159 @@ mod order_book {
         }
     }
 }
+
+mod process_pending_orders {
+    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::test_fixtures::{LOT_SIZE, order_book};
+    use std::collections::BTreeSet;
+
+    fn buy_pending(price: u64, quantity: u64) -> PendingOrder {
+        PendingOrder {
+            side: Side::Buy,
+            price: Price::new(price),
+            quantity: Quantity::from(quantity),
+        }
+    }
+
+    fn sell_pending(price: u64, quantity: u64) -> PendingOrder {
+        PendingOrder {
+            side: Side::Sell,
+            price: Price::new(price),
+            quantity: Quantity::from(quantity),
+        }
+    }
+
+    #[test]
+    fn should_return_empty_output_when_no_pending_orders() {
+        let mut book = order_book();
+        let output = book.process_pending_orders();
+
+        assert!(output.fills.is_empty());
+        assert!(output.resting_orders.is_empty());
+        assert!(book.take_filled_orders().is_empty());
+    }
+
+    #[test]
+    fn should_report_resting_order_when_no_match() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+
+        let output = book.process_pending_orders();
+
+        assert!(output.fills.is_empty());
+        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()]));
+        assert!(book.take_filled_orders().is_empty());
+    }
+
+    #[test]
+    fn should_report_filled_orders_after_exact_match() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
+        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+
+        let output = book.process_pending_orders();
+        let filled = book.take_filled_orders();
+
+        assert_eq!(output.fills.len(), 1);
+        assert!(filled.contains(&sell_id.seq())); // maker
+        assert!(filled.contains(&buy_id.seq())); // taker
+        assert!(output.resting_orders.is_empty());
+    }
+
+    #[test]
+    fn should_report_partial_fill_with_resting_remainder() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        // Sell 1 lot (maker), buy 3 lots (taker) -> taker partially fills, rests with 2
+        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
+        let buy_id = book.add_pending_order(buy_pending(100, 3 * lot)).unwrap();
+
+        let output = book.process_pending_orders();
+        let filled = book.take_filled_orders();
+
+        assert_eq!(output.fills.len(), 1);
+        assert!(filled.contains(&sell_id.seq())); // maker fully filled
+        assert!(!filled.contains(&buy_id.seq())); // taker not fully filled
+        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()])); // taker rests
+    }
+
+    #[test]
+    fn take_filled_orders_should_drain() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.add_pending_order(sell_pending(100, lot)).unwrap();
+        book.add_pending_order(buy_pending(100, lot)).unwrap();
+        book.process_pending_orders();
+
+        let first_call = book.take_filled_orders();
+        let second_call = book.take_filled_orders();
+
+        assert_eq!(first_call.len(), 2);
+        assert!(second_call.is_empty());
+    }
+}
+
+mod history {
+    use crate::order::{
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side, TokenId,
+        TradingPair,
+    };
+    use candid::Principal;
+    use dex_types::OrderStatus;
+
+    fn test_id(seq: u64) -> OrderId {
+        OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
+    }
+
+    fn test_record() -> OrderRecord {
+        OrderRecord {
+            owner: Principal::anonymous(),
+            pair: TradingPair {
+                base: TokenId::new(Principal::anonymous()),
+                quote: TokenId::new(Principal::anonymous()),
+            },
+            side: Side::Buy,
+            price: Price::new(100),
+            quantity: Quantity::from(1_000_000u64),
+            status: OrderStatus::Pending,
+        }
+    }
+
+    #[test]
+    fn insert_once_and_get() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        let record = test_record();
+        history.insert_once(id, record.clone());
+
+        assert_eq!(history.get(&id), Some(&record));
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate order ID")]
+    fn insert_once_panics_on_duplicate() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        history.insert_once(id, test_record());
+        history.insert_once(id, test_record());
+    }
+
+    #[test]
+    fn get_status_returns_not_found_for_missing() {
+        let history = OrderHistory::new();
+        assert_eq!(history.get_status(&test_id(42)), OrderStatus::NotFound);
+    }
+
+    #[test]
+    fn get_status_mut_updates_status() {
+        let mut history = OrderHistory::new();
+        let id = test_id(0);
+        history.insert_once(id, test_record());
+
+        assert_eq!(history.get_status(&id), OrderStatus::Pending);
+        *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
+        assert_eq!(history.get_status(&id), OrderStatus::Filled);
+    }
+}

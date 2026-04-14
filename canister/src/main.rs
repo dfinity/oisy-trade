@@ -120,6 +120,22 @@ fn get_events(
             payload: match event.payload {
                 EventType::Init(args) => event::EventType::Init(args),
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
+                EventType::AddTradingPair(e) => {
+                    event::EventType::AddTradingPair(event::AddTradingPairEvent {
+                        book_id: e.book_id.get(),
+                        base: dex_types::TokenId::from(e.base),
+                        quote: dex_types::TokenId::from(e.quote),
+                        tick_size: e.tick_size.get(),
+                        lot_size: e.lot_size.get(),
+                        base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
+                        quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
+                    })
+                }
+                EventType::Deposit(e) => event::EventType::Deposit(event::DepositEvent {
+                    user: e.user,
+                    token: dex_types::TokenId::from(e.token),
+                    amount: e.amount.into(),
+                }),
             },
         }
     }

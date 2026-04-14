@@ -1,5 +1,6 @@
 use crate::order::{
-    LotSize, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::state::State;
 use canbench_rs::bench;
@@ -216,21 +217,20 @@ fn new_state() -> State {
         mode: Mode::GeneralAvailability,
     })
     .unwrap();
-    state
-        .add_trading_pair(
-            trading_pair(),
-            TokenMetadata {
-                symbol: "ICP".to_string(),
-                decimals: 8,
-            },
-            TokenMetadata {
-                symbol: "USDT".to_string(),
-                decimals: 8,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        )
-        .unwrap();
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        trading_pair(),
+        TokenMetadata {
+            symbol: "ICP".to_string(),
+            decimals: 8,
+        },
+        TokenMetadata {
+            symbol: "USDT".to_string(),
+            decimals: 8,
+        },
+        TICK_SIZE,
+        LOT_SIZE,
+    );
     state
 }
 

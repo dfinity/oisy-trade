@@ -23,10 +23,60 @@ fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
     prop::option::of(arb_mode()).prop_map(|mode| UpgradeArg { mode })
 }
 
+fn arb_token_metadata() -> impl Strategy<Value = crate::order::TokenMetadata> {
+    ("[a-zA-Z]{1,10}", any::<u8>())
+        .prop_map(|(symbol, decimals)| crate::order::TokenMetadata { symbol, decimals })
+}
+
+fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
+    (
+        any::<u64>(),
+        arb_principal(),
+        arb_principal(),
+        1..u64::MAX,
+        1..u64::MAX,
+        arb_token_metadata(),
+        arb_token_metadata(),
+    )
+        .prop_map(
+            |(book_id, base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
+                AddTradingPairEvent {
+                    book_id: crate::order::OrderBookId::new(book_id),
+                    base: crate::order::TokenId::new(base),
+                    quote: crate::order::TokenId::new(quote),
+                    tick_size: TickSize::new(std::num::NonZeroU64::new(tick_size).unwrap()),
+                    lot_size: LotSize::new(std::num::NonZeroU64::new(lot_size).unwrap()),
+                    base_metadata,
+                    quote_metadata,
+                }
+            },
+        )
+}
+
+fn arb_quantity() -> impl Strategy<Value = Quantity> {
+    any::<u64>().prop_map(Quantity::from)
+}
+
+fn arb_token_id() -> impl Strategy<Value = TokenId> {
+    arb_principal().prop_map(TokenId::new)
+}
+
+fn arb_deposit_event() -> impl Strategy<Value = DepositEvent> {
+    (arb_principal(), arb_token_id(), arb_quantity()).prop_map(|(user, token, amount)| {
+        DepositEvent {
+            user,
+            token,
+            amount,
+        }
+    })
+}
+
 fn arb_event_type() -> impl Strategy<Value = EventType> {
     prop_oneof![
         arb_init_arg().prop_map(EventType::Init),
         arb_upgrade_arg().prop_map(EventType::Upgrade),
+        arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
+        arb_deposit_event().prop_map(EventType::Deposit),
     ]
 }
 
