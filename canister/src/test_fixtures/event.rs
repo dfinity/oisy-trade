@@ -27,7 +27,7 @@ impl From<&EventType> for WorstCaseEvent {
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.
     pub fn worst_case_memory_event(&self) -> Event {
-        wrap(match self {
+        max_timestamp(match self {
             Self::Init => init_restricted(),
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
@@ -35,9 +35,9 @@ impl WorstCaseEvent {
         })
     }
 
-    /// Event that maximizes instruction count during encoding/decoding and state transitions.
+    /// Event that maximizes instruction count during encoding/decoding.
     pub fn worst_case_instructions_event(&self) -> Event {
-        wrap(match self {
+        max_timestamp(match self {
             Self::Init => init_restricted(),
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
@@ -55,7 +55,7 @@ impl WorstCaseEvent {
     }
 }
 
-fn wrap(payload: EventType) -> Event {
+fn max_timestamp(payload: EventType) -> Event {
     Event {
         timestamp: u64::MAX,
         payload,
