@@ -101,6 +101,7 @@ mod worst_case {
     #[test]
     fn should_know_the_worst_case_event_size() {
         for variant in WorstCaseEvent::iter() {
+            let name: &'static str = (&variant).into();
             let event = variant.worst_case_memory_event();
 
             let bytes = event.to_bytes();
@@ -108,7 +109,7 @@ mod worst_case {
             assert_eq!(
                 bytes.len(),
                 variant.expected_memory_size(),
-                "serialized size mismatch"
+                "{name}: serialized size mismatch"
             );
         }
     }
