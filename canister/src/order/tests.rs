@@ -439,7 +439,7 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBook, OrderId, PendingOrder, Price, Quantity, Side};
     use crate::test_fixtures::{LOT_SIZE, order_book};
     use std::collections::BTreeSet;
 
@@ -459,6 +459,13 @@ mod process_pending_orders {
         }
     }
 
+    fn add_pending(book: &mut OrderBook, pending: PendingOrder) -> OrderId {
+        let seq = book.next_seq();
+        let order_id = OrderId::new(book.id(), seq);
+        book.add_pending_order(pending.into_order(seq));
+        order_id
+    }
+
     #[test]
     fn should_return_empty_output_when_no_pending_orders() {
         let mut book = order_book();
@@ -473,7 +480,7 @@ mod process_pending_orders {
     fn should_report_resting_order_when_no_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+        let buy_id = add_pending(&mut book, buy_pending(100, lot));
 
         let output = book.process_pending_orders();
 
@@ -486,8 +493,8 @@ mod process_pending_orders {
     fn should_report_filled_orders_after_exact_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
-        let buy_id = book.add_pending_order(buy_pending(100, lot)).unwrap();
+        let sell_id = add_pending(&mut book, sell_pending(100, lot));
+        let buy_id = add_pending(&mut book, buy_pending(100, lot));
 
         let output = book.process_pending_orders();
         let filled = book.take_filled_orders();
@@ -503,8 +510,8 @@ mod process_pending_orders {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         // Sell 1 lot (maker), buy 3 lots (taker) -> taker partially fills, rests with 2
-        let sell_id = book.add_pending_order(sell_pending(100, lot)).unwrap();
-        let buy_id = book.add_pending_order(buy_pending(100, 3 * lot)).unwrap();
+        let sell_id = add_pending(&mut book, sell_pending(100, lot));
+        let buy_id = add_pending(&mut book, buy_pending(100, 3 * lot));
 
         let output = book.process_pending_orders();
         let filled = book.take_filled_orders();
@@ -519,8 +526,8 @@ mod process_pending_orders {
     fn take_filled_orders_should_drain() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(sell_pending(100, lot)).unwrap();
-        book.add_pending_order(buy_pending(100, lot)).unwrap();
+        add_pending(&mut book, sell_pending(100, lot));
+        add_pending(&mut book, buy_pending(100, lot));
         book.process_pending_orders();
 
         let first_call = book.take_filled_orders();

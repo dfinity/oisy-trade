@@ -69,6 +69,10 @@ impl OrderSeq {
         Self(seq)
     }
 
+    pub fn get(self) -> u64 {
+        self.0
+    }
+
     pub fn increment(&mut self) {
         self.0 = self.0.checked_add(1).expect("OrderSeq overflow");
     }

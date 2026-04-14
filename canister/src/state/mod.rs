@@ -93,8 +93,6 @@ impl State {
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<OrderId, AddLimitOrderError> {
-        use crate::order::Side;
-
         let book_id = self
             .trading_pairs
             .get(&pair)
@@ -137,9 +135,9 @@ impl State {
         let side = pending.side;
         let price = pending.price;
         let quantity = pending.quantity.clone();
-        let order_id = book
-            .add_pending_order(pending)
-            .map_err(AddLimitOrderError::InvalidOrder)?;
+        let seq = book.next_seq();
+        let order_id = OrderId::new(*book_id, seq);
+        book.add_pending_order(pending.into_order(seq));
         self.order_history.insert_once(
             order_id,
             OrderRecord {
