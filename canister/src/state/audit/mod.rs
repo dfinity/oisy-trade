@@ -65,7 +65,7 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 quantity: quantity.clone(),
             };
             let order = pending.into_order(order_id.seq());
-            state.add_limit_order(*user, order_id.book_id(), order);
+            state.record_limit_order(*user, order_id.book_id(), order);
         }
     }
 }

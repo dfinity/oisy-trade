@@ -557,7 +557,7 @@ mod settle_fills {
             quantity,
         }
         .into_order(seq);
-        state.add_limit_order(user, book_id, order);
+        state.record_limit_order(user, book_id, order);
         OrderId::new(book_id, seq)
     }
 
@@ -578,7 +578,7 @@ mod settle_fills {
             quantity,
         }
         .into_order(seq);
-        state.add_limit_order(user, book_id, order);
+        state.record_limit_order(user, book_id, order);
         OrderId::new(book_id, seq)
     }
 

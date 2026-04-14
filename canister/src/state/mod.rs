@@ -125,7 +125,7 @@ impl State {
         Ok(())
     }
 
-    pub fn add_limit_order(
+    pub fn record_limit_order(
         &mut self,
         user: Principal,
         book_id: OrderBookId,

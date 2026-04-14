@@ -178,7 +178,7 @@ pub fn add_limit_order(user: Principal, request: &LimitOrderRequest) -> OrderId 
         let book_id = *s.trading_pairs().get(&pair).expect("BUG: unknown pair");
         let seq = s.order_book(&book_id).expect("BUG: missing book").next_seq();
         let order = pending.into_order(seq);
-        s.add_limit_order(user, book_id, order);
+        s.record_limit_order(user, book_id, order);
         OrderId::new(book_id, seq)
     })
 }
