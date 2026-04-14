@@ -1,5 +1,5 @@
 use super::State;
-use crate::state::event::{AddTradingPairEvent, DepositEvent, Event, EventType};
+use crate::state::event::{AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType};
 use crate::storage;
 use dex_types_internal::UpgradeArg;
 
@@ -51,6 +51,21 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             amount,
         }) => {
             state.deposit(*user, *token, amount.clone());
+        }
+        EventType::AddLimitOrder(AddLimitOrderEvent {
+            user,
+            order_id,
+            side,
+            price,
+            quantity,
+        }) => {
+            let pending = order::PendingOrder {
+                side: *side,
+                price: *price,
+                quantity: quantity.clone(),
+            };
+            let order = pending.into_order(order_id.seq());
+            state.add_limit_order(*user, order_id.book_id(), order);
         }
     }
 }

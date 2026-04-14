@@ -37,13 +37,33 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
+    let side = order::Side::from(request.side);
+    let price = order::Price::from(request.price);
+    let quantity = order::Quantity::from(request.quantity);
     let pending = order::PendingOrder {
-        side: order::Side::from(request.side),
-        price: order::Price::from(request.price),
-        quantity: order::Quantity::from(request.quantity),
+        side,
+        price,
+        quantity: quantity.clone(),
     };
-    let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending))
-        .map_err(AddLimitOrderError::from)?;
+    let order_id = state::with_state_mut(|s| {
+        s.validate_limit_order(&caller, &pair, &pending)
+            .map_err(AddLimitOrderError::from)?;
+        let book_id = *s.trading_pairs().get(&pair).expect("BUG: validated above");
+        let seq = s
+            .order_book(&book_id)
+            .expect("BUG: validated above")
+            .next_seq();
+        let order_id = order::OrderId::new(book_id, seq);
+        let event = state::event::AddLimitOrderEvent {
+            user: caller,
+            order_id,
+            side,
+            price,
+            quantity,
+        };
+        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event));
+        Ok::<_, AddLimitOrderError>(order_id)
+    })?;
     Ok(order_id.to_string())
 }
 

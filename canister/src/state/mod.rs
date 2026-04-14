@@ -8,8 +8,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord,
-    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use candid::Principal;
 use dex_types::OrderStatus;
@@ -87,19 +87,19 @@ impl State {
         }
     }
 
-    pub fn add_limit_order(
-        &mut self,
-        user: Principal,
-        pair: TradingPair,
-        pending: PendingOrder,
-    ) -> Result<OrderId, AddLimitOrderError> {
+    pub fn validate_limit_order(
+        &self,
+        user: &Principal,
+        pair: &TradingPair,
+        pending: &PendingOrder,
+    ) -> Result<(), AddLimitOrderError> {
         let book_id = self
             .trading_pairs
-            .get(&pair)
+            .get(pair)
             .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
-            .get_mut(book_id)
+            .get(book_id)
             .expect("BUG: trading pair registered but order book missing");
 
         book.validate_order(pending.price, &pending.quantity)
@@ -109,47 +109,61 @@ impl State {
             Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
             Side::Sell => (pair.base, pending.quantity.clone()),
         };
-        match self
+        let free = self
             .balances
-            .get_mut(&user)
-            .and_then(|tokens| tokens.get_mut(&token))
-        {
-            Some(balance) => {
-                balance
-                    .reserve(required)
-                    .map_err(|e| AddLimitOrderError::InsufficientBalance {
-                        token,
-                        available: e.available,
-                        required: e.required,
-                    })?;
-            }
-            None => {
-                return Err(AddLimitOrderError::InsufficientBalance {
-                    token,
-                    available: Quantity::ZERO,
-                    required,
-                });
-            }
+            .get(user)
+            .and_then(|tokens| tokens.get(&token))
+            .map(|b| b.free().clone())
+            .unwrap_or(Quantity::ZERO);
+        if free < required {
+            return Err(AddLimitOrderError::InsufficientBalance {
+                token,
+                available: free,
+                required,
+            });
         }
+        Ok(())
+    }
 
-        let side = pending.side;
-        let price = pending.price;
-        let quantity = pending.quantity.clone();
-        let seq = book.next_seq();
-        let order_id = OrderId::new(*book_id, seq);
-        book.add_pending_order(pending.into_order(seq));
+    pub fn add_limit_order(
+        &mut self,
+        user: Principal,
+        book_id: OrderBookId,
+        order: Order,
+    ) {
+        let pair = self
+            .trading_pair_by_book_id(book_id)
+            .expect("BUG: unknown order book");
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing");
+
+        let (token, required) = match order.side() {
+            Side::Buy => (pair.quote, order.price().mul_quantity(order.remaining_quantity())),
+            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+        };
+        self.balances
+            .entry(user)
+            .or_default()
+            .entry(token)
+            .or_default()
+            .reserve(required)
+            .expect("BUG: insufficient balance for validated order");
+
+        let order_id = OrderId::new(book_id, order.id());
         self.order_history.insert_once(
             order_id,
             OrderRecord {
                 owner: user,
                 pair,
-                side,
-                price,
-                quantity,
+                side: order.side(),
+                price: order.price(),
+                quantity: order.remaining_quantity().clone(),
                 status: OrderStatus::Pending,
             },
         );
-        Ok(order_id)
+        book.add_pending_order(order);
     }
 
     pub fn process_pending_orders(&mut self) {
@@ -313,6 +327,13 @@ impl State {
 
     pub fn trading_pairs(&self) -> &BTreeMap<TradingPair, OrderBookId> {
         &self.trading_pairs
+    }
+
+    pub fn trading_pair_by_book_id(&self, book_id: OrderBookId) -> Option<TradingPair> {
+        self.trading_pairs
+            .iter()
+            .find(|&(_, &id)| id == book_id)
+            .map(|(pair, _)| pair.clone())
     }
 
     pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {

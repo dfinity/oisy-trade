@@ -164,12 +164,12 @@ mod add_limit_order {
     fn should_add_limit_orders_with_distinct_order_ids() {
         init_state_with_order_book();
         fund_user(DEFAULT_USER);
-        let runtime = mock_runtime_for(DEFAULT_USER);
         let mut order_ids = BTreeSet::new();
         let num_orders = 100;
 
         for _ in 0..num_orders {
-            let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+            let order_id =
+                test_fixtures::add_limit_order(DEFAULT_USER, &limit_order_request());
             assert!(order_ids.insert(order_id));
         }
     }
@@ -296,7 +296,7 @@ mod add_limit_order {
             s.deposit(DEFAULT_USER, pair.quote, required.into());
         });
 
-        add_limit_order(order, &runtime).unwrap();
+        test_fixtures::add_limit_order(DEFAULT_USER, &order);
 
         assert_eq!(get_balance(pair.base.into(), &runtime), Balance::default());
         assert_eq!(
@@ -325,7 +325,7 @@ mod add_limit_order {
             s.deposit(DEFAULT_USER, pair.base, quantity.into());
         });
 
-        add_limit_order(order, &runtime).unwrap();
+        test_fixtures::add_limit_order(DEFAULT_USER, &order);
 
         assert_eq!(
             get_balance(pair.base.into(), &runtime),
@@ -345,11 +345,8 @@ mod add_limit_order {
 }
 
 mod get_order_status {
-    use crate::add_limit_order;
     use crate::get_order_status;
-    use crate::test_fixtures::{
-        fund_user, init_state_with_order_book, limit_order_request, mocks::MockRuntime,
-    };
+    use crate::test_fixtures::{self, fund_user, init_state_with_order_book, limit_order_request};
     use candid::Principal;
     use dex_types::OrderStatus;
 
@@ -357,12 +354,8 @@ mod get_order_status {
     fn should_return_pending_for_existing_order() {
         init_state_with_order_book();
         fund_user(Principal::anonymous());
-        let mut runtime = MockRuntime::new();
-        runtime
-            .expect_msg_caller()
-            .return_const(Principal::anonymous());
-        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
-        let status = get_order_status(order_id);
+        let order_id = test_fixtures::add_limit_order(Principal::anonymous(), &limit_order_request());
+        let status = get_order_status(order_id.to_string());
         assert_eq!(status, OrderStatus::Pending);
     }
 
@@ -373,20 +366,16 @@ mod get_order_status {
         let seller = Principal::from_slice(&[0x02]);
         fund_user(buyer);
         fund_user(seller);
-        let mut buyer_rt = MockRuntime::new();
-        buyer_rt.expect_msg_caller().return_const(buyer);
-        let mut seller_rt = MockRuntime::new();
-        seller_rt.expect_msg_caller().return_const(seller);
 
-        let buy_id = add_limit_order(limit_order_request(), &buyer_rt).unwrap();
+        let buy_id = test_fixtures::add_limit_order(buyer, &limit_order_request());
         let mut sell_request = limit_order_request();
         sell_request.side = dex_types::Side::Sell;
-        let sell_id = add_limit_order(sell_request, &seller_rt).unwrap();
+        let sell_id = test_fixtures::add_limit_order(seller, &sell_request);
 
         crate::process_pending_orders();
 
-        assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
-        assert_eq!(get_order_status(sell_id), OrderStatus::Filled);
+        assert_eq!(get_order_status(buy_id.to_string()), OrderStatus::Filled);
+        assert_eq!(get_order_status(sell_id.to_string()), OrderStatus::Filled);
     }
 
     #[test]
