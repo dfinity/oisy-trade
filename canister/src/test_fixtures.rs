@@ -1,6 +1,6 @@
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity,
-    Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state;
 use candid::Principal;
@@ -165,21 +165,11 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-/// Add a limit order directly via the state, bypassing `lib::add_limit_order`
-/// (which records an event and requires the canister environment).
-pub fn add_limit_order(user: Principal, request: &LimitOrderRequest) -> OrderId {
-    let pair = TradingPair::from(request.pair);
-    let pending = PendingOrder::from(request.clone());
-    state::with_state_mut(|s| {
-        let book_id = *s.trading_pairs().get(&pair).expect("BUG: unknown pair");
-        let seq = s
-            .order_book(&book_id)
-            .expect("BUG: missing book")
-            .next_seq();
-        let order = pending.into_order(seq);
-        s.record_limit_order(user, book_id, order);
-        OrderId::new(book_id, seq)
-    })
+pub fn mock_runtime_for(caller: Principal) -> mocks::MockRuntime {
+    let mut mock = mocks::MockRuntime::new();
+    mock.expect_msg_caller().return_const(caller);
+    mock.expect_time().return_const(0u64);
+    mock
 }
 
 pub mod arbitrary {
@@ -254,6 +244,7 @@ pub mod mocks {
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
+            fn time(&self) -> u64;
         }
     }
 }

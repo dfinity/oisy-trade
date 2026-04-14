@@ -48,7 +48,7 @@ pub fn add_limit_order(
             price: order.price(),
             quantity: order.remaining_quantity().clone(),
         };
-        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event));
+        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
     Ok(order_id.to_string())
 }
@@ -117,7 +117,7 @@ pub async fn deposit(
         amount,
     };
     state::with_state_mut(|s| {
-        state::audit::process_event(s, state::event::EventType::Deposit(event))
+        state::audit::process_event(s, state::event::EventType::Deposit(event), runtime)
     });
 
     Ok(deposit_response)
@@ -170,7 +170,7 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
         };
-        state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
+        state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
         Ok(())
     })
 }

@@ -1,4 +1,5 @@
 use super::State;
+use crate::Runtime;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
 };
@@ -8,9 +9,9 @@ use dex_types_internal::UpgradeArg;
 #[cfg(test)]
 mod tests;
 
-pub fn process_event(state: &mut State, payload: EventType) {
+pub fn process_event(state: &mut State, payload: EventType, runtime: &impl Runtime) {
     apply_state_transition(state, &payload);
-    storage::record_event(payload);
+    storage::record_event(runtime.time(), payload);
 }
 
 fn apply_state_transition(state: &mut State, payload: &EventType) {

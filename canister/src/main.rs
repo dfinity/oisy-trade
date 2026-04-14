@@ -136,7 +136,7 @@ fn get_events(
 
 #[ic_cdk::init]
 fn init(arg: DexArg) {
-    dex_canister::lifecycle::init(arg);
+    dex_canister::lifecycle::init(arg, &dex_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::post_upgrade]
