@@ -177,7 +177,7 @@ mod add_limit_order {
             price: Price::new(100),
             quantity: Quantity::from(LOT_SIZE.get()),
         };
-        let result = state.validate_limit_order(&user, &pair, &pending);
+        let result = state.validate_limit_order(user, pair, pending);
 
         assert_matches!(result, Err(AddLimitOrderError::InsufficientBalance { .. }));
     }

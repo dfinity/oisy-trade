@@ -89,17 +89,17 @@ impl State {
 
     pub fn validate_limit_order(
         &self,
-        user: &Principal,
-        pair: &TradingPair,
-        pending: &PendingOrder,
-    ) -> Result<(), AddLimitOrderError> {
-        let book_id = self
+        user: Principal,
+        pair: TradingPair,
+        pending: PendingOrder,
+    ) -> Result<(OrderId, Order), AddLimitOrderError> {
+        let book_id = *self
             .trading_pairs
-            .get(pair)
+            .get(&pair)
             .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
-            .get(book_id)
+            .get(&book_id)
             .expect("BUG: trading pair registered but order book missing");
 
         book.validate_order(pending.price, &pending.quantity)
@@ -111,7 +111,7 @@ impl State {
         };
         let free = self
             .balances
-            .get(user)
+            .get(&user)
             .and_then(|tokens| tokens.get(&token))
             .map(|b| b.free().clone())
             .unwrap_or(Quantity::ZERO);
@@ -122,7 +122,11 @@ impl State {
                 required,
             });
         }
-        Ok(())
+
+        let seq = book.next_seq();
+        let order_id = OrderId::new(book_id, seq);
+        let order = pending.into_order(seq);
+        Ok((order_id, order))
     }
 
     pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {

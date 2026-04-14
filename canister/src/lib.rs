@@ -39,20 +39,15 @@ pub fn add_limit_order(
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::from(request);
     let order_id = state::with_state_mut(|s| {
-        s.validate_limit_order(&caller, &pair, &pending)
+        let (order_id, order) = s
+            .validate_limit_order(caller, pair, pending)
             .map_err(AddLimitOrderError::from)?;
-        let book_id = *s.trading_pairs().get(&pair).expect("BUG: validated above");
-        let seq = s
-            .order_book(&book_id)
-            .expect("BUG: validated above")
-            .next_seq();
-        let order_id = order::OrderId::new(book_id, seq);
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
-            side: pending.side,
-            price: pending.price,
-            quantity: pending.quantity.clone(),
+            side: order.side(),
+            price: order.price(),
+            quantity: order.remaining_quantity().clone(),
         };
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event));
         Ok::<_, AddLimitOrderError>(order_id)
