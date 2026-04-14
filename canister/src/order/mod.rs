@@ -1,9 +1,11 @@
 mod book;
+mod history;
 #[cfg(test)]
 mod tests;
 
-pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
+pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
 use candid::{Nat, Principal};
+pub use history::{OrderHistory, OrderRecord};
 use num_bigint::BigUint;
 use std::fmt;
 use std::num::NonZeroU64;

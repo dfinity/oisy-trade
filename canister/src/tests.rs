@@ -367,6 +367,29 @@ mod get_order_status {
     }
 
     #[test]
+    fn should_return_filled_after_matching() {
+        init_state_with_order_book();
+        let buyer = Principal::from_slice(&[0x01]);
+        let seller = Principal::from_slice(&[0x02]);
+        fund_user(buyer);
+        fund_user(seller);
+        let mut buyer_rt = MockRuntime::new();
+        buyer_rt.expect_msg_caller().return_const(buyer);
+        let mut seller_rt = MockRuntime::new();
+        seller_rt.expect_msg_caller().return_const(seller);
+
+        let buy_id = add_limit_order(limit_order_request(), &buyer_rt).unwrap();
+        let mut sell_request = limit_order_request();
+        sell_request.side = dex_types::Side::Sell;
+        let sell_id = add_limit_order(sell_request, &seller_rt).unwrap();
+
+        crate::process_pending_orders();
+
+        assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
+        assert_eq!(get_order_status(sell_id), OrderStatus::Filled);
+    }
+
+    #[test]
     fn should_return_not_found_for_nonexistent_order() {
         init_state_with_order_book();
         // Valid hex format but refers to a non-existent book/seq

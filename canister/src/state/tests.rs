@@ -527,12 +527,20 @@ mod settle_fills {
         state
     }
 
-    fn place_buy_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_buy_order_for(state, BUYER, price, quantity);
+    fn place_buy_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_buy_order_for(state, BUYER, price, quantity)
     }
 
-    fn place_sell_order(state: &mut State, price: u64, quantity: impl Into<Quantity>) {
-        place_sell_order_for(state, SELLER, price, quantity);
+    fn place_sell_order(
+        state: &mut State,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
+        place_sell_order_for(state, SELLER, price, quantity)
     }
 
     fn place_buy_order_for(
@@ -540,7 +548,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.quote, Price::new(price).mul_quantity(&quantity));
@@ -554,7 +562,7 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
     }
 
     fn place_sell_order_for(
@@ -562,7 +570,7 @@ mod settle_fills {
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
-    ) {
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
         let quantity = quantity.into();
         state.deposit(user, pair.base, quantity.clone());
@@ -576,7 +584,177 @@ mod settle_fills {
                     quantity,
                 },
             )
-            .unwrap();
+            .unwrap()
+    }
+
+    mod order_status {
+        use super::*;
+        use dex_types::OrderStatus;
+
+        #[test]
+        fn should_return_pending_before_matching() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Pending);
+        }
+
+        #[test]
+        fn should_return_open_for_resting_order() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
+        fn should_return_filled_after_exact_match() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_open_for_partially_filled_maker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
+            let sell_id = place_sell_order(&mut state, 100, 3 * lot);
+            let buy_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+        }
+
+        #[test]
+        fn should_return_open_for_partially_filled_taker() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
+            let sell_id = place_sell_order(&mut state, 100, lot);
+            let buy_id = place_buy_order(&mut state, 100, 3 * lot);
+            state.process_pending_orders();
+
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+        }
+
+        #[test]
+        fn should_return_filled_after_multi_fill_maker_depletion() {
+            let mut state = setup();
+            let lot = u64::from(LOT_SIZE);
+            // Sell rests with 2 lots; two successive buys deplete it
+            let sell_id = place_sell_order(&mut state, 100, 2 * lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+
+            let buy1_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy1_id), OrderStatus::Filled);
+
+            let buy2_id = place_buy_order(&mut state, 100, lot);
+            state.process_pending_orders();
+            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy2_id), OrderStatus::Filled);
+        }
+    }
+
+    mod settle_fill_ordering {
+        use super::*;
+        use crate::order::{OrderBookId, OrderId, OrderRecord};
+        use crate::test_fixtures::arbitrary::arb_fill;
+        use dex_types::OrderStatus;
+        use proptest::prelude::*;
+
+        const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+
+        proptest! {
+            #[test]
+            fn should_produce_same_state_regardless_of_fill_order(
+                fill1 in arb_fill(0),
+                fill2 in arb_fill(1),
+                // Small range so principals can collide (self-trade, shared maker/taker)
+                buyer1_id in 1..=4u8,
+                seller1_id in 1..=4u8,
+                buyer2_id in 1..=4u8,
+                seller2_id in 1..=4u8,
+            ) {
+                let mut state = setup();
+                let pair = icp_ckbtc_trading_pair();
+                let principals: [(Principal, Principal); 2] = [
+                    (Principal::from_slice(&[buyer1_id]), Principal::from_slice(&[seller1_id])),
+                    (Principal::from_slice(&[buyer2_id]), Principal::from_slice(&[seller2_id])),
+                ];
+
+                // Register orders and fund balances for each fill
+                for (i, fill) in [&fill1, &fill2].iter().enumerate() {
+                    let (buyer, seller) = principals[i];
+                    let (taker_owner, maker_owner) = match fill.taker_side {
+                        Side::Buy => (buyer, seller),
+                        Side::Sell => (seller, buyer),
+                    };
+
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.taker_order_seq),
+                        OrderRecord {
+                            owner: taker_owner,
+                            pair: pair.clone(),
+                            side: fill.taker_side,
+                            price: fill.taker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+                    let maker_side = match fill.taker_side {
+                        Side::Buy => Side::Sell,
+                        Side::Sell => Side::Buy,
+                    };
+                    state.order_history.insert_once(
+                        OrderId::new(BOOK_ID, fill.maker_order_seq),
+                        OrderRecord {
+                            owner: maker_owner,
+                            pair: pair.clone(),
+                            side: maker_side,
+                            price: fill.maker_price,
+                            quantity: fill.quantity.clone(),
+                            status: OrderStatus::Open,
+                        },
+                    );
+
+                    // Buyer reserved at their order price (taker_price for buy
+                    // takers, maker_price for sell takers where maker is buyer).
+                    let buyer_price = match fill.taker_side {
+                        Side::Buy => fill.taker_price,
+                        Side::Sell => fill.maker_price,
+                    };
+                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
+                    state.deposit(buyer, pair.quote, buy_reserve.clone());
+                    state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
+                    state.deposit(seller, pair.base, fill.quantity.clone());
+                    state.balance_mut(seller, pair.base).reserve(fill.quantity.clone()).unwrap();
+                }
+
+                let mut state1 = state.clone();
+                state1.settle_fill(BOOK_ID, &pair, &fill1);
+                state1.settle_fill(BOOK_ID, &pair, &fill2);
+
+                let mut state2 = state;
+                state2.settle_fill(BOOK_ID, &pair, &fill2);
+                state2.settle_fill(BOOK_ID, &pair, &fill1);
+
+                prop_assert_eq!(state1, state2);
+            }
+        }
     }
 
     fn balance(free: u64, reserved: u64) -> Balance {
