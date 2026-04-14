@@ -74,6 +74,11 @@ impl OrderHistory {
         self.orders.get_mut(id).map(|r| &mut r.status)
     }
 
+    /// Returns an iterator over all order records.
+    pub fn iter(&self) -> impl Iterator<Item = (&OrderId, &OrderRecord)> {
+        self.orders.iter()
+    }
+
     /// Returns the status of the given order, or [`OrderStatus::NotFound`] if absent.
     pub fn get_status(&self, id: &OrderId) -> OrderStatus {
         self.orders
