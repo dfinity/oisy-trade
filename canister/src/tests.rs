@@ -471,6 +471,9 @@ mod withdraw {
                 .expect_call_unbounded_wait()
                 .times(1)
                 .in_sequence(&mut seq)
+                .withf(|canister_id, method, _args| {
+                    canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
+                })
                 .return_once(|_, _, _| Ok(response));
         }
         runtime
@@ -612,12 +615,32 @@ mod withdraw {
         // capped to amount - 1. The ledger rejects with BadFee(real_fee).
         // Retry: amount (200_000) > real_fee (100), so transfer succeeds.
         let block_index = Nat::from(42u64);
-        let runtime = mock_runtime_returning(vec![
-            transfer_response(Err(TransferError::BadFee {
-                expected_fee: Nat::from(real_fee),
-            })),
-            transfer_response(Ok(block_index.clone())),
-        ]);
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        let mut seq = Sequence::new();
+        // First attempt: fee capped to amount - 1, transfer_amount = 1.
+        runtime
+            .expect_call_unbounded_wait()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|canister_id, method, _args| {
+                canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
+            })
+            .return_once(move |_, _, _| {
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(real_fee),
+                })))
+            });
+        // Retry: fee = real_fee (100), transfer_amount = 199_900.
+        let block_index_clone = block_index.clone();
+        runtime
+            .expect_call_unbounded_wait()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(move |canister_id, method, _args| {
+                canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
+            })
+            .return_once(move |_, _, _| Ok(transfer_response(Ok(block_index_clone))));
 
         let result = withdraw(
             WithdrawRequest {
