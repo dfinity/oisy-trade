@@ -41,5 +41,6 @@ canbench-rs = "0.4"
 proptest = "1"
 scopeguard = "1"
 serde = "1.0.228"
+strum = { version = "0.28.0", features = ["derive"] }
 serde_json = "1"
 tokio = "1.51.1"
