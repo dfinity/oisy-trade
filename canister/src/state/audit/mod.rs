@@ -1,5 +1,5 @@
 use super::State;
-use crate::state::event::{AddTradingPairEvent, Event, EventType};
+use crate::state::event::{AddTradingPairEvent, DepositEvent, Event, EventType};
 use crate::storage;
 use dex_types_internal::UpgradeArg;
 
@@ -44,6 +44,13 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
                 *tick_size,
                 *lot_size,
             );
+        }
+        EventType::Deposit(DepositEvent {
+            user,
+            token,
+            amount,
+        }) => {
+            state.deposit(*user, *token, amount.clone());
         }
     }
 }

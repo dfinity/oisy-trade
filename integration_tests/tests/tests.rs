@@ -635,6 +635,64 @@ async fn should_fail_add_trading_pair() {
 }
 
 #[tokio::test]
+async fn should_replay_events_on_upgrade() {
+    use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+    use dex_types_internal::event::EventType;
+
+    // 1) Init -> Upgrade -> no trading pairs
+    let setup = Setup::new().await;
+    setup.upgrade(None).await;
+    assert_eq!(setup.dex_client().get_trading_pairs().await, vec![]);
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 1);
+        assert_matches!(&events[0], EventType::Init(_));
+    });
+
+    // 2) Add trading pair -> Upgrade -> trading pair preserved
+    setup.add_trading_pair().await;
+    let pairs_before = setup.dex_client().get_trading_pairs().await;
+    assert_eq!(pairs_before.len(), 1);
+    setup.upgrade(None).await;
+    assert_eq!(setup.dex_client().get_trading_pairs().await, pairs_before);
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 2);
+        assert_matches!(&events[1], EventType::AddTradingPair(e) => {
+            assert_eq!(e.base, setup.base_token_id());
+            assert_eq!(e.quote, setup.quote_token_id());
+            assert_eq!(e.tick_size, TICK_SIZE);
+            assert_eq!(e.lot_size, LOT_SIZE);
+            assert_eq!(e.base_metadata, TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 });
+            assert_eq!(e.quote_metadata, TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 });
+        });
+    });
+
+    // 3) Deposit -> Upgrade -> balance preserved
+    let deposit_amount: u64 = 1_000_000;
+    setup
+        .deposit_flow(setup.user(), setup.base_token_id())
+        .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+        .approve(deposit_amount + BASE_LEDGER_FEE)
+        .deposit(deposit_amount)
+        .execute()
+        .await;
+    let balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(balance_before.free, Nat::from(deposit_amount));
+    setup.upgrade(None).await;
+    let balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
+    assert_eq!(balance_after, balance_before);
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 3);
+        assert_matches!(&events[2], EventType::Deposit(e) => {
+            assert_eq!(e.user, setup.user());
+            assert_eq!(e.token, setup.base_token_id());
+            assert_eq!(e.amount, Nat::from(deposit_amount));
+        });
+    });
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_get_events() {
     let setup = Setup::new().await;
 

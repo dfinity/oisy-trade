@@ -1,4 +1,5 @@
-use crate::order::{LotSize, OrderBookId, TickSize, TokenId, TokenMetadata};
+use crate::order::{LotSize, OrderBookId, Quantity, TickSize, TokenId, TokenMetadata};
+use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -24,6 +25,8 @@ pub enum EventType {
     Upgrade(#[n(0)] UpgradeArg),
     #[n(2)]
     AddTradingPair(#[n(0)] AddTradingPairEvent),
+    #[n(3)]
+    Deposit(#[n(0)] DepositEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -42,6 +45,16 @@ pub struct AddTradingPairEvent {
     pub base_metadata: TokenMetadata,
     #[n(6)]
     pub quote_metadata: TokenMetadata,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct DepositEvent {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    pub user: Principal,
+    #[n(1)]
+    pub token: TokenId,
+    #[n(2)]
+    pub amount: Quantity,
 }
 
 impl Storable for Event {

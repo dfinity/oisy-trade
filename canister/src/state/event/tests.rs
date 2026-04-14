@@ -53,11 +53,30 @@ fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
         )
 }
 
+fn arb_quantity() -> impl Strategy<Value = Quantity> {
+    any::<u64>().prop_map(Quantity::from)
+}
+
+fn arb_token_id() -> impl Strategy<Value = TokenId> {
+    arb_principal().prop_map(TokenId::new)
+}
+
+fn arb_deposit_event() -> impl Strategy<Value = DepositEvent> {
+    (arb_principal(), arb_token_id(), arb_quantity()).prop_map(|(user, token, amount)| {
+        DepositEvent {
+            user,
+            token,
+            amount,
+        }
+    })
+}
+
 fn arb_event_type() -> impl Strategy<Value = EventType> {
     prop_oneof![
         arb_init_arg().prop_map(EventType::Init),
         arb_upgrade_arg().prop_map(EventType::Upgrade),
         arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
+        arb_deposit_event().prop_map(EventType::Deposit),
     ]
 }
 

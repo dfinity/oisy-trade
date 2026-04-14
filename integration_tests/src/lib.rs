@@ -12,7 +12,7 @@ use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_arg
 use canlog::{Log, LogEntry};
 use dex_client::{DexClient, Runtime};
 use dex_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair};
-use dex_types_internal::{DexArg, InitArg, Mode, log::Priority};
+use dex_types_internal::{DexArg, InitArg, Mode, UpgradeArg, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
 use icrc_ledger_types::icrc1::account::Account;
@@ -92,12 +92,16 @@ impl Setup {
     }
 
     pub async fn with_trading_pair(self) -> Self {
+        self.add_trading_pair().await;
+        self
+    }
+
+    pub async fn add_trading_pair(&self) {
         let controller_client = self.dex_client_with_caller(self.controller());
         let result = controller_client
             .add_trading_pair(self.add_trading_pair_request())
             .await;
         assert_eq!(result, Ok(()));
-        self
     }
 
     pub fn add_trading_pair_request(&self) -> AddTradingPairRequest {
@@ -260,6 +264,19 @@ impl Setup {
         serde_json::from_slice::<Log<Priority>>(&response.body)
             .expect("Failed to deserialize logs")
             .entries
+    }
+
+    pub async fn upgrade(&self, upgrade_arg: Option<UpgradeArg>) {
+        let arg = DexArg::Upgrade(upgrade_arg);
+        self.env()
+            .upgrade_canister(
+                self.dex_id,
+                dex_wasm(),
+                Encode!(&arg).unwrap(),
+                Some(self.controller),
+            )
+            .await
+            .expect("failed to upgrade DEX canister");
     }
 
     pub async fn assert_that_events(&self) -> DexEventAssert {
