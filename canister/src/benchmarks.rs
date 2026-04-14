@@ -3,12 +3,6 @@ use crate::order::{
     TradingPair,
 };
 
-fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
-    let pair = trading_pair();
-    let book_id = *state.trading_pairs().get(&pair).unwrap();
-    let seq = state.order_book(&book_id).unwrap().next_seq();
-    state.record_limit_order(user, book_id, pending.into_order(seq));
-}
 use crate::state::State;
 use canbench_rs::bench;
 use candid::{Nat, Principal};
@@ -295,4 +289,10 @@ fn fund_user(state: &mut State, principal: Principal) {
     let pair = trading_pair();
     state.deposit(principal, pair.base, Quantity::from(Nat::from(u128::MAX)));
     state.deposit(principal, pair.quote, Quantity::from(Nat::from(u128::MAX)));
+}
+
+fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
+    let pair = trading_pair();
+    let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+    state.record_limit_order(user, order_id.book_id(), order);
 }
