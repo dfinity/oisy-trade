@@ -100,13 +100,15 @@ fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         arb_price(),
         arb_quantity(),
     )
-        .prop_map(|(user, order_id, side, price, quantity)| AddLimitOrderEvent {
-            user,
-            order_id,
-            side,
-            price,
-            quantity,
-        })
+        .prop_map(
+            |(user, order_id, side, price, quantity)| AddLimitOrderEvent {
+                user,
+                order_id,
+                side,
+                price,
+                quantity,
+            },
+        )
 }
 
 fn arb_event_type() -> impl Strategy<Value = EventType> {

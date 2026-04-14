@@ -125,12 +125,7 @@ impl State {
         Ok(())
     }
 
-    pub fn record_limit_order(
-        &mut self,
-        user: Principal,
-        book_id: OrderBookId,
-        order: Order,
-    ) {
+    pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
         let pair = self
             .trading_pair_by_book_id(book_id)
             .expect("BUG: unknown order book");
@@ -140,7 +135,10 @@ impl State {
             .expect("BUG: order book missing");
 
         let (token, required) = match order.side() {
-            Side::Buy => (pair.quote, order.price().mul_quantity(order.remaining_quantity())),
+            Side::Buy => (
+                pair.quote,
+                order.price().mul_quantity(order.remaining_quantity()),
+            ),
             Side::Sell => (pair.base, order.remaining_quantity().clone()),
         };
         self.balances

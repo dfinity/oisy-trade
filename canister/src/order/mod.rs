@@ -71,7 +71,16 @@ impl OrderBookId {
 
 /// Sequence number identifying an order within a single order book.
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
     minicbor::Decode,
 )]
 pub struct OrderSeq(#[n(0)] u64);

@@ -1,5 +1,7 @@
 use super::State;
-use crate::state::event::{AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType};
+use crate::state::event::{
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+};
 use crate::storage;
 use dex_types_internal::UpgradeArg;
 

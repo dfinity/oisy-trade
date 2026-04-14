@@ -168,8 +168,7 @@ mod add_limit_order {
         let num_orders = 100;
 
         for _ in 0..num_orders {
-            let order_id =
-                test_fixtures::add_limit_order(DEFAULT_USER, &limit_order_request());
+            let order_id = test_fixtures::add_limit_order(DEFAULT_USER, &limit_order_request());
             assert!(order_ids.insert(order_id));
         }
     }
@@ -354,7 +353,8 @@ mod get_order_status {
     fn should_return_pending_for_existing_order() {
         init_state_with_order_book();
         fund_user(Principal::anonymous());
-        let order_id = test_fixtures::add_limit_order(Principal::anonymous(), &limit_order_request());
+        let order_id =
+            test_fixtures::add_limit_order(Principal::anonymous(), &limit_order_request());
         let status = get_order_status(order_id.to_string());
         assert_eq!(status, OrderStatus::Pending);
     }
