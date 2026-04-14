@@ -333,7 +333,7 @@ async fn should_have_different_ledger_configs() {
 
 #[tokio::test]
 async fn should_deposit_and_track_balances() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user1 = Principal::from_slice(&[0x01]);
     let user2 = Principal::from_slice(&[0x02]);
@@ -444,7 +444,7 @@ struct DepositFailureCase {
 }
 
 async fn test_deposit_failure(case: DepositFailureCase) {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user = Principal::from_slice(&[0x03]);
     let cksol = TokenId {
@@ -509,8 +509,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
 }
 
 #[tokio::test]
-async fn should_fail_deposit_when_ledger_is_dex_canister() {
-    // TODO(DEFI-2741): Remove or modify this test once we have a proper check for supported tokens.
+async fn should_fail_deposit_with_unsupported_token() {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x05]);
@@ -521,14 +520,16 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token_id: fake_token,
+            token_id: fake_token.clone(),
             amount: Nat::from(1_000_000u64),
         })
         .await;
 
-    assert_matches!(
+    assert_eq!(
         result,
-        Err(DepositError::CallFailed { reason, .. }) if reason.contains("Canister has no update method 'icrc2_transfer_from'")
+        Err(DepositError::UnsupportedToken {
+            token_id: fake_token,
+        })
     );
 
     setup.drop().await;
@@ -536,7 +537,7 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
 
 #[tokio::test]
 async fn should_fail_deposit_when_ledger_is_stopped() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user = Principal::from_slice(&[0x06]);
     let controller = setup.controller();
@@ -696,7 +697,7 @@ async fn should_replay_events_on_upgrade() {
 
 #[tokio::test]
 async fn should_withdraw_and_receive_tokens_on_ledger() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x01]);
     let client = setup.dex_client_with_caller(user);
     let cksol = TokenId {
@@ -743,7 +744,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
 
 #[tokio::test]
 async fn should_withdraw_twice_and_cache_fee() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x01]);
     let client = setup.dex_client_with_caller(user);
     let cksol = TokenId {
@@ -818,6 +819,27 @@ async fn should_fail_withdraw_on_negative_cases() {
     let setup = Setup::new().await.with_trading_pair().await;
     let cksol = setup.base_token_id();
     let fee = Nat::from(BASE_LEDGER_FEE);
+
+    // --- Unsupported token: token not part of any trading pair ---
+    {
+        let unknown_token = TokenId {
+            ledger_id: Principal::from_slice(&[0xFF]),
+        };
+        let result = setup
+            .dex_client_with_caller(Principal::from_slice(&[0x0F]))
+            .withdraw(WithdrawRequest {
+                token_id: unknown_token.clone(),
+                amount: Nat::from(1_000_000u64),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::UnsupportedToken {
+                token_id: unknown_token,
+            })
+        );
+    }
 
     // --- Zero balance: withdraw should fail with InsufficientBalance ---
     {

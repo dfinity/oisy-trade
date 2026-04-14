@@ -432,6 +432,13 @@ mod withdraw {
             .unwrap(),
         );
         state::with_state_mut(|s| {
+            s.record_token(
+                TokenId::from(token_id()),
+                crate::order::TokenMetadata {
+                    symbol: "TEST".to_string(),
+                    decimals: 8,
+                },
+            );
             s.deposit(USER, TokenId::from(token_id()), Quantity::from(amount));
         });
     }
@@ -629,6 +636,36 @@ mod withdraw {
         );
         assert_balance(deposit - withdraw_amount);
         assert_cached_fee(real_fee);
+    }
+
+    #[tokio::test]
+    async fn should_reject_unsupported_token() {
+        // Init state without registering any token.
+        state::init_state(
+            state::State::try_from(dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            })
+            .unwrap(),
+        );
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(1_000_000u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::UnsupportedToken {
+                token_id: token_id(),
+            })
+        );
     }
 
     #[tokio::test]

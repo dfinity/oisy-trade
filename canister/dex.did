@@ -102,6 +102,8 @@ type LedgerTransferFromError = variant {
 
 /// Error returned by the deposit endpoint.
 type DepositError = variant {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken : record { token_id : TokenId };
     /// The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
     /// The icrc2_transfer_from call to the token ledger returned an error.
@@ -149,6 +151,8 @@ type LedgerTransferError = variant {
 
 /// Error returned by the withdraw endpoint.
 type WithdrawError = variant {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken : record { token_id : TokenId };
     /// The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
     /// The requested amount is too small to cover the ledger transfer fee.

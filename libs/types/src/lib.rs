@@ -140,6 +140,11 @@ pub struct DepositRequest {
 /// Error returned by the deposit endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum DepositError {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken {
+        /// The unsupported token.
+        token_id: TokenId,
+    },
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.
@@ -222,6 +227,11 @@ pub struct WithdrawResponse {
 /// Error returned by the withdraw endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum WithdrawError {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken {
+        /// The unsupported token.
+        token_id: TokenId,
+    },
     /// The caller does not have enough free balance.
     InsufficientBalance {
         /// The caller's available free balance.

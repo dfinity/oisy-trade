@@ -293,7 +293,7 @@ impl State {
         self.next_book_id.increment();
     }
 
-    fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
+    pub fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
         self.tokens
             .entry(token_id)
             .and_modify(|existing| assert_eq!(existing, &metadata))
@@ -323,6 +323,10 @@ impl State {
 
     pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
         self.order_books.get(id)
+    }
+
+    pub fn is_known_token(&self, token_id: &TokenId) -> bool {
+        self.tokens.contains_key(token_id)
     }
 
     pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
