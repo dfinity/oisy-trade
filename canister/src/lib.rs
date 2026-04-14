@@ -131,16 +131,16 @@ pub async fn withdraw(
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
         return Err(WithdrawError::UnsupportedToken { token_id });
     }
+    let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
+
     if request.amount == 0u64 {
         return Err(WithdrawError::AmountTooSmall {
-            min_amount: candid::Nat::from(1u64),
+            min_amount: cached_fee + 1u64,
         });
     }
 
     let caller = runtime.msg_caller();
     let amount = order::Quantity::from(request.amount.clone());
-
-    let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
