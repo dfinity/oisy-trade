@@ -192,7 +192,7 @@ impl OrderBook {
     /// transitioned to resting (for status tracking).
     pub fn process_pending_orders(&mut self) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
-        let mut all_fills = BTreeSet::new();
+        let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
@@ -200,7 +200,10 @@ impl OrderBook {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
                         resting_order_seqs.insert(resting_order_seq);
                     }
-                    all_fills.extend(result.into_fills());
+                    for fill in result.into_fills() {
+                        debug_assert!(!all_fills.contains(&fill), "BUG: duplicate fill {fill:?}");
+                        all_fills.push(fill);
+                    }
                 }
                 Err(err) => {
                     panic!(
@@ -305,7 +308,7 @@ fn fill_against_queue<K: Ord>(
 /// Output of a matching round: fills produced and orders that began resting.
 #[derive(Debug)]
 pub struct MatchingOutput {
-    pub fills: BTreeSet<Fill>,
+    pub fills: Vec<Fill>,
     pub resting_orders: BTreeSet<OrderSeq>,
 }
 
@@ -350,7 +353,7 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
     pub taker_order_seq: OrderSeq,

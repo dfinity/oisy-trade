@@ -11,7 +11,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Buy,
     Sell,
