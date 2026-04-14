@@ -22,6 +22,7 @@ dex_types_internal = { path = "../libs/types-internal", features = ["event", "lo
 ic-cdk = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
+ic-metrics-encoder = { workspace = true }
 ic-stable-structures = { workspace = true }
 icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
