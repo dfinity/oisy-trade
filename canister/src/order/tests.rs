@@ -292,7 +292,7 @@ mod order_book {
             assert_eq!(
                 result,
                 MatchResult::PartiallyFilled {
-                    fills: vec![fill(&taker, OrderSeq::new(1), 100u64, u64::from(LOT_SIZE))],
+                    fills: vec![fill(&taker, OrderSeq::ONE, 100u64, u64::from(LOT_SIZE))],
                     resting_order_seq: OrderSeq::new(2),
                 }
             );
@@ -356,7 +356,7 @@ mod order_book {
             assert_eq!(
                 result,
                 MatchResult::Filled {
-                    fills: vec![fill(&taker1, OrderSeq::new(1), 100u64, u64::from(LOT_SIZE))],
+                    fills: vec![fill(&taker1, OrderSeq::ONE, 100u64, u64::from(LOT_SIZE))],
                 }
             );
             // The remaining 2 lots should still be matchable
@@ -367,7 +367,7 @@ mod order_book {
                 MatchResult::Filled {
                     fills: vec![fill(
                         &taker2,
-                        OrderSeq::new(1),
+                        OrderSeq::ONE,
                         100u64,
                         2 * u64::from(LOT_SIZE)
                     )],
@@ -416,7 +416,7 @@ mod order_book {
             book.match_order(buy(2u64, 100u64, 2 * u64::from(LOT_SIZE)))
                 .unwrap();
             let best = book.best_bid().unwrap();
-            assert_eq!(best.id(), OrderSeq::new(1));
+            assert_eq!(best.id(), OrderSeq::ONE);
         }
 
         #[test]
@@ -426,7 +426,7 @@ mod order_book {
             book.match_order(sell(2u64, 110u64, LOT_SIZE)).unwrap();
 
             let best = book.best_ask().unwrap();
-            assert_eq!(best.id(), OrderSeq::new(1));
+            assert_eq!(best.id(), OrderSeq::ONE);
             assert_eq!(best.price(), Price::new(100));
 
             // Fill the best ask
@@ -439,31 +439,16 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{OrderBook, OrderId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{Order, OrderSeq};
     use crate::test_fixtures::{LOT_SIZE, order_book};
     use std::collections::BTreeSet;
 
-    fn buy_pending(price: u64, quantity: u64) -> PendingOrder {
-        PendingOrder {
-            side: Side::Buy,
-            price: Price::new(price),
-            quantity: Quantity::from(quantity),
-        }
+    fn buy(seq: u64, price: u64, quantity: u64) -> Order {
+        crate::test_fixtures::buy(seq, price, quantity)
     }
 
-    fn sell_pending(price: u64, quantity: u64) -> PendingOrder {
-        PendingOrder {
-            side: Side::Sell,
-            price: Price::new(price),
-            quantity: Quantity::from(quantity),
-        }
-    }
-
-    fn add_pending(book: &mut OrderBook, pending: PendingOrder) -> OrderId {
-        let seq = book.next_seq();
-        let order_id = OrderId::new(book.id(), seq);
-        book.add_pending_order(pending.into_order(seq));
-        order_id
+    fn sell(seq: u64, price: u64, quantity: u64) -> Order {
+        crate::test_fixtures::sell(seq, price, quantity)
     }
 
     #[test]
@@ -480,12 +465,12 @@ mod process_pending_orders {
     fn should_report_resting_order_when_no_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        let buy_id = add_pending(&mut book, buy_pending(100, lot));
+        book.add_pending_order(buy(0, 100, lot));
 
         let output = book.process_pending_orders();
 
         assert!(output.fills.is_empty());
-        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()]));
+        assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ZERO]));
         assert!(book.take_filled_orders().is_empty());
     }
 
@@ -493,15 +478,15 @@ mod process_pending_orders {
     fn should_report_filled_orders_after_exact_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        let sell_id = add_pending(&mut book, sell_pending(100, lot));
-        let buy_id = add_pending(&mut book, buy_pending(100, lot));
+        book.add_pending_order(sell(0, 100, lot));
+        book.add_pending_order(buy(1, 100, lot));
 
         let output = book.process_pending_orders();
         let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&sell_id.seq())); // maker
-        assert!(filled.contains(&buy_id.seq())); // taker
+        assert!(filled.contains(&OrderSeq::ZERO)); // maker
+        assert!(filled.contains(&OrderSeq::ONE)); // taker
         assert!(output.resting_orders.is_empty());
     }
 
@@ -510,24 +495,24 @@ mod process_pending_orders {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         // Sell 1 lot (maker), buy 3 lots (taker) -> taker partially fills, rests with 2
-        let sell_id = add_pending(&mut book, sell_pending(100, lot));
-        let buy_id = add_pending(&mut book, buy_pending(100, 3 * lot));
+        book.add_pending_order(sell(0, 100, lot));
+        book.add_pending_order(buy(1, 100, 3 * lot));
 
         let output = book.process_pending_orders();
         let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&sell_id.seq())); // maker fully filled
-        assert!(!filled.contains(&buy_id.seq())); // taker not fully filled
-        assert_eq!(output.resting_orders, BTreeSet::from([buy_id.seq()])); // taker rests
+        assert!(filled.contains(&OrderSeq::ZERO)); // maker fully filled
+        assert!(!filled.contains(&OrderSeq::ONE)); // taker not fully filled
+        assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ONE])); // taker rests
     }
 
     #[test]
     fn take_filled_orders_should_drain() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        add_pending(&mut book, sell_pending(100, lot));
-        add_pending(&mut book, buy_pending(100, lot));
+        book.add_pending_order(sell(0, 100, lot));
+        book.add_pending_order(buy(1, 100, lot));
         book.process_pending_orders();
 
         let first_call = book.take_filled_orders();

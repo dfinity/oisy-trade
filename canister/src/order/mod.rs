@@ -87,6 +87,7 @@ pub struct OrderSeq(#[n(0)] u64);
 
 impl OrderSeq {
     pub const ZERO: Self = Self(0);
+    pub const ONE: Self = Self(1);
 
     pub const fn new(seq: u64) -> Self {
         Self(seq)
