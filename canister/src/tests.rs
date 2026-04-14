@@ -526,8 +526,8 @@ mod withdraw {
         );
         // Balance credited back.
         assert_balance(deposit);
-        // Fee cache updated from the first BadFee.
-        assert_cached_fee(5_000);
+        // Fee cache updated from the most recent BadFee.
+        assert_cached_fee(9_999);
     }
 
     #[tokio::test]
