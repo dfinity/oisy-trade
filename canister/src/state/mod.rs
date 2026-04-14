@@ -123,9 +123,8 @@ impl State {
             });
         }
 
-        let seq = book.next_seq();
-        let order_id = OrderId::new(book_id, seq);
-        let order = pending.into_order(seq);
+        let order_id = OrderId::new(book_id, book.next_seq());
+        let order = pending.into_order(order_id.seq());
         Ok((order_id, order))
     }
 

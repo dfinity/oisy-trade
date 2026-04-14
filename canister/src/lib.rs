@@ -38,10 +38,9 @@ pub fn add_limit_order(
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::from(request);
-    let order_id = state::with_state_mut(|s| {
-        let (order_id, order) = s
-            .validate_limit_order(caller, pair, pending)
-            .map_err(AddLimitOrderError::from)?;
+    let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
+
+    state::with_state_mut(|s| {
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
@@ -50,8 +49,7 @@ pub fn add_limit_order(
             quantity: order.remaining_quantity().clone(),
         };
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event));
-        Ok::<_, AddLimitOrderError>(order_id)
-    })?;
+    });
     Ok(order_id.to_string())
 }
 
