@@ -715,3 +715,71 @@ async fn should_get_logs() {
 
     setup.drop().await;
 }
+
+#[tokio::test]
+async fn should_expose_metrics() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching("canister_cycle_balance \\d+")
+        .assert_contains_metric_matching("canister_stable_memory_bytes \\d+")
+        .assert_contains_metric_matching("canister_stable_memory_pages \\d+")
+        .assert_contains_metric_matching("event_count \\d+")
+        .assert_contains_metric_matching("trading_pair_count 1")
+        .assert_contains_metric_matching("unique_user_count 0")
+        .assert_contains_metric_matching(
+            r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 0"#,
+        )
+        .assert_contains_metric_matching(
+            r#"order_book_ask_levels\{pair="ckSOL/ckBTC"\} 0"#,
+        );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_update_metrics_after_order() {
+    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use dex_types::{LimitOrderRequest, Side};
+
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = setup.user();
+
+    let required = 100_000_000u64;
+    setup
+        .deposit_flow(user, setup.quote_token_id())
+        .mint(required + 2 * QUOTE_LEDGER_FEE)
+        .approve(required + QUOTE_LEDGER_FEE)
+        .deposit(required)
+        .execute()
+        .await;
+
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+
+    // Tick to let the matching timer fire and move the order from pending to open.
+    setup.env().tick().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching("unique_user_count 1")
+        .assert_contains_metric_matching(
+            r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 1"#,
+        )
+        .assert_contains_metric_matching(
+            r#"order_count\{pair="ckSOL/ckBTC",status="open"\} 1"#,
+        );
+
+    setup.drop().await;
+}

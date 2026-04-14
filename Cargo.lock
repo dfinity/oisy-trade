@@ -578,6 +578,7 @@ dependencies = [
  "dex_types_internal",
  "ic-cdk 0.20.0",
  "ic-http-types",
+ "ic-metrics-assert",
  "icrc-ledger-types",
  "pocket-ic",
  "scopeguard",
@@ -1168,6 +1169,18 @@ dependencies = [
  "candid",
  "serde",
  "serde_bytes",
+]
+
+[[package]]
+name = "ic-metrics-assert"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44a54a56b268fae5165b4ad0ca95324400b9ed20c8c42b541496bda1618736a1"
+dependencies = [
+ "async-trait",
+ "candid",
+ "ic-http-types",
+ "regex",
 ]
 
 [[package]]
