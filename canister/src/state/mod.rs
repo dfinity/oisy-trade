@@ -129,9 +129,7 @@ impl State {
     }
 
     pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
-        let pair = self
-            .trading_pair_by_book_id(book_id)
-            .expect("BUG: unknown order book");
+        let pair = find_by_value(&self.trading_pairs, &book_id).expect("BUG: unknown trading pair");
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -145,10 +143,9 @@ impl State {
             Side::Sell => (pair.base, order.remaining_quantity().clone()),
         };
         self.balances
-            .entry(user)
-            .or_default()
-            .entry(token)
-            .or_default()
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token))
+            .expect("BUG: user balance missing")
             .reserve(required)
             .expect("BUG: insufficient balance for validated order");
 
@@ -157,7 +154,7 @@ impl State {
             order_id,
             OrderRecord {
                 owner: user,
-                pair,
+                pair: pair.clone(),
                 side: order.side(),
                 price: order.price(),
                 quantity: order.remaining_quantity().clone(),
@@ -330,13 +327,6 @@ impl State {
         &self.trading_pairs
     }
 
-    pub fn trading_pair_by_book_id(&self, book_id: OrderBookId) -> Option<TradingPair> {
-        self.trading_pairs
-            .iter()
-            .find(|&(_, &id)| id == book_id)
-            .map(|(pair, _)| pair.clone())
-    }
-
     pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
         self.order_books.get(id)
     }
@@ -416,4 +406,8 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             },
         }
     }
+}
+
+fn find_by_value<'a, K, V: PartialEq>(map: &'a BTreeMap<K, V>, value: &V) -> Option<&'a K> {
+    map.iter().find(|(_k, v)| v == &value).map(|(k, _v)| k)
 }

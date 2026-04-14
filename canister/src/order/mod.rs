@@ -126,6 +126,10 @@ impl OrderId {
     pub fn seq(&self) -> OrderSeq {
         self.seq
     }
+
+    pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
+        (self.book_id, self.seq)
+    }
 }
 
 impl fmt::Display for OrderId {
