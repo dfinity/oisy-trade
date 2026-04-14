@@ -11,9 +11,11 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
 pub enum Side {
+    #[n(0)]
     Buy,
+    #[n(1)]
     Sell,
 }
 
@@ -22,6 +24,15 @@ impl From<dex_types::Side> for Side {
         match side {
             dex_types::Side::Buy => Side::Buy,
             dex_types::Side::Sell => Side::Sell,
+        }
+    }
+}
+
+impl From<Side> for dex_types::Side {
+    fn from(side: Side) -> Self {
+        match side {
+            Side::Buy => dex_types::Side::Buy,
+            Side::Sell => dex_types::Side::Sell,
         }
     }
 }
@@ -59,8 +70,11 @@ impl OrderBookId {
 }
 
 /// Sequence number identifying an order within a single order book.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrderSeq(u64);
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct OrderSeq(#[n(0)] u64);
 
 impl OrderSeq {
     pub const ZERO: Self = Self(0);
@@ -81,9 +95,13 @@ impl OrderSeq {
 /// Unique order identifier encoding the order book ID and a per-book sequence number.
 ///
 /// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
 pub struct OrderId {
+    #[n(0)]
     book_id: OrderBookId,
+    #[n(1)]
     seq: OrderSeq,
 }
 
@@ -215,8 +233,10 @@ impl From<TradingPair> for dex_types::TradingPair {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Price(u64);
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
+pub struct Price(#[n(0)] u64);
 
 impl Price {
     pub const ZERO: Self = Self(0);
