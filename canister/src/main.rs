@@ -79,8 +79,7 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
         Err(err) => match err {
             WithdrawError::CallFailed { .. }
             | WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
-            | WithdrawError::LedgerError(LedgerTransferError::InternalError(_))
-            | WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { .. }) => {
+            | WithdrawError::LedgerError(LedgerTransferError::InternalError(_)) => {
                 canlog::log!(
                     Priority::Debug,
                     "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
@@ -89,7 +88,8 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             }
             WithdrawError::UnsupportedToken { .. }
             | WithdrawError::InsufficientBalance { .. }
-            | WithdrawError::AmountTooSmall { .. } => {
+            | WithdrawError::AmountTooSmall { .. }
+            | WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { .. }) => {
                 // do not log errors due to user actions
             }
         },
