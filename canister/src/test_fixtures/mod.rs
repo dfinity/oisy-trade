@@ -1,3 +1,5 @@
+pub mod event;
+
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
     TickSize, TokenId, TokenMetadata, TradingPair,
@@ -165,6 +167,7 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+#[cfg(test)]
 pub mod arbitrary {
     use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
     use proptest::prelude::*;
@@ -211,6 +214,7 @@ pub mod arbitrary {
     }
 }
 
+#[cfg(test)]
 pub mod mocks {
     use crate::Runtime;
     use candid::Principal;

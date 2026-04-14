@@ -29,9 +29,10 @@ minicbor = { workspace = true, features = ["derive"] }
 num-bigint = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
+strum = { workspace = true, optional = true }
 
 [features]
-canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde"]
+canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde", "dep:strum"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }

@@ -301,3 +301,55 @@ fn fund_user(state: &mut State, principal: Principal) {
     state.deposit(principal, pair.base, Quantity::from(Nat::from(u128::MAX)));
     state.deposit(principal, pair.quote, Quantity::from(Nat::from(u128::MAX)));
 }
+
+mod event_storage {
+    use crate::storage;
+    use crate::test_fixtures::event::WorstCaseEvent;
+    use canbench_rs::bench;
+
+    #[bench(raw)]
+    fn bench_record_event_add_trading_pair() -> canbench_rs::BenchResult {
+        let payload = WorstCaseEvent::AddTradingPair
+            .worst_case_instructions_event()
+            .payload;
+        canbench_rs::bench_fn(|| {
+            storage::record_event(payload.clone());
+        })
+    }
+
+    #[bench(raw)]
+    fn bench_read_event_add_trading_pair() -> canbench_rs::BenchResult {
+        storage::record_event(
+            WorstCaseEvent::AddTradingPair
+                .worst_case_instructions_event()
+                .payload,
+        );
+        let idx = storage::total_event_count() - 1;
+        canbench_rs::bench_fn(|| {
+            storage::get_event(idx);
+        })
+    }
+
+    #[bench(raw)]
+    fn bench_record_event_deposit() -> canbench_rs::BenchResult {
+        let payload = WorstCaseEvent::Deposit
+            .worst_case_instructions_event()
+            .payload;
+        canbench_rs::bench_fn(|| {
+            storage::record_event(payload.clone());
+        })
+    }
+
+    #[bench(raw)]
+    fn bench_read_event_deposit() -> canbench_rs::BenchResult {
+        storage::record_event(
+            WorstCaseEvent::Deposit
+                .worst_case_instructions_event()
+                .payload,
+        );
+        let idx = storage::total_event_count() - 1;
+        canbench_rs::bench_fn(|| {
+            storage::get_event(idx);
+        })
+    }
+}

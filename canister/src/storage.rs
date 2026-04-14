@@ -39,6 +39,10 @@ pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
 }
 
+pub fn get_event(idx: u64) -> Option<Event> {
+    EVENTS.with(|events| events.borrow().get(idx))
+}
+
 pub fn with_event_iter<F, R>(f: F) -> R
 where
     F: for<'a> FnOnce(Box<dyn Iterator<Item = Event> + 'a>) -> R,

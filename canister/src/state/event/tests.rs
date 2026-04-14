@@ -94,110 +94,22 @@ proptest! {
 }
 
 mod worst_case {
-    use crate::order::{LotSize, OrderBookId, Quantity, TickSize, TokenId, TokenMetadata};
-    use crate::state::event::{AddTradingPairEvent, DepositEvent, Event, EventType};
-    use candid::Principal;
-    use dex_types_internal::{InitArg, Mode, UpgradeArg};
+    use crate::test_fixtures::event::WorstCaseEvent;
     use ic_stable_structures::Storable;
     use strum::IntoEnumIterator;
 
     #[test]
     fn should_know_the_worst_case_event_size() {
         for variant in WorstCaseEvent::iter() {
-            let event = variant.worst_case_event();
+            let event = variant.worst_case_memory_event();
 
             let bytes = event.to_bytes();
 
             assert_eq!(
                 bytes.len(),
-                variant.expected_size(),
+                variant.expected_memory_size(),
                 "serialized size mismatch"
             );
         }
-    }
-
-    /// Adding a new variant to `EventType` will cause a compile error in the `From` impl,
-    /// reminding you to add a corresponding worst-case entry.
-    #[derive(strum::EnumIter)]
-    enum WorstCaseEvent {
-        Init,
-        Upgrade,
-        AddTradingPair,
-        Deposit,
-    }
-
-    impl From<&EventType> for WorstCaseEvent {
-        fn from(event: &EventType) -> Self {
-            match event {
-                EventType::Init(_) => Self::Init,
-                EventType::Upgrade(_) => Self::Upgrade,
-                EventType::AddTradingPair(_) => Self::AddTradingPair,
-                EventType::Deposit(_) => Self::Deposit,
-            }
-        }
-    }
-
-    impl WorstCaseEvent {
-        fn worst_case_event(&self) -> Event {
-            let principals: std::collections::BTreeSet<Principal> =
-                (0u8..10).map(max_principal).collect();
-
-            let payload = match self {
-                Self::Init => EventType::Init(InitArg {
-                    mode: Mode::RestrictedTo(principals),
-                }),
-                Self::Upgrade => EventType::Upgrade(UpgradeArg {
-                    mode: Some(Mode::RestrictedTo(principals)),
-                }),
-                Self::AddTradingPair => EventType::AddTradingPair(AddTradingPairEvent {
-                    book_id: OrderBookId::new(u64::MAX),
-                    base: TokenId::new(max_principal(0)),
-                    quote: TokenId::new(max_principal(1)),
-                    tick_size: TickSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
-                    lot_size: LotSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
-                    base_metadata: TokenMetadata {
-                        symbol: max_symbol(),
-                        decimals: u8::MAX,
-                    },
-                    quote_metadata: TokenMetadata {
-                        symbol: max_symbol(),
-                        decimals: u8::MAX,
-                    },
-                }),
-                Self::Deposit => EventType::Deposit(DepositEvent {
-                    user: max_principal(0),
-                    token: TokenId::new(max_principal(1)),
-                    amount: max_quantity(),
-                }),
-            };
-            Event {
-                timestamp: u64::MAX,
-                payload,
-            }
-        }
-
-        fn expected_size(&self) -> usize {
-            match self {
-                Self::Init => 328,
-                Self::Upgrade => 328,
-                Self::AddTradingPair => 136,
-                Self::Deposit => 96,
-            }
-        }
-    }
-
-    fn max_principal(seed: u8) -> Principal {
-        Principal::from_slice(&[seed; 29])
-    }
-
-    fn max_symbol() -> String {
-        "A".repeat(10)
-    }
-
-    fn max_quantity() -> Quantity {
-        // EVM-based chains use theoretically u256,
-        // but note that for example ETH has a supply of 120 million,
-        // which comfortably fits in a u128 (18 decimals).
-        Quantity::from(candid::Nat::from(u128::MAX))
     }
 }
