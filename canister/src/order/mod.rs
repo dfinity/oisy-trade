@@ -404,6 +404,16 @@ pub struct PendingOrder {
     pub quantity: Quantity,
 }
 
+impl From<dex_types::LimitOrderRequest> for PendingOrder {
+    fn from(request: dex_types::LimitOrderRequest) -> Self {
+        Self {
+            side: Side::from(request.side),
+            price: Price::from(request.price),
+            quantity: Quantity::from(request.quantity),
+        }
+    }
+}
+
 impl PendingOrder {
     pub fn into_order(self, id: OrderSeq) -> Order {
         Order {

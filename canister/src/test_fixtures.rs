@@ -168,15 +168,14 @@ pub fn fund_user(user: Principal) {
 /// Add a limit order directly via the state, bypassing `lib::add_limit_order`
 /// (which records an event and requires the canister environment).
 pub fn add_limit_order(user: Principal, request: &LimitOrderRequest) -> OrderId {
-    let pair = TradingPair::from(request.pair.clone());
-    let pending = PendingOrder {
-        side: Side::from(request.side),
-        price: Price::from(request.price),
-        quantity: Quantity::from(request.quantity.clone()),
-    };
+    let pair = TradingPair::from(request.pair);
+    let pending = PendingOrder::from(request.clone());
     state::with_state_mut(|s| {
         let book_id = *s.trading_pairs().get(&pair).expect("BUG: unknown pair");
-        let seq = s.order_book(&book_id).expect("BUG: missing book").next_seq();
+        let seq = s
+            .order_book(&book_id)
+            .expect("BUG: missing book")
+            .next_seq();
         let order = pending.into_order(seq);
         s.record_limit_order(user, book_id, order);
         OrderId::new(book_id, seq)
