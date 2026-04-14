@@ -5,7 +5,7 @@ use dex_types_internal::{InitArg, Mode, UpgradeArg};
 
 /// Adding a new variant to `EventType` will cause a compile error in the `From` impl,
 /// reminding you to add corresponding worst-case entries.
-#[derive(strum::EnumIter)]
+#[derive(strum::EnumIter, strum::IntoStaticStr)]
 pub enum WorstCaseEvent {
     Init,
     Upgrade,

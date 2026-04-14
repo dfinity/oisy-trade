@@ -306,50 +306,36 @@ mod event_storage {
     use crate::storage;
     use crate::test_fixtures::event::WorstCaseEvent;
     use canbench_rs::bench;
+    use strum::IntoEnumIterator;
 
     #[bench(raw)]
-    fn bench_record_event_add_trading_pair() -> canbench_rs::BenchResult {
-        let payload = WorstCaseEvent::AddTradingPair
-            .worst_case_instructions_event()
-            .payload;
+    fn bench_write_events() -> canbench_rs::BenchResult {
         canbench_rs::bench_fn(|| {
-            storage::record_event(payload.clone());
+            for variant in WorstCaseEvent::iter() {
+                let name: &'static str = (&variant).into();
+                {
+                    let _scope = canbench_rs::bench_scope(name);
+                    storage::record_event(variant.worst_case_instructions_event().payload);
+                }
+            }
         })
     }
 
     #[bench(raw)]
-    fn bench_read_event_add_trading_pair() -> canbench_rs::BenchResult {
-        storage::record_event(
-            WorstCaseEvent::AddTradingPair
-                .worst_case_instructions_event()
-                .payload,
-        );
-        let idx = storage::total_event_count() - 1;
+    fn bench_read_events() -> canbench_rs::BenchResult {
+        let mut indices = Vec::new();
+        for variant in WorstCaseEvent::iter() {
+            storage::record_event(variant.worst_case_instructions_event().payload);
+            indices.push((storage::total_event_count() - 1, variant));
+        }
         canbench_rs::bench_fn(|| {
-            storage::get_event(idx);
-        })
-    }
-
-    #[bench(raw)]
-    fn bench_record_event_deposit() -> canbench_rs::BenchResult {
-        let payload = WorstCaseEvent::Deposit
-            .worst_case_instructions_event()
-            .payload;
-        canbench_rs::bench_fn(|| {
-            storage::record_event(payload.clone());
-        })
-    }
-
-    #[bench(raw)]
-    fn bench_read_event_deposit() -> canbench_rs::BenchResult {
-        storage::record_event(
-            WorstCaseEvent::Deposit
-                .worst_case_instructions_event()
-                .payload,
-        );
-        let idx = storage::total_event_count() - 1;
-        canbench_rs::bench_fn(|| {
-            storage::get_event(idx);
+            for (idx, variant) in &indices {
+                let name: &'static str = variant.into();
+                {
+                    let _scope = canbench_rs::bench_scope(name);
+                    storage::get_event(*idx);
+                }
+            }
         })
     }
 }
