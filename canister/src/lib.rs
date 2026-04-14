@@ -134,7 +134,7 @@ pub async fn withdraw(
     let amount = order::Quantity::from(request.amount.clone());
     let internal_token = order::TokenId::from(token_id.clone());
 
-    let cached_fee = state::with_state(|s| s.get_cached_fee(&internal_token));
+    let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
@@ -149,7 +149,7 @@ pub async fn withdraw(
     // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
     if let Some(fee) = outcome.ledger_fee {
         state::with_state_mut(|s| {
-            s.set_cached_fee(order::TokenId::from(token_id.clone()), fee);
+            s.set_cached_ledger_fee(order::TokenId::from(token_id.clone()), fee);
         });
     }
 

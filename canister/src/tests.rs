@@ -479,7 +479,7 @@ mod withdraw {
     fn assert_cached_fee(expected: u64) {
         state::with_state(|s| {
             assert_eq!(
-                s.get_cached_fee(&TokenId::from(token_id())),
+                s.get_cached_ledger_fee(&TokenId::from(token_id())),
                 Nat::from(expected)
             );
         });
@@ -596,7 +596,7 @@ mod withdraw {
         let stale_fee = 500_000u64;
         let real_fee = 100u64;
         state::with_state_mut(|s| {
-            s.set_cached_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+            s.set_cached_ledger_fee(TokenId::from(token_id()), Nat::from(stale_fee));
         });
 
         // Withdraw an amount between the real fee and the stale cached fee.
@@ -667,7 +667,7 @@ mod withdraw {
         let stale_fee = 10_000u64;
         let real_fee = 100u64;
         state::with_state_mut(|s| {
-            s.set_cached_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+            s.set_cached_ledger_fee(TokenId::from(token_id()), Nat::from(stale_fee));
         });
 
         // Withdraw an amount below the real fee.

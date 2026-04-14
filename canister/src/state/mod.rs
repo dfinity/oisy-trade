@@ -50,7 +50,7 @@ pub struct State {
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
-    fee_cache: BTreeMap<TokenId, Nat>,
+    ledger_fee_cache: BTreeMap<TokenId, Nat>,
 }
 
 impl TryFrom<InitArg> for State {
@@ -66,7 +66,7 @@ impl TryFrom<InitArg> for State {
             balances: BTreeMap::default(),
             order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
-            fee_cache: BTreeMap::default(),
+            ledger_fee_cache: BTreeMap::default(),
         })
     }
 }
@@ -357,15 +357,15 @@ impl State {
             .deposit(amount);
     }
 
-    pub fn get_cached_fee(&self, token_id: &TokenId) -> Nat {
-        self.fee_cache
+    pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
+        self.ledger_fee_cache
             .get(token_id)
             .cloned()
             .unwrap_or(Nat::from(0u64))
     }
 
-    pub fn set_cached_fee(&mut self, token_id: TokenId, fee: Nat) {
-        self.fee_cache.insert(token_id, fee);
+    pub fn set_cached_ledger_fee(&mut self, token_id: TokenId, fee: Nat) {
+        self.ledger_fee_cache.insert(token_id, fee);
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
