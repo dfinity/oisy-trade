@@ -4,7 +4,7 @@ use crate::order::{
 };
 use crate::state;
 use candid::Principal;
-use dex_types::LimitOrderRequest;
+use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -46,6 +46,26 @@ pub fn limit_order_request() -> LimitOrderRequest {
         side: dex_types::Side::Buy,
         price: 100,
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+    }
+}
+
+pub fn trading_pair_request(
+    base_id: impl Into<dex_types::TokenId>,
+    base_meta: dex_types::TokenMetadata,
+    quote_id: impl Into<dex_types::TokenId>,
+    quote_meta: dex_types::TokenMetadata,
+) -> AddTradingPairRequest {
+    AddTradingPairRequest {
+        base: Token {
+            id: base_id.into(),
+            metadata: base_meta,
+        },
+        quote: Token {
+            id: quote_id.into(),
+            metadata: quote_meta,
+        },
+        tick_size: TICK_SIZE.get(),
+        lot_size: LOT_SIZE.get(),
     }
 }
 
@@ -122,14 +142,14 @@ pub fn init_state_with_order_book() {
         .unwrap(),
     );
     state::with_state_mut(|s| {
-        s.add_trading_pair(
+        s.record_trading_pair(
+            TEST_BOOK_ID,
             icp_ckbtc_trading_pair(),
             icp_metadata(),
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
-        )
-        .unwrap();
+        );
     });
 }
 
@@ -145,7 +165,52 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-#[cfg(test)]
+pub mod arbitrary {
+    use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
+    use proptest::prelude::*;
+
+    use super::{LOT_SIZE, TICK_SIZE};
+
+    /// Strategy for a valid [`Fill`] with unique order sequences.
+    ///
+    /// `index` must be unique per fill in a test case — it determines the order
+    /// sequence numbers (taker = 2*index, maker = 2*index + 1) so they never
+    /// collide across fills.
+    ///
+    /// Generates tick-aligned prices where `maker_price <= taker_price` for buy
+    /// takers and `maker_price >= taker_price` for sell takers (matching the
+    /// price-improvement semantics of the engine). Quantity is a lot-size multiple.
+    pub fn arb_fill(index: u64) -> impl Strategy<Value = Fill> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            any::<bool>(), // side: true = Buy
+            1..100u64,     // price_a (in ticks)
+            1..100u64,     // price_b (in ticks)
+            1..10u64,      // quantity (in lots)
+        )
+            .prop_map(move |(is_buy, pa, pb, qty_lots)| {
+                let (taker_side, taker_price, maker_price) = if is_buy {
+                    let hi = pa.max(pb) * tick;
+                    let lo = pa.min(pb) * tick;
+                    (Side::Buy, Price::new(hi), Price::new(lo))
+                } else {
+                    let hi = pa.max(pb) * tick;
+                    let lo = pa.min(pb) * tick;
+                    (Side::Sell, Price::new(lo), Price::new(hi))
+                };
+                Fill {
+                    taker_order_seq: OrderSeq::new(2 * index),
+                    taker_side,
+                    taker_price,
+                    maker_order_seq: OrderSeq::new(2 * index + 1),
+                    maker_price,
+                    quantity: Quantity::from(qty_lots * lot),
+                }
+            })
+    }
+}
+
 pub mod mocks {
     use crate::Runtime;
     use candid::Principal;

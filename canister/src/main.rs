@@ -92,6 +92,7 @@ fn get_events(
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
                 EventType::AddTradingPair(e) => {
                     event::EventType::AddTradingPair(event::AddTradingPairEvent {
+                        book_id: e.book_id.get(),
                         base: dex_types::TokenId::from(e.base),
                         quote: dex_types::TokenId::from(e.quote),
                         tick_size: e.tick_size.get(),

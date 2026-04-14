@@ -87,7 +87,7 @@ pub struct TradingPairInfo {
 }
 
 /// Status of an order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum OrderStatus {
     /// The order was not found.
     NotFound,

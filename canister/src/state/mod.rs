@@ -8,8 +8,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderId, PendingOrder, Quantity, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord,
+    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use candid::Principal;
 use dex_types::OrderStatus;
@@ -46,8 +46,7 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
-    // TODO DEFI-2752: Keep track of filled orders.
-    order_owners: BTreeMap<OrderId, Principal>,
+    order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -62,7 +61,7 @@ impl TryFrom<InitArg> for State {
             trading_pairs: BTreeMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
-            order_owners: BTreeMap::default(),
+            order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
         })
     }
@@ -86,12 +85,6 @@ impl State {
                 );
             }
         }
-    }
-
-    fn next_book_id(&mut self) -> OrderBookId {
-        let id = self.next_book_id;
-        self.next_book_id.increment();
-        id
     }
 
     pub fn add_limit_order(
@@ -141,10 +134,23 @@ impl State {
             }
         }
 
+        let side = pending.side;
+        let price = pending.price;
+        let quantity = pending.quantity.clone();
         let order_id = book
             .add_pending_order(pending)
             .map_err(AddLimitOrderError::InvalidOrder)?;
-        assert_eq!(self.order_owners.insert(order_id, user), None);
+        self.order_history.insert_once(
+            order_id,
+            OrderRecord {
+                owner: user,
+                pair,
+                side,
+                price,
+                quantity,
+                status: OrderStatus::Pending,
+            },
+        );
         Ok(order_id)
     }
 
@@ -156,33 +162,58 @@ impl State {
             .map(|(pair, &book_id)| (pair.clone(), book_id))
             .collect();
         for (pair, book_id) in pairs {
-            let fills = {
+            let (output, filled_seqs) = {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("matching");
-                self.order_books
+                let book = self
+                    .order_books
                     .get_mut(&book_id)
-                    .expect("BUG: trading pair registered but order book missing")
-                    .process_pending_orders()
+                    .expect("BUG: trading pair registered but order book missing");
+
+                (book.process_pending_orders(), book.take_filled_orders())
             };
+
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("settling");
-                for fill in &fills {
+                for fill in &output.fills {
                     self.settle_fill(book_id, &pair, fill);
+                }
+            }
+            {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("status");
+                for seq in output.resting_orders {
+                    let order_id = OrderId::new(book_id, seq);
+                    *self
+                        .order_history
+                        .get_status_mut(&order_id)
+                        .expect("BUG: resting order not found in order_history") =
+                        OrderStatus::Open;
+                }
+                for seq in filled_seqs {
+                    let order_id = OrderId::new(book_id, seq);
+                    *self
+                        .order_history
+                        .get_status_mut(&order_id)
+                        .expect("BUG: filled order not found in order_history") =
+                        OrderStatus::Filled;
                 }
             }
         }
     }
 
-    fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
-        let taker = *self
-            .order_owners
+    pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
+        let taker = self
+            .order_history
             .get(&OrderId::new(book_id, fill.taker_order_seq))
-            .expect("BUG: taker not found in order_owners");
-        let maker = *self
-            .order_owners
+            .expect("BUG: taker not found in order_history")
+            .owner;
+        let maker = self
+            .order_history
             .get(&OrderId::new(book_id, fill.maker_order_seq))
-            .expect("BUG: maker not found in order_owners");
+            .expect("BUG: maker not found in order_history")
+            .owner;
 
         let (buyer, seller) = match fill.taker_side {
             Side::Buy => (taker, maker),
@@ -229,47 +260,43 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        let book = self.order_books.get(&order_id.book_id());
-        match book {
-            Some(book) => book
-                .get_order_status(order_id.seq())
-                .unwrap_or(OrderStatus::NotFound),
-            None => OrderStatus::NotFound,
-        }
+        self.order_history.get_status(&order_id)
+    }
+
+    pub fn next_book_id(&self) -> OrderBookId {
+        self.next_book_id
     }
 
     pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
         self.trading_pairs.contains_key(pair)
     }
 
-    /// Register a new trading pair with a new order book.
-    ///
-    /// Also validates and stores the token metadata for both the base and quote
-    /// tokens. If a token is already registered with different metadata, returns
-    /// [`AddTradingPairError::InconsistentTokenMetadata`].
-    pub fn add_trading_pair(
+    pub fn record_trading_pair(
         &mut self,
+        book_id: OrderBookId,
         pair: TradingPair,
         base_metadata: TokenMetadata,
         quote_metadata: TokenMetadata,
         tick_size: TickSize,
         lot_size: LotSize,
-    ) -> Result<(), dex_types::AddTradingPairError> {
-        self.check_token_metadata_consistency(pair.base, &base_metadata)?;
-        self.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
-        if self.trading_pairs.contains_key(&pair) {
-            return Err(dex_types::AddTradingPairError::TradingPairAlreadyExists);
-        }
-        self.tokens.entry(pair.base).or_insert(base_metadata);
-        self.tokens.entry(pair.quote).or_insert(quote_metadata);
-        let book_id = self.next_book_id();
+    ) {
+        self.record_token(pair.base, base_metadata);
+        self.record_token(pair.quote, quote_metadata);
+        assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
         let book = OrderBook::new(book_id, tick_size, lot_size);
         assert_eq!(self.trading_pairs.insert(pair, book_id), None);
         assert_eq!(self.order_books.insert(book_id, book), None);
-        Ok(())
+        self.next_book_id.increment();
     }
 
-    fn check_token_metadata_consistency(
+    fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
+        self.tokens
+            .entry(token_id)
+            .and_modify(|existing| assert_eq!(existing, &metadata))
+            .or_insert(metadata);
+    }
+
+    pub fn check_token_metadata_consistency(
         &self,
         token_id: TokenId,
         submitted: &TokenMetadata,

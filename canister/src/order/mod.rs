@@ -1,9 +1,11 @@
 mod book;
+mod history;
 #[cfg(test)]
 mod tests;
 
-pub use book::{Fill, MatchOrderError, MatchResult, OrderBook};
+pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
 use candid::{Nat, Principal};
+pub use history::{OrderHistory, OrderRecord};
 use num_bigint::BigUint;
 use std::fmt;
 use std::num::NonZeroU64;
@@ -24,14 +26,31 @@ impl From<dex_types::Side> for Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OrderBookId(u64);
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct OrderBookId(#[n(0)] u64);
 
 impl OrderBookId {
     pub const ZERO: Self = Self(0);
+    pub const ONE: Self = Self(1);
 
     pub const fn new(id: u64) -> Self {
         Self(id)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
     }
 
     pub fn increment(&mut self) {

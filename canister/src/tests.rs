@@ -1,3 +1,153 @@
+mod add_trading_pair {
+    use crate::test_fixtures::{
+        ckbtc_token_id, icp_ckbtc_trading_pair, icp_token_id, init_state_with_order_book,
+        mocks::MockRuntime, trading_pair_request,
+    };
+    use crate::{add_trading_pair, state};
+    use candid::Principal;
+    use dex_types::{AddTradingPairError, TokenId, TokenMetadata};
+
+    #[test]
+    fn should_reject_inconsistent_metadata_for_base_token() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+
+        let wrong_metadata = TokenMetadata {
+            symbol: "WRONG".to_string(),
+            decimals: 99,
+        };
+        let result = add_trading_pair(
+            trading_pair_request(
+                icp_token_id(),
+                wrong_metadata.clone(),
+                token_c,
+                TokenMetadata {
+                    symbol: "ckETH".to_string(),
+                    decimals: 18,
+                },
+            ),
+            &runtime,
+        );
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InconsistentTokenMetadata {
+                token: icp_token_id().into(),
+                expected: TokenMetadata {
+                    symbol: "ICP".to_string(),
+                    decimals: 8,
+                },
+                submitted: wrong_metadata,
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_inconsistent_metadata_for_quote_token() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+
+        let wrong_metadata = TokenMetadata {
+            symbol: "WRONG".to_string(),
+            decimals: 99,
+        };
+        let result = add_trading_pair(
+            trading_pair_request(
+                token_c,
+                TokenMetadata {
+                    symbol: "ckETH".to_string(),
+                    decimals: 18,
+                },
+                ckbtc_token_id(),
+                wrong_metadata.clone(),
+            ),
+            &runtime,
+        );
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InconsistentTokenMetadata {
+                token: ckbtc_token_id().into(),
+                expected: TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
+                submitted: wrong_metadata,
+            })
+        );
+    }
+
+    #[test]
+    fn should_not_mutate_state_on_inconsistent_metadata_error() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+
+        let trading_pairs_before = state::with_state(|s| s.trading_pairs().clone());
+
+        let result = add_trading_pair(
+            trading_pair_request(
+                icp_token_id(),
+                TokenMetadata {
+                    symbol: "WRONG".to_string(),
+                    decimals: 99,
+                },
+                token_c,
+                TokenMetadata {
+                    symbol: "ckETH".to_string(),
+                    decimals: 18,
+                },
+            ),
+            &runtime,
+        );
+
+        assert!(result.is_err());
+        let trading_pairs_after = state::with_state(|s| s.trading_pairs().clone());
+        assert_eq!(trading_pairs_before, trading_pairs_after);
+    }
+
+    #[test]
+    fn should_reject_duplicate_trading_pair() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let pair = icp_ckbtc_trading_pair();
+
+        let result = add_trading_pair(
+            trading_pair_request(
+                pair.base,
+                TokenMetadata {
+                    symbol: "ICP".to_string(),
+                    decimals: 8,
+                },
+                pair.quote,
+                TokenMetadata {
+                    symbol: "ckBTC".to_string(),
+                    decimals: 8,
+                },
+            ),
+            &runtime,
+        );
+
+        assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
+    }
+
+    fn controller_runtime() -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller()
+            .return_const(Principal::anonymous());
+        mock.expect_is_controller().return_const(true);
+        mock
+    }
+}
+
 mod add_limit_order {
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
@@ -214,6 +364,29 @@ mod get_order_status {
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
         let status = get_order_status(order_id);
         assert_eq!(status, OrderStatus::Pending);
+    }
+
+    #[test]
+    fn should_return_filled_after_matching() {
+        init_state_with_order_book();
+        let buyer = Principal::from_slice(&[0x01]);
+        let seller = Principal::from_slice(&[0x02]);
+        fund_user(buyer);
+        fund_user(seller);
+        let mut buyer_rt = MockRuntime::new();
+        buyer_rt.expect_msg_caller().return_const(buyer);
+        let mut seller_rt = MockRuntime::new();
+        seller_rt.expect_msg_caller().return_const(seller);
+
+        let buy_id = add_limit_order(limit_order_request(), &buyer_rt).unwrap();
+        let mut sell_request = limit_order_request();
+        sell_request.side = dex_types::Side::Sell;
+        let sell_id = add_limit_order(sell_request, &seller_rt).unwrap();
+
+        crate::process_pending_orders();
+
+        assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
+        assert_eq!(get_order_status(sell_id), OrderStatus::Filled);
     }
 
     #[test]
