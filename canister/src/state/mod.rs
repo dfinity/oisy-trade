@@ -1,5 +1,8 @@
 pub mod audit;
 pub mod event;
+mod map;
+
+pub use map::TradingPairMap;
 
 #[cfg(test)]
 mod tests;
@@ -42,7 +45,7 @@ pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    trading_pairs: BTreeMap<TradingPair, OrderBookId>,
+    trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
@@ -58,7 +61,7 @@ impl TryFrom<InitArg> for State {
             mode: init_arg.mode,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
-            trading_pairs: BTreeMap::default(),
+            trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
             order_history: OrderHistory::new(),
@@ -95,7 +98,7 @@ impl State {
     ) -> Result<(OrderId, Order), AddLimitOrderError> {
         let book_id = *self
             .trading_pairs
-            .get(&pair)
+            .get_book_id(&pair)
             .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
@@ -129,7 +132,10 @@ impl State {
     }
 
     pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
-        let pair = find_by_value(&self.trading_pairs, &book_id).expect("BUG: unknown trading pair");
+        let pair = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair");
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -169,7 +175,7 @@ impl State {
         let pairs: Vec<(TradingPair, OrderBookId)> = self
             .trading_pairs
             .iter()
-            .map(|(pair, &book_id)| (pair.clone(), book_id))
+            .map(|(pair, book_id)| (pair.clone(), *book_id))
             .collect();
         for (pair, book_id) in pairs {
             let (output, filled_seqs) = {
@@ -278,7 +284,7 @@ impl State {
     }
 
     pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
-        self.trading_pairs.contains_key(pair)
+        self.trading_pairs.contains(pair)
     }
 
     pub fn record_trading_pair(
@@ -294,7 +300,7 @@ impl State {
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
         let book = OrderBook::new(book_id, tick_size, lot_size);
-        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        self.trading_pairs.insert(pair, book_id);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
     }
@@ -323,7 +329,7 @@ impl State {
         Ok(())
     }
 
-    pub fn trading_pairs(&self) -> &BTreeMap<TradingPair, OrderBookId> {
+    pub fn trading_pairs(&self) -> &TradingPairMap {
         &self.trading_pairs
     }
 
@@ -359,7 +365,7 @@ impl State {
 
     pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
         self.trading_pairs
-            .get(trading_pair)
+            .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
     }
 }
@@ -406,9 +412,4 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             },
         }
     }
-}
-
-// TODO(DEFI-2724): Replace this O(n) scan with a reverse map `OrderBookId → TradingPair`.
-fn find_by_value<'a, K, V: PartialEq>(map: &'a BTreeMap<K, V>, value: &V) -> Option<&'a K> {
-    map.iter().find(|(_k, v)| *v == value).map(|(k, _v)| k)
 }
