@@ -436,6 +436,99 @@ mod order_book {
             assert_eq!(best.price(), Price::new(110));
         }
     }
+
+    mod replay {
+        use crate::order::{OrderSeq, Price, Quantity, Side};
+        use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
+
+        fn tick() -> u64 {
+            crate::test_fixtures::TICK_SIZE.get()
+        }
+
+        fn lot() -> u64 {
+            u64::from(LOT_SIZE)
+        }
+
+        #[test]
+        fn clear_pending_orders_should_drain_queue() {
+            let mut book = order_book();
+            book.add_pending_order(buy(0, tick(), lot()));
+            book.add_pending_order(sell(1, tick(), lot()));
+            assert_eq!(book.pending_orders_len(), 2);
+
+            book.clear_pending_orders();
+
+            assert_eq!(book.pending_orders_len(), 0);
+        }
+
+        #[test]
+        fn reduce_resting_order_should_partially_reduce() {
+            let mut book = order_book();
+            book.add_pending_order(buy(0, tick(), 3 * lot()));
+            book.process_pending_orders();
+            assert_eq!(book.resting_orders_len(), 1);
+
+            book.reduce_resting_order(OrderSeq::ZERO, &Quantity::from(lot()));
+
+            let best = book.best_bid().unwrap();
+            assert_eq!(*best.remaining_quantity(), Quantity::from(2 * lot()));
+            assert_eq!(book.resting_orders_len(), 1);
+        }
+
+        #[test]
+        fn reduce_resting_order_should_remove_when_fully_filled() {
+            let mut book = order_book();
+            book.add_pending_order(buy(0, tick(), lot()));
+            book.process_pending_orders();
+            assert_eq!(book.resting_orders_len(), 1);
+
+            book.reduce_resting_order(OrderSeq::ZERO, &Quantity::from(lot()));
+
+            assert_eq!(book.resting_orders_len(), 0);
+            assert!(book.best_bid().is_none());
+            assert_eq!(book.bids_len(), 0);
+        }
+
+        #[test]
+        fn insert_order_should_add_to_bids() {
+            let mut book = order_book();
+
+            book.insert_order(buy(0, tick(), lot()));
+
+            assert_eq!(book.resting_orders_len(), 1);
+            let best = book.best_bid().unwrap();
+            assert_eq!(best.id(), OrderSeq::ZERO);
+            assert_eq!(best.price(), Price::new(tick()));
+            assert_eq!(*best.remaining_quantity(), Quantity::from(lot()));
+        }
+
+        #[test]
+        fn insert_order_should_add_to_asks() {
+            let mut book = order_book();
+
+            book.insert_order(sell(0, tick(), lot()));
+
+            assert_eq!(book.resting_orders_len(), 1);
+            let best = book.best_ask().unwrap();
+            assert_eq!(best.id(), OrderSeq::ZERO);
+            assert_eq!(best.price(), Price::new(tick()));
+        }
+
+        #[test]
+        #[should_panic(expected = "BUG: order not found in resting_orders index")]
+        fn reduce_resting_order_should_panic_on_unknown_seq() {
+            let mut book = order_book();
+            book.reduce_resting_order(OrderSeq::ZERO, &Quantity::from(lot()));
+        }
+
+        #[test]
+        #[should_panic]
+        fn insert_order_should_panic_on_duplicate() {
+            let mut book = order_book();
+            book.insert_order(buy(0, tick(), lot()));
+            book.insert_order(buy(0, tick(), lot()));
+        }
+    }
 }
 
 mod process_pending_orders {

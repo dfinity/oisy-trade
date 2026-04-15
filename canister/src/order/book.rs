@@ -231,7 +231,7 @@ impl OrderBook {
         std::mem::take(&mut self.filled_orders)
     }
 
-    fn insert_order(&mut self, order: Order) {
+    pub fn insert_order(&mut self, order: Order) {
         let side = order.side();
         let price = order.price();
         assert_eq!(self.resting_orders.insert(order.id(), (side, price)), None);
@@ -260,6 +260,57 @@ impl OrderBook {
 
     pub fn resting_orders_len(&self) -> usize {
         self.resting_orders.len()
+    }
+
+    /// Drain the pending orders queue.
+    pub fn clear_pending_orders(&mut self) {
+        self.pending_orders.clear();
+    }
+
+    /// Reduce the front resting order's remaining quantity by `amount`.
+    /// Removes the order if fully filled, and cleans up empty price levels.
+    ///
+    /// The target must be at the front of its price-level queue (FIFO invariant).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seq` is not in the resting index, or if it is not
+    /// at the front of its queue.
+    pub fn reduce_resting_order(&mut self, seq: OrderSeq, amount: &Quantity) {
+        let (side, price) = *self
+            .resting_orders
+            .get(&seq)
+            .expect("BUG: order not found in resting_orders index");
+
+        let queue = match side {
+            Side::Buy => self
+                .bids
+                .get_mut(&Reverse(price))
+                .expect("BUG: price level missing for resting bid"),
+            Side::Sell => self
+                .asks
+                .get_mut(&price)
+                .expect("BUG: price level missing for resting ask"),
+        };
+
+        let front = queue.front_mut().expect("BUG: empty queue for price level");
+        assert_eq!(front.id(), seq, "BUG: expected order at front of queue");
+        front.reduce_quantity(amount);
+
+        if front.remaining_quantity().is_zero() {
+            queue.pop_front();
+            self.resting_orders.remove(&seq);
+            if queue.is_empty() {
+                match side {
+                    Side::Buy => {
+                        self.bids.remove(&Reverse(price));
+                    }
+                    Side::Sell => {
+                        self.asks.remove(&price);
+                    }
+                }
+            }
+        }
     }
 }
 
