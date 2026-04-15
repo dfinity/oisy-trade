@@ -1,5 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    Fill, LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -31,6 +32,8 @@ pub enum EventType {
     Deposit(#[n(0)] DepositEvent),
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
+    #[n(5)]
+    Matching(#[n(0)] MatchingEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -73,6 +76,18 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct MatchingEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub fills: Vec<Fill>,
+    #[n(2)]
+    pub resting_order_seqs: Vec<OrderSeq>,
+    #[n(3)]
+    pub filled_order_seqs: Vec<OrderSeq>,
 }
 
 impl Storable for Event {

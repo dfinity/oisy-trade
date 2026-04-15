@@ -118,6 +118,23 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
+                    book_id: e.book_id.get(),
+                    fills: e
+                        .fills
+                        .into_iter()
+                        .map(|f| event::FillEvent {
+                            taker_order_seq: f.taker_order_seq.get(),
+                            taker_side: dex_types::Side::from(f.taker_side),
+                            taker_price: f.taker_price.get(),
+                            maker_order_seq: f.maker_order_seq.get(),
+                            maker_price: f.maker_price.get(),
+                            quantity: f.quantity.into(),
+                        })
+                        .collect(),
+                    resting_order_seqs: e.resting_order_seqs.into_iter().map(|s| s.get()).collect(),
+                    filled_order_seqs: e.filled_order_seqs.into_iter().map(|s| s.get()).collect(),
+                }),
             },
         }
     }
