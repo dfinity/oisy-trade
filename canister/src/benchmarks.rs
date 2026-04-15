@@ -43,8 +43,18 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), 1);
     assert_eq!(book.bids_len(), depth.bids.len());
 
+    let mut replay_state = state.clone();
+
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        let events = {
+            let _p = canbench_rs::bench_scope("matching");
+            state.process_pending_orders()
+        };
+        assert_eq!(events.len(), 1);
+        {
+            let _p = canbench_rs::bench_scope("replaying");
+            replay_state.replay_matching(&events[0]);
+        }
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -86,8 +96,18 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), trades.len());
 
+    let mut replay_state = state.clone();
+
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        let events = {
+            let _p = canbench_rs::bench_scope("matching");
+            state.process_pending_orders()
+        };
+        assert_eq!(events.len(), 1);
+        {
+            let _p = canbench_rs::bench_scope("replaying");
+            replay_state.replay_matching(&events[0]);
+        }
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -136,8 +156,18 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     let num_resting_orders_before = book.resting_orders_len();
     assert_eq!(book.pending_orders_len(), num_orders as usize);
 
+    let mut replay_state = state.clone();
+
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        let events = {
+            let _p = canbench_rs::bench_scope("matching");
+            state.process_pending_orders()
+        };
+        assert_eq!(events.len(), 1);
+        {
+            let _p = canbench_rs::bench_scope("replaying");
+            replay_state.replay_matching(&events[0]);
+        }
     });
 
     let book = state.get_order_book(&pair).unwrap();
