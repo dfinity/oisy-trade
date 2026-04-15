@@ -14,6 +14,20 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
+  conventional-pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - run: |
+          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?\!?\: ]]; then
+              echo pass
+          else
+              echo "PR title does not match conventions"
+              exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -129,3 +143,22 @@ jobs:
         with:
           name: pr_number
           path: pr_number/
+
+  # Gate job: the single required status check for the merge queue.
+  # Adding or removing CI jobs only requires updating the `needs` list below,
+  # with no change to the repo's branch protection settings.
+  ci-pass:
+    if: always()
+    needs:
+      - lint
+      - reproducible-build
+      - unit-tests
+      - integration-tests
+      - benchmark
+      - conventional-pr-title
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            exit 1
+          fi
