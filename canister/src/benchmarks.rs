@@ -60,6 +60,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
     assert_eq!(book.bids_len(), 0);
+    assert_eq!(state, replay_state);
 
     res
 }
@@ -112,6 +113,7 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
+    assert_eq!(state, replay_state);
 
     res
 }
@@ -176,6 +178,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
         book.resting_orders_len(),
         num_resting_orders_before + num_orders as usize
     );
+    assert_eq!(state, replay_state);
 
     res
 }

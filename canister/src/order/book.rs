@@ -272,15 +272,12 @@ impl OrderBook {
         self.pending_orders.drain(..).collect()
     }
 
-    /// Reduce the front resting order's remaining quantity by `amount`.
-    /// Removes the order if fully filled, and cleans up empty price levels.
-    ///
-    /// The target must be at the front of its price-level queue (FIFO invariant).
+    /// Reduce a resting order's remaining quantity by `amount`.
+    /// Removes the order from the book if fully filled.
     ///
     /// # Panics
     ///
-    /// Panics if `seq` is not in the resting index, or if it is not
-    /// at the front of its queue.
+    /// Panics if `seq` is not a resting order.
     pub fn reduce_resting_order(&mut self, seq: OrderSeq, amount: &Quantity) {
         let (side, price) = *self
             .resting_orders
@@ -298,12 +295,14 @@ impl OrderBook {
                 .expect("BUG: price level missing for resting ask"),
         };
 
-        let front = queue.front_mut().expect("BUG: empty queue for price level");
-        assert_eq!(front.id(), seq, "BUG: expected order at front of queue");
-        front.reduce_quantity(amount);
+        let resting = queue
+            .iter_mut()
+            .find(|o| o.id() == seq)
+            .expect("BUG: resting order not found in queue");
+        resting.reduce_quantity(amount);
 
-        if front.remaining_quantity().is_zero() {
-            queue.pop_front();
+        if resting.remaining_quantity().is_zero() {
+            queue.retain(|o| o.id() != seq);
             self.resting_orders.remove(&seq);
             if queue.is_empty() {
                 match side {

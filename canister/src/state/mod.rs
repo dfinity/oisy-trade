@@ -236,6 +236,10 @@ impl State {
 
     /// Replay a matching event by applying the diff to the order book and
     /// settling fills, without re-running the matching engine.
+    ///
+    /// Pending orders are processed in FIFO order (matching the matching engine):
+    /// each order either rests or has its fills applied before the next order
+    /// is processed, preserving the sequential state invariants.
     pub fn replay_matching(&mut self, event: &event::MatchingEvent) {
         let book_id = event.book_id;
         let pair = find_by_value(&self.trading_pairs, &book_id)
@@ -246,50 +250,67 @@ impl State {
             .get_mut(&book_id)
             .expect("BUG: order book missing during Matching replay");
 
-        // 1. Drain pending queue — save pending orders for step 2
-        let pending: Vec<Order> = book.take_pending_orders();
+        // Index fills by taker seq for O(1) lookup per pending order.
+        let mut fills_by_taker: BTreeMap<OrderSeq, Vec<&Fill>> = BTreeMap::new();
+        let mut maker_seqs: BTreeSet<OrderSeq> = BTreeSet::new();
+        for fill in &event.fills {
+            fills_by_taker
+                .entry(fill.taker_order_seq)
+                .or_default()
+                .push(fill);
+            maker_seqs.insert(fill.maker_order_seq);
+        }
 
-        // 2. Move pending orders that became makers into the resting book.
-        //    During matching, a pending order that doesn't immediately match
-        //    the opposite side rests in the book and may then be filled by a
-        //    later taker from the same batch.
+        // Process each pending order in FIFO order, mirroring the matching engine.
+        // An order that doesn't match rests in the book before the next pending
+        // order is processed, so later takers can match against it as a maker.
+        let pending = book.take_pending_orders();
+        let resting_set: BTreeSet<OrderSeq> = event.resting_order_seqs.iter().copied().collect();
+
         for order in pending {
             let seq = order.id();
-            let is_maker = event.fills.iter().any(|f| f.maker_order_seq == seq);
-            let is_resting = event.resting_order_seqs.contains(&seq);
-            if is_maker || is_resting {
+            let taker_fills = fills_by_taker.remove(&seq);
+            let is_resting = resting_set.contains(&seq);
+            let is_maker = maker_seqs.contains(&seq);
+
+            // Apply this taker's fills (reduce the makers it matched against).
+            if let Some(fills) = &taker_fills {
+                for fill in fills {
+                    book.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
+                }
+            }
+
+            if is_resting {
+                // Order rests (possibly after partial fills as taker).
+                let filled_qty = taker_fills
+                    .iter()
+                    .flat_map(|fills| fills.iter())
+                    .fold(Quantity::ZERO, |acc, f| acc + f.quantity.clone());
+                let remaining = order
+                    .remaining_quantity()
+                    .checked_sub(&filled_qty)
+                    .expect("BUG: fills exceed order quantity");
+                let resting = PendingOrder {
+                    side: order.side(),
+                    price: order.price(),
+                    quantity: remaining,
+                }
+                .into_order(seq);
+                book.insert_order(resting);
+            } else if is_maker {
+                // Order rested (to become a maker) but was fully consumed.
+                // Insert with full quantity — it will be reduced by later
+                // takers' fills in subsequent iterations.
                 book.insert_order(order);
             }
-            // Orders that are neither maker nor resting were fully filled as
-            // takers without ever entering the book — nothing to do.
         }
 
-        // 3. Reduce filled makers
-        for fill in &event.fills {
-            book.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
-        }
-
-        // 4. Insert resting takers that were partially filled
-        //    (they are already inserted in step 2 with full quantity;
-        //    reduce_resting_order in step 3 doesn't touch takers, so we
-        //    need to adjust their remaining quantity here)
-        for &seq in &event.resting_order_seqs {
-            let filled_qty = event
-                .fills
-                .iter()
-                .filter(|f| f.taker_order_seq == seq)
-                .fold(Quantity::ZERO, |acc, f| acc + f.quantity.clone());
-            if !filled_qty.is_zero() {
-                book.reduce_resting_order(seq, &filled_qty);
-            }
-        }
-
-        // 4. Settle fills
+        // Settle all fills (balance operations).
         for fill in &event.fills {
             self.settle_fill(book_id, &pair, fill);
         }
 
-        // 5. Update order statuses
+        // Update order statuses.
         for &seq in &event.resting_order_seqs {
             let order_id = OrderId::new(book_id, seq);
             *self
