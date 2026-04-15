@@ -45,13 +45,8 @@ impl WorstCaseEvent {
 
     /// Event that maximizes instruction count during encoding/decoding.
     pub fn worst_case_instructions_event(&self) -> Event {
-        max_timestamp(match self {
-            Self::Init => init_restricted(),
-            Self::Upgrade => upgrade_restricted(),
-            Self::AddTradingPair => add_trading_pair(),
-            Self::Deposit => deposit(max_quantity()),
-            Self::AddLimitOrder => add_limit_order(),
-        })
+        // currently same as worst-case memory event
+        self.worst_case_memory_event()
     }
 
     pub fn expected_memory_size(&self) -> usize {
