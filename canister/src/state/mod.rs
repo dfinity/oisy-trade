@@ -43,6 +43,7 @@ pub struct State {
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: BTreeMap<TradingPair, OrderBookId>,
+    book_to_pair: BTreeMap<OrderBookId, TradingPair>,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
@@ -59,6 +60,7 @@ impl TryFrom<InitArg> for State {
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: BTreeMap::default(),
+            book_to_pair: BTreeMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
             order_history: OrderHistory::new(),
@@ -129,7 +131,10 @@ impl State {
     }
 
     pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
-        let pair = find_by_value(&self.trading_pairs, &book_id).expect("BUG: unknown trading pair");
+        let pair = self
+            .book_to_pair
+            .get(&book_id)
+            .expect("BUG: unknown trading pair");
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -294,7 +299,8 @@ impl State {
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
         let book = OrderBook::new(book_id, tick_size, lot_size);
-        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        assert_eq!(self.trading_pairs.insert(pair.clone(), book_id), None);
+        assert_eq!(self.book_to_pair.insert(book_id, pair), None);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
     }
@@ -406,9 +412,4 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             },
         }
     }
-}
-
-// TODO(DEFI-2724): Replace this O(n) scan with a reverse map `OrderBookId → TradingPair`.
-fn find_by_value<'a, K, V: PartialEq>(map: &'a BTreeMap<K, V>, value: &V) -> Option<&'a K> {
-    map.iter().find(|(_k, v)| *v == value).map(|(k, _v)| k)
 }
