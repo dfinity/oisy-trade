@@ -1,14 +1,17 @@
 use super::State;
-use crate::state::event::{AddTradingPairEvent, DepositEvent, Event, EventType};
+use crate::Runtime;
+use crate::state::event::{
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+};
 use crate::storage;
 use dex_types_internal::UpgradeArg;
 
 #[cfg(test)]
 mod tests;
 
-pub fn process_event(state: &mut State, payload: EventType) {
+pub fn process_event(state: &mut State, payload: EventType, runtime: &impl Runtime) {
     apply_state_transition(state, &payload);
-    storage::record_event(payload);
+    storage::record_event(runtime.time(), payload);
 }
 
 fn apply_state_transition(state: &mut State, payload: &EventType) {
@@ -51,6 +54,22 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             amount,
         }) => {
             state.deposit(*user, *token, amount.clone());
+        }
+        EventType::AddLimitOrder(AddLimitOrderEvent {
+            user,
+            order_id,
+            side,
+            price,
+            quantity,
+        }) => {
+            let pending = order::PendingOrder {
+                side: *side,
+                price: *price,
+                quantity: quantity.clone(),
+            };
+            let (book_id, order_seq) = order_id.into_parts();
+            let order = pending.into_order(order_seq);
+            state.record_limit_order(*user, book_id, order);
         }
     }
 }

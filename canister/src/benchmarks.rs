@@ -2,6 +2,7 @@ use crate::order::{
     LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
     TradingPair,
 };
+
 use crate::state::State;
 use canbench_rs::bench;
 use candid::{Nat, Principal};
@@ -28,17 +29,15 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     let pair = trading_pair();
     let taker = user((depth.bids.len() + depth.asks.len()) as u64);
     fund_user(&mut state, taker);
-    state
-        .add_limit_order(
-            taker,
-            pair.clone(),
-            PendingOrder {
-                side: Side::Sell,
-                price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-                quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
-            },
-        )
-        .expect("valid sell order");
+    place_order(
+        &mut state,
+        taker,
+        PendingOrder {
+            side: Side::Sell,
+            price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
+            quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
+        },
+    );
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
@@ -73,17 +72,15 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     for (i, trade) in trades.iter().enumerate() {
         let principal = crate::benchmarks::user((taker_id_offset + i) as u64);
         crate::benchmarks::fund_user(&mut state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: if trade.m { Side::Sell } else { Side::Buy },
-                    price: Price::new(crate::benchmarks::parse_decimal_8(&trade.p)),
-                    quantity: Quantity::from(crate::benchmarks::parse_decimal_8(&trade.q)),
-                },
-            )
-            .expect("valid trade order");
+        place_order(
+            &mut state,
+            principal,
+            PendingOrder {
+                side: if trade.m { Side::Sell } else { Side::Buy },
+                price: Price::new(crate::benchmarks::parse_decimal_8(&trade.p)),
+                quantity: Quantity::from(crate::benchmarks::parse_decimal_8(&trade.q)),
+            },
+        );
     }
 
     let book = state.get_order_book(&pair).unwrap();
@@ -111,32 +108,28 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     for i in 0..num_orders / 2 {
         let principal = user(i);
         fund_user(&mut state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(200_000_000), // 2.000 USDT
-                    quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
-                },
-            )
-            .expect("valid buy order");
+        place_order(
+            &mut state,
+            principal,
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(200_000_000), // 2.000 USDT
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
     }
     for i in 0..num_orders / 2 {
         let principal = user(500 + i);
         fund_user(&mut state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(300_000_000), // 3.000 USDT
-                    quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
-                },
-            )
-            .expect("valid sell order");
+        place_order(
+            &mut state,
+            principal,
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(300_000_000), // 3.000 USDT
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
     }
 
     let book = state.get_order_book(&pair).unwrap();
@@ -249,32 +242,28 @@ fn populate_state(state: &mut State, depth: &DepthSnapshot) {
     for (i, (price_str, qty_str)) in depth.bids.iter().enumerate() {
         let principal = user(i as u64);
         fund_user(state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::from(parse_decimal_8(qty_str)),
-                },
-            )
-            .expect("valid bid order");
+        place_order(
+            state,
+            principal,
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from(parse_decimal_8(qty_str)),
+            },
+        );
     }
     for (i, (price_str, qty_str)) in depth.asks.iter().enumerate() {
         let principal = user((depth.bids.len() + i) as u64);
         fund_user(state, principal);
-        state
-            .add_limit_order(
-                principal,
-                pair.clone(),
-                PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(parse_decimal_8(price_str)),
-                    quantity: Quantity::from(parse_decimal_8(qty_str)),
-                },
-            )
-            .expect("valid ask order");
+        place_order(
+            state,
+            principal,
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from(parse_decimal_8(qty_str)),
+            },
+        );
     }
     assert_eq!(
         state.get_order_book(&pair).unwrap().pending_orders_len(),
@@ -300,6 +289,12 @@ fn fund_user(state: &mut State, principal: Principal) {
     let pair = trading_pair();
     state.deposit(principal, pair.base, Quantity::from(Nat::from(u128::MAX)));
     state.deposit(principal, pair.quote, Quantity::from(Nat::from(u128::MAX)));
+}
+
+fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
+    let pair = trading_pair();
+    let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+    state.record_limit_order(user, order_id.book_id(), order);
 }
 
 mod event_storage {

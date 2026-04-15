@@ -37,13 +37,19 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder {
-        side: order::Side::from(request.side),
-        price: order::Price::from(request.price),
-        quantity: order::Quantity::from(request.quantity),
-    };
-    let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending))
-        .map_err(AddLimitOrderError::from)?;
+    let pending = order::PendingOrder::from(request);
+    let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
+
+    state::with_state_mut(|s| {
+        let event = state::event::AddLimitOrderEvent {
+            user: caller,
+            order_id,
+            side: order.side(),
+            price: order.price(),
+            quantity: order.remaining_quantity().clone(),
+        };
+        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
+    });
     Ok(order_id.to_string())
 }
 
@@ -111,7 +117,7 @@ pub async fn deposit(
         amount,
     };
     state::with_state_mut(|s| {
-        state::audit::process_event(s, state::event::EventType::Deposit(event))
+        state::audit::process_event(s, state::event::EventType::Deposit(event), runtime)
     });
 
     Ok(deposit_response)
@@ -164,7 +170,7 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
         };
-        state::audit::process_event(s, state::event::EventType::AddTradingPair(event));
+        state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
         Ok(())
     })
 }

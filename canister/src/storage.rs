@@ -24,14 +24,9 @@ thread_local! {
     });
 }
 
-pub fn record_event(payload: EventType) {
+pub fn record_event(timestamp: u64, payload: EventType) {
     EVENTS
-        .with(|events| {
-            events.borrow().append(&Event {
-                timestamp: ic_cdk::api::time(),
-                payload,
-            })
-        })
+        .with(|events| events.borrow().append(&Event { timestamp, payload }))
         .expect("recording an event should succeed");
 }
 

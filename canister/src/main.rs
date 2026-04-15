@@ -106,6 +106,18 @@ fn get_events(
                     token: dex_types::TokenId::from(e.token),
                     amount: e.amount.into(),
                 }),
+                EventType::AddLimitOrder(e) => {
+                    event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
+                        user: e.user,
+                        order_id: event::OrderId {
+                            book_id: e.order_id.book_id().get(),
+                            seq: e.order_id.seq().get(),
+                        },
+                        side: dex_types::Side::from(e.side),
+                        price: e.price.get(),
+                        quantity: e.quantity.into(),
+                    })
+                }
             },
         }
     }
@@ -124,7 +136,7 @@ fn get_events(
 
 #[ic_cdk::init]
 fn init(arg: DexArg) {
-    dex_canister::lifecycle::init(arg);
+    dex_canister::lifecycle::init(arg, &dex_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::post_upgrade]
