@@ -143,7 +143,7 @@ mod record_trading_pair {
             LOT_SIZE,
         );
 
-        let book_ids: Vec<_> = state.trading_pairs().values().collect();
+        let book_ids: Vec<_> = state.trading_pairs().iter().map(|(_, id)| id).collect();
         assert_eq!(book_ids.len(), 2);
         assert_ne!(book_ids[0], book_ids[1]);
     }
