@@ -408,6 +408,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
     }
 }
 
+// TODO(DEFI-2724): Replace this O(n) scan with a reverse map `OrderBookId → TradingPair`.
 fn find_by_value<'a, K, V: PartialEq>(map: &'a BTreeMap<K, V>, value: &V) -> Option<&'a K> {
-    map.iter().find(|(_k, v)| v == &value).map(|(k, _v)| k)
+    map.iter().find(|(_k, v)| *v == value).map(|(k, _v)| k)
 }

@@ -664,12 +664,15 @@ async fn should_replay_events_on_upgrade() {
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
         assert_matches!(&events[1], EventType::AddTradingPair(e) => {
-            assert_eq!(e.base, setup.base_token_id());
-            assert_eq!(e.quote, setup.quote_token_id());
-            assert_eq!(e.tick_size, TICK_SIZE);
-            assert_eq!(e.lot_size, LOT_SIZE);
-            assert_eq!(e.base_metadata, TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 });
-            assert_eq!(e.quote_metadata, TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 });
+            assert_eq!(*e, dex_types_internal::event::AddTradingPairEvent {
+                book_id: 0,
+                base: setup.base_token_id(),
+                quote: setup.quote_token_id(),
+                tick_size: TICK_SIZE,
+                lot_size: LOT_SIZE,
+                base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
+                quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+            });
         });
     });
 
@@ -686,9 +689,11 @@ async fn should_replay_events_on_upgrade() {
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 3);
         assert_matches!(&events[2], EventType::Deposit(e) => {
-            assert_eq!(e.user, setup.user());
-            assert_eq!(e.token, setup.base_token_id());
-            assert_eq!(e.amount, Nat::from(deposit_amount));
+            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+                user: setup.user(),
+                token: setup.base_token_id(),
+                amount: Nat::from(deposit_amount),
+            });
         });
     });
 
@@ -712,10 +717,13 @@ async fn should_replay_events_on_upgrade() {
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
-            assert_eq!(e.user, setup.user());
-            assert_eq!(e.side, dex_types::Side::Sell);
-            assert_eq!(e.price, 100);
-            assert_eq!(e.quantity, Nat::from(deposit_amount));
+            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+                user: setup.user(),
+                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
+                side: dex_types::Side::Sell,
+                price: 100,
+                quantity: Nat::from(deposit_amount),
+            });
         });
     });
 
