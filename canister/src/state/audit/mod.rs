@@ -71,8 +71,8 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order);
         }
-        EventType::Matching(_) => {
-            todo!("DEFI-2724: diff-based matching replay")
+        EventType::Matching(event) => {
+            state.replay_matching(event);
         }
     }
 }

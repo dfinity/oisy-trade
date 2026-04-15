@@ -234,6 +234,73 @@ impl State {
         events
     }
 
+    /// Replay a matching event by applying the diff to the order book and
+    /// settling fills, without re-running the matching engine.
+    pub fn replay_matching(&mut self, event: &event::MatchingEvent) {
+        let book_id = event.book_id;
+        let pair = find_by_value(&self.trading_pairs, &book_id)
+            .expect("BUG: unknown trading pair during Matching replay")
+            .clone();
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing during Matching replay");
+
+        // 1. Drain pending queue
+        book.clear_pending_orders();
+
+        // 2. Reduce filled makers
+        for fill in &event.fills {
+            book.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
+        }
+
+        // 3. Insert resting takers
+        for &seq in &event.resting_order_seqs {
+            let order_id = OrderId::new(book_id, seq);
+            let record = self
+                .order_history
+                .get(&order_id)
+                .expect("BUG: resting order not found in order_history during replay");
+            let filled_qty = event
+                .fills
+                .iter()
+                .filter(|f| f.taker_order_seq == seq)
+                .fold(Quantity::ZERO, |acc, f| acc + f.quantity.clone());
+            let remaining = record
+                .quantity
+                .checked_sub(&filled_qty)
+                .expect("BUG: fills exceed order quantity");
+            let order = PendingOrder {
+                side: record.side,
+                price: record.price,
+                quantity: remaining,
+            }
+            .into_order(seq);
+            book.insert_order(order);
+        }
+
+        // 4. Settle fills
+        for fill in &event.fills {
+            self.settle_fill(book_id, &pair, fill);
+        }
+
+        // 5. Update order statuses
+        for &seq in &event.resting_order_seqs {
+            let order_id = OrderId::new(book_id, seq);
+            *self
+                .order_history
+                .get_status_mut(&order_id)
+                .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
+        }
+        for &seq in &event.filled_order_seqs {
+            let order_id = OrderId::new(book_id, seq);
+            *self
+                .order_history
+                .get_status_mut(&order_id)
+                .expect("BUG: filled order not found in order_history") = OrderStatus::Filled;
+        }
+    }
+
     pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
         let taker = self
             .order_history
