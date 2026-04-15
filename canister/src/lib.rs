@@ -53,13 +53,18 @@ pub fn add_limit_order(
     Ok(order_id.to_string())
 }
 
-pub fn process_pending_orders() {
+pub fn process_pending_orders(runtime: &impl Runtime) {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
         None => return,
     };
 
-    state::with_state_mut(|s| s.process_pending_orders());
+    state::with_state_mut(|s| {
+        let events = s.process_pending_orders();
+        for event in events {
+            storage::record_event(runtime.time(), state::event::EventType::Matching(event));
+        }
+    });
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {

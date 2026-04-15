@@ -9,7 +9,8 @@ use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    OrderRecord, OrderSeq, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use candid::Principal;
 use dex_types::OrderStatus;
@@ -164,13 +165,16 @@ impl State {
         book.add_pending_order(order);
     }
 
-    pub fn process_pending_orders(&mut self) {
+    /// Run matching and settlement for all trading pairs.
+    /// Returns a [`MatchingEvent`] for each pair that had activity.
+    pub fn process_pending_orders(&mut self) -> Vec<event::MatchingEvent> {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let pairs: Vec<(TradingPair, OrderBookId)> = self
             .trading_pairs
             .iter()
             .map(|(pair, &book_id)| (pair.clone(), book_id))
             .collect();
+        let mut events = Vec::new();
         for (pair, book_id) in pairs {
             let (output, filled_seqs) = {
                 #[cfg(feature = "canbench-rs")]
@@ -183,6 +187,11 @@ impl State {
                 (book.process_pending_orders(), book.take_filled_orders())
             };
 
+            if output.fills.is_empty() && output.resting_orders.is_empty() && filled_seqs.is_empty()
+            {
+                continue;
+            }
+
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("settling");
@@ -190,10 +199,14 @@ impl State {
                     self.settle_fill(book_id, &pair, fill);
                 }
             }
+
+            let resting_order_seqs: Vec<OrderSeq> = output.resting_orders.iter().copied().collect();
+            let filled_order_seqs: Vec<OrderSeq> = filled_seqs.iter().copied().collect();
+
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("status");
-                for seq in output.resting_orders {
+                for &seq in &resting_order_seqs {
                     let order_id = OrderId::new(book_id, seq);
                     *self
                         .order_history
@@ -201,7 +214,7 @@ impl State {
                         .expect("BUG: resting order not found in order_history") =
                         OrderStatus::Open;
                 }
-                for seq in filled_seqs {
+                for &seq in &filled_order_seqs {
                     let order_id = OrderId::new(book_id, seq);
                     *self
                         .order_history
@@ -210,7 +223,15 @@ impl State {
                         OrderStatus::Filled;
                 }
             }
+
+            events.push(event::MatchingEvent {
+                book_id,
+                fills: output.fills,
+                resting_order_seqs,
+                filled_order_seqs,
+            });
         }
+        events
     }
 
     pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
