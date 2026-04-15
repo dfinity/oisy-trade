@@ -1,8 +1,8 @@
 pub mod audit;
 pub mod event;
-mod trading_pair_map;
+mod map;
 
-pub use trading_pair_map::TradingPairMap;
+pub use map::TradingPairMap;
 
 #[cfg(test)]
 mod tests;
