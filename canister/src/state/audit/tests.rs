@@ -160,7 +160,7 @@ fn should_replay_add_limit_order() {
 
 #[test]
 fn should_replay_matching() {
-    use crate::order::Fill;
+    use crate::order::{Fill, MatchingStep};
     use crate::state::event::MatchingEvent;
 
     let base = Principal::from_slice(&[0x01]);
@@ -214,20 +214,29 @@ fn should_replay_matching() {
                 quantity: Quantity::from(quantity),
             }),
         },
-        // Matching event: exact match
+        // Matching event: buyer rests first, seller fills against buyer
         Event {
             timestamp: 7,
             payload: EventType::Matching(MatchingEvent {
                 book_id: OrderBookId::ZERO,
-                fills: vec![Fill {
-                    taker_order_seq: OrderSeq::new(1), // seller is taker (placed second)
-                    taker_side: Side::Sell,
-                    taker_price: Price::new(price),
-                    maker_order_seq: OrderSeq::new(0), // buyer is maker
-                    maker_price: Price::new(price),
-                    quantity: Quantity::from(quantity),
-                }],
-                resting_order_seqs: vec![],
+                steps: vec![
+                    // Buyer (seq 0) rests (no opposite side)
+                    MatchingStep::Rest {
+                        seq: OrderSeq::new(0),
+                        side: Side::Buy,
+                        price: Price::new(price),
+                        remaining: Quantity::from(quantity),
+                    },
+                    // Seller (seq 1) fills against resting buyer
+                    MatchingStep::Fill(Fill {
+                        taker_order_seq: OrderSeq::new(1),
+                        taker_side: Side::Sell,
+                        taker_price: Price::new(price),
+                        maker_order_seq: OrderSeq::new(0),
+                        maker_price: Price::new(price),
+                        quantity: Quantity::from(quantity),
+                    }),
+                ],
                 filled_order_seqs: vec![OrderSeq::new(0), OrderSeq::new(1)],
             }),
         },

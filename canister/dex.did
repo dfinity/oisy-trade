@@ -228,11 +228,21 @@ type FillEvent = record {
     quantity : nat;
 };
 
+/// An atomic step produced by the matching engine.
+type MatchingStepEvent = variant {
+    Fill : FillEvent;
+    Rest : record {
+        seq : nat64;
+        side : Side;
+        price : nat64;
+        remaining : nat;
+    };
+};
+
 /// Event payload for a matching round on a single trading pair.
 type MatchingEvent = record {
     book_id : nat64;
-    fills : vec FillEvent;
-    resting_order_seqs : vec nat64;
+    steps : vec MatchingStepEvent;
     filled_order_seqs : vec nat64;
 };
 

@@ -3,7 +3,7 @@ mod history;
 #[cfg(test)]
 mod tests;
 
-pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
+pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, MatchingStep, OrderBook};
 use candid::{Nat, Principal};
 pub use history::{OrderHistory, OrderRecord};
 use num_bigint::BigUint;

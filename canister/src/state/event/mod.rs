@@ -1,6 +1,6 @@
 use crate::order::{
-    Fill, LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, MatchingStep, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -83,10 +83,8 @@ pub struct MatchingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
-    pub fills: Vec<Fill>,
+    pub steps: Vec<MatchingStep>,
     #[n(2)]
-    pub resting_order_seqs: Vec<OrderSeq>,
-    #[n(3)]
     pub filled_order_seqs: Vec<OrderSeq>,
 }
 

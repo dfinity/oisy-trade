@@ -187,8 +187,7 @@ impl State {
                 (book.process_pending_orders(), book.take_filled_orders())
             };
 
-            if output.fills.is_empty() && output.resting_orders.is_empty() && filled_seqs.is_empty()
-            {
+            if output.steps.is_empty() && filled_seqs.is_empty() {
                 continue;
             }
 
@@ -200,14 +199,13 @@ impl State {
                 }
             }
 
-            let resting_order_seqs: Vec<OrderSeq> = output.resting_orders.iter().copied().collect();
             let filled_order_seqs: Vec<OrderSeq> = filled_seqs.iter().copied().collect();
 
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("status");
-                for &seq in &resting_order_seqs {
-                    let order_id = OrderId::new(book_id, seq);
+                for seq in &output.resting_orders {
+                    let order_id = OrderId::new(book_id, *seq);
                     *self
                         .order_history
                         .get_status_mut(&order_id)
@@ -226,97 +224,46 @@ impl State {
 
             events.push(event::MatchingEvent {
                 book_id,
-                fills: output.fills,
-                resting_order_seqs,
+                steps: output.steps,
                 filled_order_seqs,
             });
         }
         events
     }
 
-    /// Replay a matching event by applying the diff to the order book and
+    /// Replay a matching event by applying steps to the order book and
     /// settling fills, without re-running the matching engine.
-    ///
-    /// Pending orders are processed in FIFO order (matching the matching engine):
-    /// each order either rests or has its fills applied before the next order
-    /// is processed, preserving the sequential state invariants.
     pub fn replay_matching(&mut self, event: &event::MatchingEvent) {
+        use crate::order::MatchingStep;
+
         let book_id = event.book_id;
         let pair = find_by_value(&self.trading_pairs, &book_id)
             .expect("BUG: unknown trading pair during Matching replay")
             .clone();
+
+        // 1. Replay order book steps.
         let book = self
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing during Matching replay");
+        book.replay_steps(&event.steps);
 
-        // Index fills by taker seq for O(1) lookup per pending order.
-        let mut fills_by_taker: BTreeMap<OrderSeq, Vec<&Fill>> = BTreeMap::new();
-        let mut maker_seqs: BTreeSet<OrderSeq> = BTreeSet::new();
-        for fill in &event.fills {
-            fills_by_taker
-                .entry(fill.taker_order_seq)
-                .or_default()
-                .push(fill);
-            maker_seqs.insert(fill.maker_order_seq);
-        }
-
-        // Process each pending order in FIFO order, mirroring the matching engine.
-        // An order that doesn't match rests in the book before the next pending
-        // order is processed, so later takers can match against it as a maker.
-        let pending = book.take_pending_orders();
-        let resting_set: BTreeSet<OrderSeq> = event.resting_order_seqs.iter().copied().collect();
-
-        for order in pending {
-            let seq = order.id();
-            let taker_fills = fills_by_taker.remove(&seq);
-            let is_resting = resting_set.contains(&seq);
-            let is_maker = maker_seqs.contains(&seq);
-
-            // Apply this taker's fills (reduce the makers it matched against).
-            if let Some(fills) = &taker_fills {
-                for fill in fills {
-                    book.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
-                }
-            }
-
-            if is_resting {
-                // Order rests (possibly after partial fills as taker).
-                let filled_qty = taker_fills
-                    .iter()
-                    .flat_map(|fills| fills.iter())
-                    .fold(Quantity::ZERO, |acc, f| acc + f.quantity.clone());
-                let remaining = order
-                    .remaining_quantity()
-                    .checked_sub(&filled_qty)
-                    .expect("BUG: fills exceed order quantity");
-                let resting = PendingOrder {
-                    side: order.side(),
-                    price: order.price(),
-                    quantity: remaining,
-                }
-                .into_order(seq);
-                book.insert_order(resting);
-            } else if is_maker {
-                // Order rested (to become a maker) but was fully consumed.
-                // Insert with full quantity — it will be reduced by later
-                // takers' fills in subsequent iterations.
-                book.insert_order(order);
+        // 2. Settle fills.
+        for step in &event.steps {
+            if let MatchingStep::Fill(fill) = step {
+                self.settle_fill(book_id, &pair, fill);
             }
         }
 
-        // Settle all fills (balance operations).
-        for fill in &event.fills {
-            self.settle_fill(book_id, &pair, fill);
-        }
-
-        // Update order statuses.
-        for &seq in &event.resting_order_seqs {
-            let order_id = OrderId::new(book_id, seq);
-            *self
-                .order_history
-                .get_status_mut(&order_id)
-                .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
+        // 3. Update order statuses.
+        for step in &event.steps {
+            if let MatchingStep::Rest { seq, .. } = step {
+                let order_id = OrderId::new(book_id, *seq);
+                *self
+                    .order_history
+                    .get_status_mut(&order_id)
+                    .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
+            }
         }
         for &seq in &event.filled_order_seqs {
             let order_id = OrderId::new(book_id, seq);

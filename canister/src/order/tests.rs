@@ -106,7 +106,7 @@ mod order_book {
             for order in all_order_types(TICK_SIZE, LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
-                let result = book.match_order(order).unwrap();
+                let result = book.match_order(order).unwrap().0;
                 assert_eq!(
                     result,
                     MatchResult::Resting {
@@ -127,7 +127,7 @@ mod order_book {
                 book.match_order(first_order).unwrap();
                 let resting_order_seq = resting_order.id();
 
-                let result = book.match_order(resting_order).unwrap();
+                let result = book.match_order(resting_order).unwrap().0;
                 assert_eq!(result, MatchResult::Resting { resting_order_seq });
             }
         }
@@ -166,7 +166,7 @@ mod order_book {
                     book.match_order(maker).unwrap();
                 }
 
-                let result = book.match_order(taker).unwrap();
+                let result = book.match_order(taker).unwrap().0;
 
                 let prices: Vec<u64> = result.fills().iter().map(|f| f.maker_price.get()).collect();
                 assert_eq!(prices, expected_prices);
@@ -203,7 +203,7 @@ mod order_book {
                     book.match_order(maker).unwrap();
                 }
 
-                let result = book.match_order(taker).unwrap();
+                let result = book.match_order(taker).unwrap().0;
 
                 assert_eq!(result.fills()[0].maker_order_seq, first_maker_id);
             }
@@ -226,7 +226,7 @@ mod order_book {
                 let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
-                let result = book.match_order(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap().0;
 
                 assert_eq!(
                     result,
@@ -264,7 +264,7 @@ mod order_book {
                 let maker_order_seq = maker.id();
                 book.match_order(maker).unwrap();
 
-                let result = book.match_order(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap().0;
 
                 assert_eq!(
                     result,
@@ -287,7 +287,7 @@ mod order_book {
             book.match_order(sell(1u64, 100u64, LOT_SIZE)).unwrap();
 
             let taker = buy(2u64, 100u64, 3 * u64::from(LOT_SIZE));
-            let result = book.match_order(taker.clone()).unwrap();
+            let result = book.match_order(taker.clone()).unwrap().0;
 
             assert_eq!(
                 result,
@@ -331,7 +331,7 @@ mod order_book {
                 book.match_order(maker1).unwrap();
                 book.match_order(maker2).unwrap();
 
-                let result = book.match_order(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap().0;
 
                 assert_eq!(
                     result,
@@ -352,7 +352,7 @@ mod order_book {
             book.match_order(sell(1u64, 100u64, 3 * u64::from(LOT_SIZE)))
                 .unwrap();
             let taker1 = buy(2u64, 100u64, LOT_SIZE);
-            let result = book.match_order(taker1.clone()).unwrap();
+            let result = book.match_order(taker1.clone()).unwrap().0;
             assert_eq!(
                 result,
                 MatchResult::Filled {
@@ -361,7 +361,7 @@ mod order_book {
             );
             // The remaining 2 lots should still be matchable
             let taker2 = buy(3u64, 100u64, 2 * u64::from(LOT_SIZE));
-            let result = book.match_order(taker2.clone()).unwrap();
+            let result = book.match_order(taker2.clone()).unwrap().0;
             assert_eq!(
                 result,
                 MatchResult::Filled {

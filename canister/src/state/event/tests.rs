@@ -134,21 +134,31 @@ fn arb_fill() -> impl Strategy<Value = crate::order::Fill> {
         )
 }
 
+fn arb_matching_step() -> impl Strategy<Value = crate::order::MatchingStep> {
+    prop_oneof![
+        arb_fill().prop_map(crate::order::MatchingStep::Fill),
+        (arb_order_seq(), arb_side(), arb_price(), arb_quantity()).prop_map(
+            |(seq, side, price, remaining)| crate::order::MatchingStep::Rest {
+                seq,
+                side,
+                price,
+                remaining,
+            }
+        ),
+    ]
+}
+
 fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
     (
         any::<u64>(),
-        proptest::collection::vec(arb_fill(), 0..=5),
-        proptest::collection::vec(any::<u64>().prop_map(crate::order::OrderSeq::new), 0..=3),
+        proptest::collection::vec(arb_matching_step(), 0..=5),
         proptest::collection::vec(any::<u64>().prop_map(crate::order::OrderSeq::new), 0..=3),
     )
-        .prop_map(
-            |(book_id, fills, resting_order_seqs, filled_order_seqs)| MatchingEvent {
-                book_id: crate::order::OrderBookId::new(book_id),
-                fills,
-                resting_order_seqs,
-                filled_order_seqs,
-            },
-        )
+        .prop_map(|(book_id, steps, filled_order_seqs)| MatchingEvent {
+            book_id: crate::order::OrderBookId::new(book_id),
+            steps,
+            filled_order_seqs,
+        })
 }
 
 fn arb_event_type() -> impl Strategy<Value = EventType> {

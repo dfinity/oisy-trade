@@ -55,9 +55,19 @@ pub struct OrderId {
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct MatchingEvent {
     pub book_id: u64,
-    pub fills: Vec<FillEvent>,
-    pub resting_order_seqs: Vec<u64>,
+    pub steps: Vec<MatchingStepEvent>,
     pub filled_order_seqs: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub enum MatchingStepEvent {
+    Fill(FillEvent),
+    Rest {
+        seq: u64,
+        side: dex_types::Side,
+        price: u64,
+        remaining: Nat,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
