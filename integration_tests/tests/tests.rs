@@ -723,10 +723,10 @@ async fn should_expose_metrics() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching("canister_cycle_balance \\d+")
-        .assert_contains_metric_matching("canister_stable_memory_bytes \\d+")
-        .assert_contains_metric_matching("canister_stable_memory_pages \\d+")
-        .assert_contains_metric_matching("event_count \\d+")
+        .assert_contains_metric_matching("canister_cycle_balance [\\d.eE+-]+")
+        .assert_contains_metric_matching("canister_stable_memory_bytes [\\d.eE+-]+")
+        .assert_contains_metric_matching("canister_stable_memory_pages [\\d.eE+-]+")
+        .assert_contains_metric_matching("event_total [\\d.eE+-]+")
         .assert_contains_metric_matching("trading_pair_count 1")
         .assert_contains_metric_matching("unique_user_count 0")
         .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 0"#)

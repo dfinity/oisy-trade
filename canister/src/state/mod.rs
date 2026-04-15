@@ -355,10 +355,6 @@ impl State {
         self.balances.len()
     }
 
-    pub fn order_books(&self) -> &BTreeMap<OrderBookId, OrderBook> {
-        &self.order_books
-    }
-
     pub fn order_history(&self) -> &OrderHistory {
         &self.order_history
     }

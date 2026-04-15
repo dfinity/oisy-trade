@@ -198,7 +198,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
             match encode_metrics(&mut writer) {
                 Ok(()) => HttpResponseBuilder::ok()
-                    .header("Content-Type", "text/plain; version=0.0.4")
+                    .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
                     .with_body_and_content_length(writer.into_inner())
                     .build(),
                 Err(err) => HttpResponseBuilder::server_error(format!("{err}")).build(),
@@ -231,7 +231,7 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
 
     // Event log
     w.encode_counter(
-        "event_count",
+        "event_total",
         dex_canister::storage::total_event_count() as f64,
         "Total number of events in the stable log.",
     )?;
