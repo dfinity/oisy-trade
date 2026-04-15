@@ -379,12 +379,7 @@ pub fn ledger_wasm() -> Vec<u8> {
 impl AsyncCanisterHttpQuery<RejectResponse> for &Setup {
     async fn http_query(&self, request: Vec<u8>) -> Result<Vec<u8>, RejectResponse> {
         self.env()
-            .query_call(
-                self.dex_id,
-                Principal::anonymous(),
-                "http_request",
-                request,
-            )
+            .query_call(self.dex_id, Principal::anonymous(), "http_request", request)
             .await
     }
 }

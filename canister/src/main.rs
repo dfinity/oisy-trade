@@ -195,16 +195,13 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         "/metrics" => {
             use ic_metrics_encoder::MetricsEncoder;
 
-            let mut writer =
-                MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
+            let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
             match encode_metrics(&mut writer) {
                 Ok(()) => HttpResponseBuilder::ok()
                     .header("Content-Type", "text/plain; version=0.0.4")
                     .with_body_and_content_length(writer.into_inner())
                     .build(),
-                Err(err) => {
-                    HttpResponseBuilder::server_error(format!("{err}")).build()
-                }
+                Err(err) => HttpResponseBuilder::server_error(format!("{err}")).build(),
             }
         }
         _ => HttpResponseBuilder::not_found().build(),
@@ -263,8 +260,7 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
             for (pair, book_id) in s.trading_pairs() {
                 let book = s.order_book(book_id).expect("BUG: missing order book");
                 let pair_label = format_pair(s, pair);
-                bid_levels =
-                    bid_levels.value(&[("pair", &pair_label)], book.bids_len() as f64)?;
+                bid_levels = bid_levels.value(&[("pair", &pair_label)], book.bids_len() as f64)?;
             }
         }
         {
@@ -275,8 +271,7 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
             for (pair, book_id) in s.trading_pairs() {
                 let book = s.order_book(book_id).expect("BUG: missing order book");
                 let pair_label = format_pair(s, pair);
-                ask_levels =
-                    ask_levels.value(&[("pair", &pair_label)], book.asks_len() as f64)?;
+                ask_levels = ask_levels.value(&[("pair", &pair_label)], book.asks_len() as f64)?;
             }
         }
 
@@ -293,14 +288,14 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
             }
             let mut sorted: Vec<_> = counts.into_iter().collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
-            let mut order_count =
-                w.gauge_vec("order_count", "Number of orders by trading pair and status.")?;
+            let mut order_count = w.gauge_vec(
+                "order_count",
+                "Number of orders by trading pair and status.",
+            )?;
             for ((pair, status), count) in &sorted {
                 let pair_label = format_pair(s, pair);
-                order_count = order_count.value(
-                    &[("pair", &pair_label), ("status", status)],
-                    *count as f64,
-                )?;
+                order_count = order_count
+                    .value(&[("pair", &pair_label), ("status", status)], *count as f64)?;
             }
         }
 

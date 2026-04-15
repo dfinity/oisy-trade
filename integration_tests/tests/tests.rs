@@ -729,12 +729,8 @@ async fn should_expose_metrics() {
         .assert_contains_metric_matching("event_count \\d+")
         .assert_contains_metric_matching("trading_pair_count 1")
         .assert_contains_metric_matching("unique_user_count 0")
-        .assert_contains_metric_matching(
-            r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 0"#,
-        )
-        .assert_contains_metric_matching(
-            r#"order_book_ask_levels\{pair="ckSOL/ckBTC"\} 0"#,
-        );
+        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"order_book_ask_levels\{pair="ckSOL/ckBTC"\} 0"#);
 
     setup.drop().await;
 }
@@ -774,12 +770,8 @@ async fn should_update_metrics_after_order() {
         .assert_metrics()
         .await
         .assert_contains_metric_matching("unique_user_count 1")
-        .assert_contains_metric_matching(
-            r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 1"#,
-        )
-        .assert_contains_metric_matching(
-            r#"order_count\{pair="ckSOL/ckBTC",status="open"\} 1"#,
-        );
+        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 1"#)
+        .assert_contains_metric_matching(r#"order_count\{pair="ckSOL/ckBTC",status="open"\} 1"#);
 
     setup.drop().await;
 }
