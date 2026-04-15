@@ -165,6 +165,13 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+pub fn mock_runtime_for(caller: Principal) -> mocks::MockRuntime {
+    let mut mock = mocks::MockRuntime::new();
+    mock.expect_msg_caller().return_const(caller);
+    mock.expect_time().return_const(0u64);
+    mock
+}
+
 pub mod arbitrary {
     use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
     use proptest::prelude::*;
@@ -237,6 +244,7 @@ pub mod mocks {
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
+            fn time(&self) -> u64;
         }
     }
 }

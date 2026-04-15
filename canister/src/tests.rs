@@ -151,9 +151,9 @@ mod add_trading_pair {
 mod add_limit_order {
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
-        mocks::MockRuntime,
+        mock_runtime_for,
     };
-    use crate::{add_limit_order, get_balance, state, test_fixtures};
+    use crate::{add_limit_order, get_balance, state};
     use candid::Principal;
     use dex_types::{Balance, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
@@ -280,7 +280,7 @@ mod add_limit_order {
     #[test]
     fn should_reserve_balance_on_buy_order() {
         init_state_with_order_book();
-        let pair = test_fixtures::icp_ckbtc_trading_pair();
+        let pair = icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
         let price = 100u64;
         let quantity = 1_000_000u64;
@@ -311,7 +311,7 @@ mod add_limit_order {
     #[test]
     fn should_reserve_balance_on_sell_order() {
         init_state_with_order_book();
-        let pair = test_fixtures::icp_ckbtc_trading_pair();
+        let pair = icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
         let quantity = 100_000_000u64;
         let order = LimitOrderRequest {
@@ -336,20 +336,13 @@ mod add_limit_order {
         );
         assert_eq!(get_balance(pair.quote.into(), &runtime), Balance::default());
     }
-
-    fn mock_runtime_for(caller: Principal) -> MockRuntime {
-        let mut mock = MockRuntime::new();
-        mock.expect_msg_caller().return_const(caller);
-        mock
-    }
 }
 
 mod get_order_status {
-    use crate::add_limit_order;
-    use crate::get_order_status;
     use crate::test_fixtures::{
-        fund_user, init_state_with_order_book, limit_order_request, mocks::MockRuntime,
+        fund_user, init_state_with_order_book, limit_order_request, mock_runtime_for,
     };
+    use crate::{add_limit_order, get_order_status};
     use candid::Principal;
     use dex_types::OrderStatus;
 
@@ -357,10 +350,7 @@ mod get_order_status {
     fn should_return_pending_for_existing_order() {
         init_state_with_order_book();
         fund_user(Principal::anonymous());
-        let mut runtime = MockRuntime::new();
-        runtime
-            .expect_msg_caller()
-            .return_const(Principal::anonymous());
+        let runtime = mock_runtime_for(Principal::anonymous());
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
         let status = get_order_status(order_id);
         assert_eq!(status, OrderStatus::Pending);
@@ -373,15 +363,11 @@ mod get_order_status {
         let seller = Principal::from_slice(&[0x02]);
         fund_user(buyer);
         fund_user(seller);
-        let mut buyer_rt = MockRuntime::new();
-        buyer_rt.expect_msg_caller().return_const(buyer);
-        let mut seller_rt = MockRuntime::new();
-        seller_rt.expect_msg_caller().return_const(seller);
 
-        let buy_id = add_limit_order(limit_order_request(), &buyer_rt).unwrap();
+        let buy_id = add_limit_order(limit_order_request(), &mock_runtime_for(buyer)).unwrap();
         let mut sell_request = limit_order_request();
         sell_request.side = dex_types::Side::Sell;
-        let sell_id = add_limit_order(sell_request, &seller_rt).unwrap();
+        let sell_id = add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
 
         crate::process_pending_orders();
 

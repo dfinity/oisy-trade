@@ -1,7 +1,4 @@
-use super::{
-    LotSize, Order, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, RestingOrder,
-    Side, TickSize,
-};
+use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -53,10 +50,8 @@ impl OrderBook {
         self.id
     }
 
-    fn next_order_seq(&mut self) -> OrderSeq {
-        let seq = self.next_seq;
-        self.next_seq.increment();
-        seq
+    pub fn next_seq(&self) -> OrderSeq {
+        self.next_seq
     }
 
     pub fn is_empty(&self) -> bool {
@@ -176,14 +171,16 @@ impl OrderBook {
         Ok(())
     }
 
-    /// Validate and enqueue a pending order for matching.
-    /// The order ID is only assigned if validation succeeds.
-    pub fn add_pending_order(&mut self, pending: PendingOrder) -> Result<OrderId, MatchOrderError> {
-        self.validate_order(pending.price, &pending.quantity)?;
-        let seq = self.next_order_seq();
-        let order = pending.into_order(seq);
+    /// Enqueue an order for matching.
+    pub fn add_pending_order(&mut self, order: Order) {
+        assert!(
+            self.validate_order(order.price, order.remaining_quantity())
+                .is_ok(),
+            "BUG: order is invalid"
+        );
+        assert_eq!(order.id(), self.next_seq, "BUG: order seq mismatch");
         self.pending_orders.push_back(order);
-        Ok(OrderId::new(self.id, seq))
+        self.next_seq.increment();
     }
 
     /// Drain the pending queue and match each order against the book.

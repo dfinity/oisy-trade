@@ -15,9 +15,10 @@ pub enum EventType {
     Upgrade(UpgradeArg),
     AddTradingPair(AddTradingPairEvent),
     Deposit(DepositEvent),
+    AddLimitOrder(AddLimitOrderEvent),
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct AddTradingPairEvent {
     pub book_id: u64,
     pub base: TokenId,
@@ -28,11 +29,26 @@ pub struct AddTradingPairEvent {
     pub quote_metadata: TokenMetadata,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct DepositEvent {
     pub user: Principal,
     pub token: TokenId,
     pub amount: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct AddLimitOrderEvent {
+    pub user: Principal,
+    pub order_id: OrderId,
+    pub side: dex_types::Side,
+    pub price: u64,
+    pub quantity: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct OrderId {
+    pub book_id: u64,
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
