@@ -401,19 +401,25 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
+    #[n(0)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
+    #[n(1)]
     pub taker_side: Side,
     /// The limit price of the taker order.
+    #[n(2)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
+    #[n(3)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
+    #[n(4)]
     pub maker_price: Price,
     /// The quantity filled.
+    #[n(5)]
     pub quantity: Quantity,
 }
 
