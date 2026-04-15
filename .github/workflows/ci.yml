@@ -35,6 +35,8 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: 'Install just'
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+      - name: 'Install cargo-sort'
+        run: cargo install cargo-sort
       - name: 'Check code'
         run: just lint
 
