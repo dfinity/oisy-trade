@@ -296,3 +296,43 @@ fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
     state.record_limit_order(user, order_id.book_id(), order);
 }
+
+mod event_storage {
+    use crate::storage;
+    use crate::test_fixtures::event::WorstCaseEvent;
+    use canbench_rs::bench;
+    use strum::IntoEnumIterator;
+
+    #[bench(raw)]
+    fn bench_write_events() -> canbench_rs::BenchResult {
+        canbench_rs::bench_fn(|| {
+            for variant in WorstCaseEvent::iter() {
+                let name: &'static str = (&variant).into();
+                {
+                    let _scope = canbench_rs::bench_scope(name);
+                    let event = variant.worst_case_instructions_event();
+                    storage::record_event(event.timestamp, event.payload);
+                }
+            }
+        })
+    }
+
+    #[bench(raw)]
+    fn bench_read_events() -> canbench_rs::BenchResult {
+        let mut indices = Vec::new();
+        for variant in WorstCaseEvent::iter() {
+            let event = variant.worst_case_instructions_event();
+            storage::record_event(event.timestamp, event.payload);
+            indices.push((storage::total_event_count() - 1, variant));
+        }
+        canbench_rs::bench_fn(|| {
+            for (idx, variant) in &indices {
+                let name: &'static str = variant.into();
+                {
+                    let _scope = canbench_rs::bench_scope(name);
+                    storage::get_event(*idx);
+                }
+            }
+        })
+    }
+}

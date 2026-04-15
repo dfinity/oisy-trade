@@ -133,3 +133,25 @@ proptest! {
         prop_assert_eq!(event, decoded);
     }
 }
+
+mod worst_case {
+    use crate::test_fixtures::event::WorstCaseEvent;
+    use ic_stable_structures::Storable;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn should_know_the_worst_case_event_size() {
+        for variant in WorstCaseEvent::iter() {
+            let name: &'static str = (&variant).into();
+            let event = variant.worst_case_memory_event();
+
+            let bytes = event.to_bytes();
+
+            assert_eq!(
+                bytes.len(),
+                variant.expected_memory_size(),
+                "{name}: serialized size mismatch"
+            );
+        }
+    }
+}
