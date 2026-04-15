@@ -167,13 +167,6 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-pub fn mock_runtime_for(caller: Principal) -> mocks::MockRuntime {
-    let mut mock = mocks::MockRuntime::new();
-    mock.expect_msg_caller().return_const(caller);
-    mock.expect_time().return_const(0u64);
-    mock
-}
-
 #[cfg(test)]
 pub mod arbitrary {
     use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
@@ -228,6 +221,13 @@ pub mod mocks {
     use candid::utils::ArgumentEncoder;
     use ic_cdk::call::{CallFailed, Response};
     use mockall::mock;
+
+    pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller().return_const(caller);
+        mock.expect_time().return_const(0u64);
+        mock
+    }
 
     mock! {
         pub Runtime {}

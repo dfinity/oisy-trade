@@ -1,5 +1,10 @@
-use crate::order::{LotSize, OrderBookId, Quantity, TickSize, TokenId, TokenMetadata};
-use crate::state::event::{AddTradingPairEvent, DepositEvent, Event, EventType};
+use crate::order::{
+    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata,
+};
+use crate::state::event::{
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+};
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
 
@@ -11,6 +16,7 @@ pub enum WorstCaseEvent {
     Upgrade,
     AddTradingPair,
     Deposit,
+    AddLimitOrder,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -20,6 +26,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Upgrade(_) => Self::Upgrade,
             EventType::AddTradingPair(_) => Self::AddTradingPair,
             EventType::Deposit(_) => Self::Deposit,
+            EventType::AddLimitOrder(_) => Self::AddLimitOrder,
         }
     }
 }
@@ -32,6 +39,7 @@ impl WorstCaseEvent {
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
+            Self::AddLimitOrder => add_limit_order(),
         })
     }
 
@@ -42,6 +50,7 @@ impl WorstCaseEvent {
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
+            Self::AddLimitOrder => add_limit_order(),
         })
     }
 
@@ -51,6 +60,7 @@ impl WorstCaseEvent {
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
             Self::Deposit => 96,
+            Self::AddLimitOrder => 98,
         }
     }
 }
@@ -93,6 +103,16 @@ fn add_trading_pair() -> EventType {
             symbol: max_symbol(),
             decimals: u8::MAX,
         },
+    })
+}
+
+fn add_limit_order() -> EventType {
+    EventType::AddLimitOrder(AddLimitOrderEvent {
+        user: max_principal(0),
+        order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
+        side: Side::Buy,
+        price: Price::new(u64::MAX),
+        quantity: max_quantity(),
     })
 }
 

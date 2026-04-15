@@ -310,7 +310,8 @@ mod event_storage {
                 let name: &'static str = (&variant).into();
                 {
                     let _scope = canbench_rs::bench_scope(name);
-                    storage::record_event(variant.worst_case_instructions_event().payload);
+                    let event = variant.worst_case_instructions_event();
+                    storage::record_event(event.timestamp, event.payload);
                 }
             }
         })
@@ -320,7 +321,8 @@ mod event_storage {
     fn bench_read_events() -> canbench_rs::BenchResult {
         let mut indices = Vec::new();
         for variant in WorstCaseEvent::iter() {
-            storage::record_event(variant.worst_case_instructions_event().payload);
+            let event = variant.worst_case_instructions_event();
+            storage::record_event(event.timestamp, event.payload);
             indices.push((storage::total_event_count() - 1, variant));
         }
         canbench_rs::bench_fn(|| {

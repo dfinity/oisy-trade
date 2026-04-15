@@ -149,9 +149,9 @@ mod add_trading_pair {
 }
 
 mod add_limit_order {
+    use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
-        mock_runtime_for,
     };
     use crate::{add_limit_order, get_balance, state};
     use candid::Principal;
@@ -339,9 +339,8 @@ mod add_limit_order {
 }
 
 mod get_order_status {
-    use crate::test_fixtures::{
-        fund_user, init_state_with_order_book, limit_order_request, mock_runtime_for,
-    };
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
     use crate::{add_limit_order, get_order_status};
     use candid::Principal;
     use dex_types::OrderStatus;
