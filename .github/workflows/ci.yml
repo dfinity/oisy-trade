@@ -36,7 +36,7 @@ jobs:
       - name: 'Install just'
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
       - name: 'Install cargo-sort'
-        run: cargo install cargo-sort
+        run: cargo install cargo-sort --version 2.1.3 --locked
       - name: 'Check code'
         run: just lint
 
@@ -149,6 +149,7 @@ jobs:
   # Gate job: the single required status check for the merge queue.
   # Adding or removing CI jobs only requires updating the `needs` list below,
   # with no change to the repo's branch protection settings.
+  # Note: upload-pr-number is intentionally excluded — it's an artifact helper, not a quality check.
   ci-pass:
     if: always()
     needs:
@@ -161,6 +162,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             exit 1
           fi
