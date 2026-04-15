@@ -111,53 +111,14 @@ fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         )
 }
 
-fn arb_fill() -> impl Strategy<Value = crate::order::Fill> {
-    (
-        arb_order_seq(),
-        arb_side(),
-        arb_price(),
-        arb_order_seq(),
-        arb_price(),
-        arb_quantity(),
-    )
-        .prop_map(
-            |(taker_order_seq, taker_side, taker_price, maker_order_seq, maker_price, quantity)| {
-                crate::order::Fill {
-                    taker_order_seq,
-                    taker_side,
-                    taker_price,
-                    maker_order_seq,
-                    maker_price,
-                    quantity,
-                }
-            },
-        )
-}
-
-fn arb_matching_step() -> impl Strategy<Value = crate::order::MatchingStep> {
-    prop_oneof![
-        arb_fill().prop_map(crate::order::MatchingStep::Fill),
-        (arb_order_seq(), arb_side(), arb_price(), arb_quantity()).prop_map(
-            |(seq, side, price, remaining)| crate::order::MatchingStep::Rest {
-                seq,
-                side,
-                price,
-                remaining,
-            }
-        ),
-    ]
-}
-
 fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
     (
         any::<u64>(),
-        proptest::collection::vec(arb_matching_step(), 0..=5),
-        proptest::collection::vec(any::<u64>().prop_map(crate::order::OrderSeq::new), 0..=3),
+        proptest::collection::vec(proptest::collection::vec(arb_order_seq(), 0..=3), 0..=5),
     )
-        .prop_map(|(book_id, steps, filled_order_seqs)| MatchingEvent {
+        .prop_map(|(book_id, matches)| MatchingEvent {
             book_id: crate::order::OrderBookId::new(book_id),
-            steps,
-            filled_order_seqs,
+            matches,
         })
 }
 

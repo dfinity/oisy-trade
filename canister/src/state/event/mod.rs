@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, MatchingStep, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize,
-    TokenId, TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -82,10 +82,9 @@ pub struct AddLimitOrderEvent {
 pub struct MatchingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
+    /// One entry per pending order processed: the maker seqs it matched against.
     #[n(1)]
-    pub steps: Vec<MatchingStep>,
-    #[n(2)]
-    pub filled_order_seqs: Vec<OrderSeq>,
+    pub matches: Vec<Vec<OrderSeq>>,
 }
 
 impl Storable for Event {

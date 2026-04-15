@@ -160,7 +160,6 @@ fn should_replay_add_limit_order() {
 
 #[test]
 fn should_replay_matching() {
-    use crate::order::{Fill, MatchingStep};
     use crate::state::event::MatchingEvent;
 
     let base = Principal::from_slice(&[0x01]);
@@ -174,7 +173,6 @@ fn should_replay_matching() {
     let state = replay_events(vec![
         init_event(Mode::GeneralAvailability),
         add_trading_pair_event(base, quote),
-        // Buyer deposits quote tokens
         Event {
             timestamp: 3,
             payload: EventType::Deposit(DepositEvent {
@@ -183,7 +181,6 @@ fn should_replay_matching() {
                 amount: Quantity::from(required_quote),
             }),
         },
-        // Seller deposits base tokens
         Event {
             timestamp: 4,
             payload: EventType::Deposit(DepositEvent {
@@ -192,7 +189,6 @@ fn should_replay_matching() {
                 amount: Quantity::from(quantity),
             }),
         },
-        // Buyer places buy order (seq 0)
         Event {
             timestamp: 5,
             payload: EventType::AddLimitOrder(AddLimitOrderEvent {
@@ -203,7 +199,6 @@ fn should_replay_matching() {
                 quantity: Quantity::from(quantity),
             }),
         },
-        // Seller places sell order (seq 1)
         Event {
             timestamp: 6,
             payload: EventType::AddLimitOrder(AddLimitOrderEvent {
@@ -214,30 +209,15 @@ fn should_replay_matching() {
                 quantity: Quantity::from(quantity),
             }),
         },
-        // Matching event: buyer rests first, seller fills against buyer
+        // Matching: buyer (seq 0) rests (empty vec), seller (seq 1) fills against buyer
         Event {
             timestamp: 7,
             payload: EventType::Matching(MatchingEvent {
                 book_id: OrderBookId::ZERO,
-                steps: vec![
-                    // Buyer (seq 0) rests (no opposite side)
-                    MatchingStep::Rest {
-                        seq: OrderSeq::new(0),
-                        side: Side::Buy,
-                        price: Price::new(price),
-                        remaining: Quantity::from(quantity),
-                    },
-                    // Seller (seq 1) fills against resting buyer
-                    MatchingStep::Fill(Fill {
-                        taker_order_seq: OrderSeq::new(1),
-                        taker_side: Side::Sell,
-                        taker_price: Price::new(price),
-                        maker_order_seq: OrderSeq::new(0),
-                        maker_price: Price::new(price),
-                        quantity: Quantity::from(quantity),
-                    }),
+                matches: vec![
+                    vec![],                 // buyer rests (no opposite side)
+                    vec![OrderSeq::new(0)], // seller fills against buyer
                 ],
-                filled_order_seqs: vec![OrderSeq::new(0), OrderSeq::new(1)],
             }),
         },
     ]);

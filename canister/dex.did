@@ -218,32 +218,12 @@ type DepositEvent = record {
     amount : nat;
 };
 
-/// A single fill produced during order matching.
-type FillEvent = record {
-    taker_order_seq : nat64;
-    taker_side : Side;
-    taker_price : nat64;
-    maker_order_seq : nat64;
-    maker_price : nat64;
-    quantity : nat;
-};
-
-/// An atomic step produced by the matching engine.
-type MatchingStepEvent = variant {
-    Fill : FillEvent;
-    Rest : record {
-        seq : nat64;
-        side : Side;
-        price : nat64;
-        remaining : nat;
-    };
-};
-
 /// Event payload for a matching round on a single trading pair.
+/// Each entry in `matches` corresponds to one pending order processed,
+/// containing the maker order sequences it matched against.
 type MatchingEvent = record {
     book_id : nat64;
-    steps : vec MatchingStepEvent;
-    filled_order_seqs : vec nat64;
+    matches : vec vec nat64;
 };
 
 /// Type of a canister event.

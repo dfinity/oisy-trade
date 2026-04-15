@@ -120,34 +120,11 @@ fn get_events(
                 }
                 EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
                     book_id: e.book_id.get(),
-                    steps: e
-                        .steps
+                    matches: e
+                        .matches
                         .into_iter()
-                        .map(|step| match step {
-                            dex_canister::order::MatchingStep::Fill(f) => {
-                                event::MatchingStepEvent::Fill(event::FillEvent {
-                                    taker_order_seq: f.taker_order_seq.get(),
-                                    taker_side: dex_types::Side::from(f.taker_side),
-                                    taker_price: f.taker_price.get(),
-                                    maker_order_seq: f.maker_order_seq.get(),
-                                    maker_price: f.maker_price.get(),
-                                    quantity: f.quantity.into(),
-                                })
-                            }
-                            dex_canister::order::MatchingStep::Rest {
-                                seq,
-                                side,
-                                price,
-                                remaining,
-                            } => event::MatchingStepEvent::Rest {
-                                seq: seq.get(),
-                                side: dex_types::Side::from(side),
-                                price: price.get(),
-                                remaining: remaining.into(),
-                            },
-                        })
+                        .map(|seqs| seqs.into_iter().map(|s| s.get()).collect())
                         .collect(),
-                    filled_order_seqs: e.filled_order_seqs.into_iter().map(|s| s.get()).collect(),
                 }),
             },
         }

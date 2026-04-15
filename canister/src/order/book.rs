@@ -1,7 +1,4 @@
-use super::{
-    LotSize, Order, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, RestingOrder, Side,
-    TickSize,
-};
+use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -98,7 +95,7 @@ impl OrderBook {
     pub fn match_order(
         &mut self,
         mut order: Order,
-    ) -> Result<(MatchResult, Vec<MatchingStep>), MatchOrderError> {
+    ) -> Result<(MatchResult, Vec<OrderSeq>), MatchOrderError> {
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let mut fills = Vec::new();
@@ -144,29 +141,23 @@ impl OrderBook {
             }
         }
 
-        let mut steps: Vec<MatchingStep> = fills.iter().cloned().map(MatchingStep::Fill).collect();
+        let maker_seqs: Vec<OrderSeq> = fills.iter().map(|f| f.maker_order_seq).collect();
 
         if order.remaining_quantity().is_zero() {
             self.filled_orders.insert(order.id());
-            Ok((MatchResult::Filled { fills }, steps))
+            Ok((MatchResult::Filled { fills }, maker_seqs))
         } else {
             let resting_order_seq = order.id();
-            steps.push(MatchingStep::Rest {
-                seq: resting_order_seq,
-                side: order.side(),
-                price: order.price(),
-                remaining: order.remaining_quantity().clone(),
-            });
             self.insert_order(order);
             if fills.is_empty() {
-                Ok((MatchResult::Resting { resting_order_seq }, steps))
+                Ok((MatchResult::Resting { resting_order_seq }, maker_seqs))
             } else {
                 Ok((
                     MatchResult::PartiallyFilled {
                         fills,
                         resting_order_seq,
                     },
-                    steps,
+                    maker_seqs,
                 ))
             }
         }
@@ -207,11 +198,11 @@ impl OrderBook {
     pub fn process_pending_orders(&mut self) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
-        let mut all_steps = Vec::new();
+        let mut all_matches = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
         while let Some(order) = self.pending_orders.pop_front() {
             match self.match_order(order) {
-                Ok((result, steps)) => {
+                Ok((result, maker_seqs)) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
                         resting_order_seqs.insert(resting_order_seq);
                     }
@@ -219,7 +210,7 @@ impl OrderBook {
                         debug_assert!(!all_fills.contains(&fill), "BUG: duplicate fill {fill:?}");
                         all_fills.push(fill);
                     }
-                    all_steps.extend(steps);
+                    all_matches.push(maker_seqs);
                 }
                 Err(err) => {
                     panic!(
@@ -241,7 +232,7 @@ impl OrderBook {
         MatchingOutput {
             fills: all_fills,
             resting_orders,
-            steps: all_steps,
+            matches: all_matches,
         }
     }
 
@@ -337,31 +328,98 @@ impl OrderBook {
         }
     }
 
-    /// Replay a sequence of matching steps, reproducing the exact book state
-    /// that the matching engine produced.
-    pub fn replay_steps(&mut self, steps: &[MatchingStep]) {
-        self.clear_pending_orders();
-        for step in steps {
-            match step {
-                MatchingStep::Fill(fill) => {
-                    self.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
-                }
-                MatchingStep::Rest {
-                    seq,
-                    side,
-                    price,
-                    remaining,
-                } => {
-                    let order = PendingOrder {
-                        side: *side,
-                        price: *price,
-                        quantity: remaining.clone(),
+    /// Replay a matching round from the recorded maker sequences.
+    ///
+    /// Each entry in `matches` corresponds to one pending order (FIFO).
+    /// The inner `Vec<OrderSeq>` lists the maker orders it matched against.
+    /// Returns the fills (for settlement) and the sets of resting/filled seqs
+    /// (for status updates).
+    pub fn replay_matches(
+        &mut self,
+        matches: &[Vec<OrderSeq>],
+    ) -> (Vec<Fill>, BTreeSet<OrderSeq>, BTreeSet<OrderSeq>) {
+        let mut fills = Vec::new();
+        let mut resting_seqs = BTreeSet::new();
+
+        for maker_seqs in matches {
+            let mut taker = self
+                .pending_orders
+                .pop_front()
+                .expect("BUG: no pending order for replay");
+
+            for &maker_seq in maker_seqs {
+                let (maker_side, maker_price) = *self
+                    .resting_orders
+                    .get(&maker_seq)
+                    .expect("BUG: maker not found in resting index during replay");
+
+                let queue = match maker_side {
+                    Side::Buy => self
+                        .bids
+                        .get_mut(&Reverse(maker_price))
+                        .expect("BUG: price level missing"),
+                    Side::Sell => self
+                        .asks
+                        .get_mut(&maker_price)
+                        .expect("BUG: price level missing"),
+                };
+                let resting = queue.front_mut().expect("BUG: empty queue");
+                assert_eq!(resting.id(), maker_seq, "BUG: FIFO mismatch during replay");
+
+                let fill_qty =
+                    std::cmp::min(taker.remaining_quantity(), resting.remaining_quantity()).clone();
+                taker.reduce_quantity(&fill_qty);
+                resting.reduce_quantity(&fill_qty);
+
+                fills.push(Fill {
+                    taker_order_seq: taker.id(),
+                    taker_side: taker.side(),
+                    taker_price: taker.price(),
+                    maker_order_seq: maker_seq,
+                    maker_price,
+                    quantity: fill_qty,
+                });
+
+                if resting.remaining_quantity().is_zero() {
+                    let filled = queue.pop_front().expect("front exists");
+                    self.resting_orders.remove(&filled.id());
+                    self.filled_orders.insert(filled.id());
+                    // Clean up empty price level
+                    match maker_side {
+                        Side::Buy => {
+                            if self
+                                .bids
+                                .get(&Reverse(maker_price))
+                                .is_some_and(|q| q.is_empty())
+                            {
+                                self.bids.remove(&Reverse(maker_price));
+                            }
+                        }
+                        Side::Sell => {
+                            if self.asks.get(&maker_price).is_some_and(|q| q.is_empty()) {
+                                self.asks.remove(&maker_price);
+                            }
+                        }
                     }
-                    .into_order(*seq);
-                    self.insert_order(order);
                 }
             }
+
+            if taker.remaining_quantity().is_zero() {
+                self.filled_orders.insert(taker.id());
+            } else {
+                resting_seqs.insert(taker.id());
+                self.insert_order(taker);
+            }
         }
+
+        // Any remaining pending orders rest without matching.
+        while let Some(order) = self.pending_orders.pop_front() {
+            resting_seqs.insert(order.id());
+            self.insert_order(order);
+        }
+
+        let filled_seqs = std::mem::take(&mut self.filled_orders);
+        (fills, resting_seqs, filled_seqs)
     }
 }
 
@@ -404,32 +462,13 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
-/// An atomic step produced by the matching engine, replayed in order during upgrade.
-#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub enum MatchingStep {
-    /// A resting maker was (partially or fully) filled.
-    #[n(0)]
-    Fill(#[n(0)] Fill),
-    /// An order entered the resting book with the given remaining quantity.
-    #[n(1)]
-    Rest {
-        #[n(0)]
-        seq: OrderSeq,
-        #[n(1)]
-        side: Side,
-        #[n(2)]
-        price: Price,
-        #[n(3)]
-        remaining: Quantity,
-    },
-}
-
 /// Output of a matching round.
 #[derive(Debug)]
 pub struct MatchingOutput {
     pub fills: Vec<Fill>,
     pub resting_orders: BTreeSet<OrderSeq>,
-    pub steps: Vec<MatchingStep>,
+    /// One entry per pending order processed: the maker seqs it matched against.
+    pub matches: Vec<Vec<OrderSeq>>,
 }
 
 /// The result of matching an incoming order against the book.

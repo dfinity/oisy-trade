@@ -9,8 +9,7 @@ use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderSeq, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use candid::Principal;
 use dex_types::OrderStatus;
@@ -187,7 +186,10 @@ impl State {
                 (book.process_pending_orders(), book.take_filled_orders())
             };
 
-            if output.steps.is_empty() && filled_seqs.is_empty() {
+            if output.matches.iter().all(|m| m.is_empty())
+                && output.resting_orders.is_empty()
+                && filled_seqs.is_empty()
+            {
                 continue;
             }
 
@@ -198,8 +200,6 @@ impl State {
                     self.settle_fill(book_id, &pair, fill);
                 }
             }
-
-            let filled_order_seqs: Vec<OrderSeq> = filled_seqs.iter().copied().collect();
 
             {
                 #[cfg(feature = "canbench-rs")]
@@ -212,8 +212,8 @@ impl State {
                         .expect("BUG: resting order not found in order_history") =
                         OrderStatus::Open;
                 }
-                for &seq in &filled_order_seqs {
-                    let order_id = OrderId::new(book_id, seq);
+                for seq in &filled_seqs {
+                    let order_id = OrderId::new(book_id, *seq);
                     *self
                         .order_history
                         .get_status_mut(&order_id)
@@ -224,49 +224,38 @@ impl State {
 
             events.push(event::MatchingEvent {
                 book_id,
-                steps: output.steps,
-                filled_order_seqs,
+                matches: output.matches,
             });
         }
         events
     }
 
-    /// Replay a matching event by applying steps to the order book and
-    /// settling fills, without re-running the matching engine.
+    /// Replay a matching event, reproducing the exact book and balance state.
     pub fn replay_matching(&mut self, event: &event::MatchingEvent) {
-        use crate::order::MatchingStep;
-
         let book_id = event.book_id;
         let pair = find_by_value(&self.trading_pairs, &book_id)
             .expect("BUG: unknown trading pair during Matching replay")
             .clone();
 
-        // 1. Replay order book steps.
         let book = self
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing during Matching replay");
-        book.replay_steps(&event.steps);
+        let (fills, resting_seqs, filled_seqs) = book.replay_matches(&event.matches);
 
-        // 2. Settle fills.
-        for step in &event.steps {
-            if let MatchingStep::Fill(fill) = step {
-                self.settle_fill(book_id, &pair, fill);
-            }
+        for fill in &fills {
+            self.settle_fill(book_id, &pair, fill);
         }
 
-        // 3. Update order statuses.
-        for step in &event.steps {
-            if let MatchingStep::Rest { seq, .. } = step {
-                let order_id = OrderId::new(book_id, *seq);
-                *self
-                    .order_history
-                    .get_status_mut(&order_id)
-                    .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
-            }
+        for seq in &resting_seqs {
+            let order_id = OrderId::new(book_id, *seq);
+            *self
+                .order_history
+                .get_status_mut(&order_id)
+                .expect("BUG: resting order not found in order_history") = OrderStatus::Open;
         }
-        for &seq in &event.filled_order_seqs {
-            let order_id = OrderId::new(book_id, seq);
+        for seq in &filled_seqs {
+            let order_id = OrderId::new(book_id, *seq);
             *self
                 .order_history
                 .get_status_mut(&order_id)
