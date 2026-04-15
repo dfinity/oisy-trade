@@ -267,6 +267,11 @@ impl OrderBook {
         self.pending_orders.clear();
     }
 
+    /// Drain and return all pending orders.
+    pub fn take_pending_orders(&mut self) -> Vec<Order> {
+        self.pending_orders.drain(..).collect()
+    }
+
     /// Reduce the front resting order's remaining quantity by `amount`.
     /// Removes the order if fully filled, and cleans up empty price levels.
     ///

@@ -246,37 +246,42 @@ impl State {
             .get_mut(&book_id)
             .expect("BUG: order book missing during Matching replay");
 
-        // 1. Drain pending queue
-        book.clear_pending_orders();
+        // 1. Drain pending queue — save pending orders for step 2
+        let pending: Vec<Order> = book.take_pending_orders();
 
-        // 2. Reduce filled makers
+        // 2. Move pending orders that became makers into the resting book.
+        //    During matching, a pending order that doesn't immediately match
+        //    the opposite side rests in the book and may then be filled by a
+        //    later taker from the same batch.
+        for order in pending {
+            let seq = order.id();
+            let is_maker = event.fills.iter().any(|f| f.maker_order_seq == seq);
+            let is_resting = event.resting_order_seqs.contains(&seq);
+            if is_maker || is_resting {
+                book.insert_order(order);
+            }
+            // Orders that are neither maker nor resting were fully filled as
+            // takers without ever entering the book — nothing to do.
+        }
+
+        // 3. Reduce filled makers
         for fill in &event.fills {
             book.reduce_resting_order(fill.maker_order_seq, &fill.quantity);
         }
 
-        // 3. Insert resting takers
+        // 4. Insert resting takers that were partially filled
+        //    (they are already inserted in step 2 with full quantity;
+        //    reduce_resting_order in step 3 doesn't touch takers, so we
+        //    need to adjust their remaining quantity here)
         for &seq in &event.resting_order_seqs {
-            let order_id = OrderId::new(book_id, seq);
-            let record = self
-                .order_history
-                .get(&order_id)
-                .expect("BUG: resting order not found in order_history during replay");
             let filled_qty = event
                 .fills
                 .iter()
                 .filter(|f| f.taker_order_seq == seq)
                 .fold(Quantity::ZERO, |acc, f| acc + f.quantity.clone());
-            let remaining = record
-                .quantity
-                .checked_sub(&filled_qty)
-                .expect("BUG: fills exceed order quantity");
-            let order = PendingOrder {
-                side: record.side,
-                price: record.price,
-                quantity: remaining,
+            if !filled_qty.is_zero() {
+                book.reduce_resting_order(seq, &filled_qty);
             }
-            .into_order(seq);
-            book.insert_order(order);
         }
 
         // 4. Settle fills

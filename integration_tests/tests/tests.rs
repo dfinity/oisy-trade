@@ -709,13 +709,16 @@ async fn should_replay_events_on_upgrade() {
         })
         .await
         .unwrap();
+    // Tick so matching runs and the order rests (Pending -> Open)
+    setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
         setup.dex_client().get_order_status(order_id.clone()),
         setup.dex_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
-        assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
+        // Init + AddTradingPair + Deposit + AddLimitOrder + Matching (order rests)
+        assert_eq!(events.len(), 5);
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
             assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
                 user: setup.user(),
@@ -726,6 +729,59 @@ async fn should_replay_events_on_upgrade() {
             });
         });
     });
+
+    // 5) Matching -> Upgrade -> balances and order statuses preserved
+    // Place a crossing buy order from a different user, tick to trigger matching.
+    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    let buyer = Principal::from_slice(&[0x9d, 0xf7, 0x03]);
+    let required_quote = 100 * deposit_amount; // price * quantity
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+        .approve(required_quote + QUOTE_LEDGER_FEE)
+        .deposit(required_quote)
+        .execute()
+        .await;
+    let buy_order_id = setup
+        .dex_client_with_caller(buyer)
+        .add_limit_order(dex_types::LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: dex_types::Side::Buy,
+            price: 100,
+            quantity: Nat::from(deposit_amount),
+        })
+        .await
+        .unwrap();
+    // Tick twice: first tick schedules the timer, second tick executes it
+    setup.env().tick().await;
+    setup.env().tick().await;
+    // Both orders should be filled after matching
+    assert_eq!(
+        setup.dex_client().get_order_status(order_id.clone()).await,
+        dex_types::OrderStatus::Filled,
+    );
+    assert_eq!(
+        setup
+            .dex_client_with_caller(buyer)
+            .get_order_status(buy_order_id.clone())
+            .await,
+        dex_types::OrderStatus::Filled,
+    );
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.dex_client().get_order_status(order_id.clone()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_order_status(buy_order_id.clone()),
+        setup.dex_client().get_balance(setup.base_token_id()),
+        setup.dex_client().get_balance(setup.quote_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.base_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.quote_token_id()),
+    );
 
     setup.drop().await;
 }

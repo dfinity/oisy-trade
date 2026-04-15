@@ -159,6 +159,112 @@ fn should_replay_add_limit_order() {
 }
 
 #[test]
+fn should_replay_matching() {
+    use crate::order::Fill;
+    use crate::state::event::MatchingEvent;
+
+    let base = Principal::from_slice(&[0x01]);
+    let quote = Principal::from_slice(&[0x02]);
+    let buyer = Principal::from_slice(&[0x03]);
+    let seller = Principal::from_slice(&[0x04]);
+    let price = 100u64;
+    let quantity = 1_000_000u64;
+    let required_quote = price * quantity; // 100_000_000
+
+    let state = replay_events(vec![
+        init_event(Mode::GeneralAvailability),
+        add_trading_pair_event(base, quote),
+        // Buyer deposits quote tokens
+        Event {
+            timestamp: 3,
+            payload: EventType::Deposit(DepositEvent {
+                user: buyer,
+                token: crate::order::TokenId::new(quote),
+                amount: Quantity::from(required_quote),
+            }),
+        },
+        // Seller deposits base tokens
+        Event {
+            timestamp: 4,
+            payload: EventType::Deposit(DepositEvent {
+                user: seller,
+                token: crate::order::TokenId::new(base),
+                amount: Quantity::from(quantity),
+            }),
+        },
+        // Buyer places buy order (seq 0)
+        Event {
+            timestamp: 5,
+            payload: EventType::AddLimitOrder(AddLimitOrderEvent {
+                user: buyer,
+                order_id: OrderId::new(OrderBookId::ZERO, OrderSeq::new(0)),
+                side: Side::Buy,
+                price: Price::new(price),
+                quantity: Quantity::from(quantity),
+            }),
+        },
+        // Seller places sell order (seq 1)
+        Event {
+            timestamp: 6,
+            payload: EventType::AddLimitOrder(AddLimitOrderEvent {
+                user: seller,
+                order_id: OrderId::new(OrderBookId::ZERO, OrderSeq::new(1)),
+                side: Side::Sell,
+                price: Price::new(price),
+                quantity: Quantity::from(quantity),
+            }),
+        },
+        // Matching event: exact match
+        Event {
+            timestamp: 7,
+            payload: EventType::Matching(MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                fills: vec![Fill {
+                    taker_order_seq: OrderSeq::new(1), // seller is taker (placed second)
+                    taker_side: Side::Sell,
+                    taker_price: Price::new(price),
+                    maker_order_seq: OrderSeq::new(0), // buyer is maker
+                    maker_price: Price::new(price),
+                    quantity: Quantity::from(quantity),
+                }],
+                resting_order_seqs: vec![],
+                filled_order_seqs: vec![OrderSeq::new(0), OrderSeq::new(1)],
+            }),
+        },
+    ]);
+
+    // Buyer: spent quote, received base
+    assert_eq!(
+        state.get_balance(&buyer, &crate::order::TokenId::new(base)),
+        Balance::new(quantity, 0u64)
+    );
+    assert_eq!(
+        state.get_balance(&buyer, &crate::order::TokenId::new(quote)),
+        Balance::new(0u64, 0u64)
+    );
+
+    // Seller: spent base, received quote
+    assert_eq!(
+        state.get_balance(&seller, &crate::order::TokenId::new(base)),
+        Balance::new(0u64, 0u64)
+    );
+    assert_eq!(
+        state.get_balance(&seller, &crate::order::TokenId::new(quote)),
+        Balance::new(required_quote, 0u64)
+    );
+
+    // Both orders filled
+    assert_eq!(
+        state.get_order_status(OrderId::new(OrderBookId::ZERO, OrderSeq::new(0))),
+        OrderStatus::Filled
+    );
+    assert_eq!(
+        state.get_order_status(OrderId::new(OrderBookId::ZERO, OrderSeq::new(1))),
+        OrderStatus::Filled
+    );
+}
+
+#[test]
 #[should_panic(expected = "the event log should not be empty")]
 fn should_panic_on_empty_events() {
     replay_events(Vec::<Event>::new());

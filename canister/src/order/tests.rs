@@ -438,7 +438,7 @@ mod order_book {
     }
 
     mod replay {
-        use crate::order::{OrderSeq, Price, Quantity, Side};
+        use crate::order::{OrderSeq, Price, Quantity};
         use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
 
         fn tick() -> u64 {
