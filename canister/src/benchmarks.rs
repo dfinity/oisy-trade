@@ -297,6 +297,183 @@ fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
     state.record_limit_order(user, order_id.book_id(), order);
 }
 
+/// Heap vs stable memory order book comparison benchmarks.
+///
+/// These benchmarks operate directly on `OrderBook` / `StableOrderBook`,
+/// bypassing `State` to isolate the data-structure overhead.
+mod book_comparison {
+    use crate::benchmarks::{
+        AggTrade, DepthSnapshot, LOT_SIZE, TICK_SIZE, load_depth, load_trades, parse_decimal_8,
+    };
+    use crate::order::stable_book::StableOrderBook;
+    use crate::order::{OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use canbench_rs::bench;
+    use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
+    use ic_stable_structures::DefaultMemoryImpl;
+
+    const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+
+    fn heap_book() -> OrderBook {
+        OrderBook::new(BOOK_ID, TICK_SIZE, LOT_SIZE)
+    }
+
+    fn stable_book(
+    ) -> StableOrderBook<ic_stable_structures::memory_manager::VirtualMemory<DefaultMemoryImpl>> {
+        let mm = MemoryManager::init(DefaultMemoryImpl::default());
+        StableOrderBook::new(
+            BOOK_ID,
+            TICK_SIZE,
+            LOT_SIZE,
+            mm.get(MemoryId::new(0)),
+            mm.get(MemoryId::new(1)),
+            mm.get(MemoryId::new(2)),
+        )
+    }
+
+    fn add_pending_orders_no_fills(book: &mut impl BookOps, num_orders: u64) {
+        let lot = LOT_SIZE.get();
+        for i in 0..num_orders / 2 {
+            book.add_pending(PendingOrder {
+                side: Side::Buy,
+                price: Price::new(200_000_000),
+                quantity: Quantity::from((i + 1) * lot),
+            });
+        }
+        for i in 0..num_orders / 2 {
+            book.add_pending(PendingOrder {
+                side: Side::Sell,
+                price: Price::new(300_000_000),
+                quantity: Quantity::from((i + 1) * lot),
+            });
+        }
+    }
+
+    fn populate_book(book: &mut impl BookOps, depth: &DepthSnapshot) {
+        for (price_str, qty_str) in &depth.bids {
+            book.add_pending(PendingOrder {
+                side: Side::Buy,
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from(parse_decimal_8(qty_str)),
+            });
+        }
+        for (price_str, qty_str) in &depth.asks {
+            book.add_pending(PendingOrder {
+                side: Side::Sell,
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from(parse_decimal_8(qty_str)),
+            });
+        }
+        book.process_pending();
+    }
+
+    fn add_trade_orders(book: &mut impl BookOps, trades: &[AggTrade]) {
+        for trade in trades {
+            book.add_pending(PendingOrder {
+                side: if trade.m { Side::Sell } else { Side::Buy },
+                price: Price::new(parse_decimal_8(&trade.p)),
+                quantity: Quantity::from(parse_decimal_8(&trade.q)),
+            });
+        }
+    }
+
+    /// Trait to abstract over heap and stable order book for benchmark helpers.
+    trait BookOps {
+        fn add_pending(&mut self, order: PendingOrder);
+        fn process_pending(&mut self);
+        fn pending_len(&self) -> usize;
+    }
+
+    impl BookOps for OrderBook {
+        fn add_pending(&mut self, order: PendingOrder) {
+            let seq = self.next_seq();
+            self.add_pending_order(order.into_order(seq));
+        }
+        fn process_pending(&mut self) {
+            self.process_pending_orders();
+        }
+        fn pending_len(&self) -> usize {
+            self.pending_orders_len()
+        }
+    }
+
+    impl<M: ic_stable_structures::Memory> BookOps for StableOrderBook<M> {
+        fn add_pending(&mut self, order: PendingOrder) {
+            let seq = self.next_seq();
+            self.add_pending_order(order.into_order(seq));
+        }
+        fn process_pending(&mut self) {
+            self.process_pending_orders();
+        }
+        fn pending_len(&self) -> usize {
+            self.pending_orders_len()
+        }
+    }
+
+    // -- No-fills benchmarks: 1000 orders that all rest without matching --
+
+    #[bench(raw)]
+    fn bench_heap_book_1000_no_fills() -> canbench_rs::BenchResult {
+        let mut book = heap_book();
+        add_pending_orders_no_fills(&mut book, 1_000);
+        assert_eq!(book.pending_len(), 1_000);
+
+        let res = canbench_rs::bench_fn(|| {
+            book.process_pending();
+        });
+        assert_eq!(book.pending_len(), 0);
+        res
+    }
+
+    #[bench(raw)]
+    fn bench_stable_book_1000_no_fills() -> canbench_rs::BenchResult {
+        let mut book = stable_book();
+        add_pending_orders_no_fills(&mut book, 1_000);
+        assert_eq!(book.pending_len(), 1_000);
+
+        let res = canbench_rs::bench_fn(|| {
+            book.process_pending();
+        });
+        assert_eq!(book.pending_len(), 0);
+        res
+    }
+
+    // -- With-fills benchmarks: 1000 Binance trades against populated book --
+
+    #[bench(raw)]
+    fn bench_heap_book_1000_with_fills() -> canbench_rs::BenchResult {
+        let depth = load_depth();
+        let trades = load_trades();
+        let mut book = heap_book();
+
+        populate_book(&mut book, &depth);
+        add_trade_orders(&mut book, &trades);
+        assert_eq!(book.pending_len(), trades.len());
+
+        let res = canbench_rs::bench_fn(|| {
+            book.process_pending();
+        });
+        assert_eq!(book.pending_len(), 0);
+        res
+    }
+
+    #[bench(raw)]
+    fn bench_stable_book_1000_with_fills() -> canbench_rs::BenchResult {
+        let depth = load_depth();
+        let trades = load_trades();
+        let mut book = stable_book();
+
+        populate_book(&mut book, &depth);
+        add_trade_orders(&mut book, &trades);
+        assert_eq!(book.pending_len(), trades.len());
+
+        let res = canbench_rs::bench_fn(|| {
+            book.process_pending();
+        });
+        assert_eq!(book.pending_len(), 0);
+        res
+    }
+}
+
 mod event_storage {
     use crate::storage;
     use crate::test_fixtures::event::WorstCaseEvent;
