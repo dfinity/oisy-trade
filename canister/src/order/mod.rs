@@ -2,6 +2,8 @@ mod book;
 mod history;
 pub mod stable_book;
 #[cfg(test)]
+mod stable_book_tests;
+#[cfg(test)]
 mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
