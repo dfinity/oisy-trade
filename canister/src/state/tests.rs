@@ -425,13 +425,25 @@ mod settle_fills {
 
         // Total tokens unchanged: base and quote just move between free/reserved
         assert_eq!(
-            *base_before.free() + *base_before.reserved(),
-            *base_after.free() + *base_after.reserved(),
+            base_before
+                .free()
+                .checked_add(*base_before.reserved())
+                .unwrap(),
+            base_after
+                .free()
+                .checked_add(*base_after.reserved())
+                .unwrap(),
             "base token total changed"
         );
         assert_eq!(
-            *quote_before.free() + *quote_before.reserved(),
-            *quote_after.free() + *quote_after.reserved(),
+            quote_before
+                .free()
+                .checked_add(*quote_before.reserved())
+                .unwrap(),
+            quote_after
+                .free()
+                .checked_add(*quote_after.reserved())
+                .unwrap(),
             "quote token total changed"
         );
         // After self-trade: all reserved released, net balances same as deposited
@@ -485,7 +497,9 @@ mod settle_fills {
         let pair = icp_ckbtc_trading_pair();
         let price = 100u64;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
-        let quantity = &Quantity::from(u64::from(LOT_SIZE)) * u64::MAX;
+        let quantity = Quantity::from(u64::from(LOT_SIZE))
+            .checked_mul_u64(u64::MAX)
+            .unwrap();
 
         place_buy_order(&mut state, price, quantity);
         place_sell_order(&mut state, price, quantity);
@@ -784,8 +798,16 @@ mod settle_fills {
                 (Quantity::ZERO, Quantity::ZERO),
                 |(base_acc, quote_acc), (base, quote)| {
                     (
-                        base_acc + *base.free() + *base.reserved(),
-                        quote_acc + *quote.free() + *quote.reserved(),
+                        base_acc
+                            .checked_add(*base.free())
+                            .unwrap()
+                            .checked_add(*base.reserved())
+                            .unwrap(),
+                        quote_acc
+                            .checked_add(*quote.free())
+                            .unwrap()
+                            .checked_add(*quote.reserved())
+                            .unwrap(),
                     )
                 },
             )

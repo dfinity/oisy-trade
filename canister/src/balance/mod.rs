@@ -45,7 +45,10 @@ impl Balance {
         let _q = canbench_rs::bench_scope("bal");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("bal::deposit");
-        self.free += amount;
+        self.free = self
+            .free
+            .checked_add(amount)
+            .expect("BUG: deposit overflow");
     }
 
     /// Debit `amount` from the reserved balance.
@@ -80,7 +83,10 @@ impl Balance {
                 self.reserved, amount
             )
         });
-        self.free += amount;
+        self.free = self
+            .free
+            .checked_add(amount)
+            .expect("BUG: unreserve overflow");
     }
 
     pub fn withdraw(&mut self, amount: Quantity) -> Result<(), InsufficientBalanceError> {
@@ -106,7 +112,10 @@ impl Balance {
                 available: self.free,
                 required,
             })?;
-        self.reserved += required;
+        self.reserved = self
+            .reserved
+            .checked_add(required)
+            .expect("BUG: reserve overflow");
         Ok(())
     }
 }

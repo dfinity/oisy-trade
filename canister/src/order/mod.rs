@@ -276,7 +276,9 @@ impl Price {
     }
 
     pub fn mul_quantity(self, quantity: &Quantity) -> Quantity {
-        quantity * self.0
+        quantity
+            .checked_mul_u64(self.0)
+            .expect("BUG: price * quantity overflow")
     }
 }
 
@@ -452,48 +454,37 @@ impl From<Quantity> for Nat {
     }
 }
 
-impl std::ops::Add for Quantity {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
+impl Quantity {
+    pub fn checked_add(self, rhs: Self) -> Option<Self> {
         #[cfg(feature = "canbench-rs")]
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::add");
         let (low, carry) = self.low.overflowing_add(rhs.low);
-        let high = self.high + rhs.high + carry as u128;
-        Self { high, low }
+        let high = self
+            .high
+            .checked_add(rhs.high)?
+            .checked_add(carry as u128)?;
+        Some(Self { high, low })
     }
-}
 
-impl std::ops::AddAssign for Quantity {
-    fn add_assign(&mut self, rhs: Self) {
-        #[cfg(feature = "canbench-rs")]
-        let _q = canbench_rs::bench_scope("qty");
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("qty::add_assign");
-        let (low, carry) = self.low.overflowing_add(rhs.low);
-        self.high = self.high + rhs.high + carry as u128;
-        self.low = low;
-    }
-}
-
-impl std::ops::Mul<u64> for &Quantity {
-    type Output = Quantity;
-
-    fn mul(self, rhs: u64) -> Self::Output {
+    pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
         #[cfg(feature = "canbench-rs")]
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::mul_u64");
         let rhs = rhs as u128;
-        // Split low into two 64-bit halves to avoid u128 overflow
         let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
         let low_hi = self.low >> 64;
         let prod_lo = low_lo * rhs;
         let prod_hi = low_hi * rhs;
         let (low, carry) = prod_lo.overflowing_add(prod_hi << 64);
-        let high = self.high * rhs + (prod_hi >> 64) + carry as u128;
-        Quantity { high, low }
+        let high = self
+            .high
+            .checked_mul(rhs)?
+            .checked_add(prod_hi >> 64)?
+            .checked_add(carry as u128)?;
+        Some(Self { high, low })
     }
 }
 
