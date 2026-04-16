@@ -12,6 +12,9 @@ license.workspace = true
 name = "dex_canister"
 path = "src/main.rs"
 
+[features]
+canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde", "dep:strum"]
+
 [dependencies]
 async-trait = { workspace = true }
 bimap = { version = "0.6.3", default-features = false }
@@ -31,9 +34,6 @@ num-bigint = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
-
-[features]
-canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde", "dep:strum"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }
