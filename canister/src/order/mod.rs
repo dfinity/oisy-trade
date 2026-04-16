@@ -496,21 +496,25 @@ impl Quantity {
     }
 }
 
+/// CBOR encoding of large numbers:
+/// - Values ≤ u64::MAX: encoded as a CBOR unsigned integer (1–9 bytes).
+/// - Values > u64::MAX: encoded as Tag 2 (PosBignum) + big-endian byte string.
 impl<C> minicbor::Encode<C> for Quantity {
     fn encode<W: minicbor::encode::Write>(
         &self,
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-            let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
-            &bytes[start..]
+        if self.high == 0 && self.low <= u64::MAX as u128 {
+            e.u64(self.low as u64)?;
+        } else {
+            let mut buf = [0u8; 32];
+            buf[..16].copy_from_slice(&self.high.to_be_bytes());
+            buf[16..].copy_from_slice(&self.low.to_be_bytes());
+            let start = buf.iter().position(|&b| b != 0).unwrap_or(buf.len());
+            e.tag(minicbor::data::Tag::PosBignum)?
+                .bytes(&buf[start..])?;
         }
-        let high_bytes = self.high.to_be_bytes();
-        let low_bytes = self.low.to_be_bytes();
-        e.array(2)?
-            .bytes(strip_leading_zeros(&high_bytes))?
-            .bytes(strip_leading_zeros(&low_bytes))?;
         Ok(())
     }
 }
@@ -520,22 +524,30 @@ impl<'b, C> minicbor::Decode<'b, C> for Quantity {
         d: &mut minicbor::Decoder<'b>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
-        let len = d.array()?.ok_or(minicbor::decode::Error::message(
-            "expected definite-length array for Quantity",
-        ))?;
-        if len != 2 {
+        // Try decoding as a plain CBOR unsigned integer first.
+        let pos = d.position();
+        match d.u64() {
+            Ok(n) => return Ok(Self::from(n)),
+            Err(e) if e.is_type_mismatch() => d.set_position(pos),
+            Err(e) => return Err(e),
+        }
+        // Otherwise expect Tag 2 (PosBignum) + byte string.
+        let tag = d.tag()?;
+        if tag != minicbor::data::Tag::PosBignum {
             return Err(minicbor::decode::Error::message(
-                "expected 2-element array for Quantity",
+                "expected u64 or Tag::PosBignum for Quantity",
             ));
         }
-        let high_bytes = d.bytes()?;
-        let low_bytes = d.bytes()?;
-        let mut high_buf = [0u8; 16];
-        let mut low_buf = [0u8; 16];
-        high_buf[16 - high_bytes.len()..].copy_from_slice(high_bytes);
-        low_buf[16 - low_bytes.len()..].copy_from_slice(low_bytes);
-        let high = u128::from_be_bytes(high_buf);
-        let low = u128::from_be_bytes(low_buf);
+        let bytes = d.bytes()?;
+        if bytes.len() > 32 {
+            return Err(minicbor::decode::Error::message(
+                "Quantity exceeds 256 bits",
+            ));
+        }
+        let mut buf = [0u8; 32];
+        buf[32 - bytes.len()..].copy_from_slice(bytes);
+        let high = u128::from_be_bytes(buf[..16].try_into().unwrap());
+        let low = u128::from_be_bytes(buf[16..].try_into().unwrap());
         Ok(Self { high, low })
     }
 }

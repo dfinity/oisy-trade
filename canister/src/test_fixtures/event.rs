@@ -54,8 +54,8 @@ impl WorstCaseEvent {
             Self::Init => 328,
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
-            Self::Deposit => 96,
-            Self::AddLimitOrder => 98,
+            Self::Deposit => 95,
+            Self::AddLimitOrder => 97,
         }
     }
 }
