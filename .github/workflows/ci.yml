@@ -2,6 +2,8 @@ name: 'DEX'
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
   push:
     branches:
       - main
