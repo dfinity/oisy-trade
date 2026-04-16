@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "canister", "integration_tests",
+    "canister",
+    "integration_tests",
     "libs/client",
     "libs/types",
     "libs/types-internal",
@@ -15,17 +16,10 @@ homepage = "https://github.com/dfinity/dex#readme"
 license = "Apache-2.0"
 readme = "README.md"
 
-[profile.release]
-debug = false
-lto = true
-strip = true
-opt-level = 's'
-
 [workspace.dependencies]
 assert_matches = "1"
 async-trait = "0.1.89"
-num-bigint = "0.4.6"
-mockall = "0.14.0"
+canbench-rs = "0.4"
 candid = "0.10.27"
 candid_parser = "0.3.1"
 canlog = "0.2.0"
@@ -38,10 +32,18 @@ ic-stable-structures = "0.7.2"
 icrc-cbor = "0.1.0"
 icrc-ledger-types = "0.1.13"
 minicbor = "0.19.1"
+mockall = "0.14.0"
+num-bigint = "0.4.6"
 pocket-ic = "13.0.0"
-canbench-rs = "0.4"
 proptest = "1"
 scopeguard = "1"
 serde = "1.0.228"
 serde_json = "1"
+strum = { version = "0.28.0", features = ["derive"] }
 tokio = "1.51.1"
+
+[profile.release]
+debug = false
+lto = true
+strip = true
+opt-level = 's'

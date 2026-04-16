@@ -1,5 +1,8 @@
 pub mod audit;
 pub mod event;
+mod map;
+
+pub use map::TradingPairMap;
 
 #[cfg(test)]
 mod tests;
@@ -8,8 +11,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord,
-    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use candid::Principal;
 use dex_types::OrderStatus;
@@ -42,7 +45,7 @@ pub struct State {
     mode: Mode,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
-    trading_pairs: BTreeMap<TradingPair, OrderBookId>,
+    trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
@@ -58,7 +61,7 @@ impl TryFrom<InitArg> for State {
             mode: init_arg.mode,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
-            trading_pairs: BTreeMap::default(),
+            trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
             order_history: OrderHistory::new(),
@@ -87,21 +90,19 @@ impl State {
         }
     }
 
-    pub fn add_limit_order(
-        &mut self,
+    pub fn validate_limit_order(
+        &self,
         user: Principal,
         pair: TradingPair,
         pending: PendingOrder,
-    ) -> Result<OrderId, AddLimitOrderError> {
-        use crate::order::Side;
-
-        let book_id = self
+    ) -> Result<(OrderId, Order), AddLimitOrderError> {
+        let book_id = *self
             .trading_pairs
-            .get(&pair)
+            .get_book_id(&pair)
             .ok_or(AddLimitOrderError::UnknownTradingPair)?;
         let book = self
             .order_books
-            .get_mut(book_id)
+            .get(&book_id)
             .expect("BUG: trading pair registered but order book missing");
 
         book.validate_order(pending.price, &pending.quantity)
@@ -111,47 +112,62 @@ impl State {
             Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
             Side::Sell => (pair.base, pending.quantity.clone()),
         };
-        match self
+        let free = self
             .balances
-            .get_mut(&user)
-            .and_then(|tokens| tokens.get_mut(&token))
-        {
-            Some(balance) => {
-                balance
-                    .reserve(required)
-                    .map_err(|e| AddLimitOrderError::InsufficientBalance {
-                        token,
-                        available: e.available,
-                        required: e.required,
-                    })?;
-            }
-            None => {
-                return Err(AddLimitOrderError::InsufficientBalance {
-                    token,
-                    available: Quantity::ZERO,
-                    required,
-                });
-            }
+            .get(&user)
+            .and_then(|tokens| tokens.get(&token))
+            .map(|b| b.free().clone())
+            .unwrap_or(Quantity::ZERO);
+        if free < required {
+            return Err(AddLimitOrderError::InsufficientBalance {
+                token,
+                available: free,
+                required,
+            });
         }
 
-        let side = pending.side;
-        let price = pending.price;
-        let quantity = pending.quantity.clone();
-        let order_id = book
-            .add_pending_order(pending)
-            .map_err(AddLimitOrderError::InvalidOrder)?;
+        let order_id = OrderId::new(book_id, book.next_seq());
+        let order = pending.into_order(order_id.seq());
+        Ok((order_id, order))
+    }
+
+    pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
+        let pair = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair");
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing");
+
+        let (token, required) = match order.side() {
+            Side::Buy => (
+                pair.quote,
+                order.price().mul_quantity(order.remaining_quantity()),
+            ),
+            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+        };
+        self.balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token))
+            .expect("BUG: user balance missing")
+            .reserve(required)
+            .expect("BUG: insufficient balance for validated order");
+
+        let order_id = OrderId::new(book_id, order.id());
         self.order_history.insert_once(
             order_id,
             OrderRecord {
                 owner: user,
-                pair,
-                side,
-                price,
-                quantity,
+                pair: pair.clone(),
+                side: order.side(),
+                price: order.price(),
+                quantity: order.remaining_quantity().clone(),
                 status: OrderStatus::Pending,
             },
         );
-        Ok(order_id)
+        book.add_pending_order(order);
     }
 
     pub fn process_pending_orders(&mut self) {
@@ -159,7 +175,7 @@ impl State {
         let pairs: Vec<(TradingPair, OrderBookId)> = self
             .trading_pairs
             .iter()
-            .map(|(pair, &book_id)| (pair.clone(), book_id))
+            .map(|(pair, book_id)| (pair.clone(), *book_id))
             .collect();
         for (pair, book_id) in pairs {
             let (output, filled_seqs) = {
@@ -268,7 +284,7 @@ impl State {
     }
 
     pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
-        self.trading_pairs.contains_key(pair)
+        self.trading_pairs.contains(pair)
     }
 
     pub fn record_trading_pair(
@@ -284,7 +300,7 @@ impl State {
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
         let book = OrderBook::new(book_id, tick_size, lot_size);
-        assert_eq!(self.trading_pairs.insert(pair, book_id), None);
+        self.trading_pairs.insert(pair, book_id);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
     }
@@ -313,7 +329,7 @@ impl State {
         Ok(())
     }
 
-    pub fn trading_pairs(&self) -> &BTreeMap<TradingPair, OrderBookId> {
+    pub fn trading_pairs(&self) -> &TradingPairMap {
         &self.trading_pairs
     }
 
@@ -361,7 +377,7 @@ impl State {
 
     pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
         self.trading_pairs
-            .get(trading_pair)
+            .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
     }
 }

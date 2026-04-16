@@ -143,7 +143,7 @@ mod record_trading_pair {
             LOT_SIZE,
         );
 
-        let book_ids: Vec<_> = state.trading_pairs().values().collect();
+        let book_ids: Vec<_> = state.trading_pairs().iter().map(|(_, id)| id).collect();
         assert_eq!(book_ids.len(), 2);
         assert_ne!(book_ids[0], book_ids[1]);
     }
@@ -177,12 +177,9 @@ mod add_limit_order {
             price: Price::new(100),
             quantity: Quantity::from(LOT_SIZE.get()),
         };
-        let state_before_reservation = state.clone();
-
-        let result = state.add_limit_order(user, pair, pending);
+        let result = state.validate_limit_order(user, pair, pending);
 
         assert_matches!(result, Err(AddLimitOrderError::InsufficientBalance { .. }));
-        assert_eq!(state_before_reservation, state);
     }
 }
 
@@ -549,20 +546,7 @@ mod settle_fills {
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
-        let pair = icp_ckbtc_trading_pair();
-        let quantity = quantity.into();
-        state.deposit(user, pair.quote, Price::new(price).mul_quantity(&quantity));
-        state
-            .add_limit_order(
-                user,
-                pair,
-                PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(price),
-                    quantity,
-                },
-            )
-            .unwrap()
+        place_order(state, user, Side::Buy, price, quantity)
     }
 
     fn place_sell_order_for(
@@ -571,20 +555,30 @@ mod settle_fills {
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
+        place_order(state, user, Side::Sell, price, quantity)
+    }
+
+    fn place_order(
+        state: &mut State,
+        user: Principal,
+        side: Side,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> crate::order::OrderId {
         let pair = icp_ckbtc_trading_pair();
-        let quantity = quantity.into();
-        state.deposit(user, pair.base, quantity.clone());
-        state
-            .add_limit_order(
-                user,
-                pair,
-                PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(price),
-                    quantity,
-                },
-            )
-            .unwrap()
+        let pending = PendingOrder {
+            side,
+            price: Price::new(price),
+            quantity: quantity.into(),
+        };
+        let deposit = match pending.side {
+            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
+            Side::Sell => (pair.base, pending.quantity.clone()),
+        };
+        state.deposit(user, deposit.0, deposit.1);
+        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+        state.record_limit_order(user, order_id.book_id(), order);
+        order_id
     }
 
     mod order_status {

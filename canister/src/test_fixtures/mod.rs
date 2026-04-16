@@ -1,3 +1,5 @@
+pub mod event;
+
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
     TickSize, TokenId, TokenMetadata, TradingPair,
@@ -165,6 +167,7 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+#[cfg(test)]
 pub mod arbitrary {
     use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
     use proptest::prelude::*;
@@ -211,12 +214,20 @@ pub mod arbitrary {
     }
 }
 
+#[cfg(test)]
 pub mod mocks {
     use crate::Runtime;
     use candid::Principal;
     use candid::utils::ArgumentEncoder;
     use ic_cdk::call::{CallFailed, Response};
     use mockall::mock;
+
+    pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller().return_const(caller);
+        mock.expect_time().return_const(0u64);
+        mock
+    }
 
     mock! {
         pub Runtime {}
@@ -237,6 +248,7 @@ pub mod mocks {
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
+            fn time(&self) -> u64;
         }
     }
 }

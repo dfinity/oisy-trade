@@ -1,8 +1,9 @@
 use super::*;
 use crate::balance::Balance;
-use crate::order::{LotSize, Quantity, TickSize};
-use crate::state::event::{AddTradingPairEvent, DepositEvent};
+use crate::order::{LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize};
+use crate::state::event::{AddLimitOrderEvent, AddTradingPairEvent, DepositEvent};
 use candid::Principal;
+use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
 use std::num::NonZeroU64;
 
@@ -114,6 +115,47 @@ fn should_replay_deposit() {
         state.get_balance(&user, &crate::order::TokenId::new(base)),
         Balance::new(1_000_000u64, 0u64)
     );
+}
+
+#[test]
+fn should_replay_add_limit_order() {
+    let base = Principal::from_slice(&[0x01]);
+    let quote = Principal::from_slice(&[0x02]);
+    let user = Principal::from_slice(&[0x03]);
+    let deposit_amount = 100_000_000u64;
+    let order_price = 100u64;
+    let order_quantity = 1_000_000u64;
+
+    let state = replay_events(vec![
+        init_event(Mode::GeneralAvailability),
+        add_trading_pair_event(base, quote),
+        Event {
+            timestamp: 3,
+            payload: EventType::Deposit(DepositEvent {
+                user,
+                token: crate::order::TokenId::new(quote),
+                amount: Quantity::from(deposit_amount),
+            }),
+        },
+        Event {
+            timestamp: 4,
+            payload: EventType::AddLimitOrder(AddLimitOrderEvent {
+                user,
+                order_id: OrderId::new(OrderBookId::ZERO, OrderSeq::new(0)),
+                side: Side::Buy,
+                price: Price::new(order_price),
+                quantity: Quantity::from(order_quantity),
+            }),
+        },
+    ]);
+
+    // Balance should show reserved funds (buy: price * quantity = 100_000_000)
+    let balance = state.get_balance(&user, &crate::order::TokenId::new(quote));
+    assert_eq!(balance, Balance::new(0u64, deposit_amount));
+
+    // Order should be pending
+    let order_id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    assert_eq!(state.get_order_status(order_id), OrderStatus::Pending);
 }
 
 #[test]

@@ -28,6 +28,9 @@ pub trait Runtime {
 
     /// Returns the number of instructions consumed since the beginning of the current message execution.
     fn instruction_counter(&self) -> u64;
+
+    /// Returns the current time in nanoseconds since the Unix epoch.
+    fn time(&self) -> u64;
 }
 
 #[derive(Copy, Clone)]
@@ -63,5 +66,9 @@ impl Runtime for IcRuntime {
 
     fn instruction_counter(&self) -> u64 {
         ic_cdk::api::instruction_counter()
+    }
+
+    fn time(&self) -> u64 {
+        ic_cdk::api::time()
     }
 }

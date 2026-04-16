@@ -276,6 +276,10 @@ impl Setup {
     pub async fn upgrade(&self, upgrade_arg: Option<UpgradeArg>) {
         let arg = DexArg::Upgrade(upgrade_arg);
         self.env()
+            .stop_canister(self.dex_id, Some(self.controller))
+            .await
+            .expect("failed to stop DEX");
+        self.env()
             .upgrade_canister(
                 self.dex_id,
                 dex_wasm(),
@@ -284,6 +288,10 @@ impl Setup {
             )
             .await
             .expect("failed to upgrade DEX canister");
+        self.env()
+            .start_canister(self.dex_id, Some(self.controller))
+            .await
+            .expect("failed to start DEX after upgrade");
     }
 
     pub async fn assert_that_events(&self) -> DexEventAssert {
