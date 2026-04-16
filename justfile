@@ -8,6 +8,7 @@ ci: lint build test
 # Format and lint checks
 lint:
     cargo fmt --all -- --check
+    cargo sort --workspace --check
     cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all -D warnings
     cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all -D warnings
 
