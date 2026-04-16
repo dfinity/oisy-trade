@@ -374,7 +374,10 @@ impl State {
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
-        self.balances.get_balance(user, token_id)
+        self.balances
+            .get_balance(user, token_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Set of currently active tasks to avoid parallel execution.

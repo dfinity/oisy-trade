@@ -23,12 +23,8 @@ impl TokenBalance {
     }
 
     /// Read a user's balance for a given token.
-    pub fn get_balance(&self, user: &Principal, token: &TokenId) -> Balance {
-        self.0
-            .get(token)
-            .and_then(|ub| ub.get(user))
-            .cloned()
-            .unwrap_or_default()
+    pub fn get_balance(&self, user: &Principal, token: &TokenId) -> Option<&Balance> {
+        self.0.get(token).and_then(|ub| ub.get(user))
     }
 
     /// Read a user's free balance for a given token.
@@ -41,12 +37,20 @@ impl TokenBalance {
     }
 
     /// Reserve `amount` from a user's free balance for the given token.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the token has no balance entries (i.e., no prior deposit
+    /// for any user on this token).
     pub fn reserve(
         &mut self,
         user: &Principal,
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
-        self.token_mut(token).reserve(user, amount)
+        self.0
+            .get_mut(token)
+            .expect("BUG: token balance missing")
+            .reserve(user, amount)
     }
 }
