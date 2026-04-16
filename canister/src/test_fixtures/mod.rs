@@ -325,5 +325,9 @@ pub mod mocks {
         fn instruction_counter(&self) -> u64 {
             0
         }
+
+        fn time(&self) -> u64 {
+            0
+        }
     }
 }
