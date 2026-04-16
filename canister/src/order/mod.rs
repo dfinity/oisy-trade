@@ -348,6 +348,10 @@ pub struct Quantity {
 impl Quantity {
     pub const ZERO: Self = Self { high: 0, low: 0 };
 
+    pub const fn new(high: u128, low: u128) -> Self {
+        Self { high, low }
+    }
+
     pub const fn from_u128(value: u128) -> Self {
         Self {
             high: 0,

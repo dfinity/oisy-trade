@@ -30,6 +30,117 @@ mod order_id {
     }
 }
 
+mod quantity {
+    use crate::order::{LotSize, Quantity};
+    use candid::Nat;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_small_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u64>().prop_map(Quantity::from)
+    }
+
+    proptest! {
+        #[test]
+        fn checked_add_commutative(a in arb_quantity(), b in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(b), b.checked_add(a));
+        }
+
+        #[test]
+        fn checked_add_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(Quantity::ZERO), Some(a));
+        }
+
+        #[test]
+        fn checked_add_then_sub_roundtrip(a in arb_quantity(), b in arb_quantity()) {
+            if let Some(sum) = a.checked_add(b) {
+                prop_assert_eq!(sum.checked_sub(&b), Some(a));
+                prop_assert_eq!(sum.checked_sub(&a), Some(b));
+            }
+        }
+
+        #[test]
+        fn checked_sub_self_is_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_sub_returns_none_on_underflow(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+        ) {
+            if a < b {
+                prop_assert_eq!(a.checked_sub(&b), None);
+            }
+        }
+
+        #[test]
+        fn checked_mul_u64_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(1), Some(a));
+        }
+
+        #[test]
+        fn checked_mul_u64_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(0), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_mul_u64_distributes_over_add(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+            c in 1..1000u64,
+        ) {
+            // With small quantities and c < 1000, no overflow is possible.
+            // (a + b) * c == a * c + b * c
+            let left = a.checked_add(b).and_then(|s| s.checked_mul_u64(c));
+            let right = a.checked_mul_u64(c)
+                .and_then(|ac| b.checked_mul_u64(c).and_then(|bc| ac.checked_add(bc)));
+            prop_assert_eq!(left, right);
+        }
+
+        #[test]
+        fn nat_roundtrip(a in arb_quantity()) {
+            let nat: Nat = a.into();
+            let back = Quantity::from(nat);
+            prop_assert_eq!(a, back);
+        }
+
+        #[test]
+        fn from_u64_roundtrip(v in any::<u64>()) {
+            let q = Quantity::from(v);
+            let nat: Nat = q.into();
+            prop_assert_eq!(nat, Nat::from(v));
+        }
+
+        #[test]
+        fn ordering_consistent_with_nat(a in arb_small_quantity(), b in arb_small_quantity()) {
+            let nat_a: Nat = a.into();
+            let nat_b: Nat = b.into();
+            prop_assert_eq!(a.cmp(&b), nat_a.cmp(&nat_b));
+        }
+
+        #[test]
+        fn is_multiple_of_consistent(
+            base in 1..u64::MAX,
+            lot in 1..10_000u64,
+        ) {
+            let lot_size = LotSize::new(NonZeroU64::new(lot).unwrap());
+            let q = Quantity::from(base).checked_mul_u64(lot).unwrap();
+            prop_assert!(q.is_multiple_of(lot_size));
+        }
+
+        #[test]
+        fn is_zero_iff_default(high in any::<u128>(), low in any::<u128>()) {
+            let q = Quantity::new(high, low);
+            prop_assert_eq!(q.is_zero(), high == 0 && low == 0);
+        }
+    }
+}
+
 mod order_book {
     use crate::order::{MatchOrderError, MatchResult, OrderSeq, Price, Quantity};
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, fill, order_book, sell};
