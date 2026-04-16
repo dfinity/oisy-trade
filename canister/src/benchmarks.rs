@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    LotSize, OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 
 use crate::state::State;
@@ -295,6 +295,31 @@ fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
     let pair = trading_pair();
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
     state.record_limit_order(user, order_id.book_id(), order);
+}
+
+/// Benchmark encoding and decoding a fully populated OrderBook
+/// (697 bid levels + 5000 ask levels from real Binance ICP/USDT data)
+/// using minicbor CBOR serialization.
+#[bench(raw)]
+fn bench_serialize_order_book() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+
+    let pair = trading_pair();
+    let book = state.get_order_book(&pair).unwrap().clone();
+
+    canbench_rs::bench_fn(|| {
+        let bytes = {
+            let _scope = canbench_rs::bench_scope("encode");
+            minicbor::to_vec(&book).expect("failed to encode OrderBook")
+        };
+        let decoded: OrderBook = {
+            let _scope = canbench_rs::bench_scope("decode");
+            minicbor::decode(&bytes).expect("failed to decode OrderBook")
+        };
+        assert_eq!(decoded, book);
+    })
 }
 
 mod event_storage {

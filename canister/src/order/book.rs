@@ -8,25 +8,34 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// Bids are sorted by price descending (best bid = highest price).
 /// Asks are sorted by price ascending (best ask = lowest price).
 /// Within a price level, orders are matched in FIFO order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct OrderBook {
     /// Immutable identifier assigned at registration time.
+    #[n(0)]
     id: OrderBookId,
     /// Per-book sequence counter for generating order IDs.
+    #[n(1)]
     next_seq: OrderSeq,
     /// Minimum price increment. All order prices must be a multiple of this value.
+    #[n(2)]
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
+    #[n(3)]
     lot_size: LotSize,
     /// Orders awaiting matching, processed by the timer.
+    #[n(4)]
     pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
+    #[cbor(n(5), with = "crate::cbor::reverse_price_map")]
     bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>>,
     /// Sell side, sorted by price ascending (lowest first).
+    #[n(6)]
     asks: BTreeMap<Price, VecDeque<RestingOrder>>,
     /// Index mapping order sequences to their location (side, price) for O(log n) lookup.
+    #[n(7)]
     resting_orders: BTreeMap<OrderSeq, (Side, Price)>,
     /// Sequences of orders that were fully filled since the last drain.
+    #[n(8)]
     filled_orders: BTreeSet<OrderSeq>,
 }
 

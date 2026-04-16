@@ -654,6 +654,34 @@ mod order_book {
             assert_eq!(best.price(), Price::new(110));
         }
     }
+
+    mod cbor {
+        use super::*;
+        use crate::order::OrderBook;
+
+        #[test]
+        fn should_roundtrip_empty_order_book() {
+            let book = order_book();
+            let bytes = minicbor::to_vec(&book).unwrap();
+            let decoded: OrderBook = minicbor::decode(&bytes).unwrap();
+            assert_eq!(decoded, book);
+        }
+
+        #[test]
+        fn should_roundtrip_order_book_with_resting_orders() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            book.match_order(buy(1u64, 80u64, lot)).unwrap();
+            book.match_order(buy(2u64, 100u64, 2 * lot)).unwrap();
+            book.match_order(buy(3u64, 90u64, lot)).unwrap();
+            book.match_order(sell(4u64, 120u64, lot)).unwrap();
+            book.match_order(sell(5u64, 110u64, 3 * lot)).unwrap();
+
+            let bytes = minicbor::to_vec(&book).unwrap();
+            let decoded: OrderBook = minicbor::decode(&bytes).unwrap();
+            assert_eq!(decoded, book);
+        }
+    }
 }
 
 mod process_pending_orders {
