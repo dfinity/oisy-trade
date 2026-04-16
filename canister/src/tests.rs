@@ -483,8 +483,14 @@ mod withdraw {
     fn decode_transfer_arg(runtime: &CapturingRuntime, call_index: usize) -> TransferArg {
         let calls = runtime.captured_calls();
         let call = &calls[call_index];
-        assert_eq!(call.canister_id, TOKEN_LEDGER, "call {call_index}: wrong canister");
-        assert_eq!(call.method, "icrc1_transfer", "call {call_index}: wrong method");
+        assert_eq!(
+            call.canister_id, TOKEN_LEDGER,
+            "call {call_index}: wrong canister"
+        );
+        assert_eq!(
+            call.method, "icrc1_transfer",
+            "call {call_index}: wrong method"
+        );
         let (arg,): (TransferArg,) = call.decode_args();
         arg
     }
