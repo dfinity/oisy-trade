@@ -207,8 +207,10 @@ fn to_ledger_transfer_error(e: icrc_ledger_types::icrc1::transfer::TransferError
         TransferError::TemporarilyUnavailable => {
             WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
         }
-        TransferError::BadFee { .. }
-        | TransferError::BadBurn { .. }
+        TransferError::BadFee { .. } => {
+            unreachable!("BUG: BadFee is handled by the caller before invoking this mapper")
+        }
+        TransferError::BadBurn { .. }
         | TransferError::CreatedInFuture { .. }
         | TransferError::Duplicate { .. }
         | TransferError::GenericError { .. }
