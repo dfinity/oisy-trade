@@ -1,5 +1,6 @@
 mod book;
 mod history;
+pub mod stable_book;
 #[cfg(test)]
 mod tests;
 
