@@ -15,7 +15,7 @@ pub(crate) struct WithdrawOutcome {
 
 /// Result of a single `icrc1_transfer` call, keeping `BadFee` separate so
 /// the retry logic can act on it.
-enum TransferError {
+enum Icrc1TransferError {
     BadFee { expected_fee: candid::Nat },
     Other(WithdrawError),
 }
@@ -101,7 +101,7 @@ pub(crate) async fn withdraw(
             result: Ok(response),
             ledger_fee: None,
         },
-        Err(TransferError::BadFee { expected_fee }) => {
+        Err(Icrc1TransferError::BadFee { expected_fee }) => {
             if amount <= expected_fee {
                 return WithdrawOutcome {
                     result: Err(WithdrawError::AmountTooSmall {
@@ -124,7 +124,7 @@ pub(crate) async fn withdraw(
                     result: Ok(response),
                     ledger_fee: Some(expected_fee),
                 },
-                Err(TransferError::BadFee {
+                Err(Icrc1TransferError::BadFee {
                     expected_fee: latest_fee,
                 }) => WithdrawOutcome {
                     result: Err(WithdrawError::LedgerError(
@@ -134,13 +134,13 @@ pub(crate) async fn withdraw(
                     )),
                     ledger_fee: Some(latest_fee),
                 },
-                Err(TransferError::Other(e)) => WithdrawOutcome {
+                Err(Icrc1TransferError::Other(e)) => WithdrawOutcome {
                     result: Err(e),
                     ledger_fee: Some(expected_fee),
                 },
             }
         }
-        Err(TransferError::Other(e)) => WithdrawOutcome {
+        Err(Icrc1TransferError::Other(e)) => WithdrawOutcome {
             result: Err(e),
             ledger_fee: None,
         },
@@ -153,7 +153,7 @@ async fn icrc1_transfer(
     transfer_amount: candid::Nat,
     fee: candid::Nat,
     runtime: &impl Runtime,
-) -> Result<WithdrawResponse, TransferError> {
+) -> Result<WithdrawResponse, Icrc1TransferError> {
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc1::transfer::TransferArg;
 
@@ -173,7 +173,7 @@ async fn icrc1_transfer(
         .call_unbounded_wait(token.ledger_id, "icrc1_transfer", (transfer_args,))
         .await
         .map_err(|e| {
-            TransferError::Other(WithdrawError::CallFailed {
+            Icrc1TransferError::Other(WithdrawError::CallFailed {
                 ledger: token.ledger_id,
                 method: "icrc1_transfer".to_string(),
                 reason: format!("{e}"),
@@ -182,7 +182,7 @@ async fn icrc1_transfer(
 
     let (result,): (Result<candid::Nat, icrc_ledger_types::icrc1::transfer::TransferError>,) =
         response.candid_tuple().map_err(|e| {
-            TransferError::Other(WithdrawError::CallFailed {
+            Icrc1TransferError::Other(WithdrawError::CallFailed {
                 ledger: token.ledger_id,
                 method: "icrc1_transfer".to_string(),
                 reason: e.to_string(),
@@ -192,9 +192,9 @@ async fn icrc1_transfer(
     match result {
         Ok(block_index) => Ok(WithdrawResponse { block_index }),
         Err(icrc_ledger_types::icrc1::transfer::TransferError::BadFee { expected_fee }) => {
-            Err(TransferError::BadFee { expected_fee })
+            Err(Icrc1TransferError::BadFee { expected_fee })
         }
-        Err(e) => Err(TransferError::Other(to_ledger_transfer_error(e))),
+        Err(e) => Err(Icrc1TransferError::Other(to_ledger_transfer_error(e))),
     }
 }
 
