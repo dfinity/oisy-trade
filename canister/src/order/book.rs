@@ -219,16 +219,12 @@ impl OrderBook {
             resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
+        let filled_orders = std::mem::take(&mut self.filled_orders);
         MatchingOutput {
             fills: all_fills,
             resting_orders,
+            filled_orders,
         }
-    }
-
-    /// Drain and return the set of order sequences that were fully filled
-    /// since the last call.
-    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
-        std::mem::take(&mut self.filled_orders)
     }
 
     fn insert_order(&mut self, order: Order) {
@@ -309,6 +305,7 @@ fn fill_against_queue<K: Ord>(
 pub struct MatchingOutput {
     pub fills: Vec<Fill>,
     pub resting_orders: BTreeSet<OrderSeq>,
+    pub filled_orders: BTreeSet<OrderSeq>,
 }
 
 /// The result of matching an incoming order against the book.

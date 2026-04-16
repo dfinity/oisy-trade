@@ -182,7 +182,7 @@ impl State {
             .map(|(pair, book_id)| (pair.clone(), *book_id))
             .collect();
         for (pair, book_id) in pairs {
-            let (output, filled_seqs) = {
+            let output = {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("matching");
                 let book = self
@@ -190,7 +190,7 @@ impl State {
                     .get_mut(&book_id)
                     .expect("BUG: trading pair registered but order book missing");
 
-                (book.process_pending_orders(), book.take_filled_orders())
+                book.process_pending_orders()
             };
 
             {
@@ -203,16 +203,16 @@ impl State {
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("status");
-                for seq in output.resting_orders {
-                    let order_id = OrderId::new(book_id, seq);
+                for seq in &output.resting_orders {
+                    let order_id = OrderId::new(book_id, *seq);
                     *self
                         .order_history
                         .get_status_mut(&order_id)
                         .expect("BUG: resting order not found in order_history") =
                         OrderStatus::Open;
                 }
-                for seq in filled_seqs {
-                    let order_id = OrderId::new(book_id, seq);
+                for seq in &output.filled_orders {
+                    let order_id = OrderId::new(book_id, *seq);
                     *self
                         .order_history
                         .get_status_mut(&order_id)
