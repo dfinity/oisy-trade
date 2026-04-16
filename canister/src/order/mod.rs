@@ -354,6 +354,8 @@ impl Quantity {
 
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
         #[cfg(feature = "canbench-rs")]
+        let _q = canbench_rs::bench_scope("qty");
+        #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::checked_sub");
         if self >= other {
             Some(Quantity(self.0.clone() - other.0.clone()))
@@ -389,6 +391,8 @@ impl std::ops::Add for Quantity {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
         #[cfg(feature = "canbench-rs")]
+        let _q = canbench_rs::bench_scope("qty");
+        #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::add");
         Quantity(self.0 + rhs.0)
     }
@@ -396,6 +400,8 @@ impl std::ops::Add for Quantity {
 
 impl std::ops::AddAssign for Quantity {
     fn add_assign(&mut self, rhs: Self) {
+        #[cfg(feature = "canbench-rs")]
+        let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::add_assign");
         self.0 += rhs.0;
@@ -406,6 +412,8 @@ impl std::ops::Mul for Quantity {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self {
         #[cfg(feature = "canbench-rs")]
+        let _q = canbench_rs::bench_scope("qty");
+        #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::mul");
         Quantity(self.0 * rhs.0)
     }
@@ -415,6 +423,8 @@ impl std::ops::Mul<u64> for &Quantity {
     type Output = Quantity;
 
     fn mul(self, rhs: u64) -> Self::Output {
+        #[cfg(feature = "canbench-rs")]
+        let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::mul_u64");
         Quantity(Nat(self.as_big_uint() * rhs))
