@@ -733,9 +733,9 @@ mod settle_fills {
                     };
                     let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
                     state.deposit(buyer, pair.quote, buy_reserve.clone());
-                    state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
+                    state.balances.reserve(&buyer, &pair.quote, buy_reserve).unwrap();
                     state.deposit(seller, pair.base, fill.quantity.clone());
-                    state.balance_mut(seller, pair.base).reserve(fill.quantity.clone()).unwrap();
+                    state.balances.reserve(&seller, &pair.base, fill.quantity.clone()).unwrap();
                 }
 
                 let mut state1 = state.clone();

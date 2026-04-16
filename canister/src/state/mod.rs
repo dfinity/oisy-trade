@@ -9,7 +9,7 @@ mod tests;
 
 use crate::Runtime;
 use crate::Task;
-use crate::balance::Balance;
+use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
@@ -48,7 +48,7 @@ pub struct State {
     trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
+    pub(crate) balances: TokenBalance,
     order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
@@ -66,7 +66,7 @@ impl TryFrom<InitArg> for State {
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
-            balances: BTreeMap::default(),
+            balances: TokenBalance::default(),
             order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
@@ -116,12 +116,7 @@ impl State {
             Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
             Side::Sell => (pair.base, pending.quantity.clone()),
         };
-        let free = self
-            .balances
-            .get(&user)
-            .and_then(|tokens| tokens.get(&token))
-            .map(|b| b.free().clone())
-            .unwrap_or(Quantity::ZERO);
+        let free = self.balances.get_free(&user, &token);
         if free < required {
             return Err(AddLimitOrderError::InsufficientBalance {
                 token,
@@ -153,10 +148,7 @@ impl State {
             Side::Sell => (pair.base, order.remaining_quantity().clone()),
         };
         self.balances
-            .get_mut(&user)
-            .and_then(|tokens| tokens.get_mut(&token))
-            .expect("BUG: user balance missing")
-            .reserve(required)
+            .reserve(&user, &token, required)
             .expect("BUG: insufficient balance for validated order");
 
         let order_id = OrderId::new(book_id, order.id());
@@ -251,42 +243,30 @@ impl State {
         let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
         let base_amount = fill.quantity.clone();
 
-        // Buyer: pay quote, receive base
-        self.balance_mut(buyer, pair.quote)
-            .debit_reserved(quote_amount.clone());
-        self.balance_mut(buyer, pair.base)
-            .deposit(base_amount.clone());
-
-        // Seller: pay base, receive quote
-        self.balance_mut(seller, pair.base)
-            .debit_reserved(base_amount);
-        self.balance_mut(seller, pair.quote).deposit(quote_amount);
-
-        // Unreserve buy-taker surplus (price improvement):
-        // the buyer reserved `taker_price * quantity` of quote tokens but filled at
-        // the lower or equal `maker_price`, so the difference must move back to free.
-        //
-        // Sell takers have no surplus because they reserve base quantity only,
-        // which is price-independent. They see the price improvement in the deposit
-        // of quote tokens (maker_price * quantity instead of taker_price * quantity, where
-        // in the case of sell maker_price >= taker_price).
-        if fill.taker_side == Side::Buy
-            && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
-            && !price_diff.is_zero()
+        // Quote side: buyer pays reserved, seller receives free
         {
-            let surplus = price_diff.mul_quantity(&fill.quantity);
-            self.balance_mut(taker, pair.quote).unreserve(surplus);
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("state::balance_mut");
+            let quote = self.balances.token_mut(&pair.quote);
+            quote.transfer(&buyer, &seller, quote_amount);
+            // Unreserve buy-taker surplus (price improvement)
+            if fill.taker_side == Side::Buy
+                && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
+                && !price_diff.is_zero()
+            {
+                let surplus = price_diff.mul_quantity(&fill.quantity);
+                quote.unreserve(&taker, surplus);
+            }
         }
-    }
 
-    fn balance_mut(&mut self, user: Principal, token: TokenId) -> &mut Balance {
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("state::balance_mut");
-        self.balances
-            .entry(user)
-            .or_default()
-            .entry(token)
-            .or_default()
+        // Base side: seller pays reserved, buyer receives free
+        {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("state::balance_mut");
+            self.balances
+                .token_mut(&pair.base)
+                .transfer(&seller, &buyer, base_amount);
+        }
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
@@ -379,12 +359,7 @@ impl State {
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
-        self.balances
-            .entry(user)
-            .or_default()
-            .entry(token_id)
-            .or_default()
-            .deposit(amount);
+        self.balances.deposit(user, token_id, amount);
     }
 
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
@@ -399,11 +374,7 @@ impl State {
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
-        self.balances
-            .get(user)
-            .and_then(|tokens| tokens.get(token_id))
-            .cloned()
-            .unwrap_or_default()
+        self.balances.get_balance(user, token_id)
     }
 
     /// Set of currently active tasks to avoid parallel execution.
