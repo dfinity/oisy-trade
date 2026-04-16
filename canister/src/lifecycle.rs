@@ -17,12 +17,23 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
 
+pub fn pre_upgrade() {
+    state::with_state(|s| {
+        storage::save_order_books(s.order_books());
+    });
+    canlog::log!(Priority::Info, "[pre_upgrade]: order books saved to stable memory");
+}
+
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let start = runtime.instruction_counter();
 
     let state = storage::with_event_iter(|events| audit::replay_events(events));
     state::init_state(state);
     let replayed_events = storage::total_event_count();
+
+    if let Some(order_books) = storage::load_order_books() {
+        state::with_state_mut(|s| s.set_order_books(order_books));
+    }
 
     match arg {
         Some(DexArg::Init(_)) => {

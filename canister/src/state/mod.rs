@@ -429,6 +429,14 @@ impl State {
             .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
     }
+
+    pub fn order_books(&self) -> &BTreeMap<OrderBookId, OrderBook> {
+        &self.order_books
+    }
+
+    pub fn set_order_books(&mut self, order_books: BTreeMap<OrderBookId, OrderBook>) {
+        self.order_books = order_books;
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

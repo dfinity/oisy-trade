@@ -174,6 +174,11 @@ fn init(arg: DexArg) {
     dex_canister::lifecycle::init(arg, &dex_canister::IC_RUNTIME);
 }
 
+#[ic_cdk::pre_upgrade]
+fn pre_upgrade() {
+    dex_canister::lifecycle::pre_upgrade();
+}
+
 #[ic_cdk::post_upgrade]
 fn post_upgrade(arg: Option<DexArg>) {
     dex_canister::lifecycle::post_upgrade(arg, &dex_canister::IC_RUNTIME);

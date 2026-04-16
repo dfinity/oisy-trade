@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata, TradingPair,
+    LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 
 use crate::state::State;
@@ -297,28 +297,22 @@ fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
     state.record_limit_order(user, order_id.book_id(), order);
 }
 
-/// Benchmark encoding and decoding a fully populated OrderBook
-/// (697 bid levels + 5000 ask levels from real Binance ICP/USDT data)
-/// using minicbor CBOR serialization.
+/// Benchmark the full pre_upgrade/post_upgrade pipeline for a populated
+/// OrderBook (697 bid levels + 5000 ask levels from real Binance ICP/USDT
+/// data): minicbor encode → stable memory write → stable memory read →
+/// minicbor decode.
 #[bench(raw)]
 fn bench_serialize_order_book() -> canbench_rs::BenchResult {
     let depth = load_depth();
     let mut state = new_state();
     populate_state(&mut state, &depth);
 
-    let pair = trading_pair();
-    let book = state.get_order_book(&pair).unwrap().clone();
+    let expected_books = state.order_books().clone();
 
     canbench_rs::bench_fn(|| {
-        let bytes = {
-            let _scope = canbench_rs::bench_scope("encode");
-            minicbor::to_vec(&book).expect("failed to encode OrderBook")
-        };
-        let decoded: OrderBook = {
-            let _scope = canbench_rs::bench_scope("decode");
-            minicbor::decode(&bytes).expect("failed to decode OrderBook")
-        };
-        assert_eq!(decoded, book);
+        crate::storage::save_order_books(&expected_books);
+        let decoded = crate::storage::load_order_books().expect("should have order books");
+        assert_eq!(decoded, expected_books);
     })
 }
 
