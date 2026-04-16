@@ -407,12 +407,12 @@ mod get_order_status {
 
 mod withdraw {
     use crate::order::{Quantity, TokenId};
-    use crate::test_fixtures::mocks::MockRuntime;
+    use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
     use crate::{state, withdraw};
     use candid::{Nat, Principal, encode_args};
     use dex_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
     use ic_cdk::call::Response;
-    use icrc_ledger_types::icrc1::transfer::TransferError;
+    use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
     use mockall::Sequence;
 
     const USER: Principal = Principal::from_slice(&[0x42]);
@@ -495,20 +495,32 @@ mod withdraw {
         });
     }
 
+    fn decode_transfer_arg(runtime: &CapturingRuntime, call_index: usize) -> TransferArg {
+        let calls = runtime.captured_calls();
+        let call = &calls[call_index];
+        assert_eq!(call.canister_id, TOKEN_LEDGER, "call {call_index}: wrong canister");
+        assert_eq!(call.method, "icrc1_transfer", "call {call_index}: wrong method");
+        let (arg,): (TransferArg,) = call.decode_args();
+        arg
+    }
+
     #[tokio::test]
     async fn should_return_error_when_fee_changes_between_retries() {
         let deposit = 1_000_000u64;
         init_state_with_balance(deposit);
 
         // First call: BadFee(5000). Second call: BadFee(9999).
-        let runtime = mock_runtime_returning(vec![
-            transfer_response(Err(TransferError::BadFee {
-                expected_fee: Nat::from(5_000u64),
-            })),
-            transfer_response(Err(TransferError::BadFee {
-                expected_fee: Nat::from(9_999u64),
-            })),
-        ]);
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(5_000u64),
+                }))),
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(9_999u64),
+                }))),
+            ],
+        );
 
         let result = withdraw(
             WithdrawRequest {
@@ -531,6 +543,14 @@ mod withdraw {
         assert_balance(deposit);
         // Fee cache updated from the most recent BadFee.
         assert_cached_fee(9_999);
+        // First attempt: fee = 0 (cache empty), transfer_amount = deposit.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(deposit));
+        assert_eq!(arg0.fee, Some(Nat::from(0u64)));
+        // Retry: fee = 5_000 (from first BadFee), transfer_amount = deposit - 5_000.
+        let arg1 = decode_transfer_arg(&runtime, 1);
+        assert_eq!(arg1.amount, Nat::from(deposit - 5_000));
+        assert_eq!(arg1.fee, Some(Nat::from(5_000u64)));
     }
 
     #[tokio::test]
@@ -615,32 +635,15 @@ mod withdraw {
         // capped to amount - 1. The ledger rejects with BadFee(real_fee).
         // Retry: amount (200_000) > real_fee (100), so transfer succeeds.
         let block_index = Nat::from(42u64);
-        let mut runtime = MockRuntime::new();
-        runtime.expect_msg_caller().return_const(USER);
-        let mut seq = Sequence::new();
-        // First attempt: fee capped to amount - 1, transfer_amount = 1.
-        runtime
-            .expect_call_unbounded_wait()
-            .times(1)
-            .in_sequence(&mut seq)
-            .withf(|canister_id, method, _args| {
-                canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
-            })
-            .return_once(move |_, _, _| {
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![
                 Ok(transfer_response(Err(TransferError::BadFee {
                     expected_fee: Nat::from(real_fee),
-                })))
-            });
-        // Retry: fee = real_fee (100), transfer_amount = 199_900.
-        let block_index_clone = block_index.clone();
-        runtime
-            .expect_call_unbounded_wait()
-            .times(1)
-            .in_sequence(&mut seq)
-            .withf(move |canister_id, method, _args| {
-                canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
-            })
-            .return_once(move |_, _, _| Ok(transfer_response(Ok(block_index_clone))));
+                }))),
+                Ok(transfer_response(Ok(block_index.clone()))),
+            ],
+        );
 
         let result = withdraw(
             WithdrawRequest {
@@ -659,6 +662,14 @@ mod withdraw {
         );
         assert_balance(deposit - withdraw_amount);
         assert_cached_fee(real_fee);
+        // First attempt: fee capped to amount - 1 = 199_999, transfer_amount = 1.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(1u64));
+        assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
+        // Retry: fee = real_fee (100), transfer_amount = 199_900.
+        let arg1 = decode_transfer_arg(&runtime, 1);
+        assert_eq!(arg1.amount, Nat::from(withdraw_amount - real_fee));
+        assert_eq!(arg1.fee, Some(Nat::from(real_fee)));
     }
 
     #[tokio::test]
@@ -734,9 +745,12 @@ mod withdraw {
         let withdraw_amount = 50u64;
         // First call: capped_fee = min(10_000, 49) = 49, transfer_amount = 1.
         // Ledger returns BadFee(100). amount(50) <= expected_fee(100) → AmountTooSmall.
-        let runtime = mock_runtime_returning(vec![transfer_response(Err(TransferError::BadFee {
-            expected_fee: Nat::from(real_fee),
-        }))]);
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![Ok(transfer_response(Err(TransferError::BadFee {
+                expected_fee: Nat::from(real_fee),
+            })))],
+        );
 
         let result = withdraw(
             WithdrawRequest {
@@ -757,6 +771,10 @@ mod withdraw {
         assert_balance(deposit);
         // Fee cache updated to the real fee from the BadFee response.
         assert_cached_fee(real_fee);
+        // capped_fee = min(10_000, 49) = 49, transfer_amount = 1.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(1u64));
+        assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
     }
 }
 
