@@ -365,6 +365,18 @@ pub struct Fill {
     pub quantity: Quantity,
 }
 
+impl Fill {
+    /// The amount of quote tokens exchanged (maker_price × quantity).
+    pub fn quote_amount(&self) -> Quantity {
+        self.maker_price.mul_quantity(&self.quantity)
+    }
+
+    /// The amount of base tokens exchanged (same as quantity).
+    pub fn base_amount(&self) -> &Quantity {
+        &self.quantity
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchOrderError {
     /// Price is not a positive multiple of the tick size.

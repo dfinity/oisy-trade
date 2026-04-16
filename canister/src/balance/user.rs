@@ -58,6 +58,22 @@ impl UserBalance {
             .reserve(amount)
     }
 
+    /// Withdraw `amount` from user's free balance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the user has no balance entry.
+    pub fn withdraw(
+        &mut self,
+        user: &Principal,
+        amount: Quantity,
+    ) -> Result<(), InsufficientBalanceError> {
+        self.0
+            .get_mut(user)
+            .expect("BUG: user balance missing for withdraw")
+            .withdraw(amount)
+    }
+
     /// Read a user's balance.
     pub fn get(&self, user: &Principal) -> Option<&Balance> {
         self.0.get(user)

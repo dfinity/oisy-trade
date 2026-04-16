@@ -240,8 +240,8 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
-        let base_amount = fill.quantity.clone();
+        let quote_amount = fill.quote_amount();
+        let base_amount = fill.base_amount().clone();
 
         // Quote side: buyer pays reserved, seller receives free
         {
@@ -345,17 +345,7 @@ impl State {
         token_id: TokenId,
         amount: Quantity,
     ) -> Result<(), crate::balance::InsufficientBalanceError> {
-        match self
-            .balances
-            .get_mut(&user)
-            .and_then(|tokens| tokens.get_mut(&token_id))
-        {
-            Some(balance) => balance.withdraw(amount),
-            None => Err(crate::balance::InsufficientBalanceError {
-                available: Quantity::ZERO,
-                required: amount,
-            }),
-        }
+        self.balances.withdraw(&user, &token_id, amount)
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
