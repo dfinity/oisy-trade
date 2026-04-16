@@ -308,8 +308,8 @@ mod book_comparison {
     use crate::order::stable_book::StableOrderBook;
     use crate::order::{OrderBook, OrderBookId, PendingOrder, Price, Quantity, Side};
     use canbench_rs::bench;
-    use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
     use ic_stable_structures::DefaultMemoryImpl;
+    use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
 
     const BOOK_ID: OrderBookId = OrderBookId::ZERO;
 
@@ -317,8 +317,8 @@ mod book_comparison {
         OrderBook::new(BOOK_ID, TICK_SIZE, LOT_SIZE)
     }
 
-    fn stable_book(
-    ) -> StableOrderBook<ic_stable_structures::memory_manager::VirtualMemory<DefaultMemoryImpl>> {
+    fn stable_book()
+    -> StableOrderBook<ic_stable_structures::memory_manager::VirtualMemory<DefaultMemoryImpl>> {
         let mm = MemoryManager::init(DefaultMemoryImpl::default());
         StableOrderBook::new(
             BOOK_ID,
