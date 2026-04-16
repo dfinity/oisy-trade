@@ -24,10 +24,7 @@ pub struct BidKey {
 
 impl Ord for BidKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .price
-            .cmp(&self.price)
-            .then(self.seq.cmp(&other.seq))
+        other.price.cmp(&self.price).then(self.seq.cmp(&other.seq))
     }
 }
 
@@ -74,9 +71,7 @@ pub struct AskKey {
 
 impl Ord for AskKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.price
-            .cmp(&other.price)
-            .then(self.seq.cmp(&other.seq))
+        self.price.cmp(&other.price).then(self.seq.cmp(&other.seq))
     }
 }
 
@@ -382,13 +377,9 @@ impl<M: Memory> StableOrderBook<M> {
         let side = order.side();
         let price = order.price();
         let seq = order.id();
-        let prev = self.resting_orders.insert(
-            seq.get(),
-            StorableSidePrice {
-                side,
-                price,
-            },
-        );
+        let prev = self
+            .resting_orders
+            .insert(seq.get(), StorableSidePrice { side, price });
         assert!(prev.is_none());
         let qty = StorableQuantity(order.remaining_quantity().clone());
         match side {
@@ -423,8 +414,7 @@ impl<M: Memory> StableOrderBook<M> {
                 break;
             }
             let maker_seq = OrderSeq::new(key.seq);
-            let fill_qty =
-                std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
+            let fill_qty = std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
 
             order.reduce_quantity(&fill_qty);
 
@@ -458,8 +448,7 @@ impl<M: Memory> StableOrderBook<M> {
                 break;
             }
             let maker_seq = OrderSeq::new(key.seq);
-            let fill_qty =
-                std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
+            let fill_qty = std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
 
             order.reduce_quantity(&fill_qty);
 
