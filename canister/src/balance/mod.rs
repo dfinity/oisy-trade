@@ -87,8 +87,8 @@ impl Balance {
         self.free = self
             .free
             .checked_sub(&amount)
-            .ok_or_else(|| InsufficientBalanceError {
-                available: self.free.clone(),
+            .ok_or(InsufficientBalanceError {
+                available: self.free,
                 required: amount,
             })?;
         Ok(())
@@ -102,9 +102,9 @@ impl Balance {
         self.free = self
             .free
             .checked_sub(&required)
-            .ok_or_else(|| InsufficientBalanceError {
-                available: self.free.clone(),
-                required: required.clone(),
+            .ok_or(InsufficientBalanceError {
+                available: self.free,
+                required,
             })?;
         self.reserved += required;
         Ok(())
@@ -123,8 +123,8 @@ impl From<Balance> for dex_types::Balance {
 impl From<&Balance> for dex_types::Balance {
     fn from(b: &Balance) -> Self {
         Self {
-            free: b.free.clone().into(),
-            reserved: b.reserved.clone().into(),
+            free: b.free.into(),
+            reserved: b.reserved.into(),
         }
     }
 }

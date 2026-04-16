@@ -332,24 +332,45 @@ impl From<Price> for u64 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode)]
-pub struct Quantity(#[cbor(n(0), with = "icrc_cbor::nat")] Nat);
-
-impl Default for Quantity {
-    fn default() -> Self {
-        Self::ZERO
-    }
+/// A 256-bit unsigned quantity represented as `(high, low)` pair of `u128`.
+///
+/// Stack-allocated and `Copy`. In practice `high` is almost always zero
+/// (single token amounts fit in `u128`); only intermediate products like
+/// `price × quantity` may use the high limb.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Quantity {
+    high: u128,
+    low: u128,
 }
 
 impl Quantity {
-    pub const ZERO: Self = Self(Nat(BigUint::ZERO));
+    pub const ZERO: Self = Self { high: 0, low: 0 };
+
+    pub const fn from_u128(value: u128) -> Self {
+        Self {
+            high: 0,
+            low: value,
+        }
+    }
 
     pub fn is_zero(&self) -> bool {
-        self == &Self::ZERO
+        self.high == 0 && self.low == 0
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
-        self.as_big_uint() % lot_size.get() == BigUint::ZERO
+        // For lot sizes that fit in u64, only need to check low limb
+        // (if high == 0, which is the common case).
+        let divisor = lot_size.get() as u128;
+        if self.high == 0 {
+            self.low.is_multiple_of(divisor)
+        } else {
+            // Full u256 % u64: use the identity (high * 2^128 + low) % d
+            let high_rem = self.high % divisor;
+            // 2^128 mod d
+            let shift_rem = (u128::MAX % divisor + 1) % divisor;
+            let combined = (high_rem.wrapping_mul(shift_rem) + self.low % divisor) % divisor;
+            combined == 0
+        }
     }
 
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
@@ -357,33 +378,77 @@ impl Quantity {
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::checked_sub");
-        if self >= other {
-            Some(Quantity(self.0.clone() - other.0.clone()))
-        } else {
-            None
-        }
+        let (low, borrow) = self.low.overflowing_sub(other.low);
+        let high = self.high.checked_sub(other.high + borrow as u128)?;
+        Some(Self { high, low })
     }
 
-    fn as_big_uint(&self) -> &BigUint {
-        &self.0.0
+    /// Convert to `Nat` for Candid serialization.
+    pub fn to_nat(&self) -> Nat {
+        if self.high == 0 {
+            Nat::from(self.low)
+        } else {
+            let mut bytes = [0u8; 32];
+            bytes[..16].copy_from_slice(&self.high.to_be_bytes());
+            bytes[16..].copy_from_slice(&self.low.to_be_bytes());
+            Nat(BigUint::from_bytes_be(&bytes))
+        }
+    }
+}
+
+impl Ord for Quantity {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.high.cmp(&other.high).then(self.low.cmp(&other.low))
+    }
+}
+
+impl PartialOrd for Quantity {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl From<u64> for Quantity {
     fn from(value: u64) -> Self {
-        Self(Nat::from(value))
+        Self {
+            high: 0,
+            low: value as u128,
+        }
     }
 }
 
 impl From<Nat> for Quantity {
     fn from(value: Nat) -> Self {
-        Self(value)
+        let bytes = value.0.to_bytes_be();
+        if bytes.len() <= 16 {
+            let mut buf = [0u8; 16];
+            buf[16 - bytes.len()..].copy_from_slice(&bytes);
+            Self {
+                high: 0,
+                low: u128::from_be_bytes(buf),
+            }
+        } else if bytes.len() <= 32 {
+            let mut low_buf = [0u8; 16];
+            let mut high_buf = [0u8; 16];
+            let high_len = bytes.len() - 16;
+            high_buf[16 - high_len..].copy_from_slice(&bytes[..high_len]);
+            low_buf.copy_from_slice(&bytes[high_len..]);
+            Self {
+                high: u128::from_be_bytes(high_buf),
+                low: u128::from_be_bytes(low_buf),
+            }
+        } else {
+            panic!(
+                "BUG: Nat value exceeds u256 capacity ({} bytes)",
+                bytes.len()
+            );
+        }
     }
 }
 
 impl From<Quantity> for Nat {
     fn from(quantity: Quantity) -> Self {
-        quantity.0
+        quantity.to_nat()
     }
 }
 
@@ -394,7 +459,9 @@ impl std::ops::Add for Quantity {
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::add");
-        Quantity(self.0 + rhs.0)
+        let (low, carry) = self.low.overflowing_add(rhs.low);
+        let high = self.high + rhs.high + carry as u128;
+        Self { high, low }
     }
 }
 
@@ -404,18 +471,9 @@ impl std::ops::AddAssign for Quantity {
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::add_assign");
-        self.0 += rhs.0;
-    }
-}
-
-impl std::ops::Mul for Quantity {
-    type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
-        #[cfg(feature = "canbench-rs")]
-        let _q = canbench_rs::bench_scope("qty");
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("qty::mul");
-        Quantity(self.0 * rhs.0)
+        let (low, carry) = self.low.overflowing_add(rhs.low);
+        self.high = self.high + rhs.high + carry as u128;
+        self.low = low;
     }
 }
 
@@ -427,7 +485,53 @@ impl std::ops::Mul<u64> for &Quantity {
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::mul_u64");
-        Quantity(Nat(self.as_big_uint() * rhs))
+        let rhs = rhs as u128;
+        // Split low into two 64-bit halves to avoid u128 overflow
+        let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
+        let low_hi = self.low >> 64;
+        let prod_lo = low_lo * rhs;
+        let prod_hi = low_hi * rhs;
+        let (low, carry) = prod_lo.overflowing_add(prod_hi << 64);
+        let high = self.high * rhs + (prod_hi >> 64) + carry as u128;
+        Quantity { high, low }
+    }
+}
+
+impl<C> minicbor::Encode<C> for Quantity {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.array(2)?
+            .bytes(&self.high.to_be_bytes())?
+            .bytes(&self.low.to_be_bytes())?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Quantity {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?.ok_or(minicbor::decode::Error::message(
+            "expected definite-length array for Quantity",
+        ))?;
+        if len != 2 {
+            return Err(minicbor::decode::Error::message(
+                "expected 2-element array for Quantity",
+            ));
+        }
+        let high_bytes = d.bytes()?;
+        let low_bytes = d.bytes()?;
+        let mut high_buf = [0u8; 16];
+        let mut low_buf = [0u8; 16];
+        high_buf[16 - high_bytes.len()..].copy_from_slice(high_bytes);
+        low_buf[16 - low_bytes.len()..].copy_from_slice(low_bytes);
+        let high = u128::from_be_bytes(high_buf);
+        let low = u128::from_be_bytes(low_buf);
+        Ok(Self { high, low })
     }
 }
 
@@ -517,7 +621,7 @@ impl RestingOrder {
             id: self.id,
             side,
             price,
-            remaining_quantity: self.remaining_quantity.clone(),
+            remaining_quantity: self.remaining_quantity,
         }
     }
 

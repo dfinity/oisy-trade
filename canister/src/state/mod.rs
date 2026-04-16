@@ -114,7 +114,7 @@ impl State {
 
         let (token, required) = match pending.side {
             Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
-            Side::Sell => (pair.base, pending.quantity.clone()),
+            Side::Sell => (pair.base, pending.quantity),
         };
         let free = self
             .balances
@@ -150,7 +150,7 @@ impl State {
                 pair.quote,
                 order.price().mul_quantity(order.remaining_quantity()),
             ),
-            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+            Side::Sell => (pair.base, *order.remaining_quantity()),
         };
         self.balances
             .get_mut(&user)
@@ -167,7 +167,7 @@ impl State {
                 pair: pair.clone(),
                 side: order.side(),
                 price: order.price(),
-                quantity: order.remaining_quantity().clone(),
+                quantity: *order.remaining_quantity(),
                 status: OrderStatus::Pending,
             },
         );
@@ -249,13 +249,13 @@ impl State {
         };
 
         let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
-        let base_amount = fill.quantity.clone();
+        let base_amount = fill.quantity;
 
         // Buyer: pay quote, receive base
         self.balance_mut(buyer, pair.quote)
-            .debit_reserved(quote_amount.clone());
+            .debit_reserved(quote_amount);
         self.balance_mut(buyer, pair.base)
-            .deposit(base_amount.clone());
+            .deposit(base_amount);
 
         // Seller: pay base, receive quote
         self.balance_mut(seller, pair.base)

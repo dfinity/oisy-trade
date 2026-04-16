@@ -47,7 +47,7 @@ pub fn add_limit_order(
             order_id,
             side: order.side(),
             price: order.price(),
-            quantity: order.remaining_quantity().clone(),
+            quantity: *order.remaining_quantity(),
         };
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
@@ -149,7 +149,7 @@ pub async fn withdraw(
     let amount = order::Quantity::from(request.amount.clone());
 
     // Debit the full amount from the user's free balance.
-    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
+    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
         WithdrawError::InsufficientBalance {
             available: e.available.into(),
         }
