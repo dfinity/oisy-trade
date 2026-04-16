@@ -347,6 +347,10 @@ pub struct Quantity {
 
 impl Quantity {
     pub const ZERO: Self = Self { high: 0, low: 0 };
+    pub const MAX: Self = Self {
+        high: u128::MAX,
+        low: u128::MAX,
+    };
 
     pub const fn new(high: u128, low: u128) -> Self {
         Self { high, low }
@@ -498,9 +502,15 @@ impl<C> minicbor::Encode<C> for Quantity {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+            let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+            &bytes[start..]
+        }
+        let high_bytes = self.high.to_be_bytes();
+        let low_bytes = self.low.to_be_bytes();
         e.array(2)?
-            .bytes(&self.high.to_be_bytes())?
-            .bytes(&self.low.to_be_bytes())?;
+            .bytes(strip_leading_zeros(&high_bytes))?
+            .bytes(strip_leading_zeros(&low_bytes))?;
         Ok(())
     }
 }

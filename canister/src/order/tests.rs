@@ -36,12 +36,20 @@ mod quantity {
     use proptest::prelude::*;
     use std::num::NonZeroU64;
 
-    fn arb_quantity() -> impl Strategy<Value = Quantity> {
-        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
-    }
+    // Quantity with high=0 (the common case):
+    //   array(2) [1] + bytes(0) for high [1] + bytes(≤16) for low [1+≤16] = ≤19 bytes
+    // CBOR encodes short byte strings (len 0-23) with a single-byte header.
+    const MAX_SMALL_CBOR_SIZE: usize = 19;
 
-    fn arb_small_quantity() -> impl Strategy<Value = Quantity> {
-        any::<u64>().prop_map(Quantity::from)
+    const MAX_CBOR_SIZE: usize = 35;
+
+    #[test]
+    fn should_reach_exact_max_size() {
+        let max_small_quantity = Quantity::from_u128(u128::MAX);
+        assert_eq!(encode(&max_small_quantity).len(), MAX_SMALL_CBOR_SIZE);
+
+        let max_quantity = Quantity::MAX;
+        assert_eq!(encode(&max_quantity).len(), MAX_CBOR_SIZE);
     }
 
     proptest! {
@@ -138,6 +146,49 @@ mod quantity {
             let q = Quantity::new(high, low);
             prop_assert_eq!(q.is_zero(), high == 0 && low == 0);
         }
+
+        #[test]
+        fn cbor_roundtrip(a in arb_quantity()) {
+            let mut buf = Vec::new();
+            minicbor::encode(&a, &mut buf).unwrap();
+            let decoded: Quantity = minicbor::decode(&buf).unwrap();
+            prop_assert_eq!(a, decoded);
+        }
+
+        #[test]
+        fn cbor_small_values_are_compact(high in any::<u128>(), low in any::<u128>()) {
+            let small_quantity = Quantity::from_u128( low);
+            let encoded = encode(&small_quantity);
+            prop_assert!(
+                encoded.len() <= MAX_SMALL_CBOR_SIZE,
+                "small quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_SMALL_CBOR_SIZE,
+            );
+
+            let large_quantity = Quantity::new(high, low);
+            let encoded = encode(&large_quantity);
+            prop_assert!(
+                encoded.len() <= MAX_CBOR_SIZE,
+                "large quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_CBOR_SIZE,
+            );
+        }
+    }
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_small_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u64>().prop_map(Quantity::from)
+    }
+
+    fn encode(quantity: &Quantity) -> Vec<u8> {
+        let mut buf = Vec::new();
+        minicbor::encode(quantity, &mut buf).unwrap();
+        buf
     }
 }
 
