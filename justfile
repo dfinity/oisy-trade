@@ -30,7 +30,7 @@ download-external-wasms:
 
 # Run integration tests
 integration-tests: download-external-wasms _maybe-build
-    cargo test --package dex_int_tests -- --test-threads 2 --nocapture
+    cargo test --locked --package dex_int_tests -- --test-threads 2 --nocapture
 
 _maybe-build:
     {{ if env("DEX_CANISTER_WASM_PATH", "") == "" { "just build" } else { "true" } }}

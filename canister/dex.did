@@ -237,6 +237,21 @@ type AddTradingPairEvent = record {
     quote_metadata : TokenMetadata;
 };
 
+/// Structured order identifier used in events.
+type EventOrderId = record {
+    book_id : nat64;
+    seq : nat64;
+};
+
+/// Event payload for adding a limit order.
+type AddLimitOrderEvent = record {
+    user : principal;
+    order_id : EventOrderId;
+    side : Side;
+    price : nat64;
+    quantity : nat;
+};
+
 /// Event payload for a deposit.
 type DepositEvent = record {
     user : principal;
@@ -250,6 +265,7 @@ type EventType = variant {
     Upgrade : UpgradeArg;
     AddTradingPair : AddTradingPairEvent;
     Deposit : DepositEvent;
+    AddLimitOrder : AddLimitOrderEvent;
 };
 
 /// A canister event with a timestamp.

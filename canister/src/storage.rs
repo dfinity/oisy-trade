@@ -24,19 +24,18 @@ thread_local! {
     });
 }
 
-pub fn record_event(payload: EventType) {
+pub fn record_event(timestamp: u64, payload: EventType) {
     EVENTS
-        .with(|events| {
-            events.borrow().append(&Event {
-                timestamp: ic_cdk::api::time(),
-                payload,
-            })
-        })
+        .with(|events| events.borrow().append(&Event { timestamp, payload }))
         .expect("recording an event should succeed");
 }
 
 pub fn total_event_count() -> u64 {
     EVENTS.with(|events| events.borrow().len())
+}
+
+pub fn get_event(idx: u64) -> Option<Event> {
+    EVENTS.with(|events| events.borrow().get(idx))
 }
 
 pub fn with_event_iter<F, R>(f: F) -> R

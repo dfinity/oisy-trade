@@ -642,10 +642,20 @@ async fn should_replay_events_on_upgrade() {
     use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
     use dex_types_internal::event::EventType;
 
+    /// Asserts that the values produced by each `$observe` expression are unchanged after
+    /// a single canister upgrade. Accepts one or more expressions separated by commas.
+    macro_rules! assert_preserved_after_upgrade {
+    ($setup:expr, $($observe:expr),+ $(,)?) => {{
+        let before = ($($observe.await,)+);
+        $setup.upgrade(None).await;
+        let after = ($($observe.await,)+);
+        assert_eq!(before, after);
+    }};
+}
+
     // 1) Init -> Upgrade -> no trading pairs
     let setup = Setup::new().await;
-    setup.upgrade(None).await;
-    assert_eq!(setup.dex_client().get_trading_pairs().await, vec![]);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 1);
         assert_matches!(&events[0], EventType::Init(_));
@@ -653,19 +663,19 @@ async fn should_replay_events_on_upgrade() {
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
     setup.add_trading_pair().await;
-    let pairs_before = setup.dex_client().get_trading_pairs().await;
-    assert_eq!(pairs_before.len(), 1);
-    setup.upgrade(None).await;
-    assert_eq!(setup.dex_client().get_trading_pairs().await, pairs_before);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
         assert_matches!(&events[1], EventType::AddTradingPair(e) => {
-            assert_eq!(e.base, setup.base_token_id());
-            assert_eq!(e.quote, setup.quote_token_id());
-            assert_eq!(e.tick_size, TICK_SIZE);
-            assert_eq!(e.lot_size, LOT_SIZE);
-            assert_eq!(e.base_metadata, TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 });
-            assert_eq!(e.quote_metadata, TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 });
+            assert_eq!(*e, dex_types_internal::event::AddTradingPairEvent {
+                book_id: 0,
+                base: setup.base_token_id(),
+                quote: setup.quote_token_id(),
+                tick_size: TICK_SIZE,
+                lot_size: LOT_SIZE,
+                base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
+                quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+            });
         });
     });
 
@@ -678,17 +688,45 @@ async fn should_replay_events_on_upgrade() {
         .deposit(deposit_amount)
         .execute()
         .await;
-    let balance_before = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(balance_before.free, Nat::from(deposit_amount));
-    setup.upgrade(None).await;
-    let balance_after = setup.dex_client().get_balance(setup.base_token_id()).await;
-    assert_eq!(balance_after, balance_before);
+    assert_preserved_after_upgrade!(setup, setup.dex_client().get_balance(setup.base_token_id()));
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 3);
         assert_matches!(&events[2], EventType::Deposit(e) => {
-            assert_eq!(e.user, setup.user());
-            assert_eq!(e.token, setup.base_token_id());
-            assert_eq!(e.amount, Nat::from(deposit_amount));
+            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+                user: setup.user(),
+                token: setup.base_token_id(),
+                amount: Nat::from(deposit_amount),
+            });
+        });
+    });
+
+    // 4) AddLimitOrder -> Upgrade -> order status and reserved balance preserved
+    // Reuse the base token deposit from step 3 to place a sell order.
+    let order_id = setup
+        .dex_client()
+        .add_limit_order(dex_types::LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: dex_types::Side::Sell,
+            price: 100,
+            quantity: Nat::from(deposit_amount),
+        })
+        .await
+        .unwrap();
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.dex_client().get_order_status(order_id.clone()),
+        setup.dex_client().get_balance(setup.base_token_id()),
+    );
+    setup.assert_that_events().await.satisfy(|events| {
+        assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
+        assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
+            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+                user: setup.user(),
+                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
+                side: dex_types::Side::Sell,
+                price: 100,
+                quantity: Nat::from(deposit_amount),
+            });
         });
     });
 

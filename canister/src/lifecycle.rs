@@ -4,7 +4,7 @@ use crate::{MATCHING_INTERVAL, Runtime, state, storage};
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
 
-pub fn init(arg: DexArg) {
+pub fn init(arg: DexArg, runtime: &impl Runtime) {
     let init_arg = match arg {
         DexArg::Init(init_arg) => init_arg,
         DexArg::Upgrade(_) => {
@@ -12,7 +12,7 @@ pub fn init(arg: DexArg) {
         }
     };
     state::init_state(state::State::try_from(init_arg.clone()).expect("ERROR: invalid init args"));
-    storage::record_event(EventType::Init(init_arg));
+    storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
@@ -29,7 +29,9 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
             panic!("ERROR: expected Upgrade argument");
         }
         Some(DexArg::Upgrade(Some(upgrade_arg))) => {
-            state::with_state_mut(|s| audit::process_event(s, EventType::Upgrade(upgrade_arg)));
+            state::with_state_mut(|s| {
+                audit::process_event(s, EventType::Upgrade(upgrade_arg), runtime)
+            });
         }
         Some(DexArg::Upgrade(None)) | None => {}
     }
