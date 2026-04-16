@@ -232,6 +232,8 @@ impl OrderBook {
     }
 
     fn insert_order(&mut self, order: Order) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::insert_order");
         let side = order.side();
         let price = order.price();
         assert_eq!(self.resting_orders.insert(order.id(), (side, price)), None);

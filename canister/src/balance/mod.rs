@@ -41,6 +41,8 @@ impl Balance {
     }
 
     pub fn deposit(&mut self, amount: Quantity) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("bal::deposit");
         self.free += amount;
     }
 
@@ -49,6 +51,8 @@ impl Balance {
     /// # Panics
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn debit_reserved(&mut self, amount: Quantity) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("bal::debit_reserved");
         self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
             panic!(
                 "BUG: debit_reserved underflow: reserved={:?}, amount={:?}",
@@ -62,6 +66,8 @@ impl Balance {
     /// # Panics
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn unreserve(&mut self, amount: Quantity) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("bal::unreserve");
         self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
             panic!(
                 "BUG: unreserve underflow: reserved={:?}, amount={:?}",
@@ -83,6 +89,8 @@ impl Balance {
     }
 
     pub fn reserve(&mut self, required: Quantity) -> Result<(), InsufficientBalanceError> {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("bal::reserve");
         self.free = self
             .free
             .checked_sub(&required)

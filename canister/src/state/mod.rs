@@ -224,16 +224,24 @@ impl State {
     }
 
     pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
-        let taker = self
-            .order_history
-            .get(&OrderId::new(book_id, fill.taker_order_seq))
-            .expect("BUG: taker not found in order_history")
-            .owner;
-        let maker = self
-            .order_history
-            .get(&OrderId::new(book_id, fill.maker_order_seq))
-            .expect("BUG: maker not found in order_history")
-            .owner;
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("state::settle_fill");
+        let taker = {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("state::order_history_get");
+            self.order_history
+                .get(&OrderId::new(book_id, fill.taker_order_seq))
+                .expect("BUG: taker not found in order_history")
+                .owner
+        };
+        let maker = {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("state::order_history_get");
+            self.order_history
+                .get(&OrderId::new(book_id, fill.maker_order_seq))
+                .expect("BUG: maker not found in order_history")
+                .owner
+        };
 
         let (buyer, seller) = match fill.taker_side {
             Side::Buy => (taker, maker),
@@ -272,6 +280,8 @@ impl State {
     }
 
     fn balance_mut(&mut self, user: Principal, token: TokenId) -> &mut Balance {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("state::balance_mut");
         self.balances
             .entry(user)
             .or_default()
