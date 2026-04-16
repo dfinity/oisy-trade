@@ -1,6 +1,7 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -106,7 +107,10 @@ pub async fn deposit(
 ) -> Result<DepositResponse, DepositError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let token_id = request.token_id.clone();
-    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
+    let internal_token = order::TokenId::from(token_id.clone());
+    if !state::with_state(|s| s.is_known_token(&internal_token)) {
+        return Err(DepositError::UnsupportedToken { token_id });
+    }
     let amount = order::Quantity::from(request.amount.clone());
     let caller = runtime.msg_caller();
 
@@ -121,6 +125,56 @@ pub async fn deposit(
     });
 
     Ok(deposit_response)
+}
+
+pub async fn withdraw(
+    request: WithdrawRequest,
+    runtime: &impl Runtime,
+) -> Result<WithdrawResponse, WithdrawError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let token_id = request.token_id.clone();
+    let internal_token = order::TokenId::from(token_id.clone());
+    if !state::with_state(|s| s.is_known_token(&internal_token)) {
+        return Err(WithdrawError::UnsupportedToken { token_id });
+    }
+    let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
+
+    if request.amount == 0u64 {
+        return Err(WithdrawError::AmountTooSmall {
+            min_amount: cached_fee + 1u64,
+        });
+    }
+
+    let caller = runtime.msg_caller();
+    let amount = order::Quantity::from(request.amount.clone());
+
+    // Debit the full amount from the user's free balance.
+    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
+        WithdrawError::InsufficientBalance {
+            available: e.available.into(),
+        }
+    })?;
+
+    // Perform the ledger transfer (with automatic BadFee retry).
+    let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
+
+    // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
+    if let Some(fee) = outcome.ledger_fee {
+        state::with_state_mut(|s| {
+            s.set_cached_ledger_fee(order::TokenId::from(token_id.clone()), fee);
+        });
+    }
+
+    match outcome.result {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            // Credit back on failure so the user doesn't lose funds.
+            state::with_state_mut(|s| {
+                s.deposit(caller, order::TokenId::from(token_id), amount);
+            });
+            Err(e)
+        }
+    }
 }
 
 pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {

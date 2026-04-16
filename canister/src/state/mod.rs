@@ -14,7 +14,7 @@ use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use candid::Principal;
+use candid::{Nat, Principal};
 use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
@@ -51,6 +51,9 @@ pub struct State {
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
     order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
+    /// Cached ledger transfer fees, learned from `BadFee` responses.
+    /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
+    ledger_fee_cache: BTreeMap<TokenId, Nat>,
 }
 
 impl TryFrom<InitArg> for State {
@@ -66,6 +69,7 @@ impl TryFrom<InitArg> for State {
             balances: BTreeMap::default(),
             order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
+            ledger_fee_cache: BTreeMap::default(),
         })
     }
 }
@@ -305,7 +309,7 @@ impl State {
         self.next_book_id.increment();
     }
 
-    fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
+    pub fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
         self.tokens
             .entry(token_id)
             .and_modify(|existing| assert_eq!(existing, &metadata))
@@ -337,8 +341,31 @@ impl State {
         self.order_books.get(id)
     }
 
+    pub fn is_known_token(&self, token_id: &TokenId) -> bool {
+        self.tokens.contains_key(token_id)
+    }
+
     pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
         self.tokens.get(token_id)
+    }
+
+    pub fn withdraw(
+        &mut self,
+        user: Principal,
+        token_id: TokenId,
+        amount: Quantity,
+    ) -> Result<(), crate::balance::InsufficientBalanceError> {
+        match self
+            .balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token_id))
+        {
+            Some(balance) => balance.withdraw(amount),
+            None => Err(crate::balance::InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: amount,
+            }),
+        }
     }
 
     pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
@@ -348,6 +375,17 @@ impl State {
             .entry(token_id)
             .or_default()
             .deposit(amount);
+    }
+
+    pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
+        self.ledger_fee_cache
+            .get(token_id)
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn set_cached_ledger_fee(&mut self, token_id: TokenId, fee: Nat) {
+        self.ledger_fee_cache.insert(token_id, fee);
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {

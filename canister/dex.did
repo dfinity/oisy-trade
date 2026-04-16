@@ -102,6 +102,8 @@ type LedgerTransferFromError = variant {
 
 /// Error returned by the deposit endpoint.
 type DepositError = variant {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken : record { token_id : TokenId };
     /// The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
     /// The icrc2_transfer_from call to the token ledger returned an error.
@@ -123,6 +125,45 @@ type DepositResponse = record {
 };
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
+
+/// Request to withdraw tokens from the DEX.
+type WithdrawRequest = record {
+    /// The token to withdraw.
+    token_id : TokenId;
+    /// The amount to withdraw from the caller's free balance.
+    /// The ledger transfer fee is deducted from this amount,
+    /// so the caller receives amount minus fee on the ledger.
+    amount : nat;
+};
+
+/// Response after a successful withdrawal.
+type WithdrawResponse = record {
+    /// The block index of the transfer on the token ledger.
+    block_index : nat;
+};
+
+/// Errors that can be returned by icrc1_transfer.
+type LedgerTransferError = variant {
+    InsufficientFunds : record { balance : nat };
+    TemporarilyUnavailable;
+    InternalError : text;
+};
+
+/// Error returned by the withdraw endpoint.
+type WithdrawError = variant {
+    /// The token is not part of any trading pair on the DEX.
+    UnsupportedToken : record { token_id : TokenId };
+    /// The caller does not have enough free balance.
+    InsufficientBalance : record { available : nat };
+    /// The requested amount is too small to cover the ledger transfer fee.
+    AmountTooSmall : record { min_amount : nat };
+    /// The inter-canister call to the token ledger failed.
+    CallFailed : record { ledger : principal; method : text; reason : text };
+    /// The icrc1_transfer call to the token ledger returned an error.
+    LedgerError : LedgerTransferError;
+};
+
+type WithdrawResult = variant { Ok : WithdrawResponse; Err : WithdrawError };
 
 /// A user's balance for a given token.
 type Balance = record {
@@ -262,6 +303,11 @@ service : (DexArg) -> {
     /// approved the DEX canister to spend the specified amount on their behalf by
     /// calling icrc2_approve on the token ledger.
     deposit : (DepositRequest) -> (DepositResult);
+
+    /// Withdraw tokens from the DEX. Debits the caller's free balance and
+    /// transfers (amount - ledger fee) to the caller via icrc1_transfer on the
+    /// token ledger. Amounts locked in open orders cannot be withdrawn.
+    withdraw : (WithdrawRequest) -> (WithdrawResult);
 
     /// Query the caller's balance for a given token.
     get_balance : (TokenId) -> (Balance) query;

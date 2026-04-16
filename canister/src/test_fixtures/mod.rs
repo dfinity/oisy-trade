@@ -251,4 +251,83 @@ pub mod mocks {
             fn time(&self) -> u64;
         }
     }
+
+    /// A test runtime that captures `call_unbounded_wait` arguments as
+    /// candid-encoded bytes so tests can decode and assert on them.
+    pub struct CapturingRuntime {
+        caller: Principal,
+        responses: std::sync::Mutex<std::collections::VecDeque<Result<Response, CallFailed>>>,
+        captured_calls: std::sync::Mutex<Vec<CapturedCall>>,
+    }
+
+    pub struct CapturedCall {
+        pub canister_id: Principal,
+        pub method: String,
+        args: Vec<u8>,
+    }
+
+    impl CapturedCall {
+        pub fn decode_args<'a, T: candid::utils::ArgumentDecoder<'a>>(&'a self) -> T {
+            candid::decode_args(&self.args).expect("failed to decode captured call args")
+        }
+    }
+
+    impl CapturingRuntime {
+        pub fn new(caller: Principal, responses: Vec<Result<Response, CallFailed>>) -> Self {
+            Self {
+                caller,
+                responses: std::sync::Mutex::new(responses.into()),
+                captured_calls: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        pub fn captured_calls(&self) -> std::sync::MutexGuard<'_, Vec<CapturedCall>> {
+            self.captured_calls.lock().unwrap()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Runtime for CapturingRuntime {
+        async fn call_unbounded_wait<A>(
+            &self,
+            canister_id: Principal,
+            method: &str,
+            args: A,
+        ) -> Result<Response, CallFailed>
+        where
+            A: ArgumentEncoder + Send,
+        {
+            let encoded = candid::encode_args(args).expect("failed to encode args");
+            self.captured_calls.lock().unwrap().push(CapturedCall {
+                canister_id,
+                method: method.to_string(),
+                args: encoded,
+            });
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("no more pre-configured responses")
+        }
+
+        fn msg_caller(&self) -> Principal {
+            self.caller
+        }
+
+        fn canister_self(&self) -> Principal {
+            Principal::anonymous()
+        }
+
+        fn is_controller(&self, _principal: &Principal) -> bool {
+            false
+        }
+
+        fn instruction_counter(&self) -> u64 {
+            0
+        }
+
+        fn time(&self) -> u64 {
+            0
+        }
+    }
 }

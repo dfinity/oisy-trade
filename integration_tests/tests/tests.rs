@@ -1,10 +1,12 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
+use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, Token, TokenId, TokenMetadata, TradingPairInfo,
+    LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
+    TradingPairInfo, WithdrawError, WithdrawRequest,
 };
 use dex_types_internal::log::Priority;
 use icrc_ledger_types::icrc1::account::Account;
@@ -331,7 +333,7 @@ async fn should_have_different_ledger_configs() {
 
 #[tokio::test]
 async fn should_deposit_and_track_balances() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user1 = Principal::from_slice(&[0x01]);
     let user2 = Principal::from_slice(&[0x02]);
@@ -442,7 +444,7 @@ struct DepositFailureCase {
 }
 
 async fn test_deposit_failure(case: DepositFailureCase) {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user = Principal::from_slice(&[0x03]);
     let cksol = TokenId {
@@ -507,8 +509,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
 }
 
 #[tokio::test]
-async fn should_fail_deposit_when_ledger_is_dex_canister() {
-    // TODO(DEFI-2741): Remove or modify this test once we have a proper check for supported tokens.
+async fn should_fail_deposit_with_unsupported_token() {
     let setup = Setup::new().await;
 
     let user = Principal::from_slice(&[0x05]);
@@ -519,14 +520,16 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
     let result = setup
         .dex_client_with_caller(user)
         .deposit(DepositRequest {
-            token_id: fake_token,
+            token_id: fake_token.clone(),
             amount: Nat::from(1_000_000u64),
         })
         .await;
 
-    assert_matches!(
+    assert_eq!(
         result,
-        Err(DepositError::CallFailed { reason, .. }) if reason.contains("Canister has no update method 'icrc2_transfer_from'")
+        Err(DepositError::UnsupportedToken {
+            token_id: fake_token,
+        })
     );
 
     setup.drop().await;
@@ -534,7 +537,7 @@ async fn should_fail_deposit_when_ledger_is_dex_canister() {
 
 #[tokio::test]
 async fn should_fail_deposit_when_ledger_is_stopped() {
-    let setup = Setup::new().await;
+    let setup = Setup::new().await.with_trading_pair().await;
 
     let user = Principal::from_slice(&[0x06]);
     let controller = setup.controller();
@@ -726,6 +729,261 @@ async fn should_replay_events_on_upgrade() {
             });
         });
     });
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_withdraw_and_receive_tokens_on_ledger() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x01]);
+    let client = setup.dex_client_with_caller(user);
+    let cksol = TokenId {
+        ledger_id: setup.base_ledger_id(),
+    };
+    let fee = Nat::from(BASE_LEDGER_FEE);
+
+    // Deposit tokens first
+    let deposit_amount = 10_000_000u64;
+    setup
+        .deposit_flow(user, cksol.clone())
+        .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+        .approve(deposit_amount + BASE_LEDGER_FEE)
+        .deposit(deposit_amount)
+        .execute()
+        .await;
+    assert_eq!(
+        client.get_balance(cksol.clone()).await,
+        expected_balance(deposit_amount)
+    );
+
+    // Withdraw half
+    let withdraw_amount = 5_000_000u64;
+    let result = client
+        .withdraw(WithdrawRequest {
+            token_id: cksol.clone(),
+            amount: Nat::from(withdraw_amount),
+        })
+        .await;
+    assert!(result.is_ok(), "withdrawal should succeed: {result:?}");
+
+    // DEX balance decreased by the full withdraw amount
+    assert_eq!(
+        client.get_balance(cksol.clone()).await,
+        expected_balance(deposit_amount - withdraw_amount)
+    );
+
+    // User received (withdraw_amount - fee) on the ledger
+    let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
+    assert_eq!(ledger_balance, Nat::from(withdraw_amount) - fee);
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_fail_withdraw_on_negative_cases() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let cksol = setup.base_token_id();
+    let fee = Nat::from(BASE_LEDGER_FEE);
+
+    // --- Unsupported token: token not part of any trading pair ---
+    {
+        let unknown_token = TokenId {
+            ledger_id: Principal::from_slice(&[0xFF]),
+        };
+        let result = setup
+            .dex_client_with_caller(Principal::from_slice(&[0x0F]))
+            .withdraw(WithdrawRequest {
+                token_id: unknown_token.clone(),
+                amount: Nat::from(1_000_000u64),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::UnsupportedToken {
+                token_id: unknown_token,
+            })
+        );
+    }
+
+    // --- Zero balance: withdraw should fail with InsufficientBalance ---
+    {
+        let user = Principal::from_slice(&[0x10]);
+        let client = setup.dex_client_with_caller(user);
+
+        // Withdraw an amount larger than the fee so the AmountTooSmall check passes,
+        // and the balance check is reached.
+        let result = client
+            .withdraw(WithdrawRequest {
+                token_id: cksol.clone(),
+                amount: Nat::from(1_000_000u64),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::InsufficientBalance {
+                available: Nat::from(0u64),
+            })
+        );
+    }
+
+    // --- Insufficient balance: withdraw more than deposited ---
+    {
+        let user = Principal::from_slice(&[0x11]);
+        let client = setup.dex_client_with_caller(user);
+
+        let deposit_amount = 1_000_000u64;
+        setup
+            .deposit_flow(user, cksol.clone())
+            .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+            .approve(deposit_amount + BASE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        let result = client
+            .withdraw(WithdrawRequest {
+                token_id: cksol.clone(),
+                amount: Nat::from(2_000_000u64),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::InsufficientBalance {
+                available: Nat::from(deposit_amount),
+            })
+        );
+
+        assert_eq!(
+            client.get_balance(cksol.clone()).await,
+            expected_balance(deposit_amount)
+        );
+    }
+
+    // --- Amount too small: withdraw exactly the fee ---
+    {
+        let user = Principal::from_slice(&[0x12]);
+        let client = setup.dex_client_with_caller(user);
+
+        let deposit_amount = fee.clone();
+        setup
+            .deposit_flow(user, cksol.clone())
+            .mint(deposit_amount.clone() + 2 * BASE_LEDGER_FEE)
+            .approve(deposit_amount.clone() + BASE_LEDGER_FEE)
+            .deposit(deposit_amount.clone())
+            .execute()
+            .await;
+
+        let result = client
+            .withdraw(WithdrawRequest {
+                token_id: cksol.clone(),
+                amount: fee.clone(),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::AmountTooSmall {
+                min_amount: fee.clone() + 1u64,
+            })
+        );
+    }
+
+    // --- Reserved balance: all funds locked in an open order ---
+    {
+        let user = Principal::from_slice(&[0x13]);
+        let client = setup.dex_client_with_caller(user);
+
+        let deposit_amount = 1_000_000u64;
+        setup
+            .deposit_flow(user, cksol.clone())
+            .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+            .approve(deposit_amount + BASE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: 100,
+                quantity: Nat::from(deposit_amount),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            client.get_balance(cksol.clone()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: deposit_amount.into(),
+            }
+        );
+
+        let result = client
+            .withdraw(WithdrawRequest {
+                token_id: cksol.clone(),
+                amount: Nat::from(deposit_amount),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::InsufficientBalance {
+                available: Nat::from(0u64),
+            })
+        );
+
+        assert_eq!(
+            client.get_balance(cksol.clone()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: deposit_amount.into(),
+            }
+        );
+    }
+
+    // --- Ledger stopped (must be last since it alters global state) ---
+    {
+        let user = Principal::from_slice(&[0x14]);
+
+        let deposit_amount = 1_000_000u64;
+        setup
+            .deposit_flow(user, cksol.clone())
+            .mint(deposit_amount + 2 * BASE_LEDGER_FEE)
+            .approve(deposit_amount + BASE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        setup
+            .env()
+            .stop_canister(setup.base_ledger_id(), Some(setup.controller()))
+            .await
+            .expect("Failed to stop canister");
+
+        let result = setup
+            .dex_client_with_caller(user)
+            .withdraw(WithdrawRequest {
+                token_id: cksol.clone(),
+                amount: Nat::from(500_000u64),
+            })
+            .await;
+
+        assert_matches!(
+            result,
+            Err(WithdrawError::CallFailed { reason, .. }) if reason.contains("is stopped")
+        );
+
+        assert_eq!(
+            setup.dex_client_with_caller(user).get_balance(cksol).await,
+            expected_balance(deposit_amount)
+        );
+    }
 
     setup.drop().await;
 }

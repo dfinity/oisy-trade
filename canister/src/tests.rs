@@ -390,6 +390,385 @@ mod get_order_status {
     }
 }
 
+mod withdraw {
+    use crate::order::{Quantity, TokenId};
+    use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
+    use crate::{state, withdraw};
+    use candid::{Nat, Principal, encode_args};
+    use dex_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
+    use ic_cdk::call::Response;
+    use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+    use mockall::Sequence;
+
+    const USER: Principal = Principal::from_slice(&[0x42]);
+    const TOKEN_LEDGER: Principal = Principal::from_slice(&[0xAA]);
+
+    fn token_id() -> dex_types::TokenId {
+        dex_types::TokenId {
+            ledger_id: TOKEN_LEDGER,
+        }
+    }
+
+    fn init_state_with_balance(amount: u64) {
+        state::init_state(
+            state::State::try_from(dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            })
+            .unwrap(),
+        );
+        state::with_state_mut(|s| {
+            s.record_token(
+                TokenId::from(token_id()),
+                crate::order::TokenMetadata {
+                    symbol: "TEST".to_string(),
+                    decimals: 8,
+                },
+            );
+            s.deposit(USER, TokenId::from(token_id()), Quantity::from(amount));
+        });
+    }
+
+    /// Construct a [`Response`] from Candid-encoded bytes.
+    ///
+    /// `Response` has a private field, but is a newtype over `Vec<u8>` with
+    /// identical layout. This is test-only code; the transmute is sound because
+    /// the struct contains a single `Vec<u8>` field.
+    fn mock_response(bytes: Vec<u8>) -> Response {
+        assert_eq!(
+            std::mem::size_of::<Response>(),
+            std::mem::size_of::<Vec<u8>>(),
+            "Response layout changed — update this helper"
+        );
+        unsafe { std::mem::transmute::<Vec<u8>, Response>(bytes) }
+    }
+
+    fn transfer_response(result: Result<Nat, TransferError>) -> Response {
+        mock_response(encode_args((result,)).unwrap())
+    }
+
+    fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let mut seq = Sequence::new();
+        for response in responses {
+            runtime
+                .expect_call_unbounded_wait()
+                .times(1)
+                .in_sequence(&mut seq)
+                .withf(|canister_id, method, _args| {
+                    canister_id == &TOKEN_LEDGER && method == "icrc1_transfer"
+                })
+                .return_once(|_, _, _| Ok(response));
+        }
+        runtime
+    }
+
+    fn assert_balance(expected_free: u64) {
+        state::with_state(|s| {
+            let balance = s.get_balance(&USER, &TokenId::from(token_id()));
+            assert_eq!(balance.free(), &Quantity::from(expected_free));
+        });
+    }
+
+    fn assert_cached_fee(expected: u64) {
+        state::with_state(|s| {
+            assert_eq!(
+                s.get_cached_ledger_fee(&TokenId::from(token_id())),
+                Nat::from(expected)
+            );
+        });
+    }
+
+    fn decode_transfer_arg(runtime: &CapturingRuntime, call_index: usize) -> TransferArg {
+        let calls = runtime.captured_calls();
+        let call = &calls[call_index];
+        assert_eq!(
+            call.canister_id, TOKEN_LEDGER,
+            "call {call_index}: wrong canister"
+        );
+        assert_eq!(
+            call.method, "icrc1_transfer",
+            "call {call_index}: wrong method"
+        );
+        let (arg,): (TransferArg,) = call.decode_args();
+        arg
+    }
+
+    #[tokio::test]
+    async fn should_return_error_when_fee_changes_between_retries() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        // First call: BadFee(5000). Second call: BadFee(9999).
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(5_000u64),
+                }))),
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(9_999u64),
+                }))),
+            ],
+        );
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::LedgerError(
+                LedgerTransferError::InternalError(
+                    "ledger fee changed between retries".to_string()
+                )
+            ))
+        );
+        // Balance credited back.
+        assert_balance(deposit);
+        // Fee cache updated from the most recent BadFee.
+        assert_cached_fee(9_999);
+        // First attempt: fee = 0 (cache empty), transfer_amount = deposit.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(deposit));
+        assert_eq!(arg0.fee, Some(Nat::from(0u64)));
+        // Retry: fee = 5_000 (from first BadFee), transfer_amount = deposit - 5_000.
+        let arg1 = decode_transfer_arg(&runtime, 1);
+        assert_eq!(arg1.amount, Nat::from(deposit - 5_000));
+        assert_eq!(arg1.fee, Some(Nat::from(5_000u64)));
+    }
+
+    #[tokio::test]
+    async fn should_return_ledger_error_when_retry_fails() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        // First call: BadFee(5000). Retry: TemporarilyUnavailable.
+        let runtime = mock_runtime_returning(vec![
+            transfer_response(Err(TransferError::BadFee {
+                expected_fee: Nat::from(5_000u64),
+            })),
+            transfer_response(Err(TransferError::TemporarilyUnavailable)),
+        ]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::LedgerError(
+                LedgerTransferError::TemporarilyUnavailable
+            ))
+        );
+        assert_balance(deposit);
+        assert_cached_fee(5_000);
+    }
+
+    #[tokio::test]
+    async fn should_return_insufficient_funds_error() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        // The ledger says the DEX canister doesn't hold enough tokens.
+        let runtime = mock_runtime_returning(vec![transfer_response(Err(
+            TransferError::InsufficientFunds {
+                balance: Nat::from(0u64),
+            },
+        ))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::LedgerError(
+                LedgerTransferError::InsufficientFunds {
+                    balance: Nat::from(0u64)
+                }
+            ))
+        );
+        assert_balance(deposit);
+    }
+
+    #[tokio::test]
+    async fn should_succeed_when_cached_fee_is_stale_high() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        // Simulate a previously cached fee that is higher than the current ledger fee.
+        let stale_fee = 500_000u64;
+        let real_fee = 100u64;
+        state::with_state_mut(|s| {
+            s.set_cached_ledger_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+        });
+
+        // Withdraw an amount between the real fee and the stale cached fee.
+        let withdraw_amount = 200_000u64;
+        // First call: cached fee (500_000) > amount (200_000), so the fee is
+        // capped to amount - 1. The ledger rejects with BadFee(real_fee).
+        // Retry: amount (200_000) > real_fee (100), so transfer succeeds.
+        let block_index = Nat::from(42u64);
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![
+                Ok(transfer_response(Err(TransferError::BadFee {
+                    expected_fee: Nat::from(real_fee),
+                }))),
+                Ok(transfer_response(Ok(block_index.clone()))),
+            ],
+        );
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(withdraw_amount),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Ok(dex_types::WithdrawResponse {
+                block_index: block_index.clone()
+            })
+        );
+        assert_balance(deposit - withdraw_amount);
+        assert_cached_fee(real_fee);
+        // First attempt: fee capped to amount - 1 = 199_999, transfer_amount = 1.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(1u64));
+        assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
+        // Retry: fee = real_fee (100), transfer_amount = 199_900.
+        let arg1 = decode_transfer_arg(&runtime, 1);
+        assert_eq!(arg1.amount, Nat::from(withdraw_amount - real_fee));
+        assert_eq!(arg1.fee, Some(Nat::from(real_fee)));
+    }
+
+    #[tokio::test]
+    async fn should_reject_unsupported_token() {
+        // Init state without registering any token.
+        state::init_state(
+            state::State::try_from(dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            })
+            .unwrap(),
+        );
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(1_000_000u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::UnsupportedToken {
+                token_id: token_id(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_reject_zero_amount() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No call_unbounded_wait expectations — the ledger should never be called.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(0u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::AmountTooSmall {
+                min_amount: Nat::from(1u64),
+            })
+        );
+        // Balance untouched — no debit happened.
+        assert_balance(deposit);
+    }
+
+    #[tokio::test]
+    async fn should_reject_when_amount_below_real_fee_and_cached_fee_is_stale_high() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let stale_fee = 10_000u64;
+        let real_fee = 100u64;
+        state::with_state_mut(|s| {
+            s.set_cached_ledger_fee(TokenId::from(token_id()), Nat::from(stale_fee));
+        });
+
+        // Withdraw an amount below the real fee.
+        let withdraw_amount = 50u64;
+        // First call: capped_fee = min(10_000, 49) = 49, transfer_amount = 1.
+        // Ledger returns BadFee(100). amount(50) <= expected_fee(100) → AmountTooSmall.
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![Ok(transfer_response(Err(TransferError::BadFee {
+                expected_fee: Nat::from(real_fee),
+            })))],
+        );
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(withdraw_amount),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::AmountTooSmall {
+                min_amount: Nat::from(real_fee + 1),
+            })
+        );
+        // Balance credited back.
+        assert_balance(deposit);
+        // Fee cache updated to the real fee from the BadFee response.
+        assert_cached_fee(real_fee);
+        // capped_fee = min(10_000, 49) = 49, transfer_amount = 1.
+        let arg0 = decode_transfer_arg(&runtime, 0);
+        assert_eq!(arg0.amount, Nat::from(1u64));
+        assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
+    }
+}
+
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::state::init_state;
