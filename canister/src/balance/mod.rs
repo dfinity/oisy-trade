@@ -1,3 +1,6 @@
+pub mod stable;
+#[cfg(test)]
+mod stable_tests;
 mod token;
 mod user;
 

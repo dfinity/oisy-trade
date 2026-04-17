@@ -474,6 +474,115 @@ mod book_comparison {
     }
 }
 
+/// Heap vs stable memory balance comparison benchmarks.
+mod balance_comparison {
+    use crate::balance::TokenBalance;
+    use crate::balance::stable::StableTokenBalance;
+    use crate::order::{Quantity, TokenId};
+    use canbench_rs::bench;
+    use candid::Principal;
+    use ic_stable_structures::DefaultMemoryImpl;
+    use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
+
+    fn token_base() -> TokenId {
+        TokenId::new(Principal::from_slice(&[1]))
+    }
+
+    fn token_quote() -> TokenId {
+        TokenId::new(Principal::from_slice(&[2]))
+    }
+
+    fn user(id: u64) -> Principal {
+        Principal::from_slice(&id.to_be_bytes())
+    }
+
+    const NUM_USERS: u64 = 1_000;
+
+    /// Benchmark depositing and reserving for 1000 users on heap balances.
+    #[bench(raw)]
+    fn bench_heap_balance_1000_deposits() -> canbench_rs::BenchResult {
+        let mut balances = TokenBalance::default();
+        let base = token_base();
+        let quote = token_quote();
+
+        canbench_rs::bench_fn(|| {
+            for i in 0..NUM_USERS {
+                let u = user(i);
+                balances.deposit(u, base, Quantity::from_u128(u128::MAX));
+                balances.deposit(u, quote, Quantity::from_u128(u128::MAX));
+                balances.reserve(&u, &base, Quantity::from(1_000_000u64)).unwrap();
+                balances.reserve(&u, &quote, Quantity::from(1_000_000u64)).unwrap();
+            }
+        })
+    }
+
+    /// Benchmark depositing and reserving for 1000 users on stable balances.
+    #[bench(raw)]
+    fn bench_stable_balance_1000_deposits() -> canbench_rs::BenchResult {
+        let mm = MemoryManager::init(DefaultMemoryImpl::default());
+        let mut balances = StableTokenBalance::new(mm.get(MemoryId::new(0)));
+        let base = token_base();
+        let quote = token_quote();
+
+        canbench_rs::bench_fn(|| {
+            for i in 0..NUM_USERS {
+                let u = user(i);
+                balances.deposit(u, base, Quantity::from_u128(u128::MAX));
+                balances.deposit(u, quote, Quantity::from_u128(u128::MAX));
+                balances.reserve(&u, &base, Quantity::from(1_000_000u64)).unwrap();
+                balances.reserve(&u, &quote, Quantity::from(1_000_000u64)).unwrap();
+            }
+        })
+    }
+
+    /// Benchmark 1000 transfers on heap balances (simulating settle_fill).
+    #[bench(raw)]
+    fn bench_heap_balance_1000_transfers() -> canbench_rs::BenchResult {
+        let mut balances = TokenBalance::default();
+        let base = token_base();
+
+        // Setup: deposit and reserve for all users
+        for i in 0..NUM_USERS {
+            let u = user(i);
+            balances.deposit(u, base, Quantity::from_u128(u128::MAX));
+            balances.reserve(&u, &base, Quantity::from(1_000_000_000u64)).unwrap();
+        }
+
+        canbench_rs::bench_fn(|| {
+            for i in 0..NUM_USERS {
+                let debitor = user(i);
+                let creditor = user((i + 1) % NUM_USERS);
+                balances
+                    .token_mut(&base)
+                    .transfer(&debitor, &creditor, Quantity::from(1_000u64));
+            }
+        })
+    }
+
+    /// Benchmark 1000 transfers on stable balances (simulating settle_fill).
+    #[bench(raw)]
+    fn bench_stable_balance_1000_transfers() -> canbench_rs::BenchResult {
+        let mm = MemoryManager::init(DefaultMemoryImpl::default());
+        let mut balances = StableTokenBalance::new(mm.get(MemoryId::new(0)));
+        let base = token_base();
+
+        // Setup: deposit and reserve for all users
+        for i in 0..NUM_USERS {
+            let u = user(i);
+            balances.deposit(u, base, Quantity::from_u128(u128::MAX));
+            balances.reserve(&u, &base, Quantity::from(1_000_000_000u64)).unwrap();
+        }
+
+        canbench_rs::bench_fn(|| {
+            for i in 0..NUM_USERS {
+                let debitor = user(i);
+                let creditor = user((i + 1) % NUM_USERS);
+                balances.transfer(&base, &debitor, &creditor, Quantity::from(1_000u64));
+            }
+        })
+    }
+}
+
 mod event_storage {
     use crate::storage;
     use crate::test_fixtures::event::WorstCaseEvent;
