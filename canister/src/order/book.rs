@@ -300,11 +300,15 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
-/// Output of a matching round: fills produced and orders that began resting.
+/// Output of [`OrderBook::process_pending_orders`]: the fills produced,
+/// orders that began resting in the book, and orders that were fully filled.
 #[derive(Debug)]
 pub struct MatchingOutput {
+    /// Fills executed during this matching round, in execution order.
     pub fills: Vec<Fill>,
+    /// Orders that were not fully filled and are now resting in the book.
     pub resting_orders: BTreeSet<OrderSeq>,
+    /// Orders that were fully filled and removed from the book.
     pub filled_orders: BTreeSet<OrderSeq>,
 }
 
