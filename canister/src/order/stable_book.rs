@@ -339,14 +339,12 @@ impl<M: Memory> StableOrderBook<M> {
             resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
+        let filled_orders = std::mem::take(&mut self.filled_orders);
         MatchingOutput {
             fills: all_fills,
             resting_orders,
+            filled_orders,
         }
-    }
-
-    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
-        std::mem::take(&mut self.filled_orders)
     }
 
     pub fn pending_orders_len(&self) -> usize {
