@@ -22,7 +22,10 @@ pub fn pre_upgrade() {
         storage::save_order_books(s.order_books());
         storage::save_balances(s.balances());
     });
-    canlog::log!(Priority::Info, "[pre_upgrade]: state saved to stable memory");
+    canlog::log!(
+        Priority::Info,
+        "[pre_upgrade]: state saved to stable memory"
+    );
 }
 
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {

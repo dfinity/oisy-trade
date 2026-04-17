@@ -33,7 +33,7 @@ impl TokenBalance {
         self.0
             .get(token)
             .and_then(|ub| ub.get(user))
-            .map(|b| b.free().clone())
+            .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO)
     }
 

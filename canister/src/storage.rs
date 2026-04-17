@@ -67,7 +67,7 @@ fn with_memory<R>(id: MemoryId, f: impl FnOnce(VMem) -> R) -> R {
 fn write_bytes(id: MemoryId, bytes: &[u8]) {
     with_memory(id, |mem| {
         let total = 8 + bytes.len() as u64;
-        let needed_pages = (total + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
+        let needed_pages = total.div_ceil(WASM_PAGE_SIZE);
         let current_pages = mem.size();
         if needed_pages > current_pages {
             mem.grow(needed_pages - current_pages);
