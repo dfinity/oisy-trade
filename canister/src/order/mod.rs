@@ -463,6 +463,9 @@ impl TryFrom<Nat> for Quantity {
     type Error = QuantityOverflowError;
 
     fn try_from(value: Nat) -> Result<Self, Self::Error> {
+        if value.0.bits() > 256 {
+            return Err(QuantityOverflowError);
+        }
         Self::from_be_bytes(&value.0.to_bytes_be()).ok_or(QuantityOverflowError)
     }
 }
