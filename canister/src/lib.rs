@@ -127,6 +127,16 @@ pub async fn deposit(
         .map_err(|_| DepositError::AmountExceedsMaximum)?;
     let caller = runtime.msg_caller();
 
+    let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
+    if existing
+        .free()
+        .checked_add(*existing.reserved())
+        .and_then(|held| held.checked_add(amount))
+        .is_none()
+    {
+        return Err(DepositError::AmountExceedsMaximum);
+    }
+
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
         user: caller,
