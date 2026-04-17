@@ -48,6 +48,34 @@ mod balance {
     }
 
     #[test]
+    fn should_withdraw_from_free_balance() {
+        let mut balance = Balance::zero();
+        balance.deposit(Quantity::from(100));
+
+        balance.withdraw(Quantity::from(40)).unwrap();
+
+        assert_eq!(balance, Balance::new(60u64, 0u64));
+    }
+
+    #[test]
+    fn should_fail_to_withdraw_more_than_free() {
+        let mut balance = Balance::new(50u64, 30u64);
+        let balance_before = balance.clone();
+
+        assert_eq!(
+            balance.withdraw(Quantity::from(60)).unwrap_err(),
+            InsufficientBalanceError {
+                available: Quantity::from(50),
+                required: Quantity::from(60),
+            }
+        );
+        assert_eq!(
+            balance_before, balance,
+            "Balance should not have changed when withdraw failed"
+        );
+    }
+
+    #[test]
     fn should_unreserve() {
         let mut balance = Balance::new(10u64, 90u64);
 
