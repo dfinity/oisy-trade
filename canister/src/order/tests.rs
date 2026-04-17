@@ -504,6 +504,20 @@ mod process_pending_orders {
         assert!(!output.filled_orders.contains(&OrderSeq::ONE)); // taker not fully filled
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ONE])); // taker rests
     }
+
+    #[test]
+    fn should_drain_filled_orders_between_rounds() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.add_pending_order(sell(0, 100, lot));
+        book.add_pending_order(buy(1, 100, lot));
+
+        let first = book.process_pending_orders();
+        assert!(!first.filled_orders.is_empty());
+
+        let second = book.process_pending_orders();
+        assert!(second.filled_orders.is_empty());
+    }
 }
 
 mod history {

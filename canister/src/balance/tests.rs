@@ -185,6 +185,17 @@ mod user_balance {
     }
 
     #[test]
+    fn should_transfer_self_trade() {
+        let mut ub = UserBalance::default();
+        ub.deposit(alice(), Quantity::from(100u64));
+        ub.reserve(&alice(), Quantity::from(60u64)).unwrap();
+
+        ub.transfer(&alice(), &alice(), Quantity::from(60u64));
+
+        assert_eq!(ub.get(&alice()), Some(&Balance::new(100u64, 0u64)));
+    }
+
+    #[test]
     fn should_unreserve() {
         let mut ub = UserBalance::default();
         ub.deposit(alice(), Quantity::from(100u64));
@@ -218,7 +229,7 @@ mod user_balance {
 }
 
 mod token_balance {
-    use crate::balance::{Balance, TokenBalance};
+    use crate::balance::{Balance, InsufficientBalanceError, TokenBalance};
     use crate::order::{Quantity, TokenId};
     use candid::Principal;
 
@@ -270,6 +281,41 @@ mod token_balance {
 
         assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(100u64));
         assert_eq!(tb.get_free(&alice(), &token_b()), Quantity::from(200u64));
+    }
+
+    #[test]
+    fn should_withdraw_from_deposited() {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(100u64));
+
+        tb.withdraw(&alice(), &token_a(), Quantity::from(40u64))
+            .unwrap();
+
+        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(60u64));
+    }
+
+    #[test]
+    fn should_fail_to_withdraw_from_missing_token() {
+        let mut tb = TokenBalance::default();
+
+        let err = tb
+            .withdraw(&alice(), &token_a(), Quantity::from(10u64))
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: Quantity::from(10u64),
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: token balance missing")]
+    fn should_panic_reserve_missing_token() {
+        let mut tb = TokenBalance::default();
+        let _ = tb.reserve(&alice(), &token_a(), Quantity::from(10u64));
     }
 
     #[test]
