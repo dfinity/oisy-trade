@@ -246,7 +246,7 @@ impl State {
         // Quote side: buyer pays reserved, seller receives free
         {
             #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::balance_mut");
+            let _p = canbench_rs::bench_scope("state::balance_update");
             let quote = self.balances.token_mut(&pair.quote);
             quote.transfer(&buyer, &seller, quote_amount);
             // Unreserve buy-taker surplus (price improvement)
@@ -262,7 +262,7 @@ impl State {
         // Base side: seller pays reserved, buyer receives free
         {
             #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::balance_mut");
+            let _p = canbench_rs::bench_scope("state::balance_update");
             self.balances
                 .token_mut(&pair.base)
                 .transfer(&seller, &buyer, base_amount);
