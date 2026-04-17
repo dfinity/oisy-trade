@@ -48,7 +48,7 @@ pub struct State {
     trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    pub(crate) balances: TokenBalance,
+    balances: TokenBalance,
     order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
