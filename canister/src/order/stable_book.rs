@@ -106,18 +106,28 @@ impl Storable for AskKey {
     };
 }
 
-/// A [`Quantity`] stored in stable memory as a fixed-size 32-byte big-endian
-/// representation of its `(high, low)` u128 pair.
+/// A [`Quantity`] stored in stable memory with leading-zero stripping.
+///
+/// Small values (≤ u64) use only 1–8 bytes instead of the full 32.
+/// `Quantity::from_be_bytes` already handles variable-length input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorableQuantity(pub Quantity);
 
+/// Strip leading zero bytes from a big-endian byte slice.
+fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let first_nonzero = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    &bytes[first_nonzero..]
+}
+
 impl Storable for StorableQuantity {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(self.0.to_be_bytes().to_vec())
+        let full = self.0.to_be_bytes();
+        Cow::Owned(strip_leading_zeros(&full).to_vec())
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        self.0.to_be_bytes().to_vec()
+        let full = self.0.to_be_bytes();
+        strip_leading_zeros(&full).to_vec()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -126,7 +136,7 @@ impl Storable for StorableQuantity {
 
     const BOUND: Bound = Bound::Bounded {
         max_size: 32,
-        is_fixed_size: true,
+        is_fixed_size: false,
     };
 }
 

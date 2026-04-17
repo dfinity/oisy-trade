@@ -79,8 +79,12 @@ impl Storable for BalanceKey {
     };
 }
 
-/// A [`Balance`] stored in stable memory as two 32-byte big-endian quantities.
-/// Layout: `[free: 32][reserved: 32]` = 64 bytes fixed.
+/// A [`Balance`] stored in stable memory with leading-zero stripping.
+///
+/// Layout: `[free_len: 1][free: 0-32][reserved: 0-32]`.
+/// `free_len` encodes the byte length of `free`; the remaining bytes are
+/// `reserved`. Max size is 65 bytes, but typical u64 amounts shrink this
+/// to ~17 bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorableBalance {
     pub free: Quantity,
@@ -100,30 +104,41 @@ impl StorableBalance {
     }
 }
 
+/// Strip leading zero bytes from a big-endian byte slice.
+fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let first_nonzero = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    &bytes[first_nonzero..]
+}
+
 impl Storable for StorableBalance {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; 64];
-        buf[..32].copy_from_slice(&self.free.to_be_bytes());
-        buf[32..].copy_from_slice(&self.reserved.to_be_bytes());
-        Cow::Owned(buf.to_vec())
+        let free_full = self.free.to_be_bytes();
+        let free_compact = strip_leading_zeros(&free_full);
+        let reserved_full = self.reserved.to_be_bytes();
+        let reserved_compact = strip_leading_zeros(&reserved_full);
+
+        let mut buf = Vec::with_capacity(1 + free_compact.len() + reserved_compact.len());
+        buf.push(free_compact.len() as u8);
+        buf.extend_from_slice(free_compact);
+        buf.extend_from_slice(reserved_compact);
+        Cow::Owned(buf)
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        let mut buf = [0u8; 64];
-        buf[..32].copy_from_slice(&self.free.to_be_bytes());
-        buf[32..].copy_from_slice(&self.reserved.to_be_bytes());
-        buf.to_vec()
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let free = Quantity::from_be_bytes(&bytes[..32]).expect("invalid free Quantity");
-        let reserved = Quantity::from_be_bytes(&bytes[32..]).expect("invalid reserved Quantity");
+        let free_len = bytes[0] as usize;
+        let free = Quantity::from_be_bytes(&bytes[1..1 + free_len]).expect("invalid free Quantity");
+        let reserved =
+            Quantity::from_be_bytes(&bytes[1 + free_len..]).expect("invalid reserved Quantity");
         Self { free, reserved }
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: 64,
-        is_fixed_size: true,
+        max_size: 65, // 1 + 32 + 32
+        is_fixed_size: false,
     };
 }
 
