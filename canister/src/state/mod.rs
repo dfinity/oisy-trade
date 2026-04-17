@@ -120,7 +120,7 @@ impl State {
             .balances
             .get(&user)
             .and_then(|tokens| tokens.get(&token))
-            .map(|b| b.free().clone())
+            .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
         if free < required {
             return Err(AddLimitOrderError::InsufficientBalance {
@@ -254,8 +254,7 @@ impl State {
         // Buyer: pay quote, receive base
         self.balance_mut(buyer, pair.quote)
             .debit_reserved(quote_amount);
-        self.balance_mut(buyer, pair.base)
-            .deposit(base_amount);
+        self.balance_mut(buyer, pair.base).deposit(base_amount);
 
         // Seller: pay base, receive quote
         self.balance_mut(seller, pair.base)
