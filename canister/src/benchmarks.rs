@@ -316,6 +316,50 @@ fn bench_serialize_order_book() -> canbench_rs::BenchResult {
     })
 }
 
+/// Benchmark serialize/deserialize for an OrderBook with 1000 resting
+/// orders (500 bids at 2.000, 500 asks at 3.000) and zero fills.
+#[bench(raw)]
+fn bench_serialize_order_book_1000_no_fills() -> canbench_rs::BenchResult {
+    let mut state = new_state();
+    let num_orders = 1_000u64;
+
+    for i in 0..num_orders / 2 {
+        let principal = user(i);
+        fund_user(&mut state, principal);
+        place_order(
+            &mut state,
+            principal,
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(200_000_000),
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
+    }
+    for i in 0..num_orders / 2 {
+        let principal = user(500 + i);
+        fund_user(&mut state, principal);
+        place_order(
+            &mut state,
+            principal,
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(300_000_000),
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
+    }
+    state.process_pending_orders();
+
+    let expected_books = state.order_books().clone();
+
+    canbench_rs::bench_fn(|| {
+        crate::storage::save_order_books(&expected_books);
+        let decoded = crate::storage::load_order_books().expect("should have order books");
+        assert_eq!(decoded, expected_books);
+    })
+}
+
 mod event_storage {
     use crate::storage;
     use crate::test_fixtures::event::WorstCaseEvent;
