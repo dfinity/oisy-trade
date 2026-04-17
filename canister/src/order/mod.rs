@@ -393,15 +393,35 @@ impl Quantity {
         Some(Self { high, low })
     }
 
+    /// Serialize as a 32-byte big-endian representation.
+    pub fn to_be_bytes(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(&self.high.to_be_bytes());
+        bytes[16..].copy_from_slice(&self.low.to_be_bytes());
+        bytes
+    }
+
+    /// Deserialize from a big-endian byte slice (up to 32 bytes).
+    ///
+    /// Returns `None` if the slice is longer than 32 bytes.
+    pub fn from_be_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > 32 {
+            return None;
+        }
+        let mut buf = [0u8; 32];
+        buf[32 - bytes.len()..].copy_from_slice(bytes);
+        Some(Self {
+            high: u128::from_be_bytes(buf[..16].try_into().unwrap()),
+            low: u128::from_be_bytes(buf[16..].try_into().unwrap()),
+        })
+    }
+
     /// Convert to `Nat` for Candid serialization.
     pub fn to_nat(&self) -> Nat {
         if self.high == 0 {
             Nat::from(self.low)
         } else {
-            let mut bytes = [0u8; 32];
-            bytes[..16].copy_from_slice(&self.high.to_be_bytes());
-            bytes[16..].copy_from_slice(&self.low.to_be_bytes());
-            Nat(BigUint::from_bytes_be(&bytes))
+            Nat(BigUint::from_bytes_be(&self.to_be_bytes()))
         }
     }
 }
@@ -441,27 +461,7 @@ impl TryFrom<Nat> for Quantity {
     type Error = QuantityOverflowError;
 
     fn try_from(value: Nat) -> Result<Self, Self::Error> {
-        let bytes = value.0.to_bytes_be();
-        if bytes.len() <= 16 {
-            let mut buf = [0u8; 16];
-            buf[16 - bytes.len()..].copy_from_slice(&bytes);
-            Ok(Self {
-                high: 0,
-                low: u128::from_be_bytes(buf),
-            })
-        } else if bytes.len() <= 32 {
-            let mut low_buf = [0u8; 16];
-            let mut high_buf = [0u8; 16];
-            let high_len = bytes.len() - 16;
-            high_buf[16 - high_len..].copy_from_slice(&bytes[..high_len]);
-            low_buf.copy_from_slice(&bytes[high_len..]);
-            Ok(Self {
-                high: u128::from_be_bytes(high_buf),
-                low: u128::from_be_bytes(low_buf),
-            })
-        } else {
-            Err(QuantityOverflowError)
-        }
+        Self::from_be_bytes(&value.0.to_bytes_be()).ok_or(QuantityOverflowError)
     }
 }
 
@@ -517,9 +517,7 @@ impl<C> minicbor::Encode<C> for Quantity {
         if self.high == 0 && self.low <= u64::MAX as u128 {
             e.u64(self.low as u64)?;
         } else {
-            let mut buf = [0u8; 32];
-            buf[..16].copy_from_slice(&self.high.to_be_bytes());
-            buf[16..].copy_from_slice(&self.low.to_be_bytes());
+            let buf = self.to_be_bytes();
             let start = buf.iter().position(|&b| b != 0).unwrap_or(buf.len());
             e.tag(minicbor::data::Tag::PosBignum)?
                 .bytes(&buf[start..])?;
@@ -548,16 +546,8 @@ impl<'b, C> minicbor::Decode<'b, C> for Quantity {
             ));
         }
         let bytes = d.bytes()?;
-        if bytes.len() > 32 {
-            return Err(minicbor::decode::Error::message(
-                "Quantity exceeds 256 bits",
-            ));
-        }
-        let mut buf = [0u8; 32];
-        buf[32 - bytes.len()..].copy_from_slice(bytes);
-        let high = u128::from_be_bytes(buf[..16].try_into().unwrap());
-        let low = u128::from_be_bytes(buf[16..].try_into().unwrap());
-        Ok(Self { high, low })
+        Self::from_be_bytes(bytes)
+            .ok_or_else(|| minicbor::decode::Error::message("Quantity exceeds 256 bits"))
     }
 }
 
