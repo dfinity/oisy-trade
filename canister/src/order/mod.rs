@@ -427,31 +427,40 @@ impl From<u64> for Quantity {
     }
 }
 
-impl From<Nat> for Quantity {
-    fn from(value: Nat) -> Self {
+/// Error returned when a `Nat` value exceeds the 256-bit capacity of `Quantity`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuantityOverflowError;
+
+impl std::fmt::Display for QuantityOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "value exceeds u256 capacity")
+    }
+}
+
+impl TryFrom<Nat> for Quantity {
+    type Error = QuantityOverflowError;
+
+    fn try_from(value: Nat) -> Result<Self, Self::Error> {
         let bytes = value.0.to_bytes_be();
         if bytes.len() <= 16 {
             let mut buf = [0u8; 16];
             buf[16 - bytes.len()..].copy_from_slice(&bytes);
-            Self {
+            Ok(Self {
                 high: 0,
                 low: u128::from_be_bytes(buf),
-            }
+            })
         } else if bytes.len() <= 32 {
             let mut low_buf = [0u8; 16];
             let mut high_buf = [0u8; 16];
             let high_len = bytes.len() - 16;
             high_buf[16 - high_len..].copy_from_slice(&bytes[..high_len]);
             low_buf.copy_from_slice(&bytes[high_len..]);
-            Self {
+            Ok(Self {
                 high: u128::from_be_bytes(high_buf),
                 low: u128::from_be_bytes(low_buf),
-            }
+            })
         } else {
-            panic!(
-                "BUG: Nat value exceeds u256 capacity ({} bytes)",
-                bytes.len()
-            );
+            Err(QuantityOverflowError)
         }
     }
 }
@@ -559,13 +568,15 @@ pub struct PendingOrder {
     pub quantity: Quantity,
 }
 
-impl From<dex_types::LimitOrderRequest> for PendingOrder {
-    fn from(request: dex_types::LimitOrderRequest) -> Self {
-        Self {
+impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
+    type Error = QuantityOverflowError;
+
+    fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
             side: Side::from(request.side),
             price: Price::from(request.price),
-            quantity: Quantity::from(request.quantity),
-        }
+            quantity: Quantity::try_from(request.quantity)?,
+        })
     }
 }
 

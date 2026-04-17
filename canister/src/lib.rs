@@ -38,7 +38,8 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder::from(request);
+    let pending = order::PendingOrder::try_from(request)
+        .map_err(|_| AddLimitOrderError::AmountExceedsMaximum)?;
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
@@ -111,7 +112,8 @@ pub async fn deposit(
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
         return Err(DepositError::UnsupportedToken { token_id });
     }
-    let amount = order::Quantity::from(request.amount.clone());
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| DepositError::AmountExceedsMaximum)?;
     let caller = runtime.msg_caller();
 
     let deposit_response = ledger::deposit(request, runtime).await?;
@@ -146,7 +148,8 @@ pub async fn withdraw(
     }
 
     let caller = runtime.msg_caller();
-    let amount = order::Quantity::from(request.amount.clone());
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| WithdrawError::AmountExceedsMaximum)?;
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {

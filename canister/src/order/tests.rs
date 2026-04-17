@@ -116,8 +116,15 @@ mod quantity {
         #[test]
         fn nat_roundtrip(a in arb_quantity()) {
             let nat: Nat = a.into();
-            let back = Quantity::from(nat);
+            let back = Quantity::try_from(nat).unwrap();
             prop_assert_eq!(a, back);
+        }
+
+        #[test]
+        fn nat_exceeding_u256_max_fails(offset in 1..u64::MAX) {
+            let max_nat: Nat = Quantity::MAX.into();
+            let too_large = max_nat + Nat::from(offset);
+            prop_assert!(Quantity::try_from(too_large).is_err());
         }
 
         #[test]

@@ -131,5 +131,5 @@ fn max_quantity() -> Quantity {
     // EVM-based chains use theoretically u256,
     // but note that for example ETH has a supply of 120 million,
     // which comfortably fits in a u128 (18 decimals).
-    Quantity::from(candid::Nat::from(u128::MAX))
+    Quantity::try_from(candid::Nat::from(u128::MAX)).unwrap()
 }
