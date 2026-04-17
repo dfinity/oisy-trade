@@ -55,6 +55,21 @@ mod quantity {
         assert_eq!(encode(&max_u256).len(), MAX_U256_CBOR_SIZE);
     }
 
+    #[test]
+    fn should_checked_sub_with_carry() {
+        // 2^128
+        let a = Quantity::new(1, 0);
+        // 1
+        let b = Quantity::new(0, 1);
+        assert_eq!(a.checked_sub(&b), Some(Quantity::new(0, u128::MAX)));
+
+        assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+
+        // 2^128 + 1
+        let c = Quantity::new(1, 1);
+        assert_eq!(a.checked_sub(&c), None);
+    }
+
     proptest! {
         #[test]
         fn checked_add_commutative(a in arb_quantity(), b in arb_quantity()) {

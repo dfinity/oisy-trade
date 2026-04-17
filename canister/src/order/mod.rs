@@ -495,17 +495,22 @@ impl Quantity {
         let _q = canbench_rs::bench_scope("qty");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::mul_u64");
+        // We want (high * 2^128 + low) * rhs, checked for overflow.
+        // low * rhs can overflow u128, so split low into two 64-bit halves
+        // and multiply each by rhs (u64 × u64 → u128, no overflow).
         let rhs = rhs as u128;
         let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
         let low_hi = self.low >> 64;
         let prod_lo = low_lo * rhs;
         let prod_hi = low_hi * rhs;
+        // Reassemble the low limb: prod_hi is shifted left by 64 bits.
         let (low, carry) = prod_lo.overflowing_add(prod_hi << 64);
+        // Build the high limb: high * rhs + overflow from low multiplication.
         let high = self
             .high
             .checked_mul(rhs)?
-            .checked_add(prod_hi >> 64)?
-            .checked_add(carry as u128)?;
+            .checked_add(prod_hi >> 64)? // upper bits of prod_hi that spilled past bit 128
+            .checked_add(carry as u128)?; // carry from the low addition
         Some(Self { high, low })
     }
 }
