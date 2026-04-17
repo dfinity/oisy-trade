@@ -183,6 +183,71 @@ mod add_limit_order {
     }
 }
 
+mod validate_overflow_invariant {
+    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+    use crate::state::AddLimitOrderError;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
+    use candid::Principal;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    proptest! {
+        // `record_limit_order` and `settle_fill` rely on `price * quantity`
+        // not overflowing once a Buy order has passed `validate_limit_order`.
+        // This biconditional pins that guarantee: validation rejects with
+        // `AmountExceedsMaximum` exactly when the multiplication would overflow.
+        #[test]
+        fn validate_buy_rejects_iff_price_times_quantity_overflows(
+            price_raw in 1u64..=u64::MAX,
+            quantity in arb_quantity(),
+        ) {
+            // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
+            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
+            let tick = TickSize::new(NonZeroU64::new(1).unwrap());
+            let lot = LotSize::new(NonZeroU64::new(1).unwrap());
+
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair.clone(),
+                icp_metadata(),
+                ckbtc_metadata(),
+                tick,
+                lot,
+            );
+
+            let price = Price::new(price_raw);
+            let fits = price.checked_mul_quantity(&quantity).is_some();
+
+            let result = state.validate_limit_order(
+                Principal::from_slice(&[0x01]),
+                pair,
+                PendingOrder {
+                    side: Side::Buy,
+                    price,
+                    quantity,
+                },
+            );
+
+            let rejected_for_overflow =
+                matches!(result, Err(AddLimitOrderError::AmountExceedsMaximum));
+            prop_assert_eq!(
+                rejected_for_overflow,
+                !fits,
+                "result was {:?}, fits={}",
+                result,
+                fits
+            );
+        }
+    }
+}
+
 mod settle_fills {
     use crate::balance::Balance;
     use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
