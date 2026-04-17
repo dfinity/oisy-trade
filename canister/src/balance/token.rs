@@ -43,8 +43,8 @@ impl TokenBalance {
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
-        match self.0.get_mut(token).and_then(|ub| ub.get(user)) {
-            Some(_) => self.0.get_mut(token).unwrap().withdraw(user, amount),
+        match self.0.get_mut(token) {
+            Some(ub) => ub.withdraw(user, amount),
             None => Err(InsufficientBalanceError {
                 available: Quantity::ZERO,
                 required: amount,
