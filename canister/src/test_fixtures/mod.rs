@@ -162,7 +162,7 @@ pub fn fund_user(user: Principal) {
     state::with_state_mut(|s| {
         let pair = icp_ckbtc_trading_pair();
         let amount = Quantity::from(u64::MAX);
-        s.deposit(user, pair.base, amount.clone());
+        s.deposit(user, pair.base, amount);
         s.deposit(user, pair.quote, amount);
     });
 }

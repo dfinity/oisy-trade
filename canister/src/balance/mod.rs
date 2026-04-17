@@ -42,7 +42,10 @@ impl Balance {
 
     pub fn deposit(&mut self, amount: Quantity) {
         bench_scopes!("bal", "bal::deposit");
-        self.free += amount;
+        self.free = self
+            .free
+            .checked_add(amount)
+            .expect("BUG: deposit overflow");
     }
 
     /// Debit `amount` from the reserved balance.
@@ -71,15 +74,18 @@ impl Balance {
                 self.reserved, amount
             )
         });
-        self.free += amount;
+        self.free = self
+            .free
+            .checked_add(amount)
+            .expect("BUG: unreserve overflow");
     }
 
     pub fn withdraw(&mut self, amount: Quantity) -> Result<(), InsufficientBalanceError> {
         self.free = self
             .free
             .checked_sub(&amount)
-            .ok_or_else(|| InsufficientBalanceError {
-                available: self.free.clone(),
+            .ok_or(InsufficientBalanceError {
+                available: self.free,
                 required: amount,
             })?;
         Ok(())
@@ -90,11 +96,14 @@ impl Balance {
         self.free = self
             .free
             .checked_sub(&required)
-            .ok_or_else(|| InsufficientBalanceError {
-                available: self.free.clone(),
-                required: required.clone(),
+            .ok_or(InsufficientBalanceError {
+                available: self.free,
+                required,
             })?;
-        self.reserved += required;
+        self.reserved = self
+            .reserved
+            .checked_add(required)
+            .expect("BUG: reserve overflow");
         Ok(())
     }
 }
@@ -111,8 +120,8 @@ impl From<Balance> for dex_types::Balance {
 impl From<&Balance> for dex_types::Balance {
     fn from(b: &Balance) -> Self {
         Self {
-            free: b.free.clone().into(),
-            reserved: b.reserved.clone().into(),
+            free: b.free.into(),
+            reserved: b.reserved.into(),
         }
     }
 }

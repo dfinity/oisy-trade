@@ -2,10 +2,8 @@ use super::{
     Fill, LotSize, MatchOrderError, MatchResult, MatchingOutput, Order, OrderBookId, OrderSeq,
     PendingOrder, Price, Quantity, Side, TickSize,
 };
-use candid::Nat;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
-use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, VecDeque};
@@ -108,29 +106,27 @@ impl Storable for AskKey {
     };
 }
 
-/// A [`Quantity`] stored in stable memory. Serialized as the little-endian
-/// byte representation of its inner `BigUint`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A [`Quantity`] stored in stable memory as a fixed-size 32-byte big-endian
+/// representation of its `(high, low)` u128 pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorableQuantity(pub Quantity);
 
 impl Storable for StorableQuantity {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let nat: Nat = self.0.clone().into();
-        Cow::Owned(nat.0.to_bytes_le())
+        Cow::Owned(self.0.to_be_bytes().to_vec())
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        let nat: Nat = self.0.into();
-        nat.0.to_bytes_le()
+        self.0.to_be_bytes().to_vec()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        StorableQuantity(Quantity::from(Nat(BigUint::from_bytes_le(&bytes))))
+        StorableQuantity(Quantity::from_be_bytes(&bytes).expect("invalid Quantity bytes"))
     }
 
     const BOUND: Bound = Bound::Bounded {
         max_size: 32,
-        is_fixed_size: false,
+        is_fixed_size: true,
     };
 }
 

@@ -113,14 +113,20 @@ impl State {
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
         let (token, required) = match pending.side {
-            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
-            Side::Sell => (pair.base, pending.quantity.clone()),
+            Side::Buy => (
+                pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity(&pending.quantity)
+                    .ok_or(AddLimitOrderError::AmountExceedsMaximum)?,
+            ),
+            Side::Sell => (pair.base, pending.quantity),
         };
         let free = self
             .balances
             .get(&user)
             .and_then(|tokens| tokens.get(&token))
-            .map(|b| b.free().clone())
+            .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
         if free < required {
             return Err(AddLimitOrderError::InsufficientBalance {
@@ -148,9 +154,12 @@ impl State {
         let (token, required) = match order.side() {
             Side::Buy => (
                 pair.quote,
-                order.price().mul_quantity(order.remaining_quantity()),
+                order
+                    .price()
+                    .checked_mul_quantity(order.remaining_quantity())
+                    .expect("BUG: price * quantity overflow"),
             ),
-            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+            Side::Sell => (pair.base, *order.remaining_quantity()),
         };
         self.balances
             .get_mut(&user)
@@ -167,7 +176,7 @@ impl State {
                 pair: pair.clone(),
                 side: order.side(),
                 price: order.price(),
-                quantity: order.remaining_quantity().clone(),
+                quantity: *order.remaining_quantity(),
                 status: OrderStatus::Pending,
             },
         );
@@ -248,14 +257,16 @@ impl State {
             Side::Sell => (maker, taker),
         };
 
-        let quote_amount = fill.maker_price.mul_quantity(&fill.quantity);
-        let base_amount = fill.quantity.clone();
+        let quote_amount = fill
+            .maker_price
+            .checked_mul_quantity(&fill.quantity)
+            .expect("BUG: price * quantity overflow");
+        let base_amount = fill.quantity;
 
         // Buyer: pay quote, receive base
         self.balance_mut(buyer, pair.quote)
-            .debit_reserved(quote_amount.clone());
-        self.balance_mut(buyer, pair.base)
-            .deposit(base_amount.clone());
+            .debit_reserved(quote_amount);
+        self.balance_mut(buyer, pair.base).deposit(base_amount);
 
         // Seller: pay base, receive quote
         self.balance_mut(seller, pair.base)
@@ -274,7 +285,9 @@ impl State {
             && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !price_diff.is_zero()
         {
-            let surplus = price_diff.mul_quantity(&fill.quantity);
+            let surplus = price_diff
+                .checked_mul_quantity(&fill.quantity)
+                .expect("BUG: price_diff * quantity overflow");
             self.balance_mut(taker, pair.quote).unreserve(surplus);
         }
     }
@@ -420,6 +433,7 @@ impl State {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddLimitOrderError {
+    AmountExceedsMaximum,
     UnknownTradingPair,
     InvalidOrder(MatchOrderError),
     InsufficientBalance {
@@ -432,6 +446,9 @@ pub enum AddLimitOrderError {
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
         match err {
+            AddLimitOrderError::AmountExceedsMaximum => {
+                dex_types::AddLimitOrderError::AmountExceedsMaximum
+            }
             AddLimitOrderError::UnknownTradingPair => {
                 dex_types::AddLimitOrderError::UnknownTradingPair
             }

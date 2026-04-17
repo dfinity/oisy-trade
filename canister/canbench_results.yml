@@ -1,98 +1,64 @@
 benches:
-  bench_heap_book_1000_no_fills:
-    total:
-      calls: 1
-      instructions: 5448768
-      heap_increase: 2
-      stable_memory_increase: 0
-    scopes:
-      book::insert_order:
-        calls: 1000
-        instructions: 1488215
-        heap_increase: 0
-        stable_memory_increase: 0
-  bench_heap_book_1000_with_fills:
-    total:
-      calls: 1
-      instructions: 11395495
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes:
-      book::insert_order:
-        calls: 473
-        instructions: 1138857
-        heap_increase: 0
-        stable_memory_increase: 0
-      qty:
-        calls: 1538
-        instructions: 3831282
-        heap_increase: 0
-        stable_memory_increase: 0
-      qty::checked_sub:
-        calls: 1538
-        instructions: 1838185
-        heap_increase: 0
-        stable_memory_increase: 0
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 74898460
+      instructions: 68234895
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       bal:
         calls: 3481
-        instructions: 19680823
+        instructions: 16483503
         heap_increase: 0
         stable_memory_increase: 0
       bal::debit_reserved:
         calls: 1538
-        instructions: 6420222
+        instructions: 4827510
         heap_increase: 0
         stable_memory_increase: 0
       bal::deposit:
         calls: 1538
-        instructions: 5140794
+        instructions: 4108550
         heap_increase: 0
         stable_memory_increase: 0
       bal::unreserve:
         calls: 405
-        instructions: 3006897
+        instructions: 2426550
         heap_increase: 0
         stable_memory_increase: 0
       book::insert_order:
         calls: 473
-        instructions: 1131815
+        instructions: 1181065
         heap_increase: 0
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 11171740
+        instructions: 8915454
         heap_increase: 0
         stable_memory_increase: 0
       qty:
         calls: 6598
-        instructions: 15083049
+        instructions: 10462888
         heap_increase: 0
         stable_memory_increase: 0
-      qty::add_assign:
+      qty::add:
         calls: 1943
-        instructions: 1588240
+        instructions: 683936
         heap_increase: 0
         stable_memory_increase: 0
       qty::checked_sub:
         calls: 3481
-        instructions: 4180642
+        instructions: 1173097
         heap_increase: 0
         stable_memory_increase: 0
       qty::mul_u64:
         calls: 1174
-        instructions: 1072981
+        instructions: 725532
         heap_increase: 0
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 62236443
+        instructions: 57994372
         heap_increase: 0
         stable_memory_increase: 0
       state::balance_mut:
@@ -107,96 +73,96 @@ benches:
         stable_memory_increase: 0
       state::settle_fill:
         calls: 769
-        instructions: 60885207
+        instructions: 56659699
         heap_increase: 0
         stable_memory_increase: 0
       status:
         calls: 1
-        instructions: 1324077
+        instructions: 1318656
         heap_increase: 0
         stable_memory_increase: 0
   bench_process_pending_orders_1000_no_fills:
     total:
       calls: 1
-      instructions: 6175494
+      instructions: 5186102
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       book::insert_order:
         calls: 1000
-        instructions: 1517141
+        instructions: 1545009
         heap_increase: 0
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 5341400
+        instructions: 4352826
         heap_increase: 0
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 364
+        instructions: 348
         heap_increase: 0
         stable_memory_increase: 0
       status:
         calls: 1
-        instructions: 829199
+        instructions: 828319
         heap_increase: 0
         stable_memory_increase: 0
   bench_process_pending_orders_1_large:
     total:
       calls: 1
-      instructions: 58281983
+      instructions: 53499494
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       bal:
         calls: 2788
-        instructions: 14472825
+        instructions: 12231038
         heap_increase: 0
         stable_memory_increase: 0
       bal::debit_reserved:
         calls: 1394
-        instructions: 5742346
+        instructions: 4281707
         heap_increase: 0
         stable_memory_increase: 0
       bal::deposit:
         calls: 1394
-        instructions: 4703628
+        instructions: 3909176
         heap_increase: 0
         stable_memory_increase: 0
       book::insert_order:
         calls: 1
-        instructions: 2738
+        instructions: 3103
         heap_increase: 0
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 7455005
+        instructions: 6031657
         heap_increase: 0
         stable_memory_increase: 0
       qty:
         calls: 4879
-        instructions: 11119295
+        instructions: 7592082
         heap_increase: 0
         stable_memory_increase: 0
-      qty::add_assign:
+      qty::add:
         calls: 1394
-        instructions: 1121023
+        instructions: 490688
         heap_increase: 0
         stable_memory_increase: 0
       qty::checked_sub:
         calls: 2788
-        instructions: 3340116
+        instructions: 939556
         heap_increase: 0
         stable_memory_increase: 0
       qty::mul_u64:
         calls: 697
-        instructions: 706308
+        instructions: 430746
         heap_increase: 0
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 50058418
+        instructions: 46836039
         heap_increase: 0
         stable_memory_increase: 0
       state::balance_mut:
@@ -211,100 +177,76 @@ benches:
         stable_memory_increase: 0
       state::settle_fill:
         calls: 697
-        instructions: 48824125
+        instructions: 45615907
         heap_increase: 0
         stable_memory_increase: 0
       status:
         calls: 1
-        instructions: 624807
+        instructions: 625210
         heap_increase: 0
         stable_memory_increase: 0
   bench_read_events:
     total:
       calls: 1
-      instructions: 65443
+      instructions: 63460
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       AddLimitOrder:
         calls: 1
-        instructions: 9126
+        instructions: 8083
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
         calls: 1
-        instructions: 8940
+        instructions: 8959
         heap_increase: 0
         stable_memory_increase: 0
       Deposit:
         calls: 1
-        instructions: 7924
+        instructions: 6935
         heap_increase: 0
         stable_memory_increase: 0
       Init:
         calls: 1
-        instructions: 16921
+        instructions: 16936
         heap_increase: 0
         stable_memory_increase: 0
       Upgrade:
         calls: 1
-        instructions: 17110
-        heap_increase: 0
-        stable_memory_increase: 0
-  bench_stable_book_1000_no_fills:
-    total:
-      calls: 1
-      instructions: 125494898
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes: {}
-  bench_stable_book_1000_with_fills:
-    total:
-      calls: 1
-      instructions: 190368243
-      heap_increase: 2
-      stable_memory_increase: 0
-    scopes:
-      qty:
-        calls: 1538
-        instructions: 3703776
-        heap_increase: 2
-        stable_memory_increase: 0
-      qty::checked_sub:
-        calls: 1538
-        instructions: 1827621
+        instructions: 17125
         heap_increase: 0
         stable_memory_increase: 0
   bench_write_events:
     total:
       calls: 1
-      instructions: 79246
+      instructions: 81360
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       AddLimitOrder:
         calls: 1
-        instructions: 10493
+        instructions: 11699
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
         calls: 1
-        instructions: 11969
+        instructions: 11975
         heap_increase: 0
         stable_memory_increase: 0
       Deposit:
         calls: 1
-        instructions: 9306
+        instructions: 10198
         heap_increase: 0
         stable_memory_increase: 0
       Init:
         calls: 1
-        instructions: 22171
+        instructions: 22176
         heap_increase: 0
         stable_memory_increase: 0
       Upgrade:
         calls: 1
-        instructions: 19722
+        instructions: 19727
         heap_increase: 0
         stable_memory_increase: 0
 version: 0.4.0
