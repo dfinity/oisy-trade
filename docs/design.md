@@ -223,6 +223,27 @@ Deposits are independent from order placement. The user first approves the DEX c
 
 Users call `withdraw(token, amount)` to transfer tokens from their available balance to their wallet. The canister calls `icrc1_transfer` on the relevant ledger. The withdrawal fails if the requested amount exceeds the user's available balance or if the ledger is not available.
 
+### Memory Estimates
+
+Assume **1M users with non-zero balances**, and that almost all quantities fit in a `u128` (per [#59](https://github.com/dfinity/dex/pull/59): `Quantity` is a stack-allocated `(u128, u128)` — 32 B — encoded as a plain CBOR integer when the value fits in `u64` and as a PosBignum Tag 2 otherwise). Balances are stored token-first (per [#60](https://github.com/dfinity/dex/pull/60): `BTreeMap<TokenId, BTreeMap<Principal, Balance>>`).
+
+Per-entry sizes:
+
+| Item                       | Heap  | CBOR                              |
+|----------------------------|-------|-----------------------------------|
+| `TokenId` / `Principal`    | ~30 B | ~32 B                             |
+| `Balance` (2 × `Quantity`) | 64 B  | ~40 B (u128 values via PosBignum) |
+
+Totals at 1M users, varying the average number of tokens held per user. The outer `TokenId` map is dominated by a handful of listed tokens, so nearly all space is in the inner `Principal → Balance` maps:
+
+| Tokens / user | Inner entries | Heap    | CBOR snapshot |
+|---------------|---------------|---------|---------------|
+| 2             | 2M            | ~220 MB | ~150 MB       |
+| 5             | 5M            | ~550 MB | ~370 MB       |
+| 10            | 10M           | ~1.1 GB | ~740 MB       |
+
+Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 tokens/user is ~5 900 stable-memory pages — well within the 2 TiB stable budget, but large enough that the cost of serializing balances at every upgrade needs to be measured, not assumed.
+
 ## Architecture
 
 ### Single-Canister Design
