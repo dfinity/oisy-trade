@@ -244,6 +244,45 @@ Totals at 1M users, varying the average number of tokens held per user. The oute
 
 Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 tokens/user is ~5 900 stable-memory pages — well within the 2 TiB stable budget, but large enough that the cost of serializing balances at every upgrade needs to be measured, not assumed.
 
+## Order History
+
+Every order submitted to the DEX is recorded in an append-only map keyed by `OrderId`. Each `OrderRecord` captures:
+
+- **owner**: the `Principal` that submitted the order.
+- **side**: `Buy` or `Sell`.
+- **price**: the limit price as a `u64`.
+- **quantity**: the original submission size as a `Quantity`.
+- **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.
+
+A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
+
+The history exists for a single purpose: serving the `get_order_status(order_id)` query so clients that have lost track of a submission can recover its outcome.
+
+### Memory Estimates
+
+Per-record size, assuming `Quantity` encodes mostly in the `u128` range (see [Balance memory estimates](#memory-estimates)):
+
+| Item                             | Heap                    | CBOR                       |
+|----------------------------------|-------------------------|----------------------------|
+| `OrderId` (key, `(u64, u64)`)    | 16 B                    | ~18 B                      |
+| `owner: Principal`               | ~30 B                   | ~32 B                      |
+| `price: u64`                     | 8 B                     | ~5 B                       |
+| `quantity: Quantity`             | 32 B                    | ~20 B (u128 via PosBignum) |
+| `side` + `status`                | 2 B                     | ~2 B                       |
+| Overhead                         | ~15 B (BTree amortized) | ~5 B (CBOR map)            |
+| **Per record**                   | **~100 B**              | **~85 B**                  |
+
+Applying the [expected load](#expected-load) — 0.7 orders/s steady-state, 40 orders/s sustained during peak-hour events:
+
+| Horizon                             | Orders | Heap    | CBOR    |
+|-------------------------------------|--------|---------|---------|
+| 1 day @ steady                      | 60 K   | ~6 MB   | ~5 MB   |
+| 1 yr @ steady                       | 22 M   | ~2.2 GB | ~1.9 GB |
+| 1 yr @ steady + ~50 peak hours      | ~30 M  | ~3.0 GB | ~2.6 GB |
+| 2 yr @ steady                       | 44 M   | ~4.4 GB | ~3.7 GB |
+
+`order_history` grows monotonically with the total number of orders ever placed. It fits comfortably on the heap for the first year of steady-state traffic but crosses the 4 GiB heap limit at around two years. A retention or archival policy is required unless the history is stored in stable memory, where the 2 TiB per-subnet budget dominates.
+
 ## Architecture
 
 ### Single-Canister Design
