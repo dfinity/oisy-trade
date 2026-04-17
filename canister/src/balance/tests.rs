@@ -98,14 +98,6 @@ mod user_balance {
     use crate::order::Quantity;
     use candid::Principal;
 
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
-    }
-
-    fn bob() -> Principal {
-        Principal::from_slice(&[0x02])
-    }
-
     #[test]
     fn should_deposit_to_new_user() {
         let mut ub = UserBalance::default();
@@ -215,24 +207,20 @@ mod user_balance {
         let ub = UserBalance::default();
         assert_eq!(ub.get(&alice()), None);
     }
+
+    fn alice() -> Principal {
+        Principal::from_slice(&[0x01])
+    }
+
+    fn bob() -> Principal {
+        Principal::from_slice(&[0x02])
+    }
 }
 
 mod token_balance {
     use crate::balance::{Balance, TokenBalance};
     use crate::order::{Quantity, TokenId};
     use candid::Principal;
-
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
-    }
-
-    fn token_a() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xA0]))
-    }
-
-    fn token_b() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xB0]))
-    }
 
     #[test]
     fn should_deposit_and_read_balance() {
@@ -303,5 +291,17 @@ mod token_balance {
             tb.get_balance(&bob, &token_a()),
             Some(&Balance::new(100u64, 0u64))
         );
+    }
+
+    fn alice() -> Principal {
+        Principal::from_slice(&[0x01])
+    }
+
+    fn token_a() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xA0]))
+    }
+
+    fn token_b() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xB0]))
     }
 }
