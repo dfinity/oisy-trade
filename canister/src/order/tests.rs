@@ -143,11 +143,15 @@ mod quantity {
 
         #[test]
         fn is_multiple_of_consistent(
-            base in 1..u64::MAX,
+            base in 1..u128::MAX,
             lot in 1..10_000u64,
         ) {
             let lot_size = LotSize::new(NonZeroU64::new(lot).unwrap());
-            let q = Quantity::from(base).checked_mul_u64(lot).unwrap();
+            let q = Quantity::from_u128(base);
+
+            prop_assert_eq!(base.is_multiple_of(lot as u128), q.is_multiple_of(lot_size));
+
+            let q = Quantity::from_u128(base).checked_mul_u64(lot).unwrap();
             prop_assert!(q.is_multiple_of(lot_size));
         }
 

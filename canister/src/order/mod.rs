@@ -368,17 +368,22 @@ impl Quantity {
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
-        // For lot sizes that fit in u64, only need to check low limb
-        // (if high == 0, which is the common case).
+        // Quantity is (high, low) pair of u128, representing (high * 2^128 + low).
+        // We want: (high * 2^128 + low) mod d == 0
         let divisor = lot_size.get() as u128;
         if self.high == 0 {
             self.low.is_multiple_of(divisor)
         } else {
-            // Full u256 % u64: use the identity (high * 2^128 + low) % d
+            // Using the modular identity:
+            // (high * 2^128 + low) mod d = ((high mod d) * (2^128 mod d) + (low mod d)) mod d
             let high_rem = self.high % divisor;
-            // 2^128 mod d
+            // 2^128 doesn't fit in u128, so compute it as (u128::MAX + 1) mod d.
             let shift_rem = (u128::MAX % divisor + 1) % divisor;
-            let combined = (high_rem.wrapping_mul(shift_rem) + self.low % divisor) % divisor;
+            let combined = (high_rem
+                .checked_mul(shift_rem)
+                .expect("high_rem and shift_rem are < d (a u64)")
+                + self.low % divisor)
+                % divisor;
             combined == 0
         }
     }
