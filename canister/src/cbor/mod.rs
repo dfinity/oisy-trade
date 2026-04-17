@@ -63,3 +63,45 @@ pub mod reverse_price_map {
         Ok(())
     }
 }
+
+/// Codec for `BTreeMap<Principal, Balance>`.
+///
+/// `Principal` has no built-in minicbor support, so we delegate to
+/// `icrc_cbor::principal` for each key.
+pub mod principal_balance_map {
+    use crate::balance::Balance;
+    use candid::Principal;
+    use minicbor::decode::{Decoder, Error};
+    use minicbor::encode::{Encoder, Write};
+    use minicbor::{Decode, Encode};
+    use std::collections::BTreeMap;
+
+    pub fn decode<Ctx>(
+        d: &mut Decoder<'_>,
+        ctx: &mut Ctx,
+    ) -> Result<BTreeMap<Principal, Balance>, Error> {
+        let len = d
+            .map()?
+            .ok_or_else(|| Error::message("expected definite-length map"))?;
+        let mut map = BTreeMap::new();
+        for _ in 0..len {
+            let principal = icrc_cbor::principal::decode(d, ctx)?;
+            let balance = Balance::decode(d, ctx)?;
+            map.insert(principal, balance);
+        }
+        Ok(map)
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &BTreeMap<Principal, Balance>,
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.map(v.len() as u64)?;
+        for (principal, balance) in v {
+            icrc_cbor::principal::encode(principal, e, ctx)?;
+            balance.encode(e, ctx)?;
+        }
+        Ok(())
+    }
+}

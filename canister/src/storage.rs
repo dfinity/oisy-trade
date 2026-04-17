@@ -1,3 +1,4 @@
+use crate::balance::TokenBalance;
 use crate::order::{OrderBook, OrderBookId};
 use crate::state::event::{Event, EventType};
 use ic_stable_structures::Memory;
@@ -9,6 +10,7 @@ use std::collections::BTreeMap;
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 const ORDER_BOOK_MEMORY_ID: MemoryId = MemoryId::new(2);
+const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 const WASM_PAGE_SIZE: u64 = 65_536;
 
@@ -52,18 +54,18 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Order book stable memory persistence
+// Stable memory persistence helpers
 // ---------------------------------------------------------------------------
 
-fn with_order_book_memory<R>(f: impl FnOnce(VMem) -> R) -> R {
-    MEMORY_MANAGER.with(|m| f(m.borrow().get(ORDER_BOOK_MEMORY_ID)))
+fn with_memory<R>(id: MemoryId, f: impl FnOnce(VMem) -> R) -> R {
+    MEMORY_MANAGER.with(|m| f(m.borrow().get(id)))
 }
 
-/// Write raw bytes to the order book stable memory region.
+/// Write raw bytes to a stable memory region.
 ///
 /// Format: 8-byte little-endian length prefix followed by the payload.
-pub fn write_bytes_to_stable(bytes: &[u8]) {
-    with_order_book_memory(|mem| {
+fn write_bytes(id: MemoryId, bytes: &[u8]) {
+    with_memory(id, |mem| {
         let total = 8 + bytes.len() as u64;
         let needed_pages = (total + WASM_PAGE_SIZE - 1) / WASM_PAGE_SIZE;
         let current_pages = mem.size();
@@ -75,11 +77,11 @@ pub fn write_bytes_to_stable(bytes: &[u8]) {
     })
 }
 
-/// Read raw bytes previously written by [`write_bytes_to_stable`].
+/// Read raw bytes previously written by [`write_bytes`].
 ///
 /// Returns an empty `Vec` if the region has never been written to.
-pub fn read_bytes_from_stable() -> Vec<u8> {
-    with_order_book_memory(|mem| {
+fn read_bytes(id: MemoryId) -> Vec<u8> {
+    with_memory(id, |mem| {
         if mem.size() == 0 {
             return Vec::new();
         }
@@ -95,25 +97,56 @@ pub fn read_bytes_from_stable() -> Vec<u8> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Order books
+// ---------------------------------------------------------------------------
+
 /// Serialize all order books and write them to stable memory.
 pub fn save_order_books(order_books: &BTreeMap<OrderBookId, OrderBook>) {
     #[cfg(feature = "canbench-rs")]
-    let _p = canbench_rs::bench_scope("encode");
+    let _p = canbench_rs::bench_scope("order_books::encode");
     let bytes = minicbor::to_vec(order_books).expect("order book encoding should always succeed");
     #[cfg(feature = "canbench-rs")]
-    let _q = canbench_rs::bench_scope("write_stable");
-    write_bytes_to_stable(&bytes);
+    let _q = canbench_rs::bench_scope("order_books::write_stable");
+    write_bytes(ORDER_BOOK_MEMORY_ID, &bytes);
 }
 
 /// Load order books from stable memory, if previously saved.
 pub fn load_order_books() -> Option<BTreeMap<OrderBookId, OrderBook>> {
     #[cfg(feature = "canbench-rs")]
-    let _p = canbench_rs::bench_scope("read_stable");
-    let bytes = read_bytes_from_stable();
+    let _p = canbench_rs::bench_scope("order_books::read_stable");
+    let bytes = read_bytes(ORDER_BOOK_MEMORY_ID);
     if bytes.is_empty() {
         return None;
     }
     #[cfg(feature = "canbench-rs")]
-    let _q = canbench_rs::bench_scope("decode");
+    let _q = canbench_rs::bench_scope("order_books::decode");
     Some(minicbor::decode(&bytes).unwrap_or_else(|e| panic!("failed to decode order books: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Balances
+// ---------------------------------------------------------------------------
+
+/// Serialize all balances and write them to stable memory.
+pub fn save_balances(balances: &TokenBalance) {
+    #[cfg(feature = "canbench-rs")]
+    let _p = canbench_rs::bench_scope("balances::encode");
+    let bytes = minicbor::to_vec(balances).expect("balance encoding should always succeed");
+    #[cfg(feature = "canbench-rs")]
+    let _q = canbench_rs::bench_scope("balances::write_stable");
+    write_bytes(BALANCES_MEMORY_ID, &bytes);
+}
+
+/// Load balances from stable memory, if previously saved.
+pub fn load_balances() -> Option<TokenBalance> {
+    #[cfg(feature = "canbench-rs")]
+    let _p = canbench_rs::bench_scope("balances::read_stable");
+    let bytes = read_bytes(BALANCES_MEMORY_ID);
+    if bytes.is_empty() {
+        return None;
+    }
+    #[cfg(feature = "canbench-rs")]
+    let _q = canbench_rs::bench_scope("balances::decode");
+    Some(minicbor::decode(&bytes).unwrap_or_else(|e| panic!("failed to decode balances: {e}")))
 }

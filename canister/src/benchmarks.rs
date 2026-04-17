@@ -297,29 +297,32 @@ fn place_order(state: &mut State, user: Principal, pending: PendingOrder) {
     state.record_limit_order(user, order_id.book_id(), order);
 }
 
-/// Benchmark the full pre_upgrade/post_upgrade pipeline for a populated
-/// OrderBook (697 bid levels + 5000 ask levels from real Binance ICP/USDT
-/// data): minicbor encode → stable memory write → stable memory read →
-/// minicbor decode.
+/// Benchmark the full pre_upgrade/post_upgrade pipeline for a populated state
+/// (697 bid levels + 5000 ask levels from real Binance ICP/USDT data):
+/// serialize order books and balances to stable memory, then restore them.
 #[bench(raw)]
-fn bench_serialize_order_book() -> canbench_rs::BenchResult {
+fn bench_serialize_state() -> canbench_rs::BenchResult {
     let depth = load_depth();
     let mut state = new_state();
     populate_state(&mut state, &depth);
 
     let expected_books = state.order_books().clone();
+    let expected_balances = state.balances().clone();
 
     canbench_rs::bench_fn(|| {
         crate::storage::save_order_books(&expected_books);
-        let decoded = crate::storage::load_order_books().expect("should have order books");
-        assert_eq!(decoded, expected_books);
+        crate::storage::save_balances(&expected_balances);
+        let decoded_books = crate::storage::load_order_books().expect("should have order books");
+        let decoded_balances = crate::storage::load_balances().expect("should have balances");
+        assert_eq!(decoded_books, expected_books);
+        assert_eq!(decoded_balances, expected_balances);
     })
 }
 
-/// Benchmark serialize/deserialize for an OrderBook with 1000 resting
-/// orders (500 bids at 2.000, 500 asks at 3.000) and zero fills.
+/// Benchmark serialize/deserialize for a state with 1000 resting orders
+/// (500 bids at 2.000, 500 asks at 3.000) and zero fills.
 #[bench(raw)]
-fn bench_serialize_order_book_1000_no_fills() -> canbench_rs::BenchResult {
+fn bench_serialize_state_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     let num_orders = 1_000u64;
 
@@ -352,11 +355,15 @@ fn bench_serialize_order_book_1000_no_fills() -> canbench_rs::BenchResult {
     state.process_pending_orders();
 
     let expected_books = state.order_books().clone();
+    let expected_balances = state.balances().clone();
 
     canbench_rs::bench_fn(|| {
         crate::storage::save_order_books(&expected_books);
-        let decoded = crate::storage::load_order_books().expect("should have order books");
-        assert_eq!(decoded, expected_books);
+        crate::storage::save_balances(&expected_balances);
+        let decoded_books = crate::storage::load_order_books().expect("should have order books");
+        let decoded_balances = crate::storage::load_balances().expect("should have balances");
+        assert_eq!(decoded_books, expected_books);
+        assert_eq!(decoded_balances, expected_balances);
     })
 }
 

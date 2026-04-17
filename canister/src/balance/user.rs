@@ -4,8 +4,11 @@ use candid::Principal;
 use std::collections::BTreeMap;
 
 /// Per-user balance map for a single token.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct UserBalance(BTreeMap<Principal, Balance>);
+#[derive(Debug, Clone, Default, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+#[cbor(transparent)]
+pub struct UserBalance(
+    #[cbor(n(0), with = "crate::cbor::principal_balance_map")] BTreeMap<Principal, Balance>,
+);
 
 impl UserBalance {
     /// Move `amount` from debitor's reserved to creditor's free.

@@ -8,8 +8,9 @@ use std::collections::BTreeMap;
 ///
 /// This layout allows `settle_fill` to look up the token once and
 /// then operate on multiple users within the same inner map.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TokenBalance(BTreeMap<TokenId, UserBalance>);
+#[derive(Debug, Clone, Default, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+#[cbor(transparent)]
+pub struct TokenBalance(#[n(0)] BTreeMap<TokenId, UserBalance>);
 
 impl TokenBalance {
     /// Get a mutable reference to the user-balance map for a token.

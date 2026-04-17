@@ -20,8 +20,9 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
 pub fn pre_upgrade() {
     state::with_state(|s| {
         storage::save_order_books(s.order_books());
+        storage::save_balances(s.balances());
     });
-    canlog::log!(Priority::Info, "[pre_upgrade]: order books saved to stable memory");
+    canlog::log!(Priority::Info, "[pre_upgrade]: state saved to stable memory");
 }
 
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
@@ -31,9 +32,14 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     state::init_state(state);
     let replayed_events = storage::total_event_count();
 
-    if let Some(order_books) = storage::load_order_books() {
-        state::with_state_mut(|s| s.set_order_books(order_books));
-    }
+    state::with_state_mut(|s| {
+        if let Some(order_books) = storage::load_order_books() {
+            s.set_order_books(order_books);
+        }
+        if let Some(balances) = storage::load_balances() {
+            s.set_balances(balances);
+        }
+    });
 
     match arg {
         Some(DexArg::Init(_)) => {

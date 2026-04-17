@@ -399,6 +399,14 @@ impl State {
     pub fn set_order_books(&mut self, order_books: BTreeMap<OrderBookId, OrderBook>) {
         self.order_books = order_books;
     }
+
+    pub fn balances(&self) -> &TokenBalance {
+        &self.balances
+    }
+
+    pub fn set_balances(&mut self, balances: TokenBalance) {
+        self.balances = balances;
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

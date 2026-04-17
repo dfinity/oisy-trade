@@ -13,9 +13,11 @@ mod tests;
 /// The balance is split into two parts:
 /// - `free`: funds available for new orders or withdrawal.
 /// - `reserved`: funds locked by open orders.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, minicbor::Encode, minicbor::Decode)]
 pub struct Balance {
+    #[n(0)]
     free: Quantity,
+    #[n(1)]
     reserved: Quantity,
 }
 
