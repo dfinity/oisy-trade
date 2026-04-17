@@ -41,6 +41,7 @@ impl Balance {
     }
 
     pub fn deposit(&mut self, amount: Quantity) {
+        bench_scopes!("bal", "bal::deposit");
         self.free += amount;
     }
 
@@ -49,6 +50,7 @@ impl Balance {
     /// # Panics
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn debit_reserved(&mut self, amount: Quantity) {
+        bench_scopes!("bal", "bal::debit_reserved");
         self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
             panic!(
                 "BUG: debit_reserved underflow: reserved={:?}, amount={:?}",
@@ -62,6 +64,7 @@ impl Balance {
     /// # Panics
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn unreserve(&mut self, amount: Quantity) {
+        bench_scopes!("bal", "bal::unreserve");
         self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
             panic!(
                 "BUG: unreserve underflow: reserved={:?}, amount={:?}",
@@ -83,6 +86,7 @@ impl Balance {
     }
 
     pub fn reserve(&mut self, required: Quantity) -> Result<(), InsufficientBalanceError> {
+        bench_scopes!("bal", "bal::reserve");
         self.free = self
             .free
             .checked_sub(&required)
