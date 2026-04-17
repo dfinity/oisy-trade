@@ -152,7 +152,7 @@ impl State {
                 order
                     .price()
                     .checked_mul_quantity(order.remaining_quantity())
-                    .expect("BUG: price * quantity overflow"),
+                    .expect("BUG: price * quantity overflow — already validated in validate_limit_order"),
             ),
             Side::Sell => (pair.base, *order.remaining_quantity()),
         };
@@ -265,7 +265,7 @@ impl State {
             {
                 let surplus = price_diff
                     .checked_mul_quantity(&fill.quantity)
-                    .expect("BUG: price_diff * quantity overflow");
+                    .expect("BUG: price_diff * quantity overflow — already validated in validate_limit_order");
                 quote.unreserve(&taker, surplus);
             }
         }
