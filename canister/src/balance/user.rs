@@ -8,18 +8,18 @@ use std::collections::BTreeMap;
 pub struct UserBalance(BTreeMap<Principal, Balance>);
 
 impl UserBalance {
-    /// Move `amount` from debitor's reserved to creditor's free.
+    /// Move `amount` from debtor's reserved to creditor's free.
     ///
     /// Creates the creditor's entry if it doesn't exist.
     ///
     /// # Panics
     ///
-    /// Panics if the debitor has no balance entry, or if the debitor's
+    /// Panics if the debtor has no balance entry, or if the debtor's
     /// reserved balance is insufficient.
-    pub fn transfer(&mut self, debitor: &Principal, creditor: &Principal, amount: Quantity) {
+    pub fn transfer(&mut self, debtor: &Principal, creditor: &Principal, amount: Quantity) {
         self.0
-            .get_mut(debitor)
-            .expect("BUG: debitor balance missing")
+            .get_mut(debtor)
+            .expect("BUG: debtor balance missing")
             .debit_reserved(amount.clone());
         self.0.entry(*creditor).or_default().deposit(amount);
     }

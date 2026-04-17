@@ -178,8 +178,8 @@ mod user_balance {
     }
 
     #[test]
-    #[should_panic(expected = "BUG: debitor balance missing")]
-    fn should_panic_transfer_missing_debitor() {
+    #[should_panic(expected = "BUG: debtor balance missing")]
+    fn should_panic_transfer_missing_debtor() {
         let mut ub = UserBalance::default();
         ub.transfer(&alice(), &bob(), Quantity::from(10u64));
     }
