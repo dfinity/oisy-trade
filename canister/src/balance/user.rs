@@ -20,7 +20,7 @@ impl UserBalance {
         self.0
             .get_mut(debitor)
             .expect("BUG: debitor balance missing")
-            .debit_reserved(amount.clone());
+            .debit_reserved(amount);
         self.0.entry(*creditor).or_default().deposit(amount);
     }
 

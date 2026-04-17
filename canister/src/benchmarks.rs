@@ -510,8 +510,12 @@ mod balance_comparison {
                 let u = user(i);
                 balances.deposit(u, base, Quantity::from_u128(u128::MAX));
                 balances.deposit(u, quote, Quantity::from_u128(u128::MAX));
-                balances.reserve(&u, &base, Quantity::from(1_000_000u64)).unwrap();
-                balances.reserve(&u, &quote, Quantity::from(1_000_000u64)).unwrap();
+                balances
+                    .reserve(&u, &base, Quantity::from(1_000_000u64))
+                    .unwrap();
+                balances
+                    .reserve(&u, &quote, Quantity::from(1_000_000u64))
+                    .unwrap();
             }
         })
     }
@@ -529,8 +533,12 @@ mod balance_comparison {
                 let u = user(i);
                 balances.deposit(u, base, Quantity::from_u128(u128::MAX));
                 balances.deposit(u, quote, Quantity::from_u128(u128::MAX));
-                balances.reserve(&u, &base, Quantity::from(1_000_000u64)).unwrap();
-                balances.reserve(&u, &quote, Quantity::from(1_000_000u64)).unwrap();
+                balances
+                    .reserve(&u, &base, Quantity::from(1_000_000u64))
+                    .unwrap();
+                balances
+                    .reserve(&u, &quote, Quantity::from(1_000_000u64))
+                    .unwrap();
             }
         })
     }
@@ -545,7 +553,9 @@ mod balance_comparison {
         for i in 0..NUM_USERS {
             let u = user(i);
             balances.deposit(u, base, Quantity::from_u128(u128::MAX));
-            balances.reserve(&u, &base, Quantity::from(1_000_000_000u64)).unwrap();
+            balances
+                .reserve(&u, &base, Quantity::from(1_000_000_000u64))
+                .unwrap();
         }
 
         canbench_rs::bench_fn(|| {
@@ -570,7 +580,9 @@ mod balance_comparison {
         for i in 0..NUM_USERS {
             let u = user(i);
             balances.deposit(u, base, Quantity::from_u128(u128::MAX));
-            balances.reserve(&u, &base, Quantity::from(1_000_000_000u64)).unwrap();
+            balances
+                .reserve(&u, &base, Quantity::from(1_000_000_000u64))
+                .unwrap();
         }
 
         canbench_rs::bench_fn(|| {

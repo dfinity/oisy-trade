@@ -292,7 +292,7 @@ impl<M: Memory> StableOrderBook<M> {
         }
         if quantity.is_zero() || !quantity.is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity: quantity.clone(),
+                quantity: *quantity,
                 lot_size: self.lot_size,
             });
         }
@@ -375,7 +375,7 @@ impl<M: Memory> StableOrderBook<M> {
             .resting_orders
             .insert(seq.get(), StorableSidePrice { side, price });
         assert!(prev.is_none());
-        let qty = StorableQuantity(order.remaining_quantity().clone());
+        let qty = StorableQuantity(*order.remaining_quantity());
         match side {
             Side::Buy => {
                 self.bids.insert(
@@ -408,7 +408,7 @@ impl<M: Memory> StableOrderBook<M> {
                 break;
             }
             let maker_seq = OrderSeq::new(key.seq);
-            let fill_qty = std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
+            let fill_qty = *std::cmp::min(order.remaining_quantity(), &maker_qty.0);
 
             order.reduce_quantity(&fill_qty);
 
@@ -418,7 +418,7 @@ impl<M: Memory> StableOrderBook<M> {
                 taker_price: order.price(),
                 maker_order_seq: maker_seq,
                 maker_price,
-                quantity: fill_qty.clone(),
+                quantity: fill_qty,
             });
 
             let new_remaining = maker_qty.0.checked_sub(&fill_qty).unwrap();
@@ -442,7 +442,7 @@ impl<M: Memory> StableOrderBook<M> {
                 break;
             }
             let maker_seq = OrderSeq::new(key.seq);
-            let fill_qty = std::cmp::min(order.remaining_quantity(), &maker_qty.0).clone();
+            let fill_qty = *std::cmp::min(order.remaining_quantity(), &maker_qty.0);
 
             order.reduce_quantity(&fill_qty);
 
@@ -452,7 +452,7 @@ impl<M: Memory> StableOrderBook<M> {
                 taker_price: order.price(),
                 maker_order_seq: maker_seq,
                 maker_price,
-                quantity: fill_qty.clone(),
+                quantity: fill_qty,
             });
 
             let new_remaining = maker_qty.0.checked_sub(&fill_qty).unwrap();

@@ -95,7 +95,7 @@ impl StorableBalance {
         }
     }
 
-    fn to_balance(&self) -> Balance {
+    fn into_balance(self) -> Balance {
         Balance::new(self.free, self.reserved)
     }
 }
@@ -152,16 +152,17 @@ impl<M: Memory> StableTokenBalance<M> {
         let mut bal = self
             .balances
             .get(&key)
-            .map(|sb| sb.to_balance())
+            .map(|sb| sb.into_balance())
             .unwrap_or_default();
         bal.deposit(amount);
-        self.balances.insert(key, StorableBalance::from_balance(&bal));
+        self.balances
+            .insert(key, StorableBalance::from_balance(&bal));
     }
 
     /// Read a user's balance for a given token.
     pub fn get_balance(&self, user: &Principal, token: &TokenId) -> Option<Balance> {
         let key = BalanceKey::new(token, user);
-        self.balances.get(&key).map(|sb| sb.to_balance())
+        self.balances.get(&key).map(|sb| sb.into_balance())
     }
 
     /// Read a user's free balance for a given token.
@@ -182,10 +183,11 @@ impl<M: Memory> StableTokenBalance<M> {
         let mut bal = self
             .balances
             .get(&key)
-            .map(|sb| sb.to_balance())
+            .map(|sb| sb.into_balance())
             .unwrap_or_default();
         bal.withdraw(amount)?;
-        self.balances.insert(key, StorableBalance::from_balance(&bal));
+        self.balances
+            .insert(key, StorableBalance::from_balance(&bal));
         Ok(())
     }
 
@@ -197,16 +199,15 @@ impl<M: Memory> StableTokenBalance<M> {
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
         let key = BalanceKey::new(token, user);
-        let mut bal = self
-            .balances
-            .get(&key)
-            .map(|sb| sb.to_balance())
-            .ok_or(InsufficientBalanceError {
+        let mut bal = self.balances.get(&key).map(|sb| sb.into_balance()).ok_or(
+            InsufficientBalanceError {
                 available: Quantity::ZERO,
                 required: amount,
-            })?;
+            },
+        )?;
         bal.reserve(amount)?;
-        self.balances.insert(key, StorableBalance::from_balance(&bal));
+        self.balances
+            .insert(key, StorableBalance::from_balance(&bal));
         Ok(())
     }
 
@@ -224,7 +225,7 @@ impl<M: Memory> StableTokenBalance<M> {
             .balances
             .get(&deb_key)
             .expect("BUG: debitor balance missing")
-            .to_balance();
+            .into_balance();
         deb_bal.debit_reserved(amount);
         self.balances
             .insert(deb_key, StorableBalance::from_balance(&deb_bal));
@@ -234,7 +235,7 @@ impl<M: Memory> StableTokenBalance<M> {
         let mut cred_bal = self
             .balances
             .get(&cred_key)
-            .map(|sb| sb.to_balance())
+            .map(|sb| sb.into_balance())
             .unwrap_or_default();
         cred_bal.deposit(amount);
         self.balances
@@ -248,8 +249,9 @@ impl<M: Memory> StableTokenBalance<M> {
             .balances
             .get(&key)
             .expect("BUG: user balance missing for unreserve")
-            .to_balance();
+            .into_balance();
         bal.unreserve(amount);
-        self.balances.insert(key, StorableBalance::from_balance(&bal));
+        self.balances
+            .insert(key, StorableBalance::from_balance(&bal));
     }
 }

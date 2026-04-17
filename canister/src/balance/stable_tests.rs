@@ -95,7 +95,10 @@ mod deposit {
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
         balances.deposit(user_1(), token_a(), Quantity::from(50u64));
 
-        assert_eq!(balances.get_free(&user_1(), &token_a()), Quantity::from(150u64));
+        assert_eq!(
+            balances.get_free(&user_1(), &token_a()),
+            Quantity::from(150u64)
+        );
     }
 
     #[test]
@@ -104,8 +107,14 @@ mod deposit {
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
         balances.deposit(user_1(), token_b(), Quantity::from(200u64));
 
-        assert_eq!(balances.get_free(&user_1(), &token_a()), Quantity::from(100u64));
-        assert_eq!(balances.get_free(&user_1(), &token_b()), Quantity::from(200u64));
+        assert_eq!(
+            balances.get_free(&user_1(), &token_a()),
+            Quantity::from(100u64)
+        );
+        assert_eq!(
+            balances.get_free(&user_1(), &token_b()),
+            Quantity::from(200u64)
+        );
     }
 
     #[test]
@@ -114,8 +123,14 @@ mod deposit {
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
         balances.deposit(user_2(), token_a(), Quantity::from(200u64));
 
-        assert_eq!(balances.get_free(&user_1(), &token_a()), Quantity::from(100u64));
-        assert_eq!(balances.get_free(&user_2(), &token_a()), Quantity::from(200u64));
+        assert_eq!(
+            balances.get_free(&user_1(), &token_a()),
+            Quantity::from(100u64)
+        );
+        assert_eq!(
+            balances.get_free(&user_2(), &token_a()),
+            Quantity::from(200u64)
+        );
     }
 }
 
@@ -142,7 +157,9 @@ mod reserve {
     fn should_reserve_from_free() {
         let mut balances = stable_balances();
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
-        balances.reserve(&user_1(), &token_a(), Quantity::from(40u64)).unwrap();
+        balances
+            .reserve(&user_1(), &token_a(), Quantity::from(40u64))
+            .unwrap();
 
         let bal = balances.get_balance(&user_1(), &token_a()).unwrap();
         assert_eq!(bal, Balance::new(60u64, 40u64));
@@ -188,9 +205,14 @@ mod withdraw {
     fn should_withdraw_from_free() {
         let mut balances = stable_balances();
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
-        balances.withdraw(&user_1(), &token_a(), Quantity::from(40u64)).unwrap();
+        balances
+            .withdraw(&user_1(), &token_a(), Quantity::from(40u64))
+            .unwrap();
 
-        assert_eq!(balances.get_free(&user_1(), &token_a()), Quantity::from(60u64));
+        assert_eq!(
+            balances.get_free(&user_1(), &token_a()),
+            Quantity::from(60u64)
+        );
     }
 
     #[test]
@@ -218,7 +240,9 @@ mod transfer {
     fn should_transfer_reserved_to_free() {
         let mut balances = stable_balances();
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
-        balances.reserve(&user_1(), &token_a(), Quantity::from(60u64)).unwrap();
+        balances
+            .reserve(&user_1(), &token_a(), Quantity::from(60u64))
+            .unwrap();
 
         balances.transfer(&token_a(), &user_1(), &user_2(), Quantity::from(60u64));
 
@@ -237,7 +261,9 @@ mod unreserve {
     fn should_move_reserved_back_to_free() {
         let mut balances = stable_balances();
         balances.deposit(user_1(), token_a(), Quantity::from(100u64));
-        balances.reserve(&user_1(), &token_a(), Quantity::from(60u64)).unwrap();
+        balances
+            .reserve(&user_1(), &token_a(), Quantity::from(60u64))
+            .unwrap();
 
         balances.unreserve(&token_a(), &user_1(), Quantity::from(30u64));
 
