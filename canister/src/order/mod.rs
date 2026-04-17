@@ -275,10 +275,8 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn mul_quantity(self, quantity: &Quantity) -> Quantity {
-        quantity
-            .checked_mul_u64(self.0)
-            .expect("BUG: price * quantity overflow")
+    pub fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
+        quantity.checked_mul_u64(self.0)
     }
 }
 
@@ -394,7 +392,9 @@ impl Quantity {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("qty::checked_sub");
         let (low, borrow) = self.low.overflowing_sub(other.low);
-        let high = self.high.checked_sub(other.high + borrow as u128)?;
+        let high = self
+            .high
+            .checked_sub(other.high.checked_add(borrow as u128)?)?;
         Some(Self { high, low })
     }
 

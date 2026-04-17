@@ -68,6 +68,12 @@ mod quantity {
         // 2^128 + 1
         let c = Quantity::new(1, 1);
         assert_eq!(a.checked_sub(&c), None);
+
+        // other.high == u128::MAX with borrow: high + borrow would overflow u128
+        // without checked_add.
+        let d = Quantity::new(u128::MAX, 0);
+        let e = Quantity::new(u128::MAX, 1);
+        assert_eq!(d.checked_sub(&e), None);
     }
 
     proptest! {

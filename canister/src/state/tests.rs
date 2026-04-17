@@ -506,7 +506,7 @@ mod settle_fills {
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let quote_total = Price::new(price).mul_quantity(&quantity);
+        let quote_total = Price::new(price).checked_mul_quantity(&quantity).unwrap();
 
         // Buyer received all base tokens
         let buyer_base = state.get_balance(&BUYER, &pair.base);
@@ -586,7 +586,13 @@ mod settle_fills {
             quantity: quantity.into(),
         };
         let deposit = match pending.side {
-            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
+            Side::Buy => (
+                pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity(&pending.quantity)
+                    .unwrap(),
+            ),
             Side::Sell => (pair.base, pending.quantity),
         };
         state.deposit(user, deposit.0, deposit.1);
@@ -745,7 +751,7 @@ mod settle_fills {
                         Side::Buy => fill.taker_price,
                         Side::Sell => fill.maker_price,
                     };
-                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
+                    let buy_reserve = buyer_price.checked_mul_quantity(&fill.quantity).unwrap();
                     state.deposit(buyer, pair.quote, buy_reserve);
                     state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
                     state.deposit(seller, pair.base, fill.quantity);
