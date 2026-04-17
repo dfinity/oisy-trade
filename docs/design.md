@@ -338,9 +338,51 @@ Peak load is the binding constraint. The timer-driven matching engine naturally 
 
 See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
 
-### State Persistence
+### Upgrade Strategy
 
-Canister state must survive upgrades. Rather than serializing and deserializing the full state, the canister uses an **append-only event log** stored in stable memory. This is the same approach used by the ckBTC, ckETH, and ckSOL minters.
+Canister state must survive upgrades. Different data structures have different cost profiles in terms of instructions and memory. The strategy is therefore chosen per data structure rather than applied uniformly.
+
+#### Core Data Structures
+
+Three hot-path data structures must be preserved across upgrades:
+
+- **`order_books`** — see [Order Book Data Structure](#order-book-data-structure).
+- **`balances`** — see [Balances](#balances).
+- **`order_history`** — see [Order History](#order-history).
+
+Each structure has three placement options, evaluated per-structure in the sections below:
+
+- **Stable memory**: stored typically in a `StableBTreeMap`; per-op durability at the cost of a stable-memory tax on every access.
+  - Pros:
+    - Per-op durability.
+    - Zero upgrade cost.
+    - Size bounded only by the 2 TiB per-subnet stable budget.
+  - Cons:
+    - Roughly ~20× slower per operation (see [#57](https://github.com/dfinity/dex/pull/57)), driven by:
+      - Every tree hop crosses the Wasm-to-host boundary to read or write stable memory — orders of magnitude more expensive than a heap pointer chase.
+      - Keys and values are serialized bytes, so each access pays a decode (and, on writes, a re-encode) of the full value.
+      - No in-place mutation: unlike heap `BTreeMap::get_mut`, `StableBTreeMap` exposes only `get` / `insert`, so even a single-field update (e.g. incrementing a `Balance`) requires a full read-modify-write of the entire value.
+    - Stable-memory layout is harder to evolve than a heap struct.
+- **Heap**: the structure lives in memory for fast access; a dedicated mechanism preserves it across upgrades. Two variants:
+  - **Event replay**: state-changing events are appended to a stable log and replayed at `post_upgrade` to reconstruct the in-memory state.
+    - Pros:
+      - Hot path at heap speed.
+      - Free audit trail.
+      - Survives `pre_upgrade` trap since events are already persisted.
+    - Cons:
+      - One stable write per state-changing operation.
+      - Replay cost grows with log size and could exceed the 300B instructions limit for `pre_upgrade`/`post_upgrade`:
+          - If there are many events.
+          - If replaying some event are costly (in terms of instructions)
+      - Event schema must remain backwards-compatible.
+  - **Pre Upgrade**: the full structure is serialized to stable memory at `pre_upgrade` and restored at `post_upgrade`.
+    - Pros:
+      - Zero per-op cost.
+      - Upgrade cost is bounded by current state size, not lifetime traffic.
+    - Cons:
+      - Footgun: `pre_upgrade` trap blocks the upgrade and can result in data loss (upgrade skipping `pre_upgrade`).
+      - Upgrade cost is linear in state size and can exceed the 300 B `pre_upgrade`/`post_upgrade` budget for large or unbounded structures.
+      - Serialization schema must remain backwards-compatible.
 
 #### Event Sourcing
 
