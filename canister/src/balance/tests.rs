@@ -35,7 +35,7 @@ mod balance {
     fn should_debit_reserved() {
         let mut balance = Balance::new(10u64, 90u64);
 
-        balance.debit_reserved(Quantity::from(30));
+        balance.debit_reserved(&Quantity::from(30));
 
         assert_eq!(balance, Balance::new(10u64, 60u64));
     }
@@ -44,7 +44,7 @@ mod balance {
     #[should_panic(expected = "BUG: debit_reserved underflow")]
     fn should_panic_on_debit_reserved_underflow() {
         let mut balance = Balance::new(0u64, 10u64);
-        balance.debit_reserved(Quantity::from(20));
+        balance.debit_reserved(&Quantity::from(20));
     }
 
     #[test]
