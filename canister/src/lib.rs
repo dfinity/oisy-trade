@@ -7,6 +7,17 @@ use std::{num::NonZeroU64, time::Duration};
 
 pub use runtime::{IC_RUNTIME, Runtime};
 
+/// Open a pair of canbench scopes: an aggregate scope and a specific scope.
+/// Both are no-ops when the `canbench-rs` feature is not enabled.
+macro_rules! bench_scopes {
+    ($aggregate:expr, $specific:expr) => {
+        #[cfg(feature = "canbench-rs")]
+        let _aggregate = canbench_rs::bench_scope($aggregate);
+        #[cfg(feature = "canbench-rs")]
+        let _specific = canbench_rs::bench_scope($specific);
+    };
+}
+
 pub mod balance;
 pub mod cbor;
 pub mod guard;

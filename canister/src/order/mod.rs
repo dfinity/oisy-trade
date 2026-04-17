@@ -387,10 +387,7 @@ impl Quantity {
     }
 
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
-        #[cfg(feature = "canbench-rs")]
-        let _q = canbench_rs::bench_scope("qty");
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("qty::checked_sub");
+        bench_scopes!("qty", "qty::checked_sub");
         let (low, borrow) = self.low.overflowing_sub(other.low);
         let high = self
             .high
@@ -478,10 +475,7 @@ impl From<Quantity> for Nat {
 
 impl Quantity {
     pub fn checked_add(self, rhs: Self) -> Option<Self> {
-        #[cfg(feature = "canbench-rs")]
-        let _q = canbench_rs::bench_scope("qty");
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("qty::add");
+        bench_scopes!("qty", "qty::add");
         let (low, carry) = self.low.overflowing_add(rhs.low);
         let high = self
             .high
@@ -491,10 +485,7 @@ impl Quantity {
     }
 
     pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
-        #[cfg(feature = "canbench-rs")]
-        let _q = canbench_rs::bench_scope("qty");
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("qty::mul_u64");
+        bench_scopes!("qty", "qty::mul_u64");
         // We want (high * 2^128 + low) * rhs, checked for overflow.
         // low * rhs can overflow u128, so split low into two 64-bit halves
         // and multiply each by rhs (u64 × u64 → u128, no overflow).
