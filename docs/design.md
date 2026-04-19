@@ -401,26 +401,10 @@ At-a-glance viability of each placement per data structure (🟢 = viable choice
 | `balances`      | 🟠 15× the number of instructions for settling as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)).                                                   | 🔴 replay complexity is O(settling): need to update balances according to the fills.<br>Over 22 M events / yr exceeds the upgrade budget                                                                    | 🔴 Once per upgrade per traded token: 150M for for balances needed for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)).<br>Doesn't scale well:<br> - Long tail: many users will have various tokens with small balances.<br> - Adding a new trading pair adds 2 token balances to snapshot |
 | `order_history` | 🟢 no efficiency concern                                                                                                    | 🔴 heap limit crossed at ~2 yr; replay blows the 300 B budget                                                                                                                                           | 🔴 snapshot blows the 300 B budget at ~22 M records                                                                                                                                                                                                                                                         |
 
-#### Event Sourcing
+### Auditability
 
-Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory. The in-memory `State` is a derived projection of these events.
-
-#### Upgrade Process
-
-- **Pre-upgrade**: nothing to do — events are already persisted in stable memory as they occur.
-- **Post-upgrade**: the canister replays the event log from the beginning to reconstruct the full in-memory `State`.
-
-#### Benefits
-
-- **Auditability**: the event log is a complete, ordered history of every state change.
-- **Simpler upgrades**: no need to maintain serialization compatibility for the `State` struct across versions. Only the event format needs to remain stable (new event types can be added without breaking existing ones).
-- **Debuggability**: bugs can be reproduced by replaying the event log.
-
-#### Considerations
-
-- **Replay time**: as the event log grows, post-upgrade replay takes longer. This can be mitigated by periodic checkpointing (snapshotting the state and only replaying events after the checkpoint).
-- **Event schema evolution**: new event types can be added freely, but existing event types should not be modified to ensure backwards-compatible replay.
-- **Peak load (open)**: the design must sustain ~40 trades/sec during market events for one hour (see [Expected Load](#expected-load)). The exact design of events to match that load is currently open. 
+* Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory.
+* Bugs can be reproduced by replaying the event log (may take a significant amount of time)
 
 ## Monitoring
 
