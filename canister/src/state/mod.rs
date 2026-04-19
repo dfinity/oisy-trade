@@ -416,6 +416,11 @@ impl State {
             .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
     }
+
+    pub fn get_order_book_mut(&mut self, trading_pair: &TradingPair) -> Option<&mut OrderBook> {
+        let book_id = *self.trading_pairs.get_book_id(trading_pair)?;
+        self.order_books.get_mut(&book_id)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
