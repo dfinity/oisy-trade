@@ -9,21 +9,32 @@ use dex_types_internal::UpgradeArg;
 #[cfg(test)]
 mod tests;
 
+/// Controls how `apply_state_transition` integrates an event.
+///
+/// `Normal` performs all state updates, including writes to structures backed
+/// by stable memory (currently `order_history`). `Replay` skips those writes
+/// because the stable-memory structure has already persisted them across the
+/// upgrade — re-inserting would panic as a duplicate.
+enum ApplyMode {
+    Normal,
+    Replay,
+}
+
 pub fn process_event(state: &mut State, payload: EventType, runtime: &impl Runtime) {
-    apply_state_transition(state, &payload);
+    apply_state_transition(state, &payload, ApplyMode::Normal);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition(state: &mut State, payload: &EventType) {
+fn apply_state_transition(state: &mut State, payload: &EventType, mode: ApplyMode) {
     use crate::order;
 
     match payload {
         EventType::Init(_) => {
             panic!("BUG: state re-initialization is not allowed");
         }
-        EventType::Upgrade(UpgradeArg { mode }) => {
-            if let Some(mode) = mode {
-                state.set_mode(mode.clone());
+        EventType::Upgrade(UpgradeArg { mode: new_mode }) => {
+            if let Some(new_mode) = new_mode {
+                state.set_mode(new_mode.clone());
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {
@@ -69,7 +80,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType) {
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            state.record_limit_order(*user, book_id, order);
+            match mode {
+                ApplyMode::Normal => state.record_limit_order(*user, book_id, order),
+                ApplyMode::Replay => state.replay_limit_order(*user, book_id, order),
+            }
         }
     }
 }
@@ -87,7 +101,7 @@ pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload);
+        apply_state_transition(&mut state, &event.payload, ApplyMode::Replay);
     }
     state
 }

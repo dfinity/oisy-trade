@@ -11,9 +11,10 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderId, OrderRecord,
+    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
+use crate::storage;
 use candid::{Nat, Principal};
 use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
@@ -49,7 +50,6 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: BTreeMap<Principal, BTreeMap<TokenId, Balance>>,
-    order_history: OrderHistory,
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
@@ -67,7 +67,6 @@ impl TryFrom<InitArg> for State {
             trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
             balances: BTreeMap::default(),
-            order_history: OrderHistory::new(),
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
         })
@@ -160,17 +159,50 @@ impl State {
             .expect("BUG: insufficient balance for validated order");
 
         let order_id = OrderId::new(book_id, order.id());
-        self.order_history.insert_once(
+        storage::order_history::insert_once(
             order_id,
             OrderRecord {
                 owner: user,
-                pair: pair.clone(),
                 side: order.side(),
                 price: order.price(),
                 quantity: order.remaining_quantity().clone(),
                 status: OrderStatus::Pending,
             },
         );
+        book.add_pending_order(order);
+    }
+
+    /// Applies a limit order without touching `order_history`.
+    ///
+    /// Used by the replay path: on upgrade the stable-memory `order_history`
+    /// already holds the record from the original submission, so replay must
+    /// only rebuild transient state (balance reservations + pending queue in
+    /// the order book) and must not re-insert the record (which would panic
+    /// as a duplicate).
+    pub fn replay_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
+        let pair = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair");
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing");
+
+        let (token, required) = match order.side() {
+            Side::Buy => (
+                pair.quote,
+                order.price().mul_quantity(order.remaining_quantity()),
+            ),
+            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+        };
+        self.balances
+            .get_mut(&user)
+            .and_then(|tokens| tokens.get_mut(&token))
+            .expect("BUG: user balance missing")
+            .reserve(required)
+            .expect("BUG: insufficient balance for validated order");
+
         book.add_pending_order(order);
     }
 
@@ -205,19 +237,11 @@ impl State {
                 let _p = canbench_rs::bench_scope("status");
                 for seq in output.resting_orders {
                     let order_id = OrderId::new(book_id, seq);
-                    *self
-                        .order_history
-                        .get_status_mut(&order_id)
-                        .expect("BUG: resting order not found in order_history") =
-                        OrderStatus::Open;
+                    storage::order_history::set_status(&order_id, OrderStatus::Open);
                 }
                 for seq in filled_seqs {
                     let order_id = OrderId::new(book_id, seq);
-                    *self
-                        .order_history
-                        .get_status_mut(&order_id)
-                        .expect("BUG: filled order not found in order_history") =
-                        OrderStatus::Filled;
+                    storage::order_history::set_status(&order_id, OrderStatus::Filled);
                 }
             }
         }
@@ -229,16 +253,14 @@ impl State {
         let taker = {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::order_history_get");
-            self.order_history
-                .get(&OrderId::new(book_id, fill.taker_order_seq))
+            storage::order_history::get(&OrderId::new(book_id, fill.taker_order_seq))
                 .expect("BUG: taker not found in order_history")
                 .owner
         };
         let maker = {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::order_history_get");
-            self.order_history
-                .get(&OrderId::new(book_id, fill.maker_order_seq))
+            storage::order_history::get(&OrderId::new(book_id, fill.maker_order_seq))
                 .expect("BUG: maker not found in order_history")
                 .owner
         };
@@ -290,7 +312,7 @@ impl State {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        self.order_history.get_status(&order_id)
+        storage::order_history::get_status(&order_id)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {

@@ -508,6 +508,12 @@ mod settle_fills {
     }
 
     fn setup() -> State {
+        // `order_history` is a thread-local `StableBTreeMap`. libtest runs each
+        // `#[test]` on a fresh thread, but any helper test that loops (like the
+        // proptests) would otherwise see records from the previous iteration
+        // and trip `insert_once`'s duplicate assertion. Clear it up-front so
+        // every test that goes through `setup()` starts from an empty map.
+        crate::storage::order_history::clear_for_test();
         let mut state = State::try_from(InitArg {
             mode: Mode::GeneralAvailability,
         })
@@ -698,11 +704,10 @@ mod settle_fills {
                         Side::Sell => (seller, buyer),
                     };
 
-                    state.order_history.insert_once(
+                    crate::storage::order_history::insert_once(
                         OrderId::new(BOOK_ID, fill.taker_order_seq),
                         OrderRecord {
                             owner: taker_owner,
-                            pair: pair.clone(),
                             side: fill.taker_side,
                             price: fill.taker_price,
                             quantity: fill.quantity.clone(),
@@ -713,11 +718,10 @@ mod settle_fills {
                         Side::Buy => Side::Sell,
                         Side::Sell => Side::Buy,
                     };
-                    state.order_history.insert_once(
+                    crate::storage::order_history::insert_once(
                         OrderId::new(BOOK_ID, fill.maker_order_seq),
                         OrderRecord {
                             owner: maker_owner,
-                            pair: pair.clone(),
                             side: maker_side,
                             price: fill.maker_price,
                             quantity: fill.quantity.clone(),

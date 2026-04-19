@@ -1,84 +1,76 @@
-use super::{OrderId, Price, Quantity, Side, TradingPair};
+use super::{OrderId, Price, Quantity, Side};
 use candid::Principal;
 use dex_types::OrderStatus;
-use std::collections::BTreeMap;
+use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
+use std::borrow::Cow;
 
 /// Record of an order from submission through terminal state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`],
+/// so the CBOR layout is an upgrade-durable schema: removing or renumbering a
+/// field breaks decoding of records written by prior canister versions. New
+/// fields must be added with `#[cbor(n(N), default)]` or an `Option<T>` type.
+/// The trading pair is deliberately not stored — it is derivable from the
+/// `OrderBookId` embedded in the [`OrderId`] via the trading-pair registry.
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct OrderRecord {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
     pub owner: Principal,
-    pub pair: TradingPair,
+    #[n(1)]
     pub side: Side,
+    #[n(2)]
     pub price: Price,
+    #[n(3)]
     pub quantity: Quantity,
+    #[cbor(n(4), with = "crate::cbor::order_status")]
     pub status: OrderStatus,
 }
 
-/// Tracks all orders from submission to terminal state.
-///
-/// Wraps the underlying storage to provide a seam for future trimming
-/// or migration to stable memory.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OrderHistory {
-    orders: BTreeMap<OrderId, OrderRecord>,
+impl Storable for OrderRecord {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("order record encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf).expect("order record encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode order record bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
 }
 
-impl OrderHistory {
-    /// Creates an empty order history.
-    pub fn new() -> Self {
-        Self::default()
+impl Storable for OrderId {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let (book, seq) = self.into_parts();
+        let mut buf = [0u8; 16];
+        buf[..8].copy_from_slice(&book.get().to_be_bytes());
+        buf[8..].copy_from_slice(&seq.get().to_be_bytes());
+        Cow::Owned(buf.to_vec())
     }
 
-    /// Insert a new order record. Panics if the order ID already exists.
-    pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
-        assert_eq!(
-            self.orders.insert(id, record),
-            None,
-            "BUG: duplicate order ID {id}"
-        );
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
-    /// Returns the record for the given order, or `None` if absent.
-    pub fn get(&self, id: &OrderId) -> Option<&OrderRecord> {
-        self.orders.get(id)
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(bytes.len(), 16, "OrderId must decode from exactly 16 bytes");
+        let book = u64::from_be_bytes(bytes[..8].try_into().expect("8-byte slice"));
+        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
+        OrderId::new(super::OrderBookId::new(book), super::OrderSeq::new(seq))
     }
 
-    /// Returns a mutable reference to the status of the given order, or `None` if absent.
-    ///
-    /// # Example
-    ///
-    /// Change the status of an order from Pending to Filled:
-    /// ```
-    /// # use dex_canister::order::{OrderHistory, OrderRecord, OrderId, OrderBookId, OrderSeq, Price, Quantity, Side, TradingPair, TokenId};
-    /// # use dex_types::OrderStatus;
-    /// # use candid::Principal;
-    /// let mut history = OrderHistory::new();
-    /// let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    /// let pair = TradingPair {
-    ///     base: TokenId::new(Principal::anonymous()),
-    ///     quote: TokenId::new(Principal::anonymous()),
-    /// };
-    /// history.insert_once(id, OrderRecord {
-    ///     owner: Principal::anonymous(),
-    ///     pair,
-    ///     side: Side::Buy,
-    ///     price: Price::new(100),
-    ///     quantity: Quantity::from(1_000_000u64),
-    ///     status: OrderStatus::Pending,
-    /// });
-    ///
-    /// *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
-    /// assert_eq!(history.get_status(&id), OrderStatus::Filled);
-    /// ```
-    pub fn get_status_mut(&mut self, id: &OrderId) -> Option<&mut OrderStatus> {
-        self.orders.get_mut(id).map(|r| &mut r.status)
-    }
-
-    /// Returns the status of the given order, or [`OrderStatus::NotFound`] if absent.
-    pub fn get_status(&self, id: &OrderId) -> OrderStatus {
-        self.orders
-            .get(id)
-            .map(|r| r.status.clone())
-            .unwrap_or(OrderStatus::NotFound)
-    }
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 16,
+        is_fixed_size: true,
+    };
 }
