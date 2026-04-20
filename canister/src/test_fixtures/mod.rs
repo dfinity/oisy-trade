@@ -220,6 +220,7 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 
 #[cfg(test)]
 pub mod arbitrary {
+    use crate::balance::Balance;
     use crate::order::{
         Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
     };
@@ -290,6 +291,14 @@ pub mod arbitrary {
     pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
         (any::<u64>(), any::<u64>())
             .prop_map(|(book, seq)| OrderId::new(OrderBookId::new(book), OrderSeq::new(seq)))
+    }
+
+    pub fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    pub fn arb_balance() -> impl Strategy<Value = Balance> {
+        (arb_quantity(), arb_quantity()).prop_map(|(free, reserved)| Balance::new(free, reserved))
     }
 
     /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a

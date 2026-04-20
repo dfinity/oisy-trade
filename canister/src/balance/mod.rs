@@ -16,12 +16,6 @@ mod tests;
 /// The balance is split into two parts:
 /// - `free`: funds available for new orders or withdrawal.
 /// - `reserved`: funds locked by open orders.
-///
-/// Persisted in an [`ic_stable_structures::StableBTreeMap`] (see
-/// [`TokenBalance`]) so the CBOR layout is an upgrade-durable schema:
-/// removing or renumbering a field breaks decoding of balances written by
-/// prior canister versions. New fields must be added with
-/// `#[cbor(n(N), default)]` or `Option<T>`.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, minicbor::Encode, minicbor::Decode)]
 pub struct Balance {
     #[n(0)]

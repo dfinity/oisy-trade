@@ -1,6 +1,9 @@
 mod balance {
     use crate::balance::{Balance, InsufficientBalanceError};
     use crate::order::Quantity;
+    use crate::test_fixtures::arbitrary::arb_balance;
+    use ic_stable_structures::Storable;
+    use proptest::prelude::*;
 
     #[test]
     fn should_reserve_from_free_balance() {
@@ -89,6 +92,15 @@ mod balance {
     fn should_panic_on_unreserve_underflow() {
         let mut balance = Balance::new(100u64, 10u64);
         balance.unreserve(Quantity::from(20));
+    }
+
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_stable_bytes(balance in arb_balance()) {
+            let bytes = balance.to_bytes();
+            let decoded = Balance::from_bytes(bytes);
+            prop_assert_eq!(decoded, balance);
+        }
     }
 }
 
