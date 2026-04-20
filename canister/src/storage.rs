@@ -1,7 +1,8 @@
 use crate::order::{OrderId, OrderRecord};
+use crate::state::OrderHistory;
 use crate::state::event::{Event, EventType};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableLog};
+use ic_stable_structures::{DefaultMemoryImpl, StableLog};
 use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
@@ -10,7 +11,6 @@ const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
-type OrderHistoryMap = StableBTreeMap<OrderId, OrderRecord, VMem>;
 
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> = RefCell::new(
@@ -26,8 +26,8 @@ thread_local! {
         )
     });
 
-    static ORDER_HISTORY: RefCell<OrderHistoryMap> = MEMORY_MANAGER.with(|m| {
-        RefCell::new(StableBTreeMap::init(m.borrow().get(ORDER_HISTORY_MEMORY_ID)))
+    static ORDER_HISTORY: RefCell<OrderHistory<VMem>> = MEMORY_MANAGER.with(|m| {
+        RefCell::new(OrderHistory::new(m.borrow().get(ORDER_HISTORY_MEMORY_ID)))
     });
 }
 
@@ -58,46 +58,29 @@ pub mod order_history {
 
     /// Insert a new order record. Panics if the order ID already exists.
     pub fn insert_once(id: OrderId, record: OrderRecord) {
-        ORDER_HISTORY.with(|map| {
-            let mut map = map.borrow_mut();
-            assert!(!map.contains_key(&id), "BUG: duplicate order ID {id}",);
-            map.insert(id, record);
-        });
+        ORDER_HISTORY.with(|h| h.borrow_mut().insert_once(id, record));
     }
 
     /// Returns a copy of the record for the given order, or `None` if absent.
     pub fn get(id: &OrderId) -> Option<OrderRecord> {
-        ORDER_HISTORY.with(|map| map.borrow().get(id))
+        ORDER_HISTORY.with(|h| h.borrow().get(id))
     }
 
     /// Returns the status of the given order, or `None` if absent.
     pub fn get_status(id: &OrderId) -> Option<OrderStatus> {
-        ORDER_HISTORY.with(|map| map.borrow().get(id).map(|r| r.status))
+        ORDER_HISTORY.with(|h| h.borrow().get_status(id))
     }
 
     /// Updates the status of an existing order. Panics if the order is unknown.
     pub fn set_status(id: &OrderId, status: OrderStatus) {
-        ORDER_HISTORY.with(|map| {
-            let mut map = map.borrow_mut();
-            let mut record = map
-                .get(id)
-                .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-            record.status = status;
-            map.insert(*id, record);
-        });
+        ORDER_HISTORY.with(|h| h.borrow_mut().set_status(id, status));
     }
 
-    /// Removes every entry. Intended only for unit tests so that iterations
-    /// of a proptest or consecutive `#[test]`s on the same thread start from
-    /// a clean map.
+    /// Clears the process-wide history. Intended only for unit tests so that
+    /// iterations of a proptest or consecutive `#[test]`s on the same thread
+    /// start from a clean map.
     #[cfg(test)]
     pub fn clear_for_test() {
-        ORDER_HISTORY.with(|map| {
-            let mut map = map.borrow_mut();
-            let ids: Vec<OrderId> = map.iter().map(|entry| *entry.key()).collect();
-            for id in ids {
-                map.remove(&id);
-            }
-        });
+        ORDER_HISTORY.with(|h| h.borrow_mut().clear_for_test());
     }
 }

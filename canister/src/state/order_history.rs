@@ -45,7 +45,6 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn clear_for_test(&mut self) {
         let ids: Vec<OrderId> = self.map.iter().map(|entry| *entry.key()).collect();
         for id in ids {
