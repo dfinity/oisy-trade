@@ -223,7 +223,7 @@ Deposits are independent from order placement. The user first approves the DEX c
 
 Users call `withdraw(token, amount)` to transfer tokens from their available balance to their wallet. The canister calls `icrc1_transfer` on the relevant ledger. The withdrawal fails if the requested amount exceeds the user's available balance or if the ledger is not available.
 
-### Memory Estimates
+### Balance Memory Estimates
 
 Assume **1M users with non-zero balances**, and that almost all quantities fit in a `u128` (per [#59](https://github.com/dfinity/dex/pull/59): `Quantity` is a stack-allocated `(u128, u128)` — 32 B — encoded as a plain CBOR integer when the value fits in `u64` and as a PosBignum Tag 2 otherwise). Balances are stored token-first (per [#60](https://github.com/dfinity/dex/pull/60): `BTreeMap<TokenId, BTreeMap<Principal, Balance>>`).
 
@@ -242,11 +242,11 @@ Totals at 1M users, varying the average number of tokens held per user. The oute
 | 5             | 5M            | ~550 MB | ~370 MB       |
 | 10            | 10M           | ~1.1 GB | ~740 MB       |
 
-Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 tokens/user is ~5 900 stable-memory pages — well within the 2 TiB stable budget, but large enough that the cost of serializing balances at every upgrade needs to be measured, not assumed.
+Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 tokens/user is ~5_900 stable-memory pages — well within the 2 TiB stable budget, but large enough that the cost of serializing balances at every upgrade needs to be measured, not assumed.
 
 ## Order History
 
-Every order submitted to the DEX is recorded in an append-only map keyed by `OrderId`. Each `OrderRecord` captures:
+Every order submitted to the DEX is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
@@ -258,9 +258,9 @@ A record is inserted once at submission and its `status` field is updated as the
 
 The history exists for a single purpose: serving the `get_order_status(order_id)` query so clients that have lost track of a submission can recover its outcome.
 
-### Memory Estimates
+### Order History Memory Estimates
 
-Per-record size, assuming `Quantity` encodes mostly in the `u128` range (see [Balance memory estimates](#memory-estimates)):
+Per-record size, assuming `Quantity` encodes mostly in the `u128` range (see [Balance Memory Estimates](#balance-memory-estimates)):
 
 | Item                             | Heap                    | CBOR                       |
 |----------------------------------|-------------------------|----------------------------|
@@ -378,7 +378,7 @@ The structure lives in memory for fast access; a dedicated mechanism preserves i
     - Survives `pre_upgrade` trap since events are already persisted.
   - Cons:
     - One stable write per state-changing operation.
-    - Replay cost grows with log size and may exceed the 300B instruction limit for `pre_upgrade`/`post_upgrade`:
+    - Replay cost grows with log size and may exceed the 300 B instruction limit for `pre_upgrade`/`post_upgrade`:
         - If the log contains many events.
         - If replaying some events is costly in instruction terms.
     - Event schema must remain backwards-compatible.
@@ -387,7 +387,7 @@ The structure lives in memory for fast access; a dedicated mechanism preserves i
     - Zero per-op cost.
     - Upgrade cost is bounded by current state size, not lifetime traffic.
   - Cons:
-    - Footgun: `pre_upgrade` trap blocks the upgrade and can result in data loss (upgrade skipping `pre_upgrade`).
+    - Footgun: a `pre_upgrade` trap aborts the upgrade, so upgrades cannot proceed until the issue is fixed or an alternative recovery/deployment path is used.
     - Upgrade cost is linear in state size and can exceed the 300 B `pre_upgrade`/`post_upgrade` budget for large or unbounded structures.
     - Serialization schema must remain backwards-compatible.
 
@@ -403,8 +403,8 @@ At-a-glance viability of each placement per data structure (🟢 = viable choice
 
 ### Auditability
 
-* Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory.
-* Bugs can be reproduced by replaying the event log (may take a significant amount of time)
+- Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory.
+- Bugs can be reproduced by replaying the event log (may take a significant amount of time).
 
 ## Monitoring
 
