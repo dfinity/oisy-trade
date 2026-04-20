@@ -552,9 +552,9 @@ mod process_pending_orders {
 
 mod history {
     use crate::order::{
-        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,
+        Side,
     };
-    use crate::state::OrderHistory;
     use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
     use ic_stable_structures::{Storable, VectorMemory};

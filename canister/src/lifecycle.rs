@@ -1,6 +1,7 @@
+use crate::order::OrderHistory;
+use crate::state::State;
 use crate::state::audit;
 use crate::state::event::EventType;
-use crate::state::{OrderHistory, State};
 use crate::{MATCHING_INTERVAL, Runtime, state, storage};
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;

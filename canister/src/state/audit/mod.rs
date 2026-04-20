@@ -1,5 +1,6 @@
-use super::{OrderHistory, State};
+use super::State;
 use crate::Runtime;
+use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
 };

@@ -4,6 +4,8 @@ mod history;
 mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
+pub use history::OrderHistory;
+
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
 use ic_stable_structures::Storable;

@@ -1,10 +1,8 @@
 pub mod audit;
 pub mod event;
 mod map;
-mod order_history;
 
 pub use map::TradingPairMap;
-pub use order_history::OrderHistory;
 
 #[cfg(test)]
 mod tests;
@@ -13,8 +11,9 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
-    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderId, OrderRecord,
-    OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};

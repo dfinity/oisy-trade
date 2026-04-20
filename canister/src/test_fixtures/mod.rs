@@ -4,7 +4,7 @@ use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
     TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use crate::state;
+use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
@@ -40,7 +40,7 @@ pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
         },
-        state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+        order::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
     )
     .unwrap()
 }
@@ -52,7 +52,7 @@ pub fn state_vmem() -> state::State<crate::storage::VMem> {
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
         },
-        state::OrderHistory::new(crate::storage::order_history_memory()),
+        order::OrderHistory::new(crate::storage::order_history_memory()),
     )
     .unwrap()
 }
@@ -152,7 +152,7 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
-    let order_history = state::OrderHistory::new(crate::storage::order_history_memory());
+    let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
     state::init_state(
         state::State::new(
             dex_types_internal::InitArg {
