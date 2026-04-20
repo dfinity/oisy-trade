@@ -6,7 +6,10 @@ mod tests;
 pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
+use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
 use num_bigint::BigUint;
+use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -157,6 +160,33 @@ impl OrderId {
     pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
         (self.book_id, self.seq)
     }
+}
+
+impl Storable for OrderId {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let (book, seq) = self.into_parts();
+        let mut buf = [0u8; 16];
+        buf[..8].copy_from_slice(&book.get().to_be_bytes());
+        buf[8..].copy_from_slice(&seq.get().to_be_bytes());
+        Cow::Owned(buf.to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(bytes.len(), 16, "OrderId must decode from exactly 16 bytes");
+        let book = u64::from_be_bytes(bytes[..8].try_into().expect("8-byte slice"));
+        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
+        OrderId::new(OrderBookId::new(book), OrderSeq::new(seq))
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 16,
+        is_fixed_size: true,
+    };
 }
 
 impl fmt::Display for OrderId {

@@ -1,4 +1,4 @@
-use super::{OrderId, OrderStatus, Price, Quantity, Side};
+use super::{OrderStatus, Price, Quantity, Side};
 use candid::Principal;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -45,31 +45,4 @@ impl Storable for OrderRecord {
     }
 
     const BOUND: Bound = Bound::Unbounded;
-}
-
-impl Storable for OrderId {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let (book, seq) = self.into_parts();
-        let mut buf = [0u8; 16];
-        buf[..8].copy_from_slice(&book.get().to_be_bytes());
-        buf[8..].copy_from_slice(&seq.get().to_be_bytes());
-        Cow::Owned(buf.to_vec())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let bytes: &[u8] = bytes.as_ref();
-        assert_eq!(bytes.len(), 16, "OrderId must decode from exactly 16 bytes");
-        let book = u64::from_be_bytes(bytes[..8].try_into().expect("8-byte slice"));
-        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
-        OrderId::new(super::OrderBookId::new(book), super::OrderSeq::new(seq))
-    }
-
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 16,
-        is_fixed_size: true,
-    };
 }

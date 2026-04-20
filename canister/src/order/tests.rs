@@ -1,5 +1,6 @@
 mod order_id {
     use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use ic_stable_structures::Storable;
     use proptest::prelude::*;
 
     proptest! {
@@ -26,6 +27,33 @@ mod order_id {
         #[test]
         fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
             prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+        }
+
+        #[test]
+        fn should_roundtrip_order_id_through_stable_bytes(
+            book in any::<u64>(),
+            seq in any::<u64>(),
+        ) {
+            let id = OrderId::new(OrderBookId::new(book), OrderSeq::new(seq));
+            let bytes = id.to_bytes();
+            let decoded = OrderId::from_bytes(bytes);
+            prop_assert_eq!(decoded, id);
+        }
+
+        /// Big-endian encoding makes the stable-memory key order match the
+        /// lexicographic byte order of `(book_id, seq)`, so `StableBTreeMap`
+        /// iteration traverses orders in the same order as a heap `BTreeMap`
+        /// keyed by `OrderId`.
+        #[test]
+        fn should_preserve_order_under_be_encoding(
+            a in any::<(u64, u64)>(),
+            b in any::<(u64, u64)>(),
+        ) {
+            let id_a = OrderId::new(OrderBookId::new(a.0), OrderSeq::new(a.1));
+            let id_b = OrderId::new(OrderBookId::new(b.0), OrderSeq::new(b.1));
+            let bytes_a = id_a.to_bytes();
+            let bytes_b = id_b.to_bytes();
+            prop_assert_eq!(id_a.cmp(&id_b), bytes_a.cmp(&bytes_b));
         }
     }
 }
@@ -529,6 +557,7 @@ mod history {
     };
     use crate::storage::order_history;
     use candid::Principal;
+    use ic_stable_structures::Storable;
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -580,55 +609,19 @@ mod history {
         assert_eq!(order_history::get_status(&id), Some(OrderStatus::Filled));
     }
 
-    mod storable {
-        use super::test_record;
-        use crate::order::{OrderBookId, OrderId, OrderSeq, OrderStatus};
-        use ic_stable_structures::Storable;
-        use proptest::prelude::*;
-
-        #[test]
-        fn should_roundtrip_order_record_through_stable_bytes() {
-            for status in [
-                OrderStatus::Pending,
-                OrderStatus::Open,
-                OrderStatus::Filled,
-                OrderStatus::Canceled,
-            ] {
-                let mut record = test_record();
-                record.status = status;
-                let bytes = record.to_bytes();
-                let decoded = crate::order::OrderRecord::from_bytes(bytes);
-                assert_eq!(decoded, record);
-            }
-        }
-
-        proptest! {
-            #[test]
-            fn should_roundtrip_order_id_through_stable_bytes(
-                book in any::<u64>(),
-                seq in any::<u64>(),
-            ) {
-                let id = OrderId::new(OrderBookId::new(book), OrderSeq::new(seq));
-                let bytes = id.to_bytes();
-                let decoded = OrderId::from_bytes(bytes);
-                prop_assert_eq!(decoded, id);
-            }
-
-            /// Big-endian encoding makes the stable-memory key order match the
-            /// lexicographic byte order of `(book_id, seq)`, so `StableBTreeMap`
-            /// iteration traverses orders in the same order as a heap `BTreeMap`
-            /// keyed by `OrderId`.
-            #[test]
-            fn should_preserve_order_under_be_encoding(
-                a in any::<(u64, u64)>(),
-                b in any::<(u64, u64)>(),
-            ) {
-                let id_a = OrderId::new(OrderBookId::new(a.0), OrderSeq::new(a.1));
-                let id_b = OrderId::new(OrderBookId::new(b.0), OrderSeq::new(b.1));
-                let bytes_a = id_a.to_bytes();
-                let bytes_b = id_b.to_bytes();
-                prop_assert_eq!(id_a.cmp(&id_b), bytes_a.cmp(&bytes_b));
-            }
+    #[test]
+    fn should_roundtrip_order_record_through_stable_bytes() {
+        for status in [
+            OrderStatus::Pending,
+            OrderStatus::Open,
+            OrderStatus::Filled,
+            OrderStatus::Canceled,
+        ] {
+            let mut record = test_record();
+            record.status = status;
+            let bytes = record.to_bytes();
+            let decoded = OrderRecord::from_bytes(bytes);
+            assert_eq!(decoded, record);
         }
     }
 }
