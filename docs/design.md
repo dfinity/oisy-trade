@@ -223,66 +223,6 @@ Deposits are independent from order placement. The user first approves the DEX c
 
 Users call `withdraw(token, amount)` to transfer tokens from their available balance to their wallet. The canister calls `icrc1_transfer` on the relevant ledger. The withdrawal fails if the requested amount exceeds the user's available balance or if the ledger is not available.
 
-### Memory Estimates
-
-Assume **1M users with non-zero balances**, and that almost all quantities fit in a `u128` (per [#59](https://github.com/dfinity/dex/pull/59): `Quantity` is a stack-allocated `(u128, u128)` — 32 B — encoded as a plain CBOR integer when the value fits in `u64` and as a PosBignum Tag 2 otherwise). Balances are stored token-first (per [#60](https://github.com/dfinity/dex/pull/60): `BTreeMap<TokenId, BTreeMap<Principal, Balance>>`).
-
-Per-entry sizes:
-
-| Item                       | Heap  | CBOR                              |
-|----------------------------|-------|-----------------------------------|
-| `TokenId` / `Principal`    | ~30 B | ~32 B                             |
-| `Balance` (2 × `Quantity`) | 64 B  | ~40 B (u128 values via PosBignum) |
-
-Totals at 1M users, varying the average number of tokens held per user. The outer `TokenId` map is dominated by a handful of listed tokens, so nearly all space is in the inner `Principal → Balance` maps:
-
-| Tokens / user | Inner entries | Heap    | CBOR snapshot |
-|---------------|---------------|---------|---------------|
-| 2             | 2M            | ~220 MB | ~150 MB       |
-| 5             | 5M            | ~550 MB | ~370 MB       |
-| 10            | 10M           | ~1.1 GB | ~740 MB       |
-
-Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 tokens/user is ~5 900 stable-memory pages — well within the 2 TiB stable budget, but large enough that the cost of serializing balances at every upgrade needs to be measured, not assumed.
-
-## Order History
-
-Every order submitted to the DEX is recorded in an append-only map keyed by `OrderId`. Each `OrderRecord` captures:
-
-- **owner**: the `Principal` that submitted the order.
-- **side**: `Buy` or `Sell`.
-- **price**: the limit price as a `u64`.
-- **quantity**: the original submission size as a `Quantity`.
-- **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.
-
-A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
-
-The history exists for a single purpose: serving the `get_order_status(order_id)` query so clients that have lost track of a submission can recover its outcome.
-
-### Memory Estimates
-
-Per-record size, assuming `Quantity` encodes mostly in the `u128` range (see [Balance memory estimates](#memory-estimates)):
-
-| Item                             | Heap                    | CBOR                       |
-|----------------------------------|-------------------------|----------------------------|
-| `OrderId` (key, `(u64, u64)`)    | 16 B                    | ~18 B                      |
-| `owner: Principal`               | ~30 B                   | ~32 B                      |
-| `price: u64`                     | 8 B                     | ~5 B                       |
-| `quantity: Quantity`             | 32 B                    | ~20 B (u128 via PosBignum) |
-| `side` + `status`                | 2 B                     | ~2 B                       |
-| Overhead                         | ~15 B (BTree amortized) | ~5 B (CBOR map)            |
-| **Per record**                   | **~100 B**              | **~85 B**                  |
-
-Applying the [expected load](#expected-load) — 0.7 orders/s steady-state, 40 orders/s sustained during peak-hour events:
-
-| Horizon                             | Orders | Heap    | CBOR    |
-|-------------------------------------|--------|---------|---------|
-| 1 day @ steady                      | 60 K   | ~6 MB   | ~5 MB   |
-| 1 yr @ steady                       | 22 M   | ~2.2 GB | ~1.9 GB |
-| 1 yr @ steady + ~50 peak hours      | ~30 M  | ~3.0 GB | ~2.6 GB |
-| 2 yr @ steady                       | 44 M   | ~4.4 GB | ~3.7 GB |
-
-`order_history` grows monotonically with the total number of orders ever placed. It fits comfortably on the heap for the first year of steady-state traffic but crosses the 4 GiB heap limit at around two years. A retention or archival policy is required unless the history is stored in stable memory, where the 2 TiB per-subnet budget dominates.
-
 ## Architecture
 
 ### Single-Canister Design
@@ -338,73 +278,30 @@ Peak load is the binding constraint. The timer-driven matching engine naturally 
 
 See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
 
-### Upgrade Strategy
+### State Persistence
 
-Canister state must survive upgrades. Different data structures have different cost profiles in terms of instructions and memory. The strategy is therefore chosen per data structure rather than applied uniformly.
+Canister state must survive upgrades. Rather than serializing and deserializing the full state, the canister uses an **append-only event log** stored in stable memory. This is the same approach used by the ckBTC, ckETH, and ckSOL minters.
 
-#### Core Data Structures
+#### Event Sourcing
 
-Three hot-path data structures must be preserved across upgrades:
+Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory. The in-memory `State` is a derived projection of these events.
 
-- **`order_books`** — see [Order Book Data Structure](#order-book-data-structure).
-- **`balances`** — see [Balances](#balances).
-- **`order_history`** — see [Order History](#order-history).
+#### Upgrade Process
 
-Each structure can live either in stable memory or on the heap. The two placements are described in the following subsections and evaluated per-structure in the later sections.
+- **Pre-upgrade**: nothing to do — events are already persisted in stable memory as they occur.
+- **Post-upgrade**: the canister replays the event log from the beginning to reconstruct the full in-memory `State`.
 
-#### Stable Memory
+#### Benefits
 
-Stored typically in a `StableBTreeMap`; per-op durability at the cost of a stable-memory tax on every access.
+- **Auditability**: the event log is a complete, ordered history of every state change.
+- **Simpler upgrades**: no need to maintain serialization compatibility for the `State` struct across versions. Only the event format needs to remain stable (new event types can be added without breaking existing ones).
+- **Debuggability**: bugs can be reproduced by replaying the event log.
 
-- Pros:
-  - Per-op durability.
-  - Zero upgrade cost.
-  - Size bounded only by the 2 TiB per-subnet stable budget.
-- Cons:
-  - Roughly ~20× slower per operation (see [#57](https://github.com/dfinity/dex/pull/57)), driven by:
-    - Every tree hop crosses the Wasm-to-host boundary to read or write stable memory — orders of magnitude more expensive than a heap pointer chase.
-    - Keys and values are serialized bytes, so each access pays a decode (and, on writes, a re-encode) of the full value.
-    - No in-place mutation: unlike heap `BTreeMap::get_mut`, `StableBTreeMap` exposes only `get` / `insert`, so even a single-field update (e.g. incrementing a `Balance`) requires a full read-modify-write of the entire value.
-  - Stable-memory layout is harder to evolve than a heap struct.
+#### Considerations
 
-#### Heap
-
-The structure lives in memory for fast access; a dedicated mechanism preserves it across upgrades. Two variants:
-
-- **Event replay**: state-changing events are appended to a stable log and replayed at `post_upgrade` to reconstruct the in-memory state.
-  - Pros:
-    - Hot path at heap speed.
-    - Free audit trail.
-    - Survives `pre_upgrade` trap since events are already persisted.
-  - Cons:
-    - One stable write per state-changing operation.
-    - Replay cost grows with log size and could exceed the 300B instructions limit for `pre_upgrade`/`post_upgrade`:
-        - If there are many events.
-        - If replaying some event are costly (in terms of instructions)
-    - Event schema must remain backwards-compatible.
-- **Pre Upgrade**: the full structure is serialized to stable memory at `pre_upgrade` and restored at `post_upgrade`.
-  - Pros:
-    - Zero per-op cost.
-    - Upgrade cost is bounded by current state size, not lifetime traffic.
-  - Cons:
-    - Footgun: `pre_upgrade` trap blocks the upgrade and can result in data loss (upgrade skipping `pre_upgrade`).
-    - Upgrade cost is linear in state size and can exceed the 300 B `pre_upgrade`/`post_upgrade` budget for large or unbounded structures.
-    - Serialization schema must remain backwards-compatible.
-
-#### Summary
-
-At-a-glance viability of each placement per data structure (🟢 = viable choice, 🔴 = ruled out).
-
-| Data structure  | Stable memory                                                                                                               | Heap + event replay                                                                                                                                                                                     | Heap + pre-upgrade snapshot                                                                                                                                                                                                                                                                                 |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `order_books`   | 🔴 21×-29x the number of instructions for matching as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)) | 🔴 replay complexity is O(matching) in the worst-case, e.g. insert resting orders which involves only tree operation that would need to be replayed.<br>Over 22 M events / yr exceeds the upgrade budget | 🟢 Once per upgrade per order book: 60M instructions for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)) amounting to 2bps of the 300 B instructions upgrade budget so that we could easily snapshots 1_000 order books                                                                    |
-| `balances`      | 🟠 15× the number of instructions for settling as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)).                                                   | 🔴 replay complexity is O(settling): need to update balances according to the fills.<br>Over 22 M events / yr exceeds the upgrade budget                                                                    | 🔴 Once per upgrade per traded token: 150M for for balances needed for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)).<br>Doesn't scale well:<br> - Long tail: many users will have various tokens with small balances.<br> - Adding a new trading pair adds 2 token balances to snapshot |
-| `order_history` | 🟢 no efficiency concern                                                                                                    | 🔴 heap limit crossed at ~2 yr; replay blows the 300 B budget                                                                                                                                           | 🔴 snapshot blows the 300 B budget at ~22 M records                                                                                                                                                                                                                                                         |
-
-### Auditability
-
-* Every state-changing operation (deposit, order placement, fill, cancellation, withdrawal, pair configuration change, etc.) is recorded as an event in a persistent, append-only log in stable memory.
-* Bugs can be reproduced by replaying the event log (may take a significant amount of time)
+- **Replay time**: as the event log grows, post-upgrade replay takes longer. This can be mitigated by periodic checkpointing (snapshotting the state and only replaying events after the checkpoint).
+- **Event schema evolution**: new event types can be added freely, but existing event types should not be modified to ensure backwards-compatible replay.
+- **Peak load (open)**: the design must sustain ~40 trades/sec during market events for one hour (see [Expected Load](#expected-load)). The exact design of events to match that load is currently open. 
 
 ## Monitoring
 
