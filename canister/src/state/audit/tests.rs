@@ -1,94 +1,78 @@
 use super::*;
-use crate::balance::Balance;
-use crate::order::{LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize};
-use crate::state::event::{AddLimitOrderEvent, AddTradingPairEvent, DepositEvent};
-use crate::test_fixtures;
+use crate::order::{
+    OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+};
+use crate::state::StableMemoryOptions;
+use crate::state::event::{AddLimitOrderEvent, DepositEvent};
+use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
+use crate::test_fixtures::{
+    LOT_SIZE, TICK_SIZE, base_metadata, order_history, quote_metadata, state,
+};
 use candid::Principal;
-use dex_types_internal::{InitArg, Mode, UpgradeArg};
-use std::num::NonZeroU64;
-use test_fixtures::{order_history, state};
-
-fn init_event(mode: Mode) -> Event {
-    Event {
-        timestamp: 0,
-        payload: EventType::Init(InitArg { mode }),
-    }
-}
-
-fn upgrade_event(mode: Option<Mode>) -> Event {
-    Event {
-        timestamp: 1,
-        payload: EventType::Upgrade(UpgradeArg { mode }),
-    }
-}
-
-fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
-    use crate::order::{self, OrderBookId, TokenMetadata};
-    Event {
-        timestamp: 2,
-        payload: EventType::AddTradingPair(AddTradingPairEvent {
-            book_id: OrderBookId::ZERO,
-            base: order::TokenId::new(base),
-            quote: order::TokenId::new(quote),
-            tick_size: TickSize::new(NonZeroU64::new(10).unwrap()),
-            lot_size: LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
-            base_metadata: TokenMetadata {
-                symbol: "BASE".to_string(),
-                decimals: 8,
-            },
-            quote_metadata: TokenMetadata {
-                symbol: "QUOTE".to_string(),
-                decimals: 8,
-            },
-        }),
-    }
-}
+use dex_types_internal::Mode;
 
 #[test]
 fn should_replay_init_event() {
-    let replayed_state =
-        replay_events(vec![init_event(Mode::GeneralAvailability)], order_history());
-    let expected = state();
-    assert_eq!(replayed_state, expected);
+    let normal = state();
+    let replayed = replay_events(
+        vec![init_event(Mode::GeneralAvailability)],
+        normal.order_history.clone(),
+    );
+    assert_eq!(replayed, normal);
 }
 
 #[test]
 fn should_replay_init_then_upgrade() {
     let restricted = Mode::restricted_to(vec![Principal::from_slice(&[0x01])]);
-    let replayed_state = replay_events(
+    let mut normal = state();
+    normal.set_mode(restricted.clone());
+
+    let replayed = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),
-            upgrade_event(Some(restricted.clone())),
+            upgrade_event(Some(restricted)),
         ],
-        order_history(),
+        normal.order_history.clone(),
     );
-    let mut expected = state();
-    expected.set_mode(restricted);
-    assert_eq!(expected, replayed_state);
+    assert_eq!(replayed, normal);
 }
 
 #[test]
 fn should_replay_upgrade_without_mode_change() {
-    let replayed_state = replay_events(
+    let normal = state();
+    let replayed = replay_events(
         vec![init_event(Mode::GeneralAvailability), upgrade_event(None)],
-        order_history(),
+        normal.order_history.clone(),
     );
-    let expected = state();
-    assert_eq!(expected, replayed_state);
+    assert_eq!(replayed, normal);
 }
 
 #[test]
 fn should_replay_add_trading_pair() {
     let base = Principal::from_slice(&[0x01]);
     let quote = Principal::from_slice(&[0x02]);
-    let state = replay_events(
+
+    let mut normal = state();
+    normal.record_trading_pair(
+        OrderBookId::ZERO,
+        TradingPair {
+            base: TokenId::new(base),
+            quote: TokenId::new(quote),
+        },
+        base_metadata(),
+        quote_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+
+    let replayed = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),
             add_trading_pair_event(base, quote),
         ],
-        order_history(),
+        normal.order_history.clone(),
     );
-    assert_eq!(state.trading_pairs().len(), 1);
+    assert_eq!(replayed, normal);
 }
 
 #[test]
@@ -96,8 +80,23 @@ fn should_replay_deposit() {
     let base = Principal::from_slice(&[0x01]);
     let quote = Principal::from_slice(&[0x02]);
     let user = Principal::from_slice(&[0x03]);
+    let amount = 1_000_000u64;
 
-    let state = replay_events(
+    let mut normal = state();
+    normal.record_trading_pair(
+        OrderBookId::ZERO,
+        TradingPair {
+            base: TokenId::new(base),
+            quote: TokenId::new(quote),
+        },
+        base_metadata(),
+        quote_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+    normal.deposit(user, TokenId::new(base), Quantity::from(amount));
+
+    let replayed = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),
             add_trading_pair_event(base, quote),
@@ -105,18 +104,14 @@ fn should_replay_deposit() {
                 timestamp: 3,
                 payload: EventType::Deposit(DepositEvent {
                     user,
-                    token: crate::order::TokenId::new(base),
-                    amount: Quantity::from(1_000_000u64),
+                    token: TokenId::new(base),
+                    amount: Quantity::from(amount),
                 }),
             },
         ],
-        order_history(),
+        normal.order_history.clone(),
     );
-
-    assert_eq!(
-        state.get_balance(&user, &crate::order::TokenId::new(base)),
-        Balance::new(1_000_000u64, 0u64)
-    );
+    assert_eq!(replayed, normal);
 }
 
 #[test]
@@ -128,7 +123,30 @@ fn should_replay_add_limit_order() {
     let order_price = 100u64;
     let order_quantity = 1_000_000u64;
 
-    let state = replay_events(
+    let pair = TradingPair {
+        base: TokenId::new(base),
+        quote: TokenId::new(quote),
+    };
+    let pending = PendingOrder {
+        side: Side::Buy,
+        price: Price::new(order_price),
+        quantity: Quantity::from(order_quantity),
+    };
+
+    let mut normal = state();
+    normal.record_trading_pair(
+        OrderBookId::ZERO,
+        pair.clone(),
+        base_metadata(),
+        quote_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+    normal.deposit(user, TokenId::new(quote), Quantity::from(deposit_amount));
+    let (order_id, order) = normal.validate_limit_order(user, pair, pending).unwrap();
+    normal.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+
+    let replayed = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),
             add_trading_pair_event(base, quote),
@@ -136,7 +154,7 @@ fn should_replay_add_limit_order() {
                 timestamp: 3,
                 payload: EventType::Deposit(DepositEvent {
                     user,
-                    token: crate::order::TokenId::new(quote),
+                    token: TokenId::new(quote),
                     amount: Quantity::from(deposit_amount),
                 }),
             },
@@ -151,18 +169,9 @@ fn should_replay_add_limit_order() {
                 }),
             },
         ],
-        order_history(),
+        normal.order_history.clone(),
     );
-
-    // Balance should show reserved funds (buy: price * quantity = 100_000_000).
-    // Replay rebuilds transient state (balance reservations, pending-order queue)
-    // from the event log; order_history is not re-inserted by replay, so
-    // `get_order_status` returns `None` on a fresh test-scoped history.
-    let balance = state.get_balance(&user, &crate::order::TokenId::new(quote));
-    assert_eq!(balance, Balance::new(0u64, deposit_amount));
-
-    let order_id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    assert_eq!(state.get_order_status(order_id), None);
+    assert_eq!(replayed, normal);
 }
 
 #[test]

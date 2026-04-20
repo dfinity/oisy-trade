@@ -36,6 +36,20 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
+pub fn base_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "BASE".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn quote_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "QUOTE".to_string(),
+        decimals: 8,
+    }
+}
+
 pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
     state::State::new(
         dex_types_internal::InitArg {
