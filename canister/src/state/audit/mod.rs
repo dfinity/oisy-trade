@@ -1,5 +1,6 @@
 use super::{StableMemoryOptions, State};
 use crate::Runtime;
+use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
@@ -11,13 +12,17 @@ use ic_stable_structures::Memory;
 #[cfg(test)]
 mod tests;
 
-pub fn process_event<M: Memory>(state: &mut State<M>, payload: EventType, runtime: &impl Runtime) {
+pub fn process_event<MH: Memory, MB: Memory>(
+    state: &mut State<MH, MB>,
+    payload: EventType,
+    runtime: &impl Runtime,
+) {
     apply_state_transition(state, &payload, StableMemoryOptions::Write);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition<M: Memory>(
-    state: &mut State<M>,
+fn apply_state_transition<MH: Memory, MB: Memory>(
+    state: &mut State<MH, MB>,
     payload: &EventType,
     persistence: StableMemoryOptions,
 ) {
@@ -59,7 +64,7 @@ fn apply_state_transition<M: Memory>(
             token,
             amount,
         }) => {
-            state.deposit(*user, *token, *amount);
+            state.deposit(*user, *token, *amount, persistence);
         }
         EventType::AddLimitOrder(AddLimitOrderEvent {
             user,
@@ -80,10 +85,11 @@ fn apply_state_transition<M: Memory>(
     }
 }
 
-pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
+pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
-    order_history: OrderHistory<M>,
-) -> State<M> {
+    order_history: OrderHistory<MH>,
+    balances: TokenBalance<MB>,
+) -> State<MH, MB> {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
         .next()
@@ -92,7 +98,8 @@ pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history).expect("BUG: state initialization should succeed"),
+        } => State::new(init_arg, order_history, balances)
+            .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {

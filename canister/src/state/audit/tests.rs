@@ -6,7 +6,7 @@ use crate::state::StableMemoryOptions;
 use crate::state::event::{AddLimitOrderEvent, DepositEvent};
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
-    LOT_SIZE, TICK_SIZE, base_metadata, order_history, quote_metadata, state,
+    LOT_SIZE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata, state,
 };
 use candid::Principal;
 use dex_types_internal::Mode;
@@ -17,6 +17,7 @@ fn should_replay_init_event() {
     let replayed = replay_events(
         vec![init_event(Mode::GeneralAvailability)],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -33,6 +34,7 @@ fn should_replay_init_then_upgrade() {
             upgrade_event(Some(restricted)),
         ],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -43,6 +45,7 @@ fn should_replay_upgrade_without_mode_change() {
     let replayed = replay_events(
         vec![init_event(Mode::GeneralAvailability), upgrade_event(None)],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -71,6 +74,7 @@ fn should_replay_add_trading_pair() {
             add_trading_pair_event(base, quote),
         ],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -94,7 +98,12 @@ fn should_replay_deposit() {
         TICK_SIZE,
         LOT_SIZE,
     );
-    normal.deposit(user, TokenId::new(base), Quantity::from(amount));
+    normal.deposit(
+        user,
+        TokenId::new(base),
+        Quantity::from(amount),
+        StableMemoryOptions::Write,
+    );
 
     let replayed = replay_events(
         vec![
@@ -110,6 +119,7 @@ fn should_replay_deposit() {
             },
         ],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -142,7 +152,12 @@ fn should_replay_add_limit_order() {
         TICK_SIZE,
         LOT_SIZE,
     );
-    normal.deposit(user, TokenId::new(quote), Quantity::from(deposit_amount));
+    normal.deposit(
+        user,
+        TokenId::new(quote),
+        Quantity::from(deposit_amount),
+        StableMemoryOptions::Write,
+    );
     let (order_id, order) = normal.validate_limit_order(user, pair, pending).unwrap();
     normal.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
 
@@ -170,6 +185,7 @@ fn should_replay_add_limit_order() {
             },
         ],
         normal.order_history.clone(),
+        normal.balances.clone(),
     );
     assert_eq!(replayed, normal);
 }
@@ -177,11 +193,11 @@ fn should_replay_add_limit_order() {
 #[test]
 #[should_panic(expected = "the event log should not be empty")]
 fn should_panic_on_empty_events() {
-    replay_events(Vec::<Event>::new(), order_history());
+    replay_events(Vec::<Event>::new(), order_history(), balances());
 }
 
 #[test]
 #[should_panic(expected = "the first event must be an Init event")]
 fn should_panic_when_first_event_is_not_init() {
-    replay_events(vec![upgrade_event(None)], order_history());
+    replay_events(vec![upgrade_event(None)], order_history(), balances());
 }

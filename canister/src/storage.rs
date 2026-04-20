@@ -7,6 +7,7 @@ use std::cell::RefCell;
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
+const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -52,4 +53,11 @@ where
 /// `init` / `post_upgrade`.
 pub fn order_history_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(ORDER_HISTORY_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice dedicated to the balances map.
+/// Used to construct the production `TokenBalance<VMem>` on canister
+/// `init` / `post_upgrade`.
+pub fn balances_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(BALANCES_MEMORY_ID))
 }

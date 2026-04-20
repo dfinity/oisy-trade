@@ -48,10 +48,13 @@ mod assert_caller_is_allowed {
         state.assert_caller_is_allowed(&mock);
     }
 
-    fn state(mode: Mode) -> State<ic_stable_structures::VectorMemory> {
+    fn state(
+        mode: Mode,
+    ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
         State::new(
             dex_types_internal::InitArg { mode },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
     }
@@ -271,7 +274,7 @@ mod settle_fills {
     use ic_stable_structures::VectorMemory;
     use std::collections::BTreeMap;
 
-    type TestState = State<VectorMemory>;
+    type TestState = State<VectorMemory, VectorMemory>;
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -671,7 +674,7 @@ mod settle_fills {
             ),
             Side::Sell => (pair.base, pending.quantity),
         };
-        state.deposit(user, deposit.0, deposit.1);
+        state.deposit(user, deposit.0, deposit.1, StableMemoryOptions::Write);
         let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
         state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
         order_id
@@ -825,9 +828,9 @@ mod settle_fills {
                         Side::Sell => fill.maker_price,
                     };
                     let buy_reserve = buyer_price.checked_mul_quantity(&fill.quantity).unwrap();
-                    state.deposit(buyer, pair.quote, buy_reserve);
+                    state.deposit(buyer, pair.quote, buy_reserve, StableMemoryOptions::Write);
                     state.balances.reserve(&buyer, &pair.quote, buy_reserve).unwrap();
-                    state.deposit(seller, pair.base, fill.quantity);
+                    state.deposit(seller, pair.base, fill.quantity, StableMemoryOptions::Write);
                     state.balances.reserve(&seller, &pair.base, fill.quantity).unwrap();
                 }
 

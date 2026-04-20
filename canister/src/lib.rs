@@ -200,7 +200,12 @@ pub async fn withdraw(
         Err(e) => {
             // Credit back on failure so the user doesn't lose funds.
             state::with_state_mut(|s| {
-                s.deposit(caller, order::TokenId::from(token_id), amount);
+                s.deposit(
+                    caller,
+                    order::TokenId::from(token_id),
+                    amount,
+                    state::StableMemoryOptions::Write,
+                );
             });
             Err(e)
         }

@@ -207,12 +207,13 @@ fn load_trades() -> Vec<AggTrade> {
     trades
 }
 
-fn new_state() -> State<storage::VMem> {
+fn new_state() -> State<storage::VMem, storage::VMem> {
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
         },
         OrderHistory::new(storage::order_history_memory()),
+        crate::balance::TokenBalance::new(storage::balances_memory()),
     )
     .unwrap();
     state.record_trading_pair(
@@ -242,7 +243,7 @@ fn trading_pair() -> TradingPair {
 /// Pre-populate an order book with resting orders from the Binance depth snapshot.
 /// Each depth level is placed by a different user (IDs 0..bids+asks).
 /// Best bid (2.304) < best ask (2.305), so no fills occur during population.
-fn populate_state(state: &mut State<storage::VMem>, depth: &DepthSnapshot) {
+fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &DepthSnapshot) {
     let pair = trading_pair();
     for (i, (price_str, qty_str)) in depth.bids.iter().enumerate() {
         let principal = user(i as u64);
@@ -290,13 +291,27 @@ fn user(id: u64) -> Principal {
 }
 
 /// Fund a user with a large balance for both tokens of the trading pair.
-fn fund_user(state: &mut State<storage::VMem>, principal: Principal) {
+fn fund_user(state: &mut State<storage::VMem, storage::VMem>, principal: Principal) {
     let pair = trading_pair();
-    state.deposit(principal, pair.base, Quantity::from_u128(u128::MAX));
-    state.deposit(principal, pair.quote, Quantity::from_u128(u128::MAX));
+    state.deposit(
+        principal,
+        pair.base,
+        Quantity::from_u128(u128::MAX),
+        StableMemoryOptions::Write,
+    );
+    state.deposit(
+        principal,
+        pair.quote,
+        Quantity::from_u128(u128::MAX),
+        StableMemoryOptions::Write,
+    );
 }
 
-fn place_order(state: &mut State<storage::VMem>, user: Principal, pending: PendingOrder) {
+fn place_order(
+    state: &mut State<storage::VMem, storage::VMem>,
+    user: Principal,
+    pending: PendingOrder,
+) {
     let pair = trading_pair();
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
     state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);

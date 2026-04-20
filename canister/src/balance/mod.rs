@@ -1,9 +1,12 @@
 mod token;
-mod user;
 
 pub use token::TokenBalance;
 
-use crate::order::Quantity;
+use crate::order::{Quantity, TokenId};
+use candid::Principal;
+use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
+use std::borrow::Cow;
 
 #[cfg(test)]
 mod tests;
@@ -13,9 +16,11 @@ mod tests;
 /// The balance is split into two parts:
 /// - `free`: funds available for new orders or withdrawal.
 /// - `reserved`: funds locked by open orders.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, minicbor::Encode, minicbor::Decode)]
 pub struct Balance {
+    #[n(0)]
     free: Quantity,
+    #[n(1)]
     reserved: Quantity,
 }
 
@@ -111,6 +116,10 @@ impl Balance {
             .expect("BUG: reserve overflow");
         Ok(())
     }
+
+    pub const fn is_zero(&self) -> bool {
+        self.free.is_zero() && self.reserved.is_zero()
+    }
 }
 
 impl From<Balance> for dex_types::Balance {
@@ -129,4 +138,72 @@ impl From<&Balance> for dex_types::Balance {
             reserved: b.reserved.into(),
         }
     }
+}
+
+impl Storable for Balance {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode balance bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+/// Composite key used to index [`Balance`] entries in
+/// [`ic_stable_structures::StableBTreeMap`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
+pub struct BalanceKey {
+    #[n(0)]
+    token: TokenId,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    owner: Principal,
+}
+
+impl BalanceKey {
+    pub fn new(token: TokenId, owner: Principal) -> Self {
+        Self { token, owner }
+    }
+
+    pub fn token(&self) -> &TokenId {
+        &self.token
+    }
+
+    pub fn owner(&self) -> &Principal {
+        &self.owner
+    }
+}
+
+impl Storable for BalanceKey {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance key encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance key encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode balance key bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
 }
