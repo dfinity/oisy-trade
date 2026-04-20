@@ -281,9 +281,13 @@ impl From<TokenMetadata> for dex_types::TokenMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
 pub struct TradingPair {
+    #[n(0)]
     pub base: TokenId,
+    #[n(1)]
     pub quote: TokenId,
 }
 
@@ -646,11 +650,15 @@ impl PendingOrder {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct Order {
+    #[n(0)]
     id: OrderSeq,
+    #[n(1)]
     side: Side,
+    #[n(2)]
     price: Price,
+    #[n(3)]
     remaining_quantity: Quantity,
 }
 
@@ -681,9 +689,11 @@ impl Order {
 
 /// An order resting in the order book. Only carries the ID and remaining
 /// quantity — side and price are implicit from the book's structure.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct RestingOrder {
+    #[n(0)]
     id: OrderSeq,
+    #[n(1)]
     remaining_quantity: Quantity,
 }
 

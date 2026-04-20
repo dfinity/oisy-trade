@@ -261,6 +261,51 @@ impl OrderBook {
     pub fn resting_orders_len(&self) -> usize {
         self.resting_orders.len()
     }
+
+    pub(crate) fn pending_orders_snapshot(&self) -> Vec<Order> {
+        self.pending_orders.iter().cloned().collect()
+    }
+
+    pub(crate) fn bids_snapshot(&self) -> &BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> {
+        &self.bids
+    }
+
+    pub(crate) fn asks_snapshot(&self) -> &BTreeMap<Price, VecDeque<RestingOrder>> {
+        &self.asks
+    }
+
+    pub(crate) fn filled_orders_snapshot(&self) -> &BTreeSet<OrderSeq> {
+        &self.filled_orders
+    }
+
+    /// Reassembles an [`OrderBook`] from its snapshot parts. Used by the
+    /// upgrade-restore path. The caller is responsible for the internal
+    /// consistency of the arguments (i.e., `resting_orders` indexes exactly
+    /// the entries present in `bids` and `asks`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_snapshot_parts(
+        id: OrderBookId,
+        next_seq: OrderSeq,
+        tick_size: TickSize,
+        lot_size: LotSize,
+        pending_orders: VecDeque<Order>,
+        bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>>,
+        asks: BTreeMap<Price, VecDeque<RestingOrder>>,
+        resting_orders: BTreeMap<OrderSeq, (Side, Price)>,
+        filled_orders: BTreeSet<OrderSeq>,
+    ) -> Self {
+        Self {
+            id,
+            next_seq,
+            tick_size,
+            lot_size,
+            pending_orders,
+            bids,
+            asks,
+            resting_orders,
+            filled_orders,
+        }
+    }
 }
 
 fn fill_against_queue<K: Ord>(
