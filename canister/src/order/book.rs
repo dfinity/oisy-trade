@@ -93,8 +93,6 @@ impl OrderBook {
     /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
     /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
     pub fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let mut fills = Vec::new();
@@ -221,16 +219,12 @@ impl OrderBook {
             resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
+        let filled_orders = std::mem::take(&mut self.filled_orders);
         MatchingOutput {
             fills: all_fills,
             resting_orders,
+            filled_orders,
         }
-    }
-
-    /// Drain and return the set of order sequences that were fully filled
-    /// since the last call.
-    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
-        std::mem::take(&mut self.filled_orders)
     }
 
     fn insert_order(&mut self, order: Order) {
@@ -275,8 +269,6 @@ fn fill_against_queue<K: Ord>(
     orders_index: &mut BTreeMap<OrderSeq, (Side, Price)>,
     filled_orders: &mut BTreeSet<OrderSeq>,
 ) {
-    #[cfg(feature = "canbench-rs")]
-    let _p = canbench_rs::bench_scope("book::fill_against_queue");
     let resting_orders = entry.get_mut();
     while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
         let Some(resting) = resting_orders.front_mut() else {
@@ -308,11 +300,16 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
-/// Output of a matching round: fills produced and orders that began resting.
+/// Output of [`OrderBook::process_pending_orders`]: the fills produced,
+/// orders that began resting in the book, and orders that were fully filled.
 #[derive(Debug)]
 pub struct MatchingOutput {
+    /// Fills executed during this matching round, in execution order.
     pub fills: Vec<Fill>,
+    /// Orders that were not fully filled and are now resting in the book.
     pub resting_orders: BTreeSet<OrderSeq>,
+    /// Orders that were fully filled and removed from the book.
+    pub filled_orders: BTreeSet<OrderSeq>,
 }
 
 /// The result of matching an incoming order against the book.
@@ -370,6 +367,18 @@ pub struct Fill {
     pub maker_price: Price,
     /// The quantity filled.
     pub quantity: Quantity,
+}
+
+impl Fill {
+    /// The amount of quote tokens exchanged (maker_price × quantity).
+    pub fn quote_amount(&self) -> Quantity {
+        self.maker_price.mul_quantity(&self.quantity)
+    }
+
+    /// The amount of base tokens exchanged (same as quantity).
+    pub fn base_amount(&self) -> &Quantity {
+        &self.quantity
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -96,48 +96,6 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     res
 }
 
-/// Benchmark the matching step in isolation — no settling, no order-history updates —
-/// on the same 1000-order fixture as `bench_process_pending_orders_1000`.
-/// Used to compare per-order matching cost against event-replay cost.
-#[bench(raw)]
-fn bench_matching_only_1000() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let trades = load_trades();
-    let mut state = new_state();
-
-    populate_state(&mut state, &depth);
-
-    let pair = trading_pair();
-    let taker_id_offset = depth.bids.len() + depth.asks.len();
-    for (i, trade) in trades.iter().enumerate() {
-        let principal = user((taker_id_offset + i) as u64);
-        fund_user(&mut state, principal);
-        place_order(
-            &mut state,
-            principal,
-            PendingOrder {
-                side: if trade.m { Side::Sell } else { Side::Buy },
-                price: Price::new(parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
-            },
-        );
-    }
-
-    let book = state.get_order_book(&pair).unwrap();
-    assert_eq!(book.pending_orders_len(), trades.len());
-
-    let res = canbench_rs::bench_fn(|| {
-        let book = state.get_order_book_mut(&pair).unwrap();
-        let _output = book.process_pending_orders();
-        let _filled = book.take_filled_orders();
-    });
-
-    let book = state.get_order_book(&pair).unwrap();
-    assert_eq!(book.pending_orders_len(), 0);
-
-    res
-}
-
 /// Benchmark processing 1000 orders that all rest without matching.
 /// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
 /// Each order is placed by a different user (worst case for balance lookups).
