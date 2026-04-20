@@ -186,7 +186,7 @@ impl<M: Memory> State<M> {
                     owner: user,
                     side: order.side(),
                     price: order.price(),
-                    quantity: order.remaining_quantity(),
+                    quantity: *order.remaining_quantity(),
                     status: OrderStatus::Pending,
                 },
             );
@@ -227,7 +227,7 @@ impl<M: Memory> State<M> {
                     let order_id = OrderId::new(book_id, seq);
                     self.order_history.set_status(&order_id, OrderStatus::Open);
                 }
-                for seq in filled_seqs {
+                for seq in output.filled_orders {
                     let order_id = OrderId::new(book_id, seq);
                     self.order_history
                         .set_status(&order_id, OrderStatus::Filled);
@@ -402,11 +402,6 @@ impl<M: Memory> State<M> {
         self.trading_pairs
             .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
-    }
-
-    pub fn get_order_book_mut(&mut self, trading_pair: &TradingPair) -> Option<&mut OrderBook> {
-        let book_id = *self.trading_pairs.get_book_id(trading_pair)?;
-        self.order_books.get_mut(&book_id)
     }
 }
 
