@@ -138,7 +138,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Buy => (pair.quote, amount),
             Side::Sell => (pair.base, pending.quantity),
         };
-        let free = self.balances.get_free(&user, &token);
+        let free = self
+            .balances
+            .get_balance(&user, &token)
+            .map(|b| *b.free())
+            .unwrap_or(Quantity::ZERO);
         if free < required {
             return Err(AddLimitOrderError::InsufficientBalance {
                 token,

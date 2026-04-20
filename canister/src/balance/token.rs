@@ -30,13 +30,6 @@ impl<M: Memory> TokenBalance<M> {
         self.balances.get(&BalanceKey::new(*token, *user))
     }
 
-    /// Read a user's free balance for a given token. Absent entries read as zero.
-    pub fn get_free(&self, user: &Principal, token: &TokenId) -> Quantity {
-        self.get_balance(user, token)
-            .map(|b| *b.free())
-            .unwrap_or(Quantity::ZERO)
-    }
-
     /// Deposit `amount` into a user's free balance for the given token.
     /// Creates the entry if absent.
     pub fn deposit(&mut self, user: Principal, token: TokenId, amount: Quantity) {

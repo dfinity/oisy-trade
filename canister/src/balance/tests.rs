@@ -124,15 +124,6 @@ mod token_balance {
     fn should_return_none_for_unknown_balance() {
         let tb = TokenBalance::default();
         assert_eq!(tb.get_balance(&alice(), &token_a()), None);
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::ZERO);
-    }
-
-    #[test]
-    fn should_get_free_balance() {
-        let mut tb = TokenBalance::default();
-        tb.deposit(alice(), token_a(), Quantity::from(100u64));
-
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(100u64));
     }
 
     #[test]
@@ -155,8 +146,14 @@ mod token_balance {
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
         tb.deposit(alice(), token_b(), Quantity::from(200u64));
 
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(100u64));
-        assert_eq!(tb.get_free(&alice(), &token_b()), Quantity::from(200u64));
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(100u64, 0u64))
+        );
+        assert_eq!(
+            tb.get_balance(&alice(), &token_b()),
+            Some(Balance::new(200u64, 0u64))
+        );
     }
 
     #[test]
@@ -167,7 +164,10 @@ mod token_balance {
         tb.withdraw(&alice(), &token_a(), Quantity::from(40u64))
             .unwrap();
 
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(60u64));
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(60u64, 0u64))
+        );
     }
 
     #[test]
