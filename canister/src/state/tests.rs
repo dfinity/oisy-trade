@@ -190,7 +190,7 @@ mod add_limit_order {
 mod settle_fills {
     use crate::balance::Balance;
     use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
-    use crate::state::State;
+    use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
@@ -581,7 +581,7 @@ mod settle_fills {
         };
         state.deposit(user, deposit.0, deposit.1);
         let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-        state.record_limit_order(user, order_id.book_id(), order);
+        state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
         order_id
     }
 

@@ -1,4 +1,4 @@
-use super::State;
+use super::{StableMemoryOptions, State};
 use crate::Runtime;
 use crate::order::OrderHistory;
 use crate::state::event::{
@@ -11,23 +11,16 @@ use ic_stable_structures::Memory;
 #[cfg(test)]
 mod tests;
 
-/// Controls how `apply_state_transition` integrates an event.
-///
-/// `Normal` performs all state updates, including writes to structures backed
-/// by stable memory (currently `order_history`). `Replay` skips those writes
-/// because the stable-memory structure has already persisted them across the
-/// upgrade — re-inserting would panic as a duplicate.
-enum ApplyMode {
-    Normal,
-    Replay,
-}
-
 pub fn process_event<M: Memory>(state: &mut State<M>, payload: EventType, runtime: &impl Runtime) {
-    apply_state_transition(state, &payload, ApplyMode::Normal);
+    apply_state_transition(state, &payload, StableMemoryOptions::Write);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition<M: Memory>(state: &mut State<M>, payload: &EventType, mode: ApplyMode) {
+fn apply_state_transition<M: Memory>(
+    state: &mut State<M>,
+    payload: &EventType,
+    persistence: StableMemoryOptions,
+) {
     use crate::order;
 
     match payload {
@@ -82,10 +75,7 @@ fn apply_state_transition<M: Memory>(state: &mut State<M>, payload: &EventType, 
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            match mode {
-                ApplyMode::Normal => state.record_limit_order(*user, book_id, order),
-                ApplyMode::Replay => state.replay_limit_order(*user, book_id, order),
-            }
+            state.record_limit_order(*user, book_id, order, persistence);
         }
     }
 }
@@ -106,7 +96,7 @@ pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, ApplyMode::Replay);
+        apply_state_transition(&mut state, &event.payload, StableMemoryOptions::Skip);
     }
     state
 }

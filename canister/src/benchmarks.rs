@@ -3,7 +3,7 @@ use crate::order::{
     TradingPair,
 };
 
-use crate::state::{OrderHistory, State};
+use crate::state::{OrderHistory, StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
 use candid::{Nat, Principal};
@@ -340,7 +340,7 @@ fn fund_user(state: &mut State<storage::VMem>, principal: Principal) {
 fn place_order(state: &mut State<storage::VMem>, user: Principal, pending: PendingOrder) {
     let pair = trading_pair();
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-    state.record_limit_order(user, order_id.book_id(), order);
+    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
 }
 
 mod event_storage {

@@ -42,6 +42,18 @@ pub fn init_state(state: State<VMem>) {
     });
 }
 
+/// Controls whether a state mutation propagates to stable-memory-backed
+/// structures. Normal execution uses [`StableMemoryOptions::Write`]; the
+/// `post_upgrade` replay uses [`StableMemoryOptions::Skip`] because stable
+/// storage already holds the post-mutation values — re-inserting them
+/// would either duplicate entries or overwrite newer states with the
+/// values the event carries at submission time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StableMemoryOptions {
+    Write,
+    Skip,
+}
+
 pub struct State<M: Memory> {
     mode: Mode,
     next_book_id: OrderBookId,
@@ -147,7 +159,13 @@ impl<M: Memory> State<M> {
         Ok((order_id, order))
     }
 
-    pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
+    pub fn record_limit_order(
+        &mut self,
+        user: Principal,
+        book_id: OrderBookId,
+        order: Order,
+        persistence: StableMemoryOptions,
+    ) {
         let pair = self
             .trading_pairs
             .get_pair(&book_id)
@@ -171,51 +189,19 @@ impl<M: Memory> State<M> {
             .reserve(required)
             .expect("BUG: insufficient balance for validated order");
 
-        let order_id = OrderId::new(book_id, order.id());
-        self.order_history.insert_once(
-            order_id,
-            OrderRecord {
-                owner: user,
-                side: order.side(),
-                price: order.price(),
-                quantity: order.remaining_quantity().clone(),
-                status: OrderStatus::Pending,
-            },
-        );
-        book.add_pending_order(order);
-    }
-
-    /// Applies a limit order without touching `order_history`.
-    ///
-    /// Used by the replay path: on upgrade the stable-memory `order_history`
-    /// already holds the record from the original submission, so replay must
-    /// only rebuild transient state (balance reservations + pending queue in
-    /// the order book) and must not re-insert the record (which would panic
-    /// as a duplicate).
-    pub fn replay_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
-        let pair = self
-            .trading_pairs
-            .get_pair(&book_id)
-            .expect("BUG: unknown trading pair");
-        let book = self
-            .order_books
-            .get_mut(&book_id)
-            .expect("BUG: order book missing");
-
-        let (token, required) = match order.side() {
-            Side::Buy => (
-                pair.quote,
-                order.price().mul_quantity(order.remaining_quantity()),
-            ),
-            Side::Sell => (pair.base, order.remaining_quantity().clone()),
-        };
-        self.balances
-            .get_mut(&user)
-            .and_then(|tokens| tokens.get_mut(&token))
-            .expect("BUG: user balance missing")
-            .reserve(required)
-            .expect("BUG: insufficient balance for validated order");
-
+        if matches!(persistence, StableMemoryOptions::Write) {
+            let order_id = OrderId::new(book_id, order.id());
+            self.order_history.insert_once(
+                order_id,
+                OrderRecord {
+                    owner: user,
+                    side: order.side(),
+                    price: order.price(),
+                    quantity: order.remaining_quantity().clone(),
+                    status: OrderStatus::Pending,
+                },
+            );
+        }
         book.add_pending_order(order);
     }
 
