@@ -4,12 +4,7 @@ use candid::Principal;
 use ic_stable_structures::{Memory, StableBTreeMap};
 
 /// Per-token balance ledger, stored in an `ic_stable_structures::StableBTreeMap`
-/// keyed by `(TokenId, Principal)` (see [`BalanceKey`]) — token-first so that
-/// all principals holding a given token form a contiguous range, matching
-/// the layout chosen in `docs/design.md` §Upgrade Strategy.
-///
-/// `StableBTreeMap` exposes no `get_mut`, so every mutation here is a
-/// read-modify-write round trip.
+/// keyed by `(TokenId, Principal)` (see [`BalanceKey`]).
 pub struct TokenBalance<M: Memory> {
     balances: StableBTreeMap<BalanceKey, Balance, M>,
 }

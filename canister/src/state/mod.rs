@@ -378,11 +378,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Credits `amount` to the user's free balance.
-    ///
-    /// `persistence` controls whether the stable-memory balance map is
-    /// touched. Replay uses [`StableMemoryOptions::Skip`] because balances
-    /// already reflect every prior deposit — re-applying from the event log
-    /// would double-credit.
     pub fn deposit(
         &mut self,
         user: Principal,
