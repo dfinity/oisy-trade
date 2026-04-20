@@ -112,14 +112,16 @@ impl State {
         book.validate_order(pending.price, &pending.quantity)
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
+        // Settlement computes `maker_price × fill.quantity` regardless of the
+        // maker's side (see `Fill::quote_amount`), so both Buy and Sell must
+        // satisfy `price × quantity ≤ u256::MAX`.
+        let amount = pending
+            .price
+            .checked_mul_quantity(&pending.quantity)
+            .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
+
         let (token, required) = match pending.side {
-            Side::Buy => (
-                pair.quote,
-                pending
-                    .price
-                    .checked_mul_quantity(&pending.quantity)
-                    .expect("BUG: price * quantity overflow — already rejected by validate_order"),
-            ),
+            Side::Buy => (pair.quote, amount),
             Side::Sell => (pair.base, pending.quantity),
         };
         let free = self.balances.get_free(&user, &token);
@@ -428,9 +430,6 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 quantity: quantity.into(),
                 lot_size: lot_size.get(),
             },
-            AddLimitOrderError::InvalidOrder(MatchOrderError::AmountOverflow { .. }) => {
-                dex_types::AddLimitOrderError::AmountExceedsMaximum
-            }
             AddLimitOrderError::InsufficientBalance {
                 token,
                 available,

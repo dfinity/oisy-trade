@@ -184,9 +184,7 @@ mod add_limit_order {
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{
-        LotSize, MatchOrderError, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
-    };
+    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
@@ -208,7 +206,7 @@ mod validate_overflow_invariant {
         // Settlement computes `maker_price × fill.quantity` regardless of
         // the maker's side, so the invariant must hold for Buy and Sell alike.
         // This biconditional pins that guarantee: validation rejects with
-        // `AmountOverflow` exactly when the multiplication would overflow.
+        // `AmountExceedsMaximum` exactly when the multiplication would overflow.
         #[test]
         fn validate_rejects_iff_price_times_quantity_overflows(
             price_raw in 1u64..=u64::MAX,
@@ -216,7 +214,7 @@ mod validate_overflow_invariant {
             side in arb_side(),
         ) {
             // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
-            // leaving `AmountOverflow` as the only overflow-driven rejection.
+            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
             let tick = TickSize::new(NonZeroU64::new(1).unwrap());
             let lot = LotSize::new(NonZeroU64::new(1).unwrap());
 
@@ -244,12 +242,8 @@ mod validate_overflow_invariant {
                 },
             );
 
-            let rejected_for_overflow = matches!(
-                result,
-                Err(AddLimitOrderError::InvalidOrder(
-                    MatchOrderError::AmountOverflow { .. }
-                ))
-            );
+            let rejected_for_overflow =
+                matches!(result, Err(AddLimitOrderError::AmountExceedsMaximum));
             prop_assert_eq!(
                 rejected_for_overflow,
                 !fits,
