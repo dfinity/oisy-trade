@@ -105,8 +105,6 @@ fn should_replay_deposit() {
         StableMemoryOptions::Write,
     );
 
-    // Replay inherits the normal-path balances (they live in stable memory
-    // and survive the upgrade); replay itself skips re-applying Deposit.
     let replayed = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),

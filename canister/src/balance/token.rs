@@ -47,10 +47,6 @@ impl<M: Memory> TokenBalance<M> {
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
         bench_scopes!("balances", "balances::withdraw");
-        // `Balance::default()` has `free = 0`, so an absent entry flows
-        // through `try_update` → `Balance::withdraw` →
-        // `InsufficientBalanceError { available: 0, required: amount }`.
-        // `try_update` does not persist on `Err`, so no empty row is created.
         self.try_update(*user, *token, |b| b.withdraw(amount))
     }
 
