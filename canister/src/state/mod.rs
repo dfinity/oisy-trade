@@ -1,8 +1,10 @@
 pub mod audit;
 pub mod event;
 mod map;
+mod order_history;
 
 pub use map::TradingPairMap;
+pub use order_history::OrderHistory;
 
 #[cfg(test)]
 mod tests;
