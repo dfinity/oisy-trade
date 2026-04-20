@@ -1,3 +1,4 @@
+use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::State;
 use crate::state::audit;
@@ -14,8 +15,9 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
         }
     };
     let order_history = OrderHistory::new(storage::order_history_memory());
+    let balances = TokenBalance::new(storage::balances_memory());
     state::init_state(
-        State::new(init_arg.clone(), order_history).expect("ERROR: invalid init args"),
+        State::new(init_arg.clone(), order_history, balances).expect("ERROR: invalid init args"),
     );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
@@ -26,7 +28,9 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let start = runtime.instruction_counter();
 
     let order_history = OrderHistory::new(storage::order_history_memory());
-    let state = storage::with_event_iter(|events| audit::replay_events(events, order_history));
+    let balances = TokenBalance::new(storage::balances_memory());
+    let state =
+        storage::with_event_iter(|events| audit::replay_events(events, order_history, balances));
     state::init_state(state);
     let replayed_events = storage::total_event_count();
 

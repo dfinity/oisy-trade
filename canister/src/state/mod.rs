@@ -23,18 +23,18 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
-    static STATE: RefCell<Option<State<VMem>>> = RefCell::default();
+    static STATE: RefCell<Option<State<VMem, VMem>>> = RefCell::default();
 }
 
-pub fn with_state<R>(f: impl FnOnce(&State<VMem>) -> R) -> R {
+pub fn with_state<R>(f: impl FnOnce(&State<VMem, VMem>) -> R) -> R {
     STATE.with(|s| f(s.borrow().as_ref().expect("State not initialized!")))
 }
 
-pub fn with_state_mut<R>(f: impl FnOnce(&mut State<VMem>) -> R) -> R {
+pub fn with_state_mut<R>(f: impl FnOnce(&mut State<VMem, VMem>) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
 }
 
-pub fn init_state(state: State<VMem>) {
+pub fn init_state(state: State<VMem, VMem>) {
     STATE.with(|s| {
         let mut current = s.borrow_mut();
         assert!(current.is_none(), "State already initialized!");
@@ -55,30 +55,34 @@ pub enum StableMemoryOptions {
 }
 
 #[derive(Debug)]
-pub struct State<M: Memory> {
+pub struct State<MH: Memory, MB: Memory> {
     mode: Mode,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
-    balances: TokenBalance,
-    order_history: OrderHistory<M>,
+    balances: TokenBalance<MB>,
+    order_history: OrderHistory<MH>,
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
 }
 
-impl<M: Memory> State<M> {
-    pub fn new(init_arg: InitArg, order_history: OrderHistory<M>) -> Result<Self, String> {
+impl<MH: Memory, MB: Memory> State<MH, MB> {
+    pub fn new(
+        init_arg: InitArg,
+        order_history: OrderHistory<MH>,
+        balances: TokenBalance<MB>,
+    ) -> Result<Self, String> {
         Ok(Self {
             mode: init_arg.mode,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
-            balances: TokenBalance::default(),
+            balances,
             order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
@@ -174,11 +178,14 @@ impl<M: Memory> State<M> {
             ),
             Side::Sell => (pair.base, *order.remaining_quantity()),
         };
-        self.balances
-            .reserve(&user, &token, required)
-            .expect("BUG: insufficient balance for validated order");
 
+        // Balances and order_history both live in stable memory; replay
+        // must skip both or it would double-reserve and re-insert.
         if matches!(persistence, StableMemoryOptions::Write) {
+            self.balances
+                .reserve(&user, &token, required)
+                .expect("BUG: insufficient balance for validated order");
+
             let order_id = OrderId::new(book_id, order.id());
             self.order_history.insert_once(
                 order_id,
@@ -268,8 +275,8 @@ impl<M: Memory> State<M> {
         {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::balance_update");
-            let quote = self.balances.token_mut(&pair.quote);
-            quote.transfer(&buyer, &seller, quote_amount);
+            self.balances
+                .transfer(&buyer, &seller, &pair.quote, quote_amount);
             // Unreserve buy-taker surplus (price improvement)
             if fill.taker_side == Side::Buy
                 && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
@@ -278,7 +285,7 @@ impl<M: Memory> State<M> {
                 let surplus = price_diff
                     .checked_mul_quantity(&fill.quantity)
                     .expect("BUG: price_diff * quantity overflow — already validated in validate_limit_order");
-                quote.unreserve(&taker, surplus);
+                self.balances.unreserve(&taker, &pair.quote, surplus);
             }
         }
 
@@ -287,8 +294,7 @@ impl<M: Memory> State<M> {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::balance_update");
             self.balances
-                .token_mut(&pair.base)
-                .transfer(&seller, &buyer, base_amount);
+                .transfer(&seller, &buyer, &pair.base, base_amount);
         }
     }
 
@@ -371,8 +377,22 @@ impl<M: Memory> State<M> {
         self.balances.withdraw(&user, &token_id, amount)
     }
 
-    pub fn deposit(&mut self, user: Principal, token_id: TokenId, amount: Quantity) {
-        self.balances.deposit(user, token_id, amount);
+    /// Credits `amount` to the user's free balance.
+    ///
+    /// `persistence` controls whether the stable-memory balance map is
+    /// touched. Replay uses [`StableMemoryOptions::Skip`] because balances
+    /// already reflect every prior deposit — re-applying from the event log
+    /// would double-credit.
+    pub fn deposit(
+        &mut self,
+        user: Principal,
+        token_id: TokenId,
+        amount: Quantity,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.balances.deposit(user, token_id, amount);
+        }
     }
 
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
@@ -389,7 +409,6 @@ impl<M: Memory> State<M> {
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
         self.balances
             .get_balance(user, token_id)
-            .cloned()
             .unwrap_or_default()
     }
 
@@ -406,7 +425,7 @@ impl<M: Memory> State<M> {
 }
 
 #[cfg(test)]
-impl Clone for State<ic_stable_structures::VectorMemory> {
+impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
         let Self {
             mode,
@@ -434,7 +453,7 @@ impl Clone for State<ic_stable_structures::VectorMemory> {
 }
 
 #[cfg(test)]
-impl PartialEq for State<ic_stable_structures::VectorMemory> {
+impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
         let Self {
             mode,
@@ -471,7 +490,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory> {
 }
 
 #[cfg(test)]
-impl Eq for State<ic_stable_structures::VectorMemory> {}
+impl Eq for State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddLimitOrderError {

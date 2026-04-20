@@ -293,7 +293,12 @@ mod add_limit_order {
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
         state::with_state_mut(|s| {
-            s.deposit(DEFAULT_USER, pair.quote, required.into());
+            s.deposit(
+                DEFAULT_USER,
+                pair.quote,
+                required.into(),
+                state::StableMemoryOptions::Write,
+            );
         });
 
         add_limit_order(order, &runtime).unwrap();
@@ -322,7 +327,12 @@ mod add_limit_order {
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
         state::with_state_mut(|s| {
-            s.deposit(DEFAULT_USER, pair.base, quantity.into());
+            s.deposit(
+                DEFAULT_USER,
+                pair.base,
+                quantity.into(),
+                state::StableMemoryOptions::Write,
+            );
         });
 
         add_limit_order(order, &runtime).unwrap();
@@ -419,7 +429,12 @@ mod withdraw {
                     decimals: 8,
                 },
             );
-            s.deposit(USER, TokenId::from(token_id()), Quantity::from(amount));
+            s.deposit(
+                USER,
+                TokenId::from(token_id()),
+                Quantity::from(amount),
+                state::StableMemoryOptions::Write,
+            );
         });
     }
 

@@ -16,7 +16,7 @@ mod balance {
     fn should_fail_to_reserve_more_than_free() {
         let mut balance = Balance::zero();
         balance.deposit(Quantity::from(50));
-        let balance_before_reserve = balance.clone();
+        let balance_before_reserve = balance;
 
         assert_eq!(
             balance.reserve(Quantity::from(100)).unwrap_err(),
@@ -60,7 +60,7 @@ mod balance {
     #[test]
     fn should_fail_to_withdraw_more_than_free() {
         let mut balance = Balance::new(50u64, 30u64);
-        let balance_before = balance.clone();
+        let balance_before = balance;
 
         assert_eq!(
             balance.withdraw(Quantity::from(60)).unwrap_err(),
@@ -92,142 +92,6 @@ mod balance {
     }
 }
 
-mod user_balance {
-    use crate::balance::user::UserBalance;
-    use crate::balance::{Balance, InsufficientBalanceError};
-    use crate::order::Quantity;
-    use candid::Principal;
-
-    #[test]
-    fn should_deposit_to_new_user() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(100u64, 0u64)));
-    }
-
-    #[test]
-    fn should_deposit_to_existing_user() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(50u64));
-        ub.deposit(alice(), Quantity::from(30u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(80u64, 0u64)));
-    }
-
-    #[test]
-    fn should_reserve_from_deposited() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-
-        ub.reserve(&alice(), Quantity::from(40u64)).unwrap();
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(60u64, 40u64)));
-    }
-
-    #[test]
-    fn should_fail_reserve_with_insufficient_free() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(10u64));
-
-        let err = ub.reserve(&alice(), Quantity::from(50u64)).unwrap_err();
-
-        assert_eq!(
-            err,
-            InsufficientBalanceError {
-                available: Quantity::from(10u64),
-                required: Quantity::from(50u64),
-            }
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: user balance missing for reserve")]
-    fn should_panic_reserve_missing_user() {
-        let mut ub = UserBalance::default();
-        let _ = ub.reserve(&alice(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_transfer_reserved_to_free() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.deposit(bob(), Quantity::from(10u64));
-        ub.reserve(&alice(), Quantity::from(100u64)).unwrap();
-
-        // Bob exists
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(10u64, 0u64)));
-
-        ub.transfer(&alice(), &bob(), Quantity::from(60u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(0u64, 40u64)));
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(70u64, 0u64)));
-    }
-
-    #[test]
-    fn should_transfer_creating_creditor_entry() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(50u64));
-        ub.reserve(&alice(), Quantity::from(50u64)).unwrap();
-
-        // Bob doesn't exist yet
-        assert_eq!(ub.get(&bob()), None);
-        ub.transfer(&alice(), &bob(), Quantity::from(50u64));
-
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(50u64, 0u64)));
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: debtor balance missing")]
-    fn should_panic_transfer_missing_debtor() {
-        let mut ub = UserBalance::default();
-        ub.transfer(&alice(), &bob(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_transfer_self_trade() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.reserve(&alice(), Quantity::from(60u64)).unwrap();
-
-        ub.transfer(&alice(), &alice(), Quantity::from(60u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(100u64, 0u64)));
-    }
-
-    #[test]
-    fn should_unreserve() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.reserve(&alice(), Quantity::from(80u64)).unwrap();
-
-        ub.unreserve(&alice(), Quantity::from(30u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(50u64, 50u64)));
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: user balance missing for unreserve")]
-    fn should_panic_unreserve_missing_user() {
-        let mut ub = UserBalance::default();
-        ub.unreserve(&alice(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_return_none_for_unknown_user() {
-        let ub = UserBalance::default();
-        assert_eq!(ub.get(&alice()), None);
-    }
-
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
-    }
-
-    fn bob() -> Principal {
-        Principal::from_slice(&[0x02])
-    }
-}
-
 mod token_balance {
     use crate::balance::{Balance, InsufficientBalanceError, TokenBalance};
     use crate::order::{Quantity, TokenId};
@@ -240,7 +104,7 @@ mod token_balance {
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(100u64, 0u64))
+            Some(Balance::new(100u64, 0u64))
         );
     }
 
@@ -269,7 +133,7 @@ mod token_balance {
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(60u64, 40u64))
+            Some(Balance::new(60u64, 40u64))
         );
     }
 
@@ -295,7 +159,7 @@ mod token_balance {
     }
 
     #[test]
-    fn should_fail_to_withdraw_from_missing_token() {
+    fn should_fail_to_withdraw_from_missing_entry() {
         let mut tb = TokenBalance::default();
 
         let err = tb
@@ -312,31 +176,85 @@ mod token_balance {
     }
 
     #[test]
-    #[should_panic(expected = "BUG: token balance missing")]
-    fn should_panic_reserve_missing_token() {
+    fn should_fail_to_reserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        let _ = tb.reserve(&alice(), &token_a(), Quantity::from(10u64));
+
+        let err = tb
+            .reserve(&alice(), &token_a(), Quantity::from(10u64))
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: Quantity::from(10u64),
+            }
+        );
     }
 
     #[test]
-    fn should_transfer_via_token_mut() {
+    fn should_transfer_between_users() {
         let bob = Principal::from_slice(&[0x02]);
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
         tb.reserve(&alice(), &token_a(), Quantity::from(100u64))
             .unwrap();
 
-        tb.token_mut(&token_a())
-            .transfer(&alice(), &bob, Quantity::from(100u64));
+        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(100u64));
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(0u64, 0u64))
+            Some(Balance::new(0u64, 0u64))
         );
         assert_eq!(
             tb.get_balance(&bob, &token_a()),
-            Some(&Balance::new(100u64, 0u64))
+            Some(Balance::new(100u64, 0u64))
         );
+    }
+
+    #[test]
+    fn should_transfer_self_trade_preserves_free_and_clears_reserved() {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(100u64));
+        tb.reserve(&alice(), &token_a(), Quantity::from(60u64))
+            .unwrap();
+
+        tb.transfer(&alice(), &alice(), &token_a(), Quantity::from(60u64));
+
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(100u64, 0u64))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: debtor balance missing")]
+    fn should_panic_transfer_missing_debtor() {
+        let bob = Principal::from_slice(&[0x02]);
+        let mut tb = TokenBalance::default();
+        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(10u64));
+    }
+
+    #[test]
+    fn should_unreserve_back_to_free() {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(100u64));
+        tb.reserve(&alice(), &token_a(), Quantity::from(80u64))
+            .unwrap();
+
+        tb.unreserve(&alice(), &token_a(), Quantity::from(30u64));
+
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(50u64, 50u64))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: user balance missing for unreserve")]
+    fn should_panic_unreserve_missing_entry() {
+        let mut tb = TokenBalance::default();
+        tb.unreserve(&alice(), &token_a(), Quantity::from(10u64));
     }
 
     fn alice() -> Principal {
@@ -349,5 +267,46 @@ mod token_balance {
 
     fn token_b() -> TokenId {
         TokenId::new(Principal::from_slice(&[0xB0]))
+    }
+}
+
+mod key {
+    use super::super::BalanceKey;
+    use crate::order::TokenId;
+    use candid::Principal;
+    use ic_stable_structures::Storable;
+    use proptest::prelude::*;
+
+    /// Arbitrary principal up to the 29-byte spec max. Covers length 0, 1,
+    /// 29, and same-length-different-bytes by construction.
+    fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    fn arb_key() -> impl Strategy<Value = BalanceKey> {
+        (arb_principal(), arb_principal())
+            .prop_map(|(token, owner)| BalanceKey::new(TokenId::new(token), owner))
+    }
+
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_stable_bytes(key in arb_key()) {
+            let bytes = key.to_bytes();
+            prop_assert_eq!(bytes.len(), BalanceKey::ENCODED_SIZE as usize);
+            let decoded = BalanceKey::from_bytes(bytes);
+            prop_assert_eq!(decoded, key);
+        }
+
+        /// Byte-lexicographic order of the encoded key must agree with
+        /// `(TokenId, Principal)` ordering, which is what `StableBTreeMap`
+        /// uses to iterate entries. A mismatch would silently break range
+        /// scans and any future per-token iteration.
+        #[test]
+        fn should_preserve_order_under_encoding(a in arb_key(), b in arb_key()) {
+            let bytes_a = a.to_bytes();
+            let bytes_b = b.to_bytes();
+            let natural = (a.token(), a.owner()).cmp(&(b.token(), b.owner()));
+            prop_assert_eq!(natural, bytes_a.cmp(&bytes_b));
+        }
     }
 }

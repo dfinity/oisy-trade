@@ -1,9 +1,11 @@
 pub mod event;
 
+use crate::balance::TokenBalance;
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
     Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
+use crate::state::StableMemoryOptions;
 use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
@@ -50,24 +52,26 @@ pub fn quote_metadata() -> TokenMetadata {
     }
 }
 
-pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
+pub fn state() -> state::State<VectorMemory, VectorMemory> {
     state::State::new(
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
         },
         order_history(),
+        balances(),
     )
     .unwrap()
 }
 
-/// Build a fresh `State<VMem>` backed by production stable memory for tests
-/// that go through `state::init_state` (i.e. the canister thread_local).
-pub fn state_vmem() -> state::State<crate::storage::VMem> {
+/// Build a fresh `State<VMem, VMem>` backed by production stable memory for
+/// tests that go through `state::init_state` (i.e. the canister thread_local).
+pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> {
     state::State::new(
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
         },
         order::OrderHistory::new(crate::storage::order_history_memory()),
+        TokenBalance::new(crate::storage::balances_memory()),
     )
     .unwrap()
 }
@@ -168,12 +172,14 @@ pub fn all_order_types(
 
 pub fn init_state_with_order_book() {
     let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
+    let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
             dex_types_internal::InitArg {
                 mode: dex_types_internal::Mode::GeneralAvailability,
             },
             order_history,
+            balances,
         )
         .unwrap(),
     );
@@ -196,13 +202,20 @@ pub fn fund_user(user: Principal) {
     state::with_state_mut(|s| {
         let pair = icp_ckbtc_trading_pair();
         let amount = Quantity::from(u64::MAX);
-        s.deposit(user, pair.base, amount);
-        s.deposit(user, pair.quote, amount);
+        s.deposit(user, pair.base, amount, StableMemoryOptions::Write);
+        s.deposit(user, pair.quote, amount, StableMemoryOptions::Write);
     });
 }
 
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default())
+}
+
+/// Fresh, empty `TokenBalance<VectorMemory>` for unit tests. Each call
+/// allocates its own backing memory, so tests that clone or snapshot a
+/// `State` through `state()` get independent ledgers.
+pub fn balances() -> TokenBalance<VectorMemory> {
+    TokenBalance::new(VectorMemory::default())
 }
 
 #[cfg(test)]
