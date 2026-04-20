@@ -118,7 +118,7 @@ impl State {
                 pending
                     .price
                     .checked_mul_quantity(&pending.quantity)
-                    .ok_or(AddLimitOrderError::AmountExceedsMaximum)?,
+                    .expect("BUG: price * quantity overflow — already rejected by validate_order"),
             ),
             Side::Sell => (pair.base, pending.quantity),
         };
@@ -428,6 +428,9 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 quantity: quantity.into(),
                 lot_size: lot_size.get(),
             },
+            AddLimitOrderError::InvalidOrder(MatchOrderError::AmountOverflow { .. }) => {
+                dex_types::AddLimitOrderError::AmountExceedsMaximum
+            }
             AddLimitOrderError::InsufficientBalance {
                 token,
                 available,

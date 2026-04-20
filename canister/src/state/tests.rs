@@ -184,7 +184,9 @@ mod add_limit_order {
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+    use crate::order::{
+        LotSize, MatchOrderError, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
+    };
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
@@ -196,18 +198,25 @@ mod validate_overflow_invariant {
         (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
     }
 
+    fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
     proptest! {
         // `record_limit_order` and `settle_fill` rely on `price * quantity`
-        // not overflowing once a Buy order has passed `validate_limit_order`.
+        // not overflowing once an order has passed `validate_limit_order`.
+        // Settlement computes `maker_price × fill.quantity` regardless of
+        // the maker's side, so the invariant must hold for Buy and Sell alike.
         // This biconditional pins that guarantee: validation rejects with
-        // `AmountExceedsMaximum` exactly when the multiplication would overflow.
+        // `AmountOverflow` exactly when the multiplication would overflow.
         #[test]
-        fn validate_buy_rejects_iff_price_times_quantity_overflows(
+        fn validate_rejects_iff_price_times_quantity_overflows(
             price_raw in 1u64..=u64::MAX,
             quantity in arb_quantity(),
+            side in arb_side(),
         ) {
             // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
-            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
+            // leaving `AmountOverflow` as the only overflow-driven rejection.
             let tick = TickSize::new(NonZeroU64::new(1).unwrap());
             let lot = LotSize::new(NonZeroU64::new(1).unwrap());
 
@@ -229,14 +238,18 @@ mod validate_overflow_invariant {
                 Principal::from_slice(&[0x01]),
                 pair,
                 PendingOrder {
-                    side: Side::Buy,
+                    side,
                     price,
                     quantity,
                 },
             );
 
-            let rejected_for_overflow =
-                matches!(result, Err(AddLimitOrderError::AmountExceedsMaximum));
+            let rejected_for_overflow = matches!(
+                result,
+                Err(AddLimitOrderError::InvalidOrder(
+                    MatchOrderError::AmountOverflow { .. }
+                ))
+            );
             prop_assert_eq!(
                 rejected_for_overflow,
                 !fits,

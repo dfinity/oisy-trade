@@ -168,6 +168,12 @@ impl OrderBook {
                 lot_size: self.lot_size,
             });
         }
+        if price.checked_mul_quantity(quantity).is_none() {
+            return Err(MatchOrderError::AmountOverflow {
+                price,
+                quantity: *quantity,
+            });
+        }
         Ok(())
     }
 
@@ -391,4 +397,10 @@ pub enum MatchOrderError {
         quantity: Quantity,
         lot_size: LotSize,
     },
+    /// `price × quantity` does not fit in [`Quantity`]. Settlement computes
+    /// `maker_price × fill.quantity` (and, for buy-takers, `price_diff ×
+    /// fill.quantity`); rejecting overflow at validation time keeps those
+    /// multiplications panic-free regardless of which side the order takes
+    /// during a fill.
+    AmountOverflow { price: Price, quantity: Quantity },
 }
