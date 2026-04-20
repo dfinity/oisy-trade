@@ -1,5 +1,6 @@
 mod order_id {
     use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use crate::test_fixtures::arbitrary::arb_order_id;
     use ic_stable_structures::Storable;
     use proptest::prelude::*;
 
@@ -31,10 +32,8 @@ mod order_id {
 
         #[test]
         fn should_roundtrip_order_id_through_stable_bytes(
-            book in any::<u64>(),
-            seq in any::<u64>(),
+            id in arb_order_id(),
         ) {
-            let id = OrderId::new(OrderBookId::new(book), OrderSeq::new(seq));
             let bytes = id.to_bytes();
             let decoded = OrderId::from_bytes(bytes);
             prop_assert_eq!(decoded, id);
@@ -556,8 +555,10 @@ mod history {
         OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
     };
     use crate::storage::order_history;
+    use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
     use ic_stable_structures::Storable;
+    use proptest::{prop_assert_eq, proptest};
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -609,19 +610,14 @@ mod history {
         assert_eq!(order_history::get_status(&id), Some(OrderStatus::Filled));
     }
 
-    #[test]
-    fn should_roundtrip_order_record_through_stable_bytes() {
-        for status in [
-            OrderStatus::Pending,
-            OrderStatus::Open,
-            OrderStatus::Filled,
-            OrderStatus::Canceled,
-        ] {
-            let mut record = test_record();
-            record.status = status;
+    proptest! {
+        #[test]
+        fn should_store_order_record(
+            record in arb_order_record(),
+        ) {
             let bytes = record.to_bytes();
             let decoded = OrderRecord::from_bytes(bytes);
-            assert_eq!(decoded, record);
+            prop_assert_eq!(decoded, record);
         }
     }
 }
