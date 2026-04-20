@@ -21,20 +21,12 @@ enum ApplyMode {
     Replay,
 }
 
-pub fn process_event<M: Memory>(
-    state: &mut State<M>,
-    payload: EventType,
-    runtime: &impl Runtime,
-) {
+pub fn process_event<M: Memory>(state: &mut State<M>, payload: EventType, runtime: &impl Runtime) {
     apply_state_transition(state, &payload, ApplyMode::Normal);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition<M: Memory>(
-    state: &mut State<M>,
-    payload: &EventType,
-    mode: ApplyMode,
-) {
+fn apply_state_transition<M: Memory>(state: &mut State<M>, payload: &EventType, mode: ApplyMode) {
     use crate::order;
 
     match payload {
@@ -109,8 +101,7 @@ pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history)
-            .expect("BUG: state initialization should succeed"),
+        } => State::new(init_arg, order_history).expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {

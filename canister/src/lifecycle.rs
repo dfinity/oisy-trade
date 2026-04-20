@@ -25,8 +25,7 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let start = runtime.instruction_counter();
 
     let order_history = OrderHistory::new(storage::order_history_memory());
-    let state =
-        storage::with_event_iter(|events| audit::replay_events(events, order_history));
+    let state = storage::with_event_iter(|events| audit::replay_events(events, order_history));
     state::init_state(state);
     let replayed_events = storage::total_event_count();
 

@@ -255,7 +255,8 @@ impl<M: Memory> State<M> {
                 }
                 for seq in filled_seqs {
                     let order_id = OrderId::new(book_id, seq);
-                    self.order_history.set_status(&order_id, OrderStatus::Filled);
+                    self.order_history
+                        .set_status(&order_id, OrderStatus::Filled);
                 }
             }
         }

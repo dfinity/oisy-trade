@@ -1,7 +1,7 @@
 use crate::state::event::{Event, EventType};
+use ic_stable_structures::DefaultMemoryImpl;
 use ic_stable_structures::StableLog;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::DefaultMemoryImpl;
 use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);

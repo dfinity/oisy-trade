@@ -76,10 +76,7 @@ fn should_replay_init_then_upgrade() {
 #[test]
 fn should_replay_upgrade_without_mode_change() {
     let state = replay_events(
-        vec![
-            init_event(Mode::GeneralAvailability),
-            upgrade_event(None),
-        ],
+        vec![init_event(Mode::GeneralAvailability), upgrade_event(None)],
         fresh_history(),
     );
     let expected = new_state(Mode::GeneralAvailability);
