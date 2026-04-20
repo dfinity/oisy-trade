@@ -1,12 +1,13 @@
 pub mod event;
 
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
+    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
+use ic_stable_structures::VectorMemory;
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -40,7 +41,7 @@ pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
         },
-        order::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+        order_history(),
     )
     .unwrap()
 }
@@ -184,6 +185,10 @@ pub fn fund_user(user: Principal) {
         s.deposit(user, pair.base, amount.clone());
         s.deposit(user, pair.quote, amount);
     });
+}
+
+pub fn order_history() -> OrderHistory<VectorMemory> {
+    OrderHistory::new(VectorMemory::default())
 }
 
 #[cfg(test)]

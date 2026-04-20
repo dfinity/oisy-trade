@@ -2,18 +2,11 @@ use super::*;
 use crate::balance::Balance;
 use crate::order::{LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize};
 use crate::state::event::{AddLimitOrderEvent, AddTradingPairEvent, DepositEvent};
+use crate::test_fixtures;
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
-use ic_stable_structures::VectorMemory;
 use std::num::NonZeroU64;
-
-fn fresh_history() -> OrderHistory<VectorMemory> {
-    OrderHistory::new(VectorMemory::default())
-}
-
-fn new_state(mode: Mode) -> State<VectorMemory> {
-    State::new(InitArg { mode }, fresh_history()).unwrap()
-}
+use test_fixtures::{order_history, state};
 
 fn init_event(mode: Mode) -> Event {
     Event {
@@ -53,34 +46,35 @@ fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
 
 #[test]
 fn should_replay_init_event() {
-    let state = replay_events(vec![init_event(Mode::GeneralAvailability)], fresh_history());
-    let expected = new_state(Mode::GeneralAvailability);
-    assert_eq!(state, expected);
+    let replayed_state =
+        replay_events(vec![init_event(Mode::GeneralAvailability)], order_history());
+    let expected = state();
+    assert_eq!(replayed_state, expected);
 }
 
 #[test]
 fn should_replay_init_then_upgrade() {
     let restricted = Mode::restricted_to(vec![Principal::from_slice(&[0x01])]);
-    let state = replay_events(
+    let replayed_state = replay_events(
         vec![
             init_event(Mode::GeneralAvailability),
             upgrade_event(Some(restricted.clone())),
         ],
-        fresh_history(),
+        order_history(),
     );
-    let mut expected = new_state(Mode::GeneralAvailability);
+    let mut expected = state();
     expected.set_mode(restricted);
-    assert_eq!(state, expected);
+    assert_eq!(expected, replayed_state);
 }
 
 #[test]
 fn should_replay_upgrade_without_mode_change() {
-    let state = replay_events(
+    let replayed_state = replay_events(
         vec![init_event(Mode::GeneralAvailability), upgrade_event(None)],
-        fresh_history(),
+        order_history(),
     );
-    let expected = new_state(Mode::GeneralAvailability);
-    assert_eq!(state, expected);
+    let expected = state();
+    assert_eq!(expected, replayed_state);
 }
 
 #[test]
@@ -92,7 +86,7 @@ fn should_replay_add_trading_pair() {
             init_event(Mode::GeneralAvailability),
             add_trading_pair_event(base, quote),
         ],
-        fresh_history(),
+        order_history(),
     );
     assert_eq!(state.trading_pairs().len(), 1);
 }
@@ -116,7 +110,7 @@ fn should_replay_deposit() {
                 }),
             },
         ],
-        fresh_history(),
+        order_history(),
     );
 
     assert_eq!(
@@ -157,7 +151,7 @@ fn should_replay_add_limit_order() {
                 }),
             },
         ],
-        fresh_history(),
+        order_history(),
     );
 
     // Balance should show reserved funds (buy: price * quantity = 100_000_000).
@@ -174,11 +168,11 @@ fn should_replay_add_limit_order() {
 #[test]
 #[should_panic(expected = "the event log should not be empty")]
 fn should_panic_on_empty_events() {
-    replay_events(Vec::<Event>::new(), fresh_history());
+    replay_events(Vec::<Event>::new(), order_history());
 }
 
 #[test]
 #[should_panic(expected = "the first event must be an Init event")]
 fn should_panic_when_first_event_is_not_init() {
-    replay_events(vec![upgrade_event(None)], fresh_history());
+    replay_events(vec![upgrade_event(None)], order_history());
 }
