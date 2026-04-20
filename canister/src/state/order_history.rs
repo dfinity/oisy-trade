@@ -39,16 +39,7 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.map.iter().map(|entry| (*entry.key(), entry.value()))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn clear_for_test(&mut self) {
-        let ids: Vec<OrderId> = self.map.iter().map(|entry| *entry.key()).collect();
-        for id in ids {
-            self.map.remove(&id);
-        }
     }
 }

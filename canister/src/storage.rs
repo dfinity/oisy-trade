@@ -1,15 +1,14 @@
-use crate::order::{OrderId, OrderRecord};
-use crate::state::OrderHistory;
 use crate::state::event::{Event, EventType};
+use ic_stable_structures::StableLog;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableLog};
+use ic_stable_structures::DefaultMemoryImpl;
 use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
 
-type VMem = VirtualMemory<DefaultMemoryImpl>;
+pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
 
 thread_local! {
@@ -24,10 +23,6 @@ thread_local! {
                 m.borrow().get(EVENT_LOG_DATA_MEMORY_ID),
             )
         )
-    });
-
-    static ORDER_HISTORY: RefCell<OrderHistory<VMem>> = MEMORY_MANAGER.with(|m| {
-        RefCell::new(OrderHistory::new(m.borrow().get(ORDER_HISTORY_MEMORY_ID)))
     });
 }
 
@@ -52,35 +47,9 @@ where
     EVENTS.with(|events| f(Box::new(events.borrow().iter())))
 }
 
-pub mod order_history {
-    use super::{ORDER_HISTORY, OrderId, OrderRecord};
-    use crate::order::OrderStatus;
-
-    /// Insert a new order record. Panics if the order ID already exists.
-    pub fn insert_once(id: OrderId, record: OrderRecord) {
-        ORDER_HISTORY.with(|h| h.borrow_mut().insert_once(id, record));
-    }
-
-    /// Returns a copy of the record for the given order, or `None` if absent.
-    pub fn get(id: &OrderId) -> Option<OrderRecord> {
-        ORDER_HISTORY.with(|h| h.borrow().get(id))
-    }
-
-    /// Returns the status of the given order, or `None` if absent.
-    pub fn get_status(id: &OrderId) -> Option<OrderStatus> {
-        ORDER_HISTORY.with(|h| h.borrow().get_status(id))
-    }
-
-    /// Updates the status of an existing order. Panics if the order is unknown.
-    pub fn set_status(id: &OrderId, status: OrderStatus) {
-        ORDER_HISTORY.with(|h| h.borrow_mut().set_status(id, status));
-    }
-
-    /// Clears the process-wide history. Intended only for unit tests so that
-    /// iterations of a proptest or consecutive `#[test]`s on the same thread
-    /// start from a clean map.
-    #[cfg(test)]
-    pub fn clear_for_test() {
-        ORDER_HISTORY.with(|h| h.borrow_mut().clear_for_test());
-    }
+/// Returns the virtual memory slice dedicated to the order-history map.
+/// Used to construct the production `OrderHistory<VMem>` on canister
+/// `init` / `post_upgrade`.
+pub fn order_history_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(ORDER_HISTORY_MEMORY_ID))
 }

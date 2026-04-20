@@ -35,10 +35,25 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
-pub fn state() -> state::State {
-    state::State::try_from(dex_types_internal::InitArg {
-        mode: dex_types_internal::Mode::GeneralAvailability,
-    })
+pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+    )
+    .unwrap()
+}
+
+/// Build a fresh `State<VMem>` backed by production stable memory for tests
+/// that go through `state::init_state` (i.e. the canister thread_local).
+pub fn state_vmem() -> state::State<crate::storage::VMem> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        state::OrderHistory::new(crate::storage::order_history_memory()),
+    )
     .unwrap()
 }
 
@@ -137,10 +152,14 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
+    let order_history = state::OrderHistory::new(crate::storage::order_history_memory());
     state::init_state(
-        state::State::try_from(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        })
+        state::State::new(
+            dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            },
+            order_history,
+        )
         .unwrap(),
     );
     state::with_state_mut(|s| {

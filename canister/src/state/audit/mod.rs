@@ -1,10 +1,11 @@
-use super::State;
+use super::{OrderHistory, State};
 use crate::Runtime;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
+use ic_stable_structures::Memory;
 
 #[cfg(test)]
 mod tests;
@@ -20,12 +21,20 @@ enum ApplyMode {
     Replay,
 }
 
-pub fn process_event(state: &mut State, payload: EventType, runtime: &impl Runtime) {
+pub fn process_event<M: Memory>(
+    state: &mut State<M>,
+    payload: EventType,
+    runtime: &impl Runtime,
+) {
     apply_state_transition(state, &payload, ApplyMode::Normal);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition(state: &mut State, payload: &EventType, mode: ApplyMode) {
+fn apply_state_transition<M: Memory>(
+    state: &mut State<M>,
+    payload: &EventType,
+    mode: ApplyMode,
+) {
     use crate::order;
 
     match payload {
@@ -88,7 +97,10 @@ fn apply_state_transition(state: &mut State, payload: &EventType, mode: ApplyMod
     }
 }
 
-pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
+pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
+    events: T,
+    order_history: OrderHistory<M>,
+) -> State<M> {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
         .next()
@@ -97,7 +109,8 @@ pub fn replay_events<T: IntoIterator<Item = Event>>(events: T) -> State {
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::try_from(init_arg).expect("BUG: state initialization should succeed"),
+        } => State::new(init_arg, order_history)
+            .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {

@@ -48,8 +48,12 @@ mod assert_caller_is_allowed {
         state.assert_caller_is_allowed(&mock);
     }
 
-    fn state(mode: Mode) -> State {
-        State::try_from(dex_types_internal::InitArg { mode }).unwrap()
+    fn state(mode: Mode) -> State<ic_stable_structures::VectorMemory> {
+        State::new(
+            dex_types_internal::InitArg { mode },
+            crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+        )
+        .unwrap()
     }
 }
 
@@ -187,12 +191,15 @@ mod settle_fills {
     use crate::balance::Balance;
     use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::State;
+    use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
-    use dex_types_internal::{InitArg, Mode};
+    use ic_stable_structures::VectorMemory;
     use std::collections::BTreeMap;
+
+    type TestState = State<VectorMemory>;
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -507,17 +514,8 @@ mod settle_fills {
         assert_token_conservation(&state, &totals_before);
     }
 
-    fn setup() -> State {
-        // `order_history` is a thread-local `StableBTreeMap`. libtest runs each
-        // `#[test]` on a fresh thread, but any helper test that loops (like the
-        // proptests) would otherwise see records from the previous iteration
-        // and trip `insert_once`'s duplicate assertion. Clear it up-front so
-        // every test that goes through `setup()` starts from an empty map.
-        crate::storage::order_history::clear_for_test();
-        let mut state = State::try_from(InitArg {
-            mode: Mode::GeneralAvailability,
-        })
-        .unwrap();
+    fn setup() -> TestState {
+        let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();
         state.record_trading_pair(
             OrderBookId::ZERO,
@@ -531,7 +529,7 @@ mod settle_fills {
     }
 
     fn place_buy_order(
-        state: &mut State,
+        state: &mut TestState,
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
@@ -539,7 +537,7 @@ mod settle_fills {
     }
 
     fn place_sell_order(
-        state: &mut State,
+        state: &mut TestState,
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
@@ -547,7 +545,7 @@ mod settle_fills {
     }
 
     fn place_buy_order_for(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
@@ -556,7 +554,7 @@ mod settle_fills {
     }
 
     fn place_sell_order_for(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
@@ -565,7 +563,7 @@ mod settle_fills {
     }
 
     fn place_order(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         side: Side,
         price: u64,
@@ -703,7 +701,7 @@ mod settle_fills {
                         Side::Sell => (seller, buyer),
                     };
 
-                    crate::storage::order_history::insert_once(
+                    state.order_history_mut().insert_once(
                         OrderId::new(BOOK_ID, fill.taker_order_seq),
                         OrderRecord {
                             owner: taker_owner,
@@ -717,7 +715,7 @@ mod settle_fills {
                         Side::Buy => Side::Sell,
                         Side::Sell => Side::Buy,
                     };
-                    crate::storage::order_history::insert_once(
+                    state.order_history_mut().insert_once(
                         OrderId::new(BOOK_ID, fill.maker_order_seq),
                         OrderRecord {
                             owner: maker_owner,
@@ -761,7 +759,7 @@ mod settle_fills {
     type BalanceSnapshot = BTreeMap<Principal, (Balance, Balance)>;
 
     /// Snapshot base and quote balances for each principal.
-    fn snapshot_balances(state: &State, principals: &[Principal]) -> BalanceSnapshot {
+    fn snapshot_balances(state: &TestState, principals: &[Principal]) -> BalanceSnapshot {
         let pair = icp_ckbtc_trading_pair();
         principals
             .iter()
@@ -778,7 +776,7 @@ mod settle_fills {
     }
 
     /// Assert that the total base and quote tokens across all principals are unchanged.
-    fn assert_token_conservation(state: &State, before: &BalanceSnapshot) {
+    fn assert_token_conservation(state: &TestState, before: &BalanceSnapshot) {
         let principals: Vec<Principal> = before.keys().copied().collect();
         let after = snapshot_balances(state, &principals);
 
