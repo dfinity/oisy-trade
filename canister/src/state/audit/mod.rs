@@ -2,7 +2,7 @@ use super::{StableMemoryOptions, State};
 use crate::Runtime;
 use crate::order::OrderHistory;
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+    AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
@@ -76,6 +76,9 @@ fn apply_state_transition<M: Memory>(
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order, persistence);
+        }
+        EventType::CancelLimitOrder(CancelLimitOrderEvent { user, order_id }) => {
+            state.record_cancel_limit_order(*user, *order_id, persistence);
         }
     }
 }

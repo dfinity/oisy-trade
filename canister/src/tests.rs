@@ -338,6 +338,91 @@ mod add_limit_order {
     }
 }
 
+mod cancel_limit_order {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{add_limit_order, cancel_limit_order};
+    use candid::Principal;
+    use dex_types::CancelLimitOrderError;
+
+    #[test]
+    fn should_reject_cancel_of_unknown_order() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
+        // Valid hex format but refers to a non-existent book/seq.
+        let result = cancel_limit_order("ffffffffffffffffffffffffffffffff".to_string(), &runtime);
+        assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+    }
+
+    #[test]
+    fn should_reject_cancel_with_malformed_order_id() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
+        let result = cancel_limit_order("not-a-valid-id".to_string(), &runtime);
+        assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+    }
+
+    #[test]
+    fn should_reject_cancel_by_non_owner() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        let stranger = Principal::from_slice(&[0x02]);
+        fund_user(owner);
+
+        let order_id = add_limit_order(limit_order_request(), &mock_runtime_for(owner)).unwrap();
+
+        let result = cancel_limit_order(order_id, &mock_runtime_for(stranger));
+        assert_eq!(result, Err(CancelLimitOrderError::NotOrderOwner));
+    }
+
+    #[test]
+    fn should_reject_second_cancel() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        fund_user(owner);
+        let runtime = mock_runtime_for(owner);
+        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+
+        cancel_limit_order(order_id.clone(), &runtime).unwrap();
+        let result = cancel_limit_order(order_id, &runtime);
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyCanceled));
+    }
+
+    #[test]
+    fn should_reject_cancel_of_filled_order() {
+        init_state_with_order_book();
+        let buyer = Principal::from_slice(&[0x01]);
+        let seller = Principal::from_slice(&[0x02]);
+        fund_user(buyer);
+        fund_user(seller);
+
+        let buy_id = add_limit_order(limit_order_request(), &mock_runtime_for(buyer)).unwrap();
+        let mut sell_request = limit_order_request();
+        sell_request.side = dex_types::Side::Sell;
+        add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
+        crate::process_pending_orders();
+
+        let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+    }
+
+    #[test]
+    fn should_succeed_for_owner() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        fund_user(owner);
+        let runtime = mock_runtime_for(owner);
+        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+
+        let result = cancel_limit_order(order_id.clone(), &runtime);
+        assert_eq!(result, Ok(()));
+        assert_eq!(
+            crate::get_order_status(order_id),
+            dex_types::OrderStatus::Canceled
+        );
+    }
+}
+
 mod get_order_status {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};

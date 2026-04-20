@@ -12,8 +12,8 @@ use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    OrderRecord, OrderStatus, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
@@ -192,6 +192,64 @@ impl<M: Memory> State<M> {
             );
         }
         book.add_pending_order(order);
+    }
+
+    pub fn validate_cancel_limit_order(
+        &self,
+        caller: Principal,
+        order_id: OrderId,
+    ) -> Result<(), CancelLimitOrderError> {
+        let record = self
+            .order_history
+            .get(&order_id)
+            .ok_or(CancelLimitOrderError::OrderNotFound)?;
+        if record.owner != caller {
+            return Err(CancelLimitOrderError::NotOrderOwner);
+        }
+        match record.status {
+            OrderStatus::Pending | OrderStatus::Open => Ok(()),
+            OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
+            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+        }
+    }
+
+    pub fn record_cancel_limit_order(
+        &mut self,
+        user: Principal,
+        order_id: OrderId,
+        persistence: StableMemoryOptions,
+    ) {
+        let (book_id, seq) = order_id.into_parts();
+        let pair = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair for canceled order")
+            .clone();
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing for canceled order");
+        let RemovedOrder {
+            side,
+            price,
+            remaining_quantity,
+        } = book
+            .remove_order(seq)
+            .expect("BUG: canceled order not found in book");
+        let (token, amount) = match side {
+            Side::Buy => (
+                pair.quote,
+                price
+                    .checked_mul_quantity(&remaining_quantity)
+                    .expect("BUG: price * remaining overflow — validated at placement"),
+            ),
+            Side::Sell => (pair.base, remaining_quantity),
+        };
+        self.balances.token_mut(&token).unreserve(&user, amount);
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.order_history
+                .set_status(&order_id, OrderStatus::Canceled);
+        }
     }
 
     pub fn process_pending_orders(&mut self) {
@@ -483,6 +541,33 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CancelLimitOrderError {
+    OrderNotFound,
+    NotOrderOwner,
+    OrderAlreadyFilled,
+    OrderAlreadyCanceled,
+}
+
+impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+    fn from(err: CancelLimitOrderError) -> Self {
+        match err {
+            CancelLimitOrderError::OrderNotFound => {
+                dex_types::CancelLimitOrderError::OrderNotFound
+            }
+            CancelLimitOrderError::NotOrderOwner => {
+                dex_types::CancelLimitOrderError::NotOrderOwner
+            }
+            CancelLimitOrderError::OrderAlreadyFilled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+            }
+            CancelLimitOrderError::OrderAlreadyCanceled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+            }
+        }
+    }
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {

@@ -187,6 +187,293 @@ mod add_limit_order {
     }
 }
 
+mod cancel_limit_order {
+    use crate::balance::Balance;
+    use crate::order::{
+        OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side,
+    };
+    use crate::state::audit::replay_events;
+    use crate::state::event::{
+        AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event,
+        EventType,
+    };
+    use crate::state::{CancelLimitOrderError, StableMemoryOptions, State};
+    use crate::test_fixtures::{
+        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
+    use candid::Principal;
+    use dex_types_internal::{InitArg, Mode};
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+
+    #[test]
+    fn should_refund_full_reserved_quote_for_pending_buy() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let price = 100u64;
+        let pair = icp_ckbtc_trading_pair();
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, lot);
+
+        state.validate_cancel_limit_order(OWNER, buy_id).unwrap();
+        state.record_cancel_limit_order(OWNER, buy_id, StableMemoryOptions::Write);
+
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
+        assert_eq!(
+            state.get_balance(&OWNER, &pair.quote),
+            balance(price * lot, 0)
+        );
+        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(0, 0));
+    }
+
+    #[test]
+    fn should_refund_base_for_pending_sell() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let pair = icp_ckbtc_trading_pair();
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
+
+        state.record_cancel_limit_order(OWNER, sell_id, StableMemoryOptions::Write);
+
+        assert_eq!(
+            state.get_order_status(sell_id),
+            Some(OrderStatus::Canceled)
+        );
+        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
+        assert_eq!(state.get_balance(&OWNER, &pair.quote), balance(0, 0));
+    }
+
+    #[test]
+    fn should_refund_resting_buy_after_matching_runs() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let price = 100u64;
+        let pair = icp_ckbtc_trading_pair();
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, lot);
+        state.process_pending_orders();
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+
+        state.record_cancel_limit_order(OWNER, buy_id, StableMemoryOptions::Write);
+
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
+        assert_eq!(
+            state.get_balance(&OWNER, &pair.quote),
+            balance(price * lot, 0)
+        );
+    }
+
+    #[test]
+    fn should_refund_resting_sell_after_matching_runs() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let pair = icp_ckbtc_trading_pair();
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
+        state.process_pending_orders();
+        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+
+        state.record_cancel_limit_order(OWNER, sell_id, StableMemoryOptions::Write);
+
+        assert_eq!(
+            state.get_order_status(sell_id),
+            Some(OrderStatus::Canceled)
+        );
+        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
+    }
+
+    #[test]
+    fn should_refund_residual_of_partially_filled_buy() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let price = 100u64;
+        let pair = icp_ckbtc_trading_pair();
+        // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
+        place_order(&mut state, STRANGER, Side::Sell, price, lot);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, 3 * lot);
+        state.process_pending_orders();
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+        // Sanity: 1 lot filled (bought), 2 lots still reserved at price 100.
+        assert_eq!(
+            state.get_balance(&OWNER, &pair.quote),
+            balance(0, 2 * price * lot)
+        );
+
+        state.record_cancel_limit_order(OWNER, buy_id, StableMemoryOptions::Write);
+
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
+        assert_eq!(
+            state.get_balance(&OWNER, &pair.quote),
+            balance(2 * price * lot, 0)
+        );
+        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
+    }
+
+    #[test]
+    fn should_reject_unknown_order_id() {
+        let state = setup();
+        let id = OrderId::new(OrderBookId::ZERO, crate::order::OrderSeq::new(42));
+        assert_eq!(
+            state.validate_cancel_limit_order(OWNER, id),
+            Err(CancelLimitOrderError::OrderNotFound)
+        );
+    }
+
+    #[test]
+    fn should_reject_cancel_by_non_owner() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
+
+        assert_eq!(
+            state.validate_cancel_limit_order(STRANGER, buy_id),
+            Err(CancelLimitOrderError::NotOrderOwner)
+        );
+    }
+
+    #[test]
+    fn should_reject_cancel_of_filled_order() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
+        place_order(&mut state, STRANGER, Side::Sell, 100, lot);
+        state.process_pending_orders();
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
+
+        assert_eq!(
+            state.validate_cancel_limit_order(OWNER, buy_id),
+            Err(CancelLimitOrderError::OrderAlreadyFilled)
+        );
+    }
+
+    #[test]
+    fn should_reject_second_cancel() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
+        state.record_cancel_limit_order(OWNER, buy_id, StableMemoryOptions::Write);
+
+        assert_eq!(
+            state.validate_cancel_limit_order(OWNER, buy_id),
+            Err(CancelLimitOrderError::OrderAlreadyCanceled)
+        );
+    }
+
+    #[test]
+    fn should_replay_to_canceled_state() {
+        let lot = u64::from(LOT_SIZE);
+        let price = 100u64;
+        let order_id = OrderId::new(OrderBookId::ZERO, crate::order::OrderSeq::ZERO);
+        let pair = icp_ckbtc_trading_pair();
+
+        let events = vec![
+            event(EventType::Init(InitArg {
+                mode: Mode::GeneralAvailability,
+            })),
+            event(EventType::AddTradingPair(AddTradingPairEvent {
+                book_id: OrderBookId::ZERO,
+                base: pair.base,
+                quote: pair.quote,
+                tick_size: TICK_SIZE,
+                lot_size: LOT_SIZE,
+                base_metadata: icp_metadata(),
+                quote_metadata: ckbtc_metadata(),
+            })),
+            event(EventType::Deposit(DepositEvent {
+                user: OWNER,
+                token: pair.quote,
+                amount: Quantity::from(price * lot),
+            })),
+            event(EventType::AddLimitOrder(AddLimitOrderEvent {
+                user: OWNER,
+                order_id,
+                side: Side::Buy,
+                price: Price::new(price),
+                quantity: Quantity::from(lot),
+            })),
+            event(EventType::CancelLimitOrder(CancelLimitOrderEvent {
+                user: OWNER,
+                order_id,
+            })),
+        ];
+
+        // Replay rebuilds the in-memory book and balances. Stable-memory-backed
+        // structures (order_history) are assumed to already be in place, so we
+        // pre-seed `order_history` with the terminal (Canceled) record that
+        // would be persisted during production execution.
+        let mut order_history = test_fixtures::order_history();
+        order_history.insert_once(
+            order_id,
+            crate::order::OrderRecord {
+                owner: OWNER,
+                side: Side::Buy,
+                price: Price::new(price),
+                quantity: Quantity::from(lot),
+                status: OrderStatus::Canceled,
+            },
+        );
+        let state = replay_events(events, order_history);
+
+        assert_eq!(state.get_order_status(order_id), Some(OrderStatus::Canceled));
+        assert_eq!(
+            state.get_balance(&OWNER, &pair.quote),
+            balance(price * lot, 0)
+        );
+    }
+
+    fn event(payload: EventType) -> Event {
+        Event {
+            timestamp: 0,
+            payload,
+        }
+    }
+
+    fn setup() -> State<VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+        state
+    }
+
+    fn place_order(
+        state: &mut State<VectorMemory>,
+        user: Principal,
+        side: Side,
+        price: u64,
+        quantity: impl Into<Quantity>,
+    ) -> OrderId {
+        let pair = icp_ckbtc_trading_pair();
+        let pending = PendingOrder {
+            side,
+            price: Price::new(price),
+            quantity: quantity.into(),
+        };
+        let (token, required) = match pending.side {
+            Side::Buy => (
+                pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity(&pending.quantity)
+                    .unwrap(),
+            ),
+            Side::Sell => (pair.base, pending.quantity),
+        };
+        state.deposit(user, token, required);
+        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+        state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+        order_id
+    }
+
+    fn balance(free: u64, reserved: u64) -> Balance {
+        Balance::new(free, reserved)
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
     use crate::state::AddLimitOrderError;

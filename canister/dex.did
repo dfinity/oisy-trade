@@ -46,6 +46,18 @@ type AddLimitOrderError = variant {
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
+/// Error returned when cancelling a limit order fails.
+type CancelLimitOrderError = variant {
+    /// No order with the given ID exists.
+    OrderNotFound;
+    /// The caller does not own the order.
+    NotOrderOwner;
+    /// The order has already been fully filled and cannot be cancelled.
+    OrderAlreadyFilled;
+    /// The order has already been cancelled.
+    OrderAlreadyCanceled;
+};
+
 /// Information about a listed trading pair.
 type TradingPairInfo = record {
     /// The base token.
@@ -265,6 +277,12 @@ type DepositEvent = record {
     amount : nat;
 };
 
+/// Event payload for cancelling a limit order.
+type CancelLimitOrderEvent = record {
+    user : principal;
+    order_id : EventOrderId;
+};
+
 /// Type of a canister event.
 type EventType = variant {
     Init : InitArg;
@@ -272,6 +290,7 @@ type EventType = variant {
     AddTradingPair : AddTradingPairEvent;
     Deposit : DepositEvent;
     AddLimitOrder : AddLimitOrderEvent;
+    CancelLimitOrder : CancelLimitOrderEvent;
 };
 
 /// A canister event with a timestamp.
@@ -296,6 +315,10 @@ service : (DexArg) -> {
     /// Submit a new limit order. The order is queued for *asynchronous* processing
     /// and an order ID is immediately returned.
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
+
+    /// Cancel a limit order previously submitted by the caller. Any remaining
+    /// reserved balance is credited back to the caller's free balance.
+    cancel_limit_order : (OrderId) -> (variant { Ok; Err : CancelLimitOrderError });
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;

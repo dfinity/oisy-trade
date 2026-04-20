@@ -1,8 +1,8 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
-    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance,
+    CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, LedgerTransferError,
+    LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -22,6 +22,25 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         dex_canister::process_pending_orders();
     });
     Ok(order_id)
+}
+
+#[ic_cdk::update]
+fn cancel_limit_order(order_id: OrderId) -> Result<(), CancelLimitOrderError> {
+    let result = dex_canister::cancel_limit_order(order_id.clone(), &dex_canister::IC_RUNTIME);
+    match &result {
+        Ok(()) => canlog::log!(
+            Priority::Info,
+            "[cancel_limit_order]: canceled order_id={}",
+            order_id
+        ),
+        Err(err) => canlog::log!(
+            Priority::Debug,
+            "[cancel_limit_order]: cancel for order_id={} failed, error={:?}",
+            order_id,
+            err
+        ),
+    }
+    result
 }
 
 #[ic_cdk::query]
@@ -151,6 +170,15 @@ fn get_events(
                         side: dex_types::Side::from(e.side),
                         price: e.price.get(),
                         quantity: e.quantity.into(),
+                    })
+                }
+                EventType::CancelLimitOrder(e) => {
+                    event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                        user: e.user,
+                        order_id: event::OrderId {
+                            book_id: e.order_id.book_id().get(),
+                            seq: e.order_id.seq().get(),
+                        },
                     })
                 }
             },

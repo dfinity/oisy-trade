@@ -31,6 +31,8 @@ pub enum EventType {
     Deposit(#[n(0)] DepositEvent),
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
+    #[n(5)]
+    CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -73,6 +75,14 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct CancelLimitOrderEvent {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    pub user: Principal,
+    #[n(1)]
+    pub order_id: OrderId,
 }
 
 impl Storable for Event {

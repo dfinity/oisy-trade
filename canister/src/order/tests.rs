@@ -765,6 +765,147 @@ mod process_pending_orders {
     }
 }
 
+mod remove_order {
+    use crate::order::{OrderSeq, Price, Quantity, RemovedOrder, Side};
+    use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
+
+    #[test]
+    fn should_return_none_when_order_is_absent() {
+        let mut book = order_book();
+        assert_eq!(book.remove_order(OrderSeq::new(42)), None);
+    }
+
+    #[test]
+    fn should_remove_pending_buy_order() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.add_pending_order(buy(0u64, 100u64, lot));
+        book.add_pending_order(sell(1u64, 200u64, 2 * lot));
+
+        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Buy,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(lot),
+            }
+        );
+        assert_eq!(book.pending_orders_len(), 1);
+        assert_eq!(book.resting_orders_len(), 0);
+    }
+
+    #[test]
+    fn should_remove_pending_sell_order_and_preserve_fifo() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.add_pending_order(sell(0u64, 100u64, lot));
+        book.add_pending_order(sell(1u64, 100u64, 2 * lot));
+        book.add_pending_order(sell(2u64, 100u64, 3 * lot));
+
+        let removed = book.remove_order(OrderSeq::ONE).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Sell,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(2 * lot),
+            }
+        );
+        assert_eq!(book.pending_orders_len(), 2);
+
+        // Processing remaining pending orders should still follow FIFO.
+        let output = book.process_pending_orders();
+        assert!(output.fills.is_empty());
+        assert_eq!(book.resting_orders_len(), 2);
+    }
+
+    #[test]
+    fn should_remove_resting_bid_and_preserve_siblings_at_same_level() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        // Rest three buy orders at the same price; remove the middle one.
+        book.match_order(buy(0u64, 100u64, lot)).unwrap();
+        book.match_order(buy(1u64, 100u64, 2 * lot)).unwrap();
+        book.match_order(buy(2u64, 100u64, 3 * lot)).unwrap();
+
+        let removed = book.remove_order(OrderSeq::ONE).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Buy,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(2 * lot),
+            }
+        );
+        assert_eq!(book.resting_orders_len(), 2);
+        assert_eq!(book.bids_len(), 1);
+
+        // FIFO preserved among remaining: seq 0 is still the best / first to match.
+        let best = book.best_bid().unwrap();
+        assert_eq!(best.id(), OrderSeq::ZERO);
+    }
+
+    #[test]
+    fn should_delete_empty_price_level_when_last_resting_ask_removed() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.match_order(sell(0u64, 100u64, lot)).unwrap();
+        book.match_order(sell(1u64, 110u64, 2 * lot)).unwrap();
+
+        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Sell,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(lot),
+            }
+        );
+        assert_eq!(book.asks_len(), 1);
+        assert_eq!(book.resting_orders_len(), 1);
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
+    }
+
+    #[test]
+    fn should_report_residual_for_partially_filled_resting_order() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        // Rest a 3-lot sell; cross with a 1-lot buy to partially fill.
+        book.match_order(sell(0u64, 100u64, 3 * lot)).unwrap();
+        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+
+        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Sell,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(2 * lot),
+            }
+        );
+        assert_eq!(book.resting_orders_len(), 0);
+        assert!(book.is_empty());
+    }
+
+    #[test]
+    fn should_return_none_for_fully_filled_order() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.match_order(sell(0u64, 100u64, lot)).unwrap();
+        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+
+        // Both orders are fully filled; removing either must be a no-op.
+        assert_eq!(book.remove_order(OrderSeq::ZERO), None);
+        assert_eq!(book.remove_order(OrderSeq::ONE), None);
+    }
+}
+
 mod history {
     use crate::order::{
         OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,

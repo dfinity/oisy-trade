@@ -111,6 +111,11 @@ fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         )
 }
 
+fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {
+    (arb_principal(), arb_order_id())
+        .prop_map(|(user, order_id)| CancelLimitOrderEvent { user, order_id })
+}
+
 fn arb_event_type() -> impl Strategy<Value = EventType> {
     prop_oneof![
         arb_init_arg().prop_map(EventType::Init),
@@ -118,6 +123,7 @@ fn arb_event_type() -> impl Strategy<Value = EventType> {
         arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
         arb_deposit_event().prop_map(EventType::Deposit),
         arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
+        arb_cancel_limit_order_event().prop_map(EventType::CancelLimitOrder),
     ]
 }
 

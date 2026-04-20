@@ -7,9 +7,10 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId,
-    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance,
+    CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, LimitOrderRequest,
+    OrderId, OrderStatus, TokenId, TradingPairInfo, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -70,6 +71,17 @@ impl<R: Runtime> DexClient<R> {
     ) -> Result<OrderId, AddLimitOrderError> {
         self.runtime
             .call(self.dex_canister, "add_limit_order", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Cancel a limit order previously submitted by the caller.
+    pub async fn cancel_limit_order(
+        &self,
+        order_id: OrderId,
+    ) -> Result<(), CancelLimitOrderError> {
+        self.runtime
+            .call(self.dex_canister, "cancel_limit_order", (order_id,), 0)
             .await
             .unwrap()
     }

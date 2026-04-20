@@ -3,7 +3,7 @@ mod history;
 #[cfg(test)]
 mod tests;
 
-pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
+pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, RemovedOrder};
 pub use history::OrderHistory;
 
 use candid::{Nat, Principal};
