@@ -116,6 +116,10 @@ impl Balance {
             .expect("BUG: reserve overflow");
         Ok(())
     }
+
+    pub const fn is_zero(&self) -> bool {
+        self.free.is_zero() && self.reserved.is_zero()
+    }
 }
 
 impl From<Balance> for dex_types::Balance {

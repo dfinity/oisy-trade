@@ -419,7 +419,7 @@ impl Quantity {
         }
     }
 
-    pub fn is_zero(&self) -> bool {
+    pub const fn is_zero(&self) -> bool {
         self.high == 0 && self.low == 0
     }
 

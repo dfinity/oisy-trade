@@ -117,10 +117,11 @@ impl<M: Memory> TokenBalance<M> {
     /// don't materialise empty `(0, 0)` rows.
     fn update<F: FnOnce(&mut Balance)>(&mut self, user: Principal, token: TokenId, f: F) {
         let key = BalanceKey::new(token, user);
-        let existed = self.balances.contains_key(&key);
-        let mut balance = self.balances.get(&key).unwrap_or_default();
+        let prev = self.balances.get(&key);
+        let existed = prev.is_some();
+        let mut balance = prev.unwrap_or_default();
         f(&mut balance);
-        if existed || balance != Balance::default() {
+        if existed || !balance.is_zero() {
             self.balances.insert(key, balance);
         }
     }
