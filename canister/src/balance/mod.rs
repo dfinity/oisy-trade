@@ -1,3 +1,8 @@
+mod token;
+mod user;
+
+pub use token::TokenBalance;
+
 use crate::order::Quantity;
 
 #[cfg(test)]
@@ -49,9 +54,9 @@ impl Balance {
     ///
     /// # Panics
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
-    pub fn debit_reserved(&mut self, amount: Quantity) {
+    pub fn debit_reserved(&mut self, amount: &Quantity) {
         bench_scopes!("bal", "bal::debit_reserved");
-        self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
+        self.reserved = self.reserved.checked_sub(amount).unwrap_or_else(|| {
             panic!(
                 "BUG: debit_reserved underflow: reserved={:?}, amount={:?}",
                 self.reserved, amount

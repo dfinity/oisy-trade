@@ -458,7 +458,7 @@ mod process_pending_orders {
 
         assert!(output.fills.is_empty());
         assert!(output.resting_orders.is_empty());
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod process_pending_orders {
 
         assert!(output.fills.is_empty());
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ZERO]));
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -482,11 +482,10 @@ mod process_pending_orders {
         book.add_pending_order(buy(1, 100, lot));
 
         let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker
-        assert!(filled.contains(&OrderSeq::ONE)); // taker
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker
+        assert!(output.filled_orders.contains(&OrderSeq::ONE)); // taker
         assert!(output.resting_orders.is_empty());
     }
 
@@ -499,27 +498,25 @@ mod process_pending_orders {
         book.add_pending_order(buy(1, 100, 3 * lot));
 
         let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker fully filled
-        assert!(!filled.contains(&OrderSeq::ONE)); // taker not fully filled
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker fully filled
+        assert!(!output.filled_orders.contains(&OrderSeq::ONE)); // taker not fully filled
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ONE])); // taker rests
     }
 
     #[test]
-    fn take_filled_orders_should_drain() {
+    fn should_drain_filled_orders_between_rounds() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
-        book.process_pending_orders();
 
-        let first_call = book.take_filled_orders();
-        let second_call = book.take_filled_orders();
+        let first = book.process_pending_orders();
+        assert!(!first.filled_orders.is_empty());
 
-        assert_eq!(first_call.len(), 2);
-        assert!(second_call.is_empty());
+        let second = book.process_pending_orders();
+        assert!(second.filled_orders.is_empty());
     }
 }
 
