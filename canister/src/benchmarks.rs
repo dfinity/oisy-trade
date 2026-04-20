@@ -3,7 +3,8 @@ use crate::order::{
     TradingPair,
 };
 
-use crate::state::{OrderHistory, StableMemoryOptions, State};
+use crate::order::OrderHistory;
+use crate::state::{StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
 use candid::{Nat, Principal};
