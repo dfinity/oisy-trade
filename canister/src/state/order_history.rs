@@ -14,11 +14,11 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Insert a new order record. Panics if the order ID already exists.
     pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
-        assert!(
-            !self.orders.contains_key(&id),
+        assert_eq!(
+            self.orders.insert(id, record),
+            None,
             "BUG: duplicate order ID {id}"
         );
-        self.orders.insert(id, record);
     }
 
     /// Returns a copy of the record for the given order, or `None` if absent.
