@@ -524,10 +524,11 @@ mod process_pending_orders {
 }
 
 mod history {
-    use crate::order::{OrderBookId, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side};
+    use crate::order::{
+        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+    };
     use crate::storage::order_history;
     use candid::Principal;
-    use dex_types::OrderStatus;
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -563,12 +564,9 @@ mod history {
     }
 
     #[test]
-    fn get_status_returns_not_found_for_missing() {
+    fn get_status_returns_none_for_missing() {
         order_history::clear_for_test();
-        assert_eq!(
-            order_history::get_status(&test_id(42)),
-            OrderStatus::NotFound
-        );
+        assert_eq!(order_history::get_status(&test_id(42)), None);
     }
 
     #[test]
@@ -577,15 +575,14 @@ mod history {
         let id = test_id(0);
         order_history::insert_once(id, test_record());
 
-        assert_eq!(order_history::get_status(&id), OrderStatus::Pending);
+        assert_eq!(order_history::get_status(&id), Some(OrderStatus::Pending));
         order_history::set_status(&id, OrderStatus::Filled);
-        assert_eq!(order_history::get_status(&id), OrderStatus::Filled);
+        assert_eq!(order_history::get_status(&id), Some(OrderStatus::Filled));
     }
 
     mod storable {
         use super::test_record;
-        use crate::order::{OrderBookId, OrderId, OrderSeq};
-        use dex_types::OrderStatus;
+        use crate::order::{OrderBookId, OrderId, OrderSeq, OrderStatus};
         use ic_stable_structures::Storable;
         use proptest::prelude::*;
 
@@ -598,19 +595,11 @@ mod history {
                 OrderStatus::Canceled,
             ] {
                 let mut record = test_record();
-                record.status = status.clone();
+                record.status = status;
                 let bytes = record.to_bytes();
                 let decoded = crate::order::OrderRecord::from_bytes(bytes);
                 assert_eq!(decoded, record);
             }
-        }
-
-        #[test]
-        #[should_panic(expected = "OrderStatus::NotFound must never be persisted")]
-        fn should_reject_not_found_when_encoding() {
-            let mut record = test_record();
-            record.status = OrderStatus::NotFound;
-            let _ = record.to_bytes();
         }
 
         proptest! {

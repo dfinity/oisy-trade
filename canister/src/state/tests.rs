@@ -671,9 +671,8 @@ mod settle_fills {
 
     mod settle_fill_ordering {
         use super::*;
-        use crate::order::{OrderBookId, OrderId, OrderRecord};
+        use crate::order::{OrderBookId, OrderId, OrderRecord, OrderStatus};
         use crate::test_fixtures::arbitrary::arb_fill;
-        use dex_types::OrderStatus;
         use proptest::prelude::*;
 
         const BOOK_ID: OrderBookId = OrderBookId::ZERO;

@@ -37,6 +37,32 @@ impl From<Side> for dex_types::Side {
     }
 }
 
+/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
+/// states of [`dex_types::OrderStatus`]; the public `NotFound` variant is
+/// synthesized at the canister boundary when no record exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub enum OrderStatus {
+    #[n(0)]
+    Pending,
+    #[n(1)]
+    Open,
+    #[n(2)]
+    Filled,
+    #[n(3)]
+    Canceled,
+}
+
+impl From<OrderStatus> for dex_types::OrderStatus {
+    fn from(status: OrderStatus) -> Self {
+        match status {
+            OrderStatus::Pending => dex_types::OrderStatus::Pending,
+            OrderStatus::Open => dex_types::OrderStatus::Open,
+            OrderStatus::Filled => dex_types::OrderStatus::Filled,
+            OrderStatus::Canceled => dex_types::OrderStatus::Canceled,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,

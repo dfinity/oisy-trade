@@ -1,6 +1,5 @@
 use crate::order::{OrderId, OrderRecord};
 use crate::state::event::{Event, EventType};
-use dex_types::OrderStatus;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableLog};
 use std::cell::RefCell;
@@ -54,7 +53,8 @@ where
 }
 
 pub mod order_history {
-    use super::{ORDER_HISTORY, OrderId, OrderRecord, OrderStatus};
+    use super::{ORDER_HISTORY, OrderId, OrderRecord};
+    use crate::order::OrderStatus;
 
     /// Insert a new order record. Panics if the order ID already exists.
     pub fn insert_once(id: OrderId, record: OrderRecord) {
@@ -70,14 +70,9 @@ pub mod order_history {
         ORDER_HISTORY.with(|map| map.borrow().get(id))
     }
 
-    /// Returns the status of the given order, or [`OrderStatus::NotFound`] if absent.
-    pub fn get_status(id: &OrderId) -> OrderStatus {
-        ORDER_HISTORY.with(|map| {
-            map.borrow()
-                .get(id)
-                .map(|r| r.status.clone())
-                .unwrap_or(OrderStatus::NotFound)
-        })
+    /// Returns the status of the given order, or `None` if absent.
+    pub fn get_status(id: &OrderId) -> Option<OrderStatus> {
+        ORDER_HISTORY.with(|map| map.borrow().get(id).map(|r| r.status))
     }
 
     /// Updates the status of an existing order. Panics if the order is unknown.

@@ -1,6 +1,5 @@
-use super::{OrderId, Price, Quantity, Side};
+use super::{OrderId, OrderStatus, Price, Quantity, Side};
 use candid::Principal;
-use dex_types::OrderStatus;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use std::borrow::Cow;
@@ -23,7 +22,7 @@ pub struct OrderRecord {
     pub price: Price,
     #[n(3)]
     pub quantity: Quantity,
-    #[cbor(n(4), with = "crate::cbor::order_status")]
+    #[n(4)]
     pub status: OrderStatus,
 }
 

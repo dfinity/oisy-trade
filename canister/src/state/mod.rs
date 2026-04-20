@@ -12,11 +12,10 @@ use crate::Task;
 use crate::balance::Balance;
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderId, OrderRecord,
-    PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage;
 use candid::{Nat, Principal};
-use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -311,8 +310,10 @@ impl State {
             .or_default()
     }
 
-    pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
+    pub fn get_order_status(&self, order_id: OrderId) -> dex_types::OrderStatus {
         storage::order_history::get_status(&order_id)
+            .map(Into::into)
+            .unwrap_or(dex_types::OrderStatus::NotFound)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
