@@ -377,6 +377,9 @@ impl Quantity {
             let high_rem = self.high % divisor;
             // 2^128 doesn't fit in u128, so compute it as (u128::MAX + 1) mod d.
             let shift_rem = (u128::MAX % divisor + 1) % divisor;
+            // Cannot overflow: high_rem and shift_rem are both < divisor (a u64),
+            // so their product is at most (u64::MAX-1)^2, and self.low % divisor
+            // is at most u64::MAX-1, leaving plenty of room in u128.
             let combined = (high_rem
                 .checked_mul(shift_rem)
                 .expect("high_rem and shift_rem are < d (a u64)")
