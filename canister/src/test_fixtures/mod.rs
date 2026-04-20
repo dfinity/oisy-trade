@@ -169,7 +169,10 @@ pub fn fund_user(user: Principal) {
 
 #[cfg(test)]
 pub mod arbitrary {
-    use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
+    use crate::order::{
+        Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+    };
+    use candid::Principal;
     use proptest::prelude::*;
 
     use super::{LOT_SIZE, TICK_SIZE};
@@ -211,6 +214,54 @@ pub mod arbitrary {
                     quantity: Quantity::from(qty_lots * lot),
                 }
             })
+    }
+
+    /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
+    /// byte slice (up to 29 bytes), covering the full principal byte-length
+    /// range that appears in canister state.
+    pub fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    pub fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
+    pub fn arb_order_status() -> impl Strategy<Value = OrderStatus> {
+        prop_oneof![
+            Just(OrderStatus::Pending),
+            Just(OrderStatus::Open),
+            Just(OrderStatus::Filled),
+            Just(OrderStatus::Canceled),
+        ]
+    }
+
+    pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
+        (any::<u64>(), any::<u64>())
+            .prop_map(|(book, seq)| OrderId::new(OrderBookId::new(book), OrderSeq::new(seq)))
+    }
+
+    /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
+    /// lot-aligned non-zero quantity.
+    pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            arb_principal(),
+            arb_side(),
+            1..1_000u64, // price in ticks
+            1..1_000u64, // quantity in lots
+            arb_order_status(),
+        )
+            .prop_map(
+                move |(owner, side, price_ticks, qty_lots, status)| OrderRecord {
+                    owner,
+                    side,
+                    price: Price::new(price_ticks * tick),
+                    quantity: Quantity::from(qty_lots * lot),
+                    status,
+                },
+            )
     }
 }
 
