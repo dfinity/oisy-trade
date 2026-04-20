@@ -378,9 +378,9 @@ The structure lives in memory for fast access; a dedicated mechanism preserves i
     - Survives `pre_upgrade` trap since events are already persisted.
   - Cons:
     - One stable write per state-changing operation.
-    - Replay cost grows with log size and could exceed the 300B instructions limit for `pre_upgrade`/`post_upgrade`:
-        - If there are many events.
-        - If replaying some event are costly (in terms of instructions)
+    - Replay cost grows with log size and may exceed the 300B instruction limit for `pre_upgrade`/`post_upgrade`:
+        - If the log contains many events.
+        - If replaying some events is costly in instruction terms.
     - Event schema must remain backwards-compatible.
 - **Pre Upgrade**: the full structure is serialized to stable memory at `pre_upgrade` and restored at `post_upgrade`.
   - Pros:
@@ -393,11 +393,11 @@ The structure lives in memory for fast access; a dedicated mechanism preserves i
 
 #### Summary
 
-At-a-glance viability of each placement per data structure (🟢 = viable choice, 🔴 = ruled out).
+At-a-glance viability of each placement per data structure (🟢 = viable choice, 🟠 = possible but expensive, 🔴 = ruled out).
 
 | Data structure  | Stable memory                                                                                                               | Heap + event replay                                                                                                                                                                                     | Heap + pre-upgrade snapshot                                                                                                                                                                                                                                                                                 |
 |-----------------|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `order_books`   | 🔴 21×-29x the number of instructions for matching as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)) | 🔴 replay complexity is O(matching) in the worst-case, e.g. insert resting orders which involves only tree operation that would need to be replayed.<br>Over 22 M events / yr exceeds the upgrade budget | 🟢 Once per upgrade per order book: 60M instructions for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)) amounting to 2bps of the 300 B instructions upgrade budget so that we could easily snapshots 1_000 order books                                                                    |
+| `order_books`   | 🔴 21×-29x the number of instructions for matching as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)) | 🔴 replay complexity is O(matching) in the worst-case, e.g. insert resting orders which involves only tree operation that would need to be replayed.<br>Over 22 M events / yr exceeds the upgrade budget | 🟢 Once per upgrade per order book: 60M instructions for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)), about 2 bps of the 300 B instructions upgrade budget.<br>Even snapshotting 1_000 order books would be ~60 B instructions (~20% of the budget)                                   |
 | `balances`      | 🟠 15× the number of instructions for settling as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)).                                                   | 🔴 replay complexity is O(settling): need to update balances according to the fills.<br>Over 22 M events / yr exceeds the upgrade budget                                                                    | 🔴 Once per upgrade per traded token: 150M for for balances needed for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)).<br>Doesn't scale well:<br> - Long tail: many users will have various tokens with small balances.<br> - Adding a new trading pair adds 2 token balances to snapshot |
 | `order_history` | 🟢 no efficiency concern                                                                                                    | 🔴 heap limit crossed at ~2 yr; replay blows the 300 B budget                                                                                                                                           | 🔴 snapshot blows the 300 B budget at ~22 M records                                                                                                                                                                                                                                                         |
 
