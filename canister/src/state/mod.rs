@@ -54,6 +54,7 @@ pub enum StableMemoryOptions {
     Skip,
 }
 
+#[derive(Debug)]
 pub struct State<M: Memory> {
     mode: Mode,
     next_book_id: OrderBookId,
@@ -67,21 +68,6 @@ pub struct State<M: Memory> {
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
     order_history: OrderHistory<M>,
-}
-
-impl<M: Memory> std::fmt::Debug for State<M> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("State")
-            .field("mode", &self.mode)
-            .field("next_book_id", &self.next_book_id)
-            .field("tokens", &self.tokens)
-            .field("trading_pairs", &self.trading_pairs)
-            .field("order_books", &self.order_books)
-            .field("balances", &self.balances)
-            .field("active_tasks", &self.active_tasks)
-            .field("ledger_fee_cache", &self.ledger_fee_cache)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<M: Memory> State<M> {

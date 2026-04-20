@@ -51,6 +51,14 @@ pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, OrderRecord, M>,
 }
 
+impl<M: Memory> std::fmt::Debug for OrderHistory<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OrderHistory")
+            .field("len", &self.orders.len())
+            .finish()
+    }
+}
+
 impl<M: Memory> OrderHistory<M> {
     pub fn new(memory: M) -> Self {
         Self {
