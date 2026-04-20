@@ -310,10 +310,8 @@ impl State {
             .or_default()
     }
 
-    pub fn get_order_status(&self, order_id: OrderId) -> dex_types::OrderStatus {
+    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
         storage::order_history::get_status(&order_id)
-            .map(Into::into)
-            .unwrap_or(dex_types::OrderStatus::NotFound)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {

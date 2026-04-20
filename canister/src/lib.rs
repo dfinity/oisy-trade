@@ -76,7 +76,9 @@ pub fn process_pending_orders() {
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     match order_id.parse::<order::OrderId>() {
-        Ok(id) => state::with_state(|s| s.get_order_status(id)),
+        Ok(id) => state::with_state(|s| s.get_order_status(id))
+            .map(Into::into)
+            .unwrap_or(OrderStatus::NotFound),
         Err(e) => panic!("ERROR: invalid order id: {}", e),
     }
 }

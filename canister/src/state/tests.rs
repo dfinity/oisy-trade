@@ -589,7 +589,7 @@ mod settle_fills {
 
     mod order_status {
         use super::*;
-        use dex_types::OrderStatus;
+        use crate::order::OrderStatus;
 
         #[test]
         fn should_return_pending_before_matching() {
@@ -597,7 +597,7 @@ mod settle_fills {
             let lot = u64::from(LOT_SIZE);
             let buy_id = place_buy_order(&mut state, 100, lot);
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Pending);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
         }
 
         #[test]
@@ -607,7 +607,7 @@ mod settle_fills {
             let buy_id = place_buy_order(&mut state, 100, lot);
             state.process_pending_orders();
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
         }
 
         #[test]
@@ -618,8 +618,8 @@ mod settle_fills {
             let sell_id = place_sell_order(&mut state, 100, lot);
             state.process_pending_orders();
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
         }
 
         #[test]
@@ -631,8 +631,8 @@ mod settle_fills {
             let buy_id = place_buy_order(&mut state, 100, lot);
             state.process_pending_orders();
 
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
         }
 
         #[test]
@@ -644,8 +644,8 @@ mod settle_fills {
             let buy_id = place_buy_order(&mut state, 100, 3 * lot);
             state.process_pending_orders();
 
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
         }
 
         #[test]
@@ -655,17 +655,17 @@ mod settle_fills {
             // Sell rests with 2 lots; two successive buys deplete it
             let sell_id = place_sell_order(&mut state, 100, 2 * lot);
             state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
             let buy1_id = place_buy_order(&mut state, 100, lot);
             state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
-            assert_eq!(state.get_order_status(buy1_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+            assert_eq!(state.get_order_status(buy1_id), Some(OrderStatus::Filled));
 
             let buy2_id = place_buy_order(&mut state, 100, lot);
             state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(buy2_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(buy2_id), Some(OrderStatus::Filled));
         }
     }
 
