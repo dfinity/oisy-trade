@@ -465,20 +465,27 @@ impl<M: Memory> State<M> {
 #[cfg(test)]
 impl Clone for State<ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
-        let mut order_history = OrderHistory::new(ic_stable_structures::VectorMemory::default());
-        for (id, record) in self.order_history.iter() {
-            order_history.insert_once(id, record);
-        }
-        Self {
-            mode: self.mode.clone(),
-            next_book_id: self.next_book_id,
-            tokens: self.tokens.clone(),
-            trading_pairs: self.trading_pairs.clone(),
-            order_books: self.order_books.clone(),
-            balances: self.balances.clone(),
-            active_tasks: self.active_tasks.clone(),
-            ledger_fee_cache: self.ledger_fee_cache.clone(),
+        let Self {
+            mode,
+            next_book_id,
+            tokens,
+            trading_pairs,
+            order_books,
+            balances,
+            active_tasks,
+            ledger_fee_cache,
             order_history,
+        } = self;
+        Self {
+            mode: mode.clone(),
+            next_book_id: *next_book_id,
+            tokens: tokens.clone(),
+            trading_pairs: trading_pairs.clone(),
+            order_books: order_books.clone(),
+            balances: balances.clone(),
+            active_tasks: active_tasks.clone(),
+            ledger_fee_cache: ledger_fee_cache.clone(),
+            order_history: order_history.clone(),
         }
     }
 }
@@ -486,15 +493,37 @@ impl Clone for State<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for State<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.mode == other.mode
-            && self.next_book_id == other.next_book_id
-            && self.tokens == other.tokens
-            && self.trading_pairs == other.trading_pairs
-            && self.order_books == other.order_books
-            && self.balances == other.balances
-            && self.active_tasks == other.active_tasks
-            && self.ledger_fee_cache == other.ledger_fee_cache
-            && self.order_history.iter().eq(other.order_history.iter())
+        let Self {
+            mode,
+            next_book_id,
+            tokens,
+            trading_pairs,
+            order_books,
+            balances,
+            active_tasks,
+            ledger_fee_cache,
+            order_history,
+        } = self;
+        let Self {
+            mode: other_mode,
+            next_book_id: other_next_book_id,
+            tokens: other_tokens,
+            trading_pairs: other_trading_pairs,
+            order_books: other_order_books,
+            balances: other_balances,
+            active_tasks: other_active_tasks,
+            ledger_fee_cache: other_ledger_fee_cache,
+            order_history: other_order_history,
+        } = other;
+        mode == other_mode
+            && next_book_id == other_next_book_id
+            && tokens == other_tokens
+            && trading_pairs == other_trading_pairs
+            && order_books == other_order_books
+            && balances == other_balances
+            && active_tasks == other_active_tasks
+            && ledger_fee_cache == other_ledger_fee_cache
+            && order_history == other_order_history
     }
 }
 

@@ -48,3 +48,24 @@ impl<M: Memory> OrderHistory<M> {
             .map(|entry| (*entry.key(), entry.value()))
     }
 }
+
+#[cfg(test)]
+impl Clone for OrderHistory<ic_stable_structures::VectorMemory> {
+    fn clone(&self) -> Self {
+        let mut fresh = Self::new(ic_stable_structures::VectorMemory::default());
+        for (id, record) in self.iter() {
+            fresh.insert_once(id, record);
+        }
+        fresh
+    }
+}
+
+#[cfg(test)]
+impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+#[cfg(test)]
+impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
