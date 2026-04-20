@@ -598,9 +598,9 @@ mod history {
     }
 
     #[test]
-    fn get_status_returns_none_for_missing() {
+    fn get_returns_none_for_missing() {
         let history = history();
-        assert_eq!(history.get_status(&test_id(42)), None);
+        assert_eq!(history.get(&test_id(42)), None);
     }
 
     #[test]
@@ -609,9 +609,15 @@ mod history {
         let id = test_id(0);
         history.insert_once(id, test_record());
 
-        assert_eq!(history.get_status(&id), Some(OrderStatus::Pending));
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Pending),
+        );
         history.set_status(&id, OrderStatus::Filled);
-        assert_eq!(history.get_status(&id), Some(OrderStatus::Filled));
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Filled),
+        );
     }
 
     proptest! {

@@ -68,6 +68,7 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Insert a new order record. Panics if the order ID already exists.
     pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
+        bench_scopes!("order_history", "order_history::insert_once");
         assert_eq!(
             self.orders.insert(id, record),
             None,
@@ -77,16 +78,13 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Returns a copy of the record for the given order, or `None` if absent.
     pub fn get(&self, id: &OrderId) -> Option<OrderRecord> {
+        bench_scopes!("order_history", "order_history::get");
         self.orders.get(id)
-    }
-
-    /// Returns the status of the given order, or `None` if absent.
-    pub fn get_status(&self, id: &OrderId) -> Option<OrderStatus> {
-        self.orders.get(id).map(|r| r.status)
     }
 
     /// Updates the status of an existing order. Panics if the order is unknown.
     pub fn set_status(&mut self, id: &OrderId, status: OrderStatus) {
+        bench_scopes!("order_history", "order_history::set_status");
         let mut record = self
             .orders
             .get(id)

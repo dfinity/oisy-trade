@@ -300,7 +300,7 @@ impl<M: Memory> State<M> {
     }
 
     pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
-        self.order_history.get_status(&order_id)
+        self.order_history.get(&order_id).map(|r| r.status)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
