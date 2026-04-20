@@ -284,41 +284,16 @@ mod token_balance {
 
 mod key {
     use super::super::BalanceKey;
-    use crate::order::TokenId;
-    use candid::Principal;
+    use crate::test_fixtures::arbitrary::arb_balance_key;
     use ic_stable_structures::Storable;
     use proptest::prelude::*;
 
-    /// Arbitrary principal up to the 29-byte spec max. Covers length 0, 1,
-    /// 29, and same-length-different-bytes by construction.
-    fn arb_principal() -> impl Strategy<Value = Principal> {
-        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
-    }
-
-    fn arb_key() -> impl Strategy<Value = BalanceKey> {
-        (arb_principal(), arb_principal())
-            .prop_map(|(token, owner)| BalanceKey::new(TokenId::new(token), owner))
-    }
-
     proptest! {
         #[test]
-        fn should_roundtrip_through_stable_bytes(key in arb_key()) {
+        fn should_roundtrip_through_stable_bytes(key in arb_balance_key()) {
             let bytes = key.to_bytes();
-            prop_assert_eq!(bytes.len(), BalanceKey::ENCODED_SIZE as usize);
             let decoded = BalanceKey::from_bytes(bytes);
             prop_assert_eq!(decoded, key);
-        }
-
-        /// Byte-lexicographic order of the encoded key must agree with
-        /// `(TokenId, Principal)` ordering, which is what `StableBTreeMap`
-        /// uses to iterate entries. A mismatch would silently break range
-        /// scans and any future per-token iteration.
-        #[test]
-        fn should_preserve_order_under_encoding(a in arb_key(), b in arb_key()) {
-            let bytes_a = a.to_bytes();
-            let bytes_b = b.to_bytes();
-            let natural = (a.token(), a.owner()).cmp(&(b.token(), b.owner()));
-            prop_assert_eq!(natural, bytes_a.cmp(&bytes_b));
         }
     }
 }

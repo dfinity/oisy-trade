@@ -211,18 +211,16 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default())
 }
 
-/// Fresh, empty `TokenBalance<VectorMemory>` for unit tests. Each call
-/// allocates its own backing memory, so tests that clone or snapshot a
-/// `State` through `state()` get independent ledgers.
 pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }
 
 #[cfg(test)]
 pub mod arbitrary {
-    use crate::balance::Balance;
+    use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+        TokenId,
     };
     use candid::Principal;
     use proptest::prelude::*;
@@ -273,6 +271,11 @@ pub mod arbitrary {
     /// range that appears in canister state.
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
         prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    pub fn arb_balance_key() -> impl Strategy<Value = BalanceKey> {
+        (arb_principal(), arb_principal())
+            .prop_map(|(token, owner)| BalanceKey::new(TokenId::new(token), owner))
     }
 
     pub fn arb_side() -> impl Strategy<Value = Side> {

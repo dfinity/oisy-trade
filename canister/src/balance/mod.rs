@@ -159,23 +159,17 @@ impl Storable for Balance {
 
 /// Composite key used to index [`Balance`] entries in
 /// [`ic_stable_structures::StableBTreeMap`].
-///
-/// Layout: 30 bytes for the token, followed by 30 bytes for the owner. Each
-/// principal is encoded as `[len, bytes..]` with trailing zeros padded to the
-/// full 30-byte slot, so byte-lexicographic ordering matches `Principal::cmp`
-/// (which compares by length first, then by bytes) and iteration is grouped
-/// by token — the "token-first" layout `docs/design.md` §Upgrade Strategy
-/// calls out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
 pub struct BalanceKey {
+    #[n(0)]
     token: TokenId,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
     owner: Principal,
 }
 
 impl BalanceKey {
-    pub const ENCODED_SIZE: u32 = 60;
-    const PRINCIPAL_SLOT: usize = 30;
-
     pub fn new(token: TokenId, owner: Principal) -> Self {
         Self { token, owner }
     }
@@ -187,60 +181,25 @@ impl BalanceKey {
     pub fn owner(&self) -> &Principal {
         &self.owner
     }
-
-    fn encode_principal_into(slot: &mut [u8], p: &Principal) {
-        debug_assert_eq!(slot.len(), Self::PRINCIPAL_SLOT);
-        let bytes = p.as_slice();
-        assert!(
-            bytes.len() <= Principal::MAX_LENGTH_IN_BYTES,
-            "BUG: Principal longer than spec allows"
-        );
-        slot.fill(0);
-        slot[0] = bytes.len() as u8;
-        slot[1..1 + bytes.len()].copy_from_slice(bytes);
-    }
-
-    fn decode_principal_from(slot: &[u8]) -> Principal {
-        debug_assert_eq!(slot.len(), Self::PRINCIPAL_SLOT);
-        let len = slot[0] as usize;
-        assert!(
-            len <= Principal::MAX_LENGTH_IN_BYTES,
-            "BUG: encoded principal length exceeds spec"
-        );
-        Principal::from_slice(&slot[1..1 + len])
-    }
 }
 
 impl Storable for BalanceKey {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; Self::ENCODED_SIZE as usize];
-        let (token_slot, owner_slot) = buf.split_at_mut(Self::PRINCIPAL_SLOT);
-        Self::encode_principal_into(token_slot, self.token.as_principal());
-        Self::encode_principal_into(owner_slot, &self.owner);
-        Cow::Owned(buf.to_vec())
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance key encoding should always succeed");
+        Cow::Owned(buf)
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("balance key encoding should always succeed");
+        buf
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let bytes: &[u8] = bytes.as_ref();
-        assert_eq!(
-            bytes.len(),
-            Self::ENCODED_SIZE as usize,
-            "BalanceKey must decode from exactly {} bytes",
-            Self::ENCODED_SIZE
-        );
-        let (token_slot, owner_slot) = bytes.split_at(Self::PRINCIPAL_SLOT);
-        Self {
-            token: TokenId::new(Self::decode_principal_from(token_slot)),
-            owner: Self::decode_principal_from(owner_slot),
-        }
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode balance key bytes: {e}"))
     }
 
-    const BOUND: Bound = Bound::Bounded {
-        max_size: Self::ENCODED_SIZE,
-        is_fixed_size: true,
-    };
+    const BOUND: Bound = Bound::Unbounded;
 }
