@@ -112,9 +112,17 @@ impl State {
         book.validate_order(pending.price, &pending.quantity)
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
+        // Settlement computes `maker_price × fill.quantity` regardless of the
+        // maker's side (see `Fill::quote_amount`), so both Buy and Sell must
+        // satisfy `price × quantity ≤ u256::MAX`.
+        let amount = pending
+            .price
+            .checked_mul_quantity(&pending.quantity)
+            .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
+
         let (token, required) = match pending.side {
-            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
-            Side::Sell => (pair.base, pending.quantity.clone()),
+            Side::Buy => (pair.quote, amount),
+            Side::Sell => (pair.base, pending.quantity),
         };
         let free = self.balances.get_free(&user, &token);
         if free < required {
@@ -143,9 +151,12 @@ impl State {
         let (token, required) = match order.side() {
             Side::Buy => (
                 pair.quote,
-                order.price().mul_quantity(order.remaining_quantity()),
+                order
+                    .price()
+                    .checked_mul_quantity(order.remaining_quantity())
+                    .expect("BUG: price * quantity overflow — already validated in validate_limit_order"),
             ),
-            Side::Sell => (pair.base, order.remaining_quantity().clone()),
+            Side::Sell => (pair.base, *order.remaining_quantity()),
         };
         self.balances
             .reserve(&user, &token, required)
@@ -159,7 +170,7 @@ impl State {
                 pair: pair.clone(),
                 side: order.side(),
                 price: order.price(),
-                quantity: order.remaining_quantity().clone(),
+                quantity: *order.remaining_quantity(),
                 status: OrderStatus::Pending,
             },
         );
@@ -241,7 +252,7 @@ impl State {
         };
 
         let quote_amount = fill.quote_amount();
-        let base_amount = fill.base_amount().clone();
+        let base_amount = *fill.base_amount();
 
         // Quote side: buyer pays reserved, seller receives free
         {
@@ -254,7 +265,9 @@ impl State {
                 && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
                 && !price_diff.is_zero()
             {
-                let surplus = price_diff.mul_quantity(&fill.quantity);
+                let surplus = price_diff
+                    .checked_mul_quantity(&fill.quantity)
+                    .expect("BUG: price_diff * quantity overflow — already validated in validate_limit_order");
                 quote.unreserve(&taker, surplus);
             }
         }
@@ -384,6 +397,7 @@ impl State {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddLimitOrderError {
+    AmountExceedsMaximum,
     UnknownTradingPair,
     InvalidOrder(MatchOrderError),
     InsufficientBalance {
@@ -396,6 +410,9 @@ pub enum AddLimitOrderError {
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
         match err {
+            AddLimitOrderError::AmountExceedsMaximum => {
+                dex_types::AddLimitOrderError::AmountExceedsMaximum
+            }
             AddLimitOrderError::UnknownTradingPair => {
                 dex_types::AddLimitOrderError::UnknownTradingPair
             }

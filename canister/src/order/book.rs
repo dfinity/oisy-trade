@@ -164,7 +164,7 @@ impl OrderBook {
         }
         if quantity.is_zero() || !quantity.is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity: quantity.clone(),
+                quantity: *quantity,
                 lot_size: self.lot_size,
             });
         }
@@ -274,8 +274,7 @@ fn fill_against_queue<K: Ord>(
         let Some(resting) = resting_orders.front_mut() else {
             break;
         };
-        let fill_qty =
-            std::cmp::min(order.remaining_quantity(), resting.remaining_quantity()).clone();
+        let fill_qty = *std::cmp::min(order.remaining_quantity(), resting.remaining_quantity());
 
         order.reduce_quantity(&fill_qty);
         resting.reduce_quantity(&fill_qty);
@@ -372,7 +371,9 @@ pub struct Fill {
 impl Fill {
     /// The amount of quote tokens exchanged (maker_price × quantity).
     pub fn quote_amount(&self) -> Quantity {
-        self.maker_price.mul_quantity(&self.quantity)
+        self.quantity
+            .checked_mul_u64(self.maker_price.0)
+            .expect("BUG: validation of order should prevent overflow")
     }
 
     /// The amount of base tokens exchanged (same as quantity).

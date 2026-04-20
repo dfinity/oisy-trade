@@ -46,6 +46,8 @@ pub struct LimitOrderRequest {
 /// Error returned when placing a limit order fails.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum AddLimitOrderError {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum,
     /// The requested trading pair is not registered.
     UnknownTradingPair,
     /// The price is not a positive multiple of the tick size.
@@ -140,6 +142,8 @@ pub struct DepositRequest {
 /// Error returned by the deposit endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum DepositError {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum,
     /// The token is not part of any trading pair on the DEX.
     UnsupportedToken {
         /// The unsupported token.
@@ -227,6 +231,8 @@ pub struct WithdrawResponse {
 /// Error returned by the withdraw endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum WithdrawError {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum,
     /// The token is not part of any trading pair on the DEX.
     UnsupportedToken {
         /// The unsupported token.

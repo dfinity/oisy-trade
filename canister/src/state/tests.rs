@@ -183,6 +183,78 @@ mod add_limit_order {
     }
 }
 
+mod validate_overflow_invariant {
+    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+    use crate::state::AddLimitOrderError;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
+    use candid::Principal;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
+    proptest! {
+        // `record_limit_order` and `settle_fill` rely on `price * quantity`
+        // not overflowing once an order has passed `validate_limit_order`.
+        // Settlement computes `maker_price × fill.quantity` regardless of
+        // the maker's side, so the invariant must hold for Buy and Sell alike.
+        // This biconditional pins that guarantee: validation rejects with
+        // `AmountExceedsMaximum` exactly when the multiplication would overflow.
+        #[test]
+        fn validate_rejects_iff_price_times_quantity_overflows(
+            price_raw in 1u64..=u64::MAX,
+            quantity in arb_quantity(),
+            side in arb_side(),
+        ) {
+            // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
+            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
+            let tick = TickSize::new(NonZeroU64::new(1).unwrap());
+            let lot = LotSize::new(NonZeroU64::new(1).unwrap());
+
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair.clone(),
+                icp_metadata(),
+                ckbtc_metadata(),
+                tick,
+                lot,
+            );
+
+            let price = Price::new(price_raw);
+            let fits = price.checked_mul_quantity(&quantity).is_some();
+
+            let result = state.validate_limit_order(
+                Principal::from_slice(&[0x01]),
+                pair,
+                PendingOrder {
+                    side,
+                    price,
+                    quantity,
+                },
+            );
+
+            let rejected_for_overflow =
+                matches!(result, Err(AddLimitOrderError::AmountExceedsMaximum));
+            prop_assert_eq!(
+                rejected_for_overflow,
+                !fits,
+                "result was {:?}, fits={}",
+                result,
+                fits
+            );
+        }
+    }
+}
+
 mod settle_fills {
     use crate::balance::Balance;
     use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
@@ -425,13 +497,25 @@ mod settle_fills {
 
         // Total tokens unchanged: base and quote just move between free/reserved
         assert_eq!(
-            base_before.free().clone() + base_before.reserved().clone(),
-            base_after.free().clone() + base_after.reserved().clone(),
+            base_before
+                .free()
+                .checked_add(*base_before.reserved())
+                .unwrap(),
+            base_after
+                .free()
+                .checked_add(*base_after.reserved())
+                .unwrap(),
             "base token total changed"
         );
         assert_eq!(
-            quote_before.free().clone() + quote_before.reserved().clone(),
-            quote_after.free().clone() + quote_after.reserved().clone(),
+            quote_before
+                .free()
+                .checked_add(*quote_before.reserved())
+                .unwrap(),
+            quote_after
+                .free()
+                .checked_add(*quote_after.reserved())
+                .unwrap(),
             "quote token total changed"
         );
         // After self-trade: all reserved released, net balances same as deposited
@@ -485,14 +569,16 @@ mod settle_fills {
         let pair = icp_ckbtc_trading_pair();
         let price = 100u64;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
-        let quantity = Quantity::from(u64::from(LOT_SIZE)) * Quantity::from(u64::MAX);
+        let quantity = Quantity::from(u64::from(LOT_SIZE))
+            .checked_mul_u64(u64::MAX)
+            .unwrap();
 
-        place_buy_order(&mut state, price, quantity.clone());
-        place_sell_order(&mut state, price, quantity.clone());
+        place_buy_order(&mut state, price, quantity);
+        place_sell_order(&mut state, price, quantity);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         state.process_pending_orders();
 
-        let quote_total = Price::new(price).mul_quantity(&quantity);
+        let quote_total = Price::new(price).checked_mul_quantity(&quantity).unwrap();
 
         // Buyer received all base tokens
         let buyer_base = state.get_balance(&BUYER, &pair.base);
@@ -572,8 +658,14 @@ mod settle_fills {
             quantity: quantity.into(),
         };
         let deposit = match pending.side {
-            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
-            Side::Sell => (pair.base, pending.quantity.clone()),
+            Side::Buy => (
+                pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity(&pending.quantity)
+                    .unwrap(),
+            ),
+            Side::Sell => (pair.base, pending.quantity),
         };
         state.deposit(user, deposit.0, deposit.1);
         let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
@@ -705,7 +797,7 @@ mod settle_fills {
                             pair: pair.clone(),
                             side: fill.taker_side,
                             price: fill.taker_price,
-                            quantity: fill.quantity.clone(),
+                            quantity: fill.quantity,
                             status: OrderStatus::Open,
                         },
                     );
@@ -720,7 +812,7 @@ mod settle_fills {
                             pair: pair.clone(),
                             side: maker_side,
                             price: fill.maker_price,
-                            quantity: fill.quantity.clone(),
+                            quantity: fill.quantity,
                             status: OrderStatus::Open,
                         },
                     );
@@ -731,11 +823,11 @@ mod settle_fills {
                         Side::Buy => fill.taker_price,
                         Side::Sell => fill.maker_price,
                     };
-                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
-                    state.deposit(buyer, pair.quote, buy_reserve.clone());
+                    let buy_reserve = buyer_price.checked_mul_quantity(&fill.quantity).unwrap();
+                    state.deposit(buyer, pair.quote, buy_reserve);
                     state.balances.reserve(&buyer, &pair.quote, buy_reserve).unwrap();
-                    state.deposit(seller, pair.base, fill.quantity.clone());
-                    state.balances.reserve(&seller, &pair.base, fill.quantity.clone()).unwrap();
+                    state.deposit(seller, pair.base, fill.quantity);
+                    state.balances.reserve(&seller, &pair.base, fill.quantity).unwrap();
                 }
 
                 let mut state1 = state.clone();
@@ -784,8 +876,16 @@ mod settle_fills {
                 (Quantity::ZERO, Quantity::ZERO),
                 |(base_acc, quote_acc), (base, quote)| {
                     (
-                        base_acc + base.free().clone() + base.reserved().clone(),
-                        quote_acc + quote.free().clone() + quote.reserved().clone(),
+                        base_acc
+                            .checked_add(*base.free())
+                            .unwrap()
+                            .checked_add(*base.reserved())
+                            .unwrap(),
+                        quote_acc
+                            .checked_add(*quote.free())
+                            .unwrap()
+                            .checked_add(*quote.reserved())
+                            .unwrap(),
                     )
                 },
             )

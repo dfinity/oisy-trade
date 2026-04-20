@@ -275,8 +275,8 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn mul_quantity(self, quantity: &Quantity) -> Quantity {
-        quantity * self.0
+    pub fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
+        quantity.checked_mul_u64(self.0)
     }
 }
 
@@ -332,87 +332,229 @@ impl From<Price> for u64 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode)]
-pub struct Quantity(#[cbor(n(0), with = "icrc_cbor::nat")] Nat);
-
-impl Default for Quantity {
-    fn default() -> Self {
-        Self::ZERO
-    }
+/// A 256-bit unsigned quantity represented as `(high, low)` pair of `u128`.
+///
+/// Stack-allocated and `Copy`. In practice `high` is almost always zero
+/// (single token amounts fit in `u128`); only intermediate products like
+/// `price × quantity` may use the high limb.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Quantity {
+    high: u128,
+    low: u128,
 }
 
 impl Quantity {
-    pub const ZERO: Self = Self(Nat(BigUint::ZERO));
+    pub const ZERO: Self = Self { high: 0, low: 0 };
+    pub const MAX: Self = Self {
+        high: u128::MAX,
+        low: u128::MAX,
+    };
+
+    pub const fn new(high: u128, low: u128) -> Self {
+        Self { high, low }
+    }
+
+    pub const fn from_u128(value: u128) -> Self {
+        Self {
+            high: 0,
+            low: value,
+        }
+    }
 
     pub fn is_zero(&self) -> bool {
-        self == &Self::ZERO
+        self.high == 0 && self.low == 0
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
-        self.as_big_uint() % lot_size.get() == BigUint::ZERO
+        // Quantity is (high, low) pair of u128, representing (high * 2^128 + low).
+        // We want: (high * 2^128 + low) mod d == 0
+        let divisor = lot_size.get() as u128;
+        if self.high == 0 {
+            self.low.is_multiple_of(divisor)
+        } else {
+            // Using the modular identity:
+            // (high * 2^128 + low) mod d = ((high mod d) * (2^128 mod d) + (low mod d)) mod d
+            let high_rem = self.high % divisor;
+            // 2^128 doesn't fit in u128, so compute it as (u128::MAX + 1) mod d.
+            let shift_rem = (u128::MAX % divisor + 1) % divisor;
+            // Cannot overflow: high_rem and shift_rem are both < divisor (a u64),
+            // so their product is at most (u64::MAX-1)^2, and self.low % divisor
+            // is at most u64::MAX-1, leaving plenty of room in u128.
+            let combined = (high_rem
+                .checked_mul(shift_rem)
+                .expect("high_rem and shift_rem are < d (a u64)")
+                + self.low % divisor)
+                % divisor;
+            combined == 0
+        }
     }
 
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
         bench_scopes!("qty", "qty::checked_sub");
-        if self >= other {
-            Some(Quantity(self.0.clone() - other.0.clone()))
-        } else {
-            None
-        }
+        let (low, borrow) = self.low.overflowing_sub(other.low);
+        let high = self
+            .high
+            .checked_sub(other.high.checked_add(borrow as u128)?)?;
+        Some(Self { high, low })
     }
 
-    fn as_big_uint(&self) -> &BigUint {
-        &self.0.0
+    /// Serialize as a 32-byte big-endian representation.
+    pub fn to_be_bytes(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(&self.high.to_be_bytes());
+        bytes[16..].copy_from_slice(&self.low.to_be_bytes());
+        bytes
+    }
+
+    /// Deserialize from a big-endian byte slice (up to 32 bytes).
+    ///
+    /// Returns `None` if the slice is longer than 32 bytes.
+    pub fn from_be_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > 32 {
+            return None;
+        }
+        let mut buf = [0u8; 32];
+        buf[32 - bytes.len()..].copy_from_slice(bytes);
+        Some(Self {
+            high: u128::from_be_bytes(buf[..16].try_into().unwrap()),
+            low: u128::from_be_bytes(buf[16..].try_into().unwrap()),
+        })
+    }
+
+    /// Convert to `Nat` for Candid serialization.
+    pub fn to_nat(&self) -> Nat {
+        if self.high == 0 {
+            Nat::from(self.low)
+        } else {
+            Nat(BigUint::from_bytes_be(&self.to_be_bytes()))
+        }
+    }
+}
+
+impl Ord for Quantity {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.high.cmp(&other.high).then(self.low.cmp(&other.low))
+    }
+}
+
+impl PartialOrd for Quantity {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl From<u64> for Quantity {
     fn from(value: u64) -> Self {
-        Self(Nat::from(value))
+        Self {
+            high: 0,
+            low: value as u128,
+        }
     }
 }
 
-impl From<Nat> for Quantity {
-    fn from(value: Nat) -> Self {
-        Self(value)
+/// Error returned when a `Nat` value exceeds the 256-bit capacity of `Quantity`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuantityOverflowError;
+
+impl std::fmt::Display for QuantityOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "value exceeds u256 capacity")
+    }
+}
+
+impl TryFrom<Nat> for Quantity {
+    type Error = QuantityOverflowError;
+
+    fn try_from(value: Nat) -> Result<Self, Self::Error> {
+        if value.0.bits() > 256 {
+            return Err(QuantityOverflowError);
+        }
+        Self::from_be_bytes(&value.0.to_bytes_be()).ok_or(QuantityOverflowError)
     }
 }
 
 impl From<Quantity> for Nat {
     fn from(quantity: Quantity) -> Self {
-        quantity.0
+        quantity.to_nat()
     }
 }
 
-impl std::ops::Add for Quantity {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
+impl Quantity {
+    pub fn checked_add(self, rhs: Self) -> Option<Self> {
         bench_scopes!("qty", "qty::add");
-        Quantity(self.0 + rhs.0)
+        let (low, carry) = self.low.overflowing_add(rhs.low);
+        let high = self
+            .high
+            .checked_add(rhs.high)?
+            .checked_add(carry as u128)?;
+        Some(Self { high, low })
     }
-}
 
-impl std::ops::AddAssign for Quantity {
-    fn add_assign(&mut self, rhs: Self) {
-        bench_scopes!("qty", "qty::add_assign");
-        self.0 += rhs.0;
-    }
-}
-
-impl std::ops::Mul for Quantity {
-    type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
-        bench_scopes!("qty", "qty::mul");
-        Quantity(self.0 * rhs.0)
-    }
-}
-
-impl std::ops::Mul<u64> for &Quantity {
-    type Output = Quantity;
-
-    fn mul(self, rhs: u64) -> Self::Output {
+    pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
         bench_scopes!("qty", "qty::mul_u64");
-        Quantity(Nat(self.as_big_uint() * rhs))
+        // We want (high * 2^128 + low) * rhs, checked for overflow.
+        // low * rhs can overflow u128, so split low into two 64-bit halves
+        // and multiply each by rhs (u64 × u64 → u128, no overflow).
+        let rhs = rhs as u128;
+        let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
+        let low_hi = self.low >> 64;
+        let prod_lo = low_lo * rhs;
+        let prod_hi = low_hi * rhs;
+        // Reassemble the low limb: prod_hi is shifted left by 64 bits.
+        let (low, carry) = prod_lo.overflowing_add(prod_hi << 64);
+        // Build the high limb: high * rhs + overflow from low multiplication.
+        let high = self
+            .high
+            .checked_mul(rhs)?
+            .checked_add(prod_hi >> 64)? // upper bits of prod_hi that spilled past bit 128
+            .checked_add(carry as u128)?; // carry from the low addition
+        Some(Self { high, low })
+    }
+}
+
+/// CBOR encoding of large numbers:
+/// - Values ≤ u64::MAX: encoded as a CBOR unsigned integer (1–9 bytes).
+/// - Values > u64::MAX: encoded as Tag 2 (PosBignum) + big-endian byte string.
+impl<C> minicbor::Encode<C> for Quantity {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        if self.high == 0 && self.low <= u64::MAX as u128 {
+            e.u64(self.low as u64)?;
+        } else {
+            let buf = self.to_be_bytes();
+            let start = buf.iter().position(|&b| b != 0).unwrap_or(buf.len());
+            e.tag(minicbor::data::Tag::PosBignum)?
+                .bytes(&buf[start..])?;
+        }
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Quantity {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        // Try decoding as a plain CBOR unsigned integer first.
+        let pos = d.position();
+        match d.u64() {
+            Ok(n) => return Ok(Self::from(n)),
+            Err(e) if e.is_type_mismatch() => d.set_position(pos),
+            Err(e) => return Err(e),
+        }
+        // Otherwise expect Tag 2 (PosBignum) + byte string.
+        let tag = d.tag()?;
+        if tag != minicbor::data::Tag::PosBignum {
+            return Err(minicbor::decode::Error::message(
+                "expected u64 or Tag::PosBignum for Quantity",
+            ));
+        }
+        let bytes = d.bytes()?;
+        Self::from_be_bytes(bytes)
+            .ok_or_else(|| minicbor::decode::Error::message("Quantity exceeds 256 bits"))
     }
 }
 
@@ -423,13 +565,15 @@ pub struct PendingOrder {
     pub quantity: Quantity,
 }
 
-impl From<dex_types::LimitOrderRequest> for PendingOrder {
-    fn from(request: dex_types::LimitOrderRequest) -> Self {
-        Self {
+impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
+    type Error = QuantityOverflowError;
+
+    fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
             side: Side::from(request.side),
             price: Price::from(request.price),
-            quantity: Quantity::from(request.quantity),
-        }
+            quantity: Quantity::try_from(request.quantity)?,
+        })
     }
 }
 
@@ -502,7 +646,7 @@ impl RestingOrder {
             id: self.id,
             side,
             price,
-            remaining_quantity: self.remaining_quantity.clone(),
+            remaining_quantity: self.remaining_quantity,
         }
     }
 

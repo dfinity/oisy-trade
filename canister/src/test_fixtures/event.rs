@@ -54,8 +54,8 @@ impl WorstCaseEvent {
             Self::Init => 328,
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
-            Self::Deposit => 96,
-            Self::AddLimitOrder => 98,
+            Self::Deposit => 95,
+            Self::AddLimitOrder => 97,
         }
     }
 }
@@ -131,5 +131,5 @@ fn max_quantity() -> Quantity {
     // EVM-based chains use theoretically u256,
     // but note that for example ETH has a supply of 120 million,
     // which comfortably fits in a u128 (18 decimals).
-    Quantity::from(candid::Nat::from(u128::MAX))
+    Quantity::try_from(candid::Nat::from(u128::MAX)).unwrap()
 }
