@@ -410,12 +410,7 @@ mod withdraw {
     }
 
     fn init_state_with_balance(amount: u64) {
-        state::init_state(
-            state::State::try_from(dex_types_internal::InitArg {
-                mode: dex_types_internal::Mode::GeneralAvailability,
-            })
-            .unwrap(),
-        );
+        state::init_state(crate::test_fixtures::state_vmem());
         state::with_state_mut(|s| {
             s.record_token(
                 TokenId::from(token_id()),
@@ -666,12 +661,7 @@ mod withdraw {
     #[tokio::test]
     async fn should_reject_unsupported_token() {
         // Init state without registering any token.
-        state::init_state(
-            state::State::try_from(dex_types_internal::InitArg {
-                mode: dex_types_internal::Mode::GeneralAvailability,
-            })
-            .unwrap(),
-        );
+        state::init_state(crate::test_fixtures::state_vmem());
 
         let mut runtime = MockRuntime::new();
         runtime.expect_msg_caller().return_const(USER);
@@ -780,7 +770,7 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
-        init_state(test_fixtures::state());
+        init_state(test_fixtures::state_vmem());
         let pairs = get_trading_pairs();
         assert!(pairs.is_empty());
     }

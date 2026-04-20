@@ -12,27 +12,29 @@ use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    OrderRecord, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
+use crate::storage::VMem;
 use candid::{Nat, Principal};
-use dex_types::OrderStatus;
 use dex_types_internal::{InitArg, Mode};
+use ic_stable_structures::Memory;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 thread_local! {
-    static STATE: RefCell<Option<State>> = RefCell::default();
+    static STATE: RefCell<Option<State<VMem>>> = RefCell::default();
 }
 
-pub fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
+pub fn with_state<R>(f: impl FnOnce(&State<VMem>) -> R) -> R {
     STATE.with(|s| f(s.borrow().as_ref().expect("State not initialized!")))
 }
 
-pub fn with_state_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
+pub fn with_state_mut<R>(f: impl FnOnce(&mut State<VMem>) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
 }
 
-pub fn init_state(state: State) {
+pub fn init_state(state: State<VMem>) {
     STATE.with(|s| {
         let mut current = s.borrow_mut();
         assert!(current.is_none(), "State already initialized!");
@@ -40,8 +42,20 @@ pub fn init_state(state: State) {
     });
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct State {
+/// Controls whether a state mutation propagates to stable-memory-backed
+/// structures. Normal execution uses [`StableMemoryOptions::Write`]; the
+/// `post_upgrade` replay uses [`StableMemoryOptions::Skip`] because stable
+/// storage already holds the post-mutation values — re-inserting them
+/// would either duplicate entries or overwrite newer states with the
+/// values the event carries at submission time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StableMemoryOptions {
+    Write,
+    Skip,
+}
+
+#[derive(Debug)]
+pub struct State<M: Memory> {
     mode: Mode,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
@@ -49,17 +63,15 @@ pub struct State {
     order_books: BTreeMap<OrderBookId, OrderBook>,
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: TokenBalance,
-    order_history: OrderHistory,
+    order_history: OrderHistory<M>,
     active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
 }
 
-impl TryFrom<InitArg> for State {
-    type Error = String;
-
-    fn try_from(init_arg: InitArg) -> Result<Self, Self::Error> {
+impl<M: Memory> State<M> {
+    pub fn new(init_arg: InitArg, order_history: OrderHistory<M>) -> Result<Self, String> {
         Ok(Self {
             mode: init_arg.mode,
             next_book_id: OrderBookId::default(),
@@ -67,14 +79,12 @@ impl TryFrom<InitArg> for State {
             trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
             balances: TokenBalance::default(),
-            order_history: OrderHistory::new(),
+            order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
         })
     }
-}
 
-impl State {
     pub fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
     }
@@ -138,7 +148,13 @@ impl State {
         Ok((order_id, order))
     }
 
-    pub fn record_limit_order(&mut self, user: Principal, book_id: OrderBookId, order: Order) {
+    pub fn record_limit_order(
+        &mut self,
+        user: Principal,
+        book_id: OrderBookId,
+        order: Order,
+        persistence: StableMemoryOptions,
+    ) {
         let pair = self
             .trading_pairs
             .get_pair(&book_id)
@@ -162,18 +178,19 @@ impl State {
             .reserve(&user, &token, required)
             .expect("BUG: insufficient balance for validated order");
 
-        let order_id = OrderId::new(book_id, order.id());
-        self.order_history.insert_once(
-            order_id,
-            OrderRecord {
-                owner: user,
-                pair: pair.clone(),
-                side: order.side(),
-                price: order.price(),
-                quantity: *order.remaining_quantity(),
-                status: OrderStatus::Pending,
-            },
-        );
+        if matches!(persistence, StableMemoryOptions::Write) {
+            let order_id = OrderId::new(book_id, order.id());
+            self.order_history.insert_once(
+                order_id,
+                OrderRecord {
+                    owner: user,
+                    side: order.side(),
+                    price: order.price(),
+                    quantity: *order.remaining_quantity(),
+                    status: OrderStatus::Pending,
+                },
+            );
+        }
         book.add_pending_order(order);
     }
 
@@ -206,21 +223,14 @@ impl State {
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("status");
-                for seq in &output.resting_orders {
-                    let order_id = OrderId::new(book_id, *seq);
-                    *self
-                        .order_history
-                        .get_status_mut(&order_id)
-                        .expect("BUG: resting order not found in order_history") =
-                        OrderStatus::Open;
+                for seq in output.resting_orders {
+                    let order_id = OrderId::new(book_id, seq);
+                    self.order_history.set_status(&order_id, OrderStatus::Open);
                 }
-                for seq in &output.filled_orders {
-                    let order_id = OrderId::new(book_id, *seq);
-                    *self
-                        .order_history
-                        .get_status_mut(&order_id)
-                        .expect("BUG: filled order not found in order_history") =
-                        OrderStatus::Filled;
+                for seq in output.filled_orders {
+                    let order_id = OrderId::new(book_id, seq);
+                    self.order_history
+                        .set_status(&order_id, OrderStatus::Filled);
                 }
             }
         }
@@ -282,8 +292,8 @@ impl State {
         }
     }
 
-    pub fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        self.order_history.get_status(&order_id)
+    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
+        self.order_history.get(&order_id).map(|r| r.status)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -394,6 +404,74 @@ impl State {
             .and_then(|book_id| self.order_books.get(book_id))
     }
 }
+
+#[cfg(test)]
+impl Clone for State<ic_stable_structures::VectorMemory> {
+    fn clone(&self) -> Self {
+        let Self {
+            mode,
+            next_book_id,
+            tokens,
+            trading_pairs,
+            order_books,
+            balances,
+            active_tasks,
+            ledger_fee_cache,
+            order_history,
+        } = self;
+        Self {
+            mode: mode.clone(),
+            next_book_id: *next_book_id,
+            tokens: tokens.clone(),
+            trading_pairs: trading_pairs.clone(),
+            order_books: order_books.clone(),
+            balances: balances.clone(),
+            active_tasks: active_tasks.clone(),
+            ledger_fee_cache: ledger_fee_cache.clone(),
+            order_history: order_history.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl PartialEq for State<ic_stable_structures::VectorMemory> {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            mode,
+            next_book_id,
+            tokens,
+            trading_pairs,
+            order_books,
+            balances,
+            active_tasks,
+            ledger_fee_cache,
+            order_history,
+        } = self;
+        let Self {
+            mode: other_mode,
+            next_book_id: other_next_book_id,
+            tokens: other_tokens,
+            trading_pairs: other_trading_pairs,
+            order_books: other_order_books,
+            balances: other_balances,
+            active_tasks: other_active_tasks,
+            ledger_fee_cache: other_ledger_fee_cache,
+            order_history: other_order_history,
+        } = other;
+        mode == other_mode
+            && next_book_id == other_next_book_id
+            && tokens == other_tokens
+            && trading_pairs == other_trading_pairs
+            && order_books == other_order_books
+            && balances == other_balances
+            && active_tasks == other_active_tasks
+            && ledger_fee_cache == other_ledger_fee_cache
+            && order_history == other_order_history
+    }
+}
+
+#[cfg(test)]
+impl Eq for State<ic_stable_structures::VectorMemory> {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddLimitOrderError {

@@ -1,12 +1,13 @@
 pub mod event;
 
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
+    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use crate::state;
+use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
+use ic_stable_structures::VectorMemory;
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -35,10 +36,39 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
-pub fn state() -> state::State {
-    state::State::try_from(dex_types_internal::InitArg {
-        mode: dex_types_internal::Mode::GeneralAvailability,
-    })
+pub fn base_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "BASE".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn quote_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "QUOTE".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn state() -> state::State<ic_stable_structures::VectorMemory> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        order_history(),
+    )
+    .unwrap()
+}
+
+/// Build a fresh `State<VMem>` backed by production stable memory for tests
+/// that go through `state::init_state` (i.e. the canister thread_local).
+pub fn state_vmem() -> state::State<crate::storage::VMem> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        order::OrderHistory::new(crate::storage::order_history_memory()),
+    )
     .unwrap()
 }
 
@@ -137,10 +167,14 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
+    let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
     state::init_state(
-        state::State::try_from(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        })
+        state::State::new(
+            dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            },
+            order_history,
+        )
         .unwrap(),
     );
     state::with_state_mut(|s| {
@@ -167,9 +201,16 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+pub fn order_history() -> OrderHistory<VectorMemory> {
+    OrderHistory::new(VectorMemory::default())
+}
+
 #[cfg(test)]
 pub mod arbitrary {
-    use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
+    use crate::order::{
+        Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+    };
+    use candid::Principal;
     use proptest::prelude::*;
 
     use super::{LOT_SIZE, TICK_SIZE};
@@ -211,6 +252,54 @@ pub mod arbitrary {
                     quantity: Quantity::from(qty_lots * lot),
                 }
             })
+    }
+
+    /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
+    /// byte slice (up to 29 bytes), covering the full principal byte-length
+    /// range that appears in canister state.
+    pub fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    pub fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
+    pub fn arb_order_status() -> impl Strategy<Value = OrderStatus> {
+        prop_oneof![
+            Just(OrderStatus::Pending),
+            Just(OrderStatus::Open),
+            Just(OrderStatus::Filled),
+            Just(OrderStatus::Canceled),
+        ]
+    }
+
+    pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
+        (any::<u64>(), any::<u64>())
+            .prop_map(|(book, seq)| OrderId::new(OrderBookId::new(book), OrderSeq::new(seq)))
+    }
+
+    /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
+    /// lot-aligned non-zero quantity.
+    pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            arb_principal(),
+            arb_side(),
+            1..1_000u64, // price in ticks
+            1..1_000u64, // quantity in lots
+            arb_order_status(),
+        )
+            .prop_map(
+                move |(owner, side, price_ticks, qty_lots, status)| OrderRecord {
+                    owner,
+                    side,
+                    price: Price::new(price_ticks * tick),
+                    quantity: Quantity::from(qty_lots * lot),
+                    status,
+                },
+            )
     }
 }
 

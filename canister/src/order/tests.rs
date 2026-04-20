@@ -1,5 +1,7 @@
 mod order_id {
     use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use crate::test_fixtures::arbitrary::arb_order_id;
+    use ic_stable_structures::Storable;
     use proptest::prelude::*;
 
     proptest! {
@@ -26,6 +28,31 @@ mod order_id {
         #[test]
         fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
             prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+        }
+
+        #[test]
+        fn should_roundtrip_order_id_through_stable_bytes(
+            id in arb_order_id(),
+        ) {
+            let bytes = id.to_bytes();
+            let decoded = OrderId::from_bytes(bytes);
+            prop_assert_eq!(decoded, id);
+        }
+
+        /// Big-endian encoding makes the stable-memory key order match the
+        /// lexicographic byte order of `(book_id, seq)`, so `StableBTreeMap`
+        /// iteration traverses orders in the same order as a heap `BTreeMap`
+        /// keyed by `OrderId`.
+        #[test]
+        fn should_preserve_order_under_be_encoding(
+            a in any::<(u64, u64)>(),
+            b in any::<(u64, u64)>(),
+        ) {
+            let id_a = OrderId::new(OrderBookId::new(a.0), OrderSeq::new(a.1));
+            let id_b = OrderId::new(OrderBookId::new(b.0), OrderSeq::new(b.1));
+            let bytes_a = id_a.to_bytes();
+            let bytes_b = id_b.to_bytes();
+            prop_assert_eq!(id_a.cmp(&id_b), bytes_a.cmp(&bytes_b));
         }
     }
 }
@@ -740,11 +767,17 @@ mod process_pending_orders {
 
 mod history {
     use crate::order::{
-        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side, TokenId,
-        TradingPair,
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,
+        Side,
     };
+    use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
-    use dex_types::OrderStatus;
+    use ic_stable_structures::{Storable, VectorMemory};
+    use proptest::{prop_assert_eq, proptest};
+
+    fn history() -> OrderHistory<VectorMemory> {
+        OrderHistory::new(VectorMemory::default())
+    }
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -753,10 +786,6 @@ mod history {
     fn test_record() -> OrderRecord {
         OrderRecord {
             owner: Principal::anonymous(),
-            pair: TradingPair {
-                base: TokenId::new(Principal::anonymous()),
-                quote: TokenId::new(Principal::anonymous()),
-            },
             side: Side::Buy,
             price: Price::new(100),
             quantity: Quantity::from(1_000_000u64),
@@ -766,37 +795,54 @@ mod history {
 
     #[test]
     fn insert_once_and_get() {
-        let mut history = OrderHistory::new();
+        let mut history = history();
         let id = test_id(0);
         let record = test_record();
         history.insert_once(id, record.clone());
 
-        assert_eq!(history.get(&id), Some(&record));
+        assert_eq!(history.get(&id), Some(record));
     }
 
     #[test]
     #[should_panic(expected = "duplicate order ID")]
     fn insert_once_panics_on_duplicate() {
-        let mut history = OrderHistory::new();
+        let mut history = history();
         let id = test_id(0);
         history.insert_once(id, test_record());
         history.insert_once(id, test_record());
     }
 
     #[test]
-    fn get_status_returns_not_found_for_missing() {
-        let history = OrderHistory::new();
-        assert_eq!(history.get_status(&test_id(42)), OrderStatus::NotFound);
+    fn get_returns_none_for_missing() {
+        let history = history();
+        assert_eq!(history.get(&test_id(42)), None);
     }
 
     #[test]
-    fn get_status_mut_updates_status() {
-        let mut history = OrderHistory::new();
+    fn set_status_updates_status() {
+        let mut history = history();
         let id = test_id(0);
         history.insert_once(id, test_record());
 
-        assert_eq!(history.get_status(&id), OrderStatus::Pending);
-        *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
-        assert_eq!(history.get_status(&id), OrderStatus::Filled);
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Pending),
+        );
+        history.set_status(&id, OrderStatus::Filled);
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Filled),
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn should_store_order_record(
+            record in arb_order_record(),
+        ) {
+            let bytes = record.to_bytes();
+            let decoded = OrderRecord::from_bytes(bytes);
+            prop_assert_eq!(decoded, record);
+        }
     }
 }

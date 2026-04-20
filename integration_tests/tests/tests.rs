@@ -712,6 +712,11 @@ async fn should_replay_events_on_upgrade() {
         })
         .await
         .unwrap();
+    // Let the matching timer fire so the resting order transitions from
+    // `Pending` to `Open` before taking the pre-upgrade snapshot. This pins
+    // the "before" side of the comparison so the assertion is insensitive to
+    // how many pocket-ic ticks the upgrade itself advances.
+    setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
         setup.dex_client().get_order_status(order_id.clone()),

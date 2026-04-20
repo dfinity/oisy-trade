@@ -8,6 +8,37 @@ use crate::state::event::{
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
 
+use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
+
+pub fn init_event(mode: Mode) -> Event {
+    Event {
+        timestamp: 0,
+        payload: EventType::Init(InitArg { mode }),
+    }
+}
+
+pub fn upgrade_event(mode: Option<Mode>) -> Event {
+    Event {
+        timestamp: 1,
+        payload: EventType::Upgrade(UpgradeArg { mode }),
+    }
+}
+
+pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
+    Event {
+        timestamp: 2,
+        payload: EventType::AddTradingPair(AddTradingPairEvent {
+            book_id: OrderBookId::ZERO,
+            base: TokenId::new(base),
+            quote: TokenId::new(quote),
+            tick_size: TICK_SIZE,
+            lot_size: LOT_SIZE,
+            base_metadata: base_metadata(),
+            quote_metadata: quote_metadata(),
+        }),
+    }
+}
+
 /// Adding a new variant to `EventType` will cause a compile error in the `From` impl,
 /// reminding you to add corresponding worst-case entries.
 #[derive(strum::EnumIter, strum::IntoStaticStr)]

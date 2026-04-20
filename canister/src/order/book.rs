@@ -93,6 +93,8 @@ impl OrderBook {
     /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
     /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
     pub fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let mut fills = Vec::new();
@@ -269,6 +271,8 @@ fn fill_against_queue<K: Ord>(
     orders_index: &mut BTreeMap<OrderSeq, (Side, Price)>,
     filled_orders: &mut BTreeSet<OrderSeq>,
 ) {
+    #[cfg(feature = "canbench-rs")]
+    let _p = canbench_rs::bench_scope("book::fill_against_queue");
     let resting_orders = entry.get_mut();
     while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
         let Some(resting) = resting_orders.front_mut() else {

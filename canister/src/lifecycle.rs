@@ -1,3 +1,5 @@
+use crate::order::OrderHistory;
+use crate::state::State;
 use crate::state::audit;
 use crate::state::event::EventType;
 use crate::{MATCHING_INTERVAL, Runtime, state, storage};
@@ -11,7 +13,10 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
             panic!("ERROR: expected Init argument");
         }
     };
-    state::init_state(state::State::try_from(init_arg.clone()).expect("ERROR: invalid init args"));
+    let order_history = OrderHistory::new(storage::order_history_memory());
+    state::init_state(
+        State::new(init_arg.clone(), order_history).expect("ERROR: invalid init args"),
+    );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
@@ -20,7 +25,8 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let start = runtime.instruction_counter();
 
-    let state = storage::with_event_iter(|events| audit::replay_events(events));
+    let order_history = OrderHistory::new(storage::order_history_memory());
+    let state = storage::with_event_iter(|events| audit::replay_events(events, order_history));
     state::init_state(state);
     let replayed_events = storage::total_event_count();
 

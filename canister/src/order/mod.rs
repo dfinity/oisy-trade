@@ -4,9 +4,14 @@ mod history;
 mod tests;
 
 pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook};
+pub use history::OrderHistory;
+
 use candid::{Nat, Principal};
-pub use history::{OrderHistory, OrderRecord};
+pub use history::OrderRecord;
+use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
 use num_bigint::BigUint;
+use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -33,6 +38,32 @@ impl From<Side> for dex_types::Side {
         match side {
             Side::Buy => dex_types::Side::Buy,
             Side::Sell => dex_types::Side::Sell,
+        }
+    }
+}
+
+/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
+/// states of [`dex_types::OrderStatus`]; the public `NotFound` variant is
+/// synthesized at the canister boundary when no record exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub enum OrderStatus {
+    #[n(0)]
+    Pending,
+    #[n(1)]
+    Open,
+    #[n(2)]
+    Filled,
+    #[n(3)]
+    Canceled,
+}
+
+impl From<OrderStatus> for dex_types::OrderStatus {
+    fn from(status: OrderStatus) -> Self {
+        match status {
+            OrderStatus::Pending => dex_types::OrderStatus::Pending,
+            OrderStatus::Open => dex_types::OrderStatus::Open,
+            OrderStatus::Filled => dex_types::OrderStatus::Filled,
+            OrderStatus::Canceled => dex_types::OrderStatus::Canceled,
         }
     }
 }
@@ -131,6 +162,33 @@ impl OrderId {
     pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
         (self.book_id, self.seq)
     }
+}
+
+impl Storable for OrderId {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let (book, seq) = self.into_parts();
+        let mut buf = [0u8; 16];
+        buf[..8].copy_from_slice(&book.get().to_be_bytes());
+        buf[8..].copy_from_slice(&seq.get().to_be_bytes());
+        Cow::Owned(buf.to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(bytes.len(), 16, "OrderId must decode from exactly 16 bytes");
+        let book = u64::from_be_bytes(bytes[..8].try_into().expect("8-byte slice"));
+        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
+        OrderId::new(OrderBookId::new(book), OrderSeq::new(seq))
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 16,
+        is_fixed_size: true,
+    };
 }
 
 impl fmt::Display for OrderId {

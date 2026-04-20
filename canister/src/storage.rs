@@ -1,12 +1,14 @@
 use crate::state::event::{Event, EventType};
+use ic_stable_structures::DefaultMemoryImpl;
+use ic_stable_structures::StableLog;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableLog};
 use std::cell::RefCell;
 
 const EVENT_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(0);
 const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
+const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
 
-type VMem = VirtualMemory<DefaultMemoryImpl>;
+pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
 
 thread_local! {
@@ -43,4 +45,11 @@ where
     F: for<'a> FnOnce(Box<dyn Iterator<Item = Event> + 'a>) -> R,
 {
     EVENTS.with(|events| f(Box::new(events.borrow().iter())))
+}
+
+/// Returns the virtual memory slice dedicated to the order-history map.
+/// Used to construct the production `OrderHistory<VMem>` on canister
+/// `init` / `post_upgrade`.
+pub fn order_history_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(ORDER_HISTORY_MEMORY_ID))
 }
