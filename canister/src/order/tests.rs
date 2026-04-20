@@ -554,11 +554,15 @@ mod history {
     use crate::order::{
         OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
     };
-    use crate::storage::order_history;
+    use crate::state::OrderHistory;
     use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
-    use ic_stable_structures::Storable;
+    use ic_stable_structures::{Storable, VectorMemory};
     use proptest::{prop_assert_eq, proptest};
+
+    fn history() -> OrderHistory<VectorMemory> {
+        OrderHistory::new(VectorMemory::default())
+    }
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -576,38 +580,38 @@ mod history {
 
     #[test]
     fn insert_once_and_get() {
-        order_history::clear_for_test();
+        let mut history = history();
         let id = test_id(0);
         let record = test_record();
-        order_history::insert_once(id, record.clone());
+        history.insert_once(id, record.clone());
 
-        assert_eq!(order_history::get(&id), Some(record));
+        assert_eq!(history.get(&id), Some(record));
     }
 
     #[test]
     #[should_panic(expected = "duplicate order ID")]
     fn insert_once_panics_on_duplicate() {
-        order_history::clear_for_test();
+        let mut history = history();
         let id = test_id(0);
-        order_history::insert_once(id, test_record());
-        order_history::insert_once(id, test_record());
+        history.insert_once(id, test_record());
+        history.insert_once(id, test_record());
     }
 
     #[test]
     fn get_status_returns_none_for_missing() {
-        order_history::clear_for_test();
-        assert_eq!(order_history::get_status(&test_id(42)), None);
+        let history = history();
+        assert_eq!(history.get_status(&test_id(42)), None);
     }
 
     #[test]
     fn set_status_updates_status() {
-        order_history::clear_for_test();
+        let mut history = history();
         let id = test_id(0);
-        order_history::insert_once(id, test_record());
+        history.insert_once(id, test_record());
 
-        assert_eq!(order_history::get_status(&id), Some(OrderStatus::Pending));
-        order_history::set_status(&id, OrderStatus::Filled);
-        assert_eq!(order_history::get_status(&id), Some(OrderStatus::Filled));
+        assert_eq!(history.get_status(&id), Some(OrderStatus::Pending));
+        history.set_status(&id, OrderStatus::Filled);
+        assert_eq!(history.get_status(&id), Some(OrderStatus::Filled));
     }
 
     proptest! {
