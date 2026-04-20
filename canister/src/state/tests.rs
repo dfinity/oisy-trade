@@ -701,7 +701,7 @@ mod settle_fills {
                         Side::Sell => (seller, buyer),
                     };
 
-                    state.order_history_mut().insert_once(
+                    state.order_history.insert_once(
                         OrderId::new(BOOK_ID, fill.taker_order_seq),
                         OrderRecord {
                             owner: taker_owner,
@@ -715,7 +715,7 @@ mod settle_fills {
                         Side::Buy => Side::Sell,
                         Side::Sell => Side::Buy,
                     };
-                    state.order_history_mut().insert_once(
+                   state.order_history.insert_once(
                         OrderId::new(BOOK_ID, fill.maker_order_seq),
                         OrderRecord {
                             owner: maker_owner,

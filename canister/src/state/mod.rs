@@ -332,11 +332,6 @@ impl<M: Memory> State<M> {
         self.order_history.get_status(&order_id)
     }
 
-    #[cfg(test)]
-    pub(crate) fn order_history_mut(&mut self) -> &mut OrderHistory<M> {
-        &mut self.order_history
-    }
-
     pub fn next_book_id(&self) -> OrderBookId {
         self.next_book_id
     }
