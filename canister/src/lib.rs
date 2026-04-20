@@ -49,7 +49,8 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder::from(request);
+    let pending = order::PendingOrder::try_from(request)
+        .map_err(|_| AddLimitOrderError::AmountExceedsMaximum)?;
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
@@ -58,7 +59,7 @@ pub fn add_limit_order(
             order_id,
             side: order.side(),
             price: order.price(),
-            quantity: order.remaining_quantity().clone(),
+            quantity: *order.remaining_quantity(),
         };
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
@@ -114,6 +115,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     })
 }
 
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn deposit(
     request: DepositRequest,
     runtime: &impl Runtime,
@@ -124,8 +127,19 @@ pub async fn deposit(
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
         return Err(DepositError::UnsupportedToken { token_id });
     }
-    let amount = order::Quantity::from(request.amount.clone());
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| DepositError::AmountExceedsMaximum)?;
     let caller = runtime.msg_caller();
+
+    let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
+    if existing
+        .free()
+        .checked_add(*existing.reserved())
+        .and_then(|held| held.checked_add(amount))
+        .is_none()
+    {
+        return Err(DepositError::AmountExceedsMaximum);
+    }
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -140,6 +154,8 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn withdraw(
     request: WithdrawRequest,
     runtime: &impl Runtime,
@@ -159,10 +175,11 @@ pub async fn withdraw(
     }
 
     let caller = runtime.msg_caller();
-    let amount = order::Quantity::from(request.amount.clone());
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| WithdrawError::AmountExceedsMaximum)?;
 
     // Debit the full amount from the user's free balance.
-    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount.clone())).map_err(|e| {
+    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
         WithdrawError::InsufficientBalance {
             available: e.available.into(),
         }

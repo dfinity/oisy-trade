@@ -59,7 +59,7 @@ fn apply_state_transition<M: Memory>(
             token,
             amount,
         }) => {
-            state.deposit(*user, *token, amount.clone());
+            state.deposit(*user, *token, *amount);
         }
         EventType::AddLimitOrder(AddLimitOrderEvent {
             user,
@@ -71,7 +71,7 @@ fn apply_state_transition<M: Memory>(
             let pending = order::PendingOrder {
                 side: *side,
                 price: *price,
-                quantity: quantity.clone(),
+                quantity: *quantity,
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);

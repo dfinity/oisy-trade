@@ -7,7 +7,7 @@ use crate::order::OrderHistory;
 use crate::state::{StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
-use candid::{Nat, Principal};
+use candid::Principal;
 use dex_types_internal::{InitArg, Mode};
 use serde::Deserialize;
 use std::num::NonZeroU64;
@@ -334,8 +334,8 @@ fn user(id: u64) -> Principal {
 /// Fund a user with a large balance for both tokens of the trading pair.
 fn fund_user(state: &mut State<storage::VMem>, principal: Principal) {
     let pair = trading_pair();
-    state.deposit(principal, pair.base, Quantity::from(Nat::from(u128::MAX)));
-    state.deposit(principal, pair.quote, Quantity::from(Nat::from(u128::MAX)));
+    state.deposit(principal, pair.base, Quantity::from_u128(u128::MAX));
+    state.deposit(principal, pair.quote, Quantity::from_u128(u128::MAX));
 }
 
 fn place_order(state: &mut State<storage::VMem>, user: Principal, pending: PendingOrder) {

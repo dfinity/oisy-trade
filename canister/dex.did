@@ -34,6 +34,8 @@ type LimitOrderRequest = record {
 
 /// Error returned when placing a limit order fails.
 type AddLimitOrderError = variant {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum;
     /// The requested trading pair is not registered.
     UnknownTradingPair;
     /// The price is not a positive multiple of the tick size.
@@ -102,6 +104,8 @@ type LedgerTransferFromError = variant {
 
 /// Error returned by the deposit endpoint.
 type DepositError = variant {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum;
     /// The token is not part of any trading pair on the DEX.
     UnsupportedToken : record { token_id : TokenId };
     /// The inter-canister call to the token ledger failed.
@@ -151,6 +155,8 @@ type LedgerTransferError = variant {
 
 /// Error returned by the withdraw endpoint.
 type WithdrawError = variant {
+    /// The amount exceeds the maximum supported value.
+    AmountExceedsMaximum;
     /// The token is not part of any trading pair on the DEX.
     UnsupportedToken : record { token_id : TokenId };
     /// The caller does not have enough free balance.

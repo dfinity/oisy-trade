@@ -57,6 +57,224 @@ mod order_id {
     }
 }
 
+mod quantity {
+    use crate::order::{LotSize, Quantity};
+    use candid::Nat;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    // CBOR unsigned integer: 1 byte (0–23), 2 bytes (24–255), ..., 9 bytes (u64::MAX)
+    const MAX_U64_CBOR_SIZE: usize = 9;
+    // CBOR PosBignum: Tag(2) [1] + bytes(≤16) [1 + ≤16] = ≤18 bytes
+    const MAX_U128_CBOR_SIZE: usize = 18;
+    // CBOR PosBignum: Tag(2) [1] + bytes(32) [2 + 32, since len > 23] = 35 bytes
+    const MAX_U256_CBOR_SIZE: usize = 35;
+
+    #[test]
+    fn should_reach_exact_max_size() {
+        let max_u64 = Quantity::from(u64::MAX);
+        assert_eq!(encode(&max_u64).len(), MAX_U64_CBOR_SIZE);
+
+        let max_u128 = Quantity::from_u128(u128::MAX);
+        assert_eq!(encode(&max_u128).len(), MAX_U128_CBOR_SIZE);
+
+        let max_u256 = Quantity::MAX;
+        assert_eq!(encode(&max_u256).len(), MAX_U256_CBOR_SIZE);
+    }
+
+    #[test]
+    fn should_checked_sub_with_carry() {
+        // 2^128
+        let a = Quantity::new(1, 0);
+        // 1
+        let b = Quantity::new(0, 1);
+        assert_eq!(a.checked_sub(&b), Some(Quantity::new(0, u128::MAX)));
+
+        assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+
+        // 2^128 + 1
+        let c = Quantity::new(1, 1);
+        assert_eq!(a.checked_sub(&c), None);
+
+        // other.high == u128::MAX with borrow: high + borrow would overflow u128
+        // without checked_add.
+        let d = Quantity::new(u128::MAX, 0);
+        let e = Quantity::new(u128::MAX, 1);
+        assert_eq!(d.checked_sub(&e), None);
+    }
+
+    proptest! {
+        #[test]
+        fn checked_add_commutative(a in arb_quantity(), b in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(b), b.checked_add(a));
+        }
+
+        #[test]
+        fn checked_add_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(Quantity::ZERO), Some(a));
+        }
+
+        #[test]
+        fn checked_add_then_sub_roundtrip(a in arb_quantity(), b in arb_quantity()) {
+            if let Some(sum) = a.checked_add(b) {
+                prop_assert_eq!(sum.checked_sub(&b), Some(a));
+                prop_assert_eq!(sum.checked_sub(&a), Some(b));
+            }
+        }
+
+        #[test]
+        fn checked_sub_self_is_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_sub_returns_none_on_underflow(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+        ) {
+            if a < b {
+                prop_assert_eq!(a.checked_sub(&b), None);
+            }
+        }
+
+        #[test]
+        fn checked_mul_u64_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(1), Some(a));
+        }
+
+        #[test]
+        fn checked_mul_u64_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(0), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_mul_u64_distributes_over_add(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+            c in 1..1000u64,
+        ) {
+            // With small quantities and c < 1000, no overflow is possible.
+            // (a + b) * c == a * c + b * c
+            let left = a.checked_add(b).and_then(|s| s.checked_mul_u64(c));
+            let right = a.checked_mul_u64(c)
+                .and_then(|ac| b.checked_mul_u64(c).and_then(|bc| ac.checked_add(bc)));
+            prop_assert_eq!(left, right);
+        }
+
+        #[test]
+        fn nat_roundtrip(a in arb_quantity()) {
+            let nat: Nat = a.into();
+            let back = Quantity::try_from(nat).unwrap();
+            prop_assert_eq!(a, back);
+        }
+
+        #[test]
+        fn nat_exceeding_u256_max_fails(offset in 1..u64::MAX) {
+            let max_nat: Nat = Quantity::MAX.into();
+            let too_large = max_nat + Nat::from(offset);
+            prop_assert!(Quantity::try_from(too_large).is_err());
+        }
+
+        #[test]
+        fn from_u64_roundtrip(v in any::<u64>()) {
+            let q = Quantity::from(v);
+            let nat: Nat = q.into();
+            prop_assert_eq!(nat, Nat::from(v));
+        }
+
+        #[test]
+        fn ordering_consistent_with_nat(a in arb_small_quantity(), b in arb_small_quantity()) {
+            let nat_a: Nat = a.into();
+            let nat_b: Nat = b.into();
+            prop_assert_eq!(a.cmp(&b), nat_a.cmp(&nat_b));
+        }
+
+        #[test]
+        fn is_multiple_of_consistent(
+            base in 1..u128::MAX,
+            lot in 1..10_000u64,
+        ) {
+            let lot_size = LotSize::new(NonZeroU64::new(lot).unwrap());
+            let q = Quantity::from_u128(base);
+
+            prop_assert_eq!(base.is_multiple_of(lot as u128), q.is_multiple_of(lot_size));
+
+            let q = Quantity::from_u128(base).checked_mul_u64(lot).unwrap();
+            prop_assert!(q.is_multiple_of(lot_size));
+        }
+
+        #[test]
+        fn is_zero_iff_default(high in any::<u128>(), low in any::<u128>()) {
+            let q = Quantity::new(high, low);
+            prop_assert_eq!(q.is_zero(), high == 0 && low == 0);
+        }
+
+        #[test]
+        fn cbor_roundtrip(a in arb_quantity()) {
+            let mut buf = Vec::new();
+            minicbor::encode(a, &mut buf).unwrap();
+            let decoded: Quantity = minicbor::decode(&buf).unwrap();
+            prop_assert_eq!(a, decoded);
+        }
+
+        #[test]
+        fn cbor_u64_quantity_is_compact(a in arb_u64_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U64_CBOR_SIZE,
+                "u64 quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U64_CBOR_SIZE,
+            );
+        }
+
+        #[test]
+        fn cbor_u128_quantity_is_compact(a in arb_u128_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U128_CBOR_SIZE,
+                "u128 quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U128_CBOR_SIZE,
+            );
+        }
+
+        #[test]
+        fn cbor_any_quantity_fits_max(a in arb_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U256_CBOR_SIZE,
+                "quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U256_CBOR_SIZE,
+            );
+        }
+    }
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_u64_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u64>().prop_map(Quantity::from)
+    }
+
+    // Alias for tests that don't care about the specific range.
+    fn arb_small_quantity() -> impl Strategy<Value = Quantity> {
+        arb_u64_quantity()
+    }
+
+    fn arb_u128_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u128>().prop_map(Quantity::from_u128)
+    }
+
+    fn encode(quantity: &Quantity) -> Vec<u8> {
+        let mut buf = Vec::new();
+        minicbor::encode(quantity, &mut buf).unwrap();
+        buf
+    }
+}
+
 mod order_book {
     use crate::order::{MatchOrderError, MatchResult, OrderSeq, Price, Quantity};
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, buy, fill, order_book, sell};
@@ -485,7 +703,7 @@ mod process_pending_orders {
 
         assert!(output.fills.is_empty());
         assert!(output.resting_orders.is_empty());
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -498,7 +716,7 @@ mod process_pending_orders {
 
         assert!(output.fills.is_empty());
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ZERO]));
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -509,11 +727,10 @@ mod process_pending_orders {
         book.add_pending_order(buy(1, 100, lot));
 
         let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker
-        assert!(filled.contains(&OrderSeq::ONE)); // taker
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker
+        assert!(output.filled_orders.contains(&OrderSeq::ONE)); // taker
         assert!(output.resting_orders.is_empty());
     }
 
@@ -526,27 +743,25 @@ mod process_pending_orders {
         book.add_pending_order(buy(1, 100, 3 * lot));
 
         let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker fully filled
-        assert!(!filled.contains(&OrderSeq::ONE)); // taker not fully filled
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker fully filled
+        assert!(!output.filled_orders.contains(&OrderSeq::ONE)); // taker not fully filled
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ONE])); // taker rests
     }
 
     #[test]
-    fn take_filled_orders_should_drain() {
+    fn should_drain_filled_orders_between_rounds() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
-        book.process_pending_orders();
 
-        let first_call = book.take_filled_orders();
-        let second_call = book.take_filled_orders();
+        let first = book.process_pending_orders();
+        assert!(!first.filled_orders.is_empty());
 
-        assert_eq!(first_call.len(), 2);
-        assert!(second_call.is_empty());
+        let second = book.process_pending_orders();
+        assert!(second.filled_orders.is_empty());
     }
 }
 

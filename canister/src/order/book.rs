@@ -166,7 +166,7 @@ impl OrderBook {
         }
         if quantity.is_zero() || !quantity.is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity: quantity.clone(),
+                quantity: *quantity,
                 lot_size: self.lot_size,
             });
         }
@@ -221,16 +221,12 @@ impl OrderBook {
             resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
+        let filled_orders = std::mem::take(&mut self.filled_orders);
         MatchingOutput {
             fills: all_fills,
             resting_orders,
+            filled_orders,
         }
-    }
-
-    /// Drain and return the set of order sequences that were fully filled
-    /// since the last call.
-    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
-        std::mem::take(&mut self.filled_orders)
     }
 
     fn insert_order(&mut self, order: Order) {
@@ -282,8 +278,7 @@ fn fill_against_queue<K: Ord>(
         let Some(resting) = resting_orders.front_mut() else {
             break;
         };
-        let fill_qty =
-            std::cmp::min(order.remaining_quantity(), resting.remaining_quantity()).clone();
+        let fill_qty = *std::cmp::min(order.remaining_quantity(), resting.remaining_quantity());
 
         order.reduce_quantity(&fill_qty);
         resting.reduce_quantity(&fill_qty);
@@ -308,11 +303,16 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
-/// Output of a matching round: fills produced and orders that began resting.
+/// Output of [`OrderBook::process_pending_orders`]: the fills produced,
+/// orders that began resting in the book, and orders that were fully filled.
 #[derive(Debug)]
 pub struct MatchingOutput {
+    /// Fills executed during this matching round, in execution order.
     pub fills: Vec<Fill>,
+    /// Orders that were not fully filled and are now resting in the book.
     pub resting_orders: BTreeSet<OrderSeq>,
+    /// Orders that were fully filled and removed from the book.
+    pub filled_orders: BTreeSet<OrderSeq>,
 }
 
 /// The result of matching an incoming order against the book.
@@ -370,6 +370,20 @@ pub struct Fill {
     pub maker_price: Price,
     /// The quantity filled.
     pub quantity: Quantity,
+}
+
+impl Fill {
+    /// The amount of quote tokens exchanged (maker_price × quantity).
+    pub fn quote_amount(&self) -> Quantity {
+        self.quantity
+            .checked_mul_u64(self.maker_price.0)
+            .expect("BUG: validation of order should prevent overflow")
+    }
+
+    /// The amount of base tokens exchanged (same as quantity).
+    pub fn base_amount(&self) -> &Quantity {
+        &self.quantity
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
