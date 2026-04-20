@@ -113,6 +113,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     })
 }
 
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn deposit(
     request: DepositRequest,
     runtime: &impl Runtime,
@@ -150,6 +152,8 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn withdraw(
     request: WithdrawRequest,
     runtime: &impl Runtime,
