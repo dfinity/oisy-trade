@@ -1,5 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -31,6 +32,8 @@ pub enum EventType {
     Deposit(#[n(0)] DepositEvent),
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
+    #[n(5)]
+    Matching(#[n(0)] MatchingEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -73,6 +76,31 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
+}
+
+/// One matching round on a single [`OrderBookId`], grouping every fill that
+/// occurred in that round. Principals, prices, and trading pair are *not*
+/// duplicated — they are recoverable from [`crate::order::OrderHistory`] and
+/// [`crate::state::State::trading_pairs`] via `(book_id, order_seq)`.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct MatchingEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub fills: Vec<FillEvent>,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct FillEvent {
+    #[n(0)]
+    pub maker_order_seq: OrderSeq,
+    #[n(1)]
+    pub taker_order_seq: OrderSeq,
+    /// Taker side — direction of the trade from the aggressor's point of view.
+    #[n(2)]
+    pub side: Side,
+    #[n(3)]
+    pub filled_quantity: Quantity,
 }
 
 impl Storable for Event {

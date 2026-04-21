@@ -111,6 +111,26 @@ fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         )
 }
 
+fn arb_fill_event() -> impl Strategy<Value = FillEvent> {
+    (arb_order_seq(), arb_order_seq(), arb_side(), arb_quantity()).prop_map(
+        |(maker_order_seq, taker_order_seq, side, filled_quantity)| FillEvent {
+            maker_order_seq,
+            taker_order_seq,
+            side,
+            filled_quantity,
+        },
+    )
+}
+
+fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
+    (any::<u64>(), prop::collection::vec(arb_fill_event(), 0..5)).prop_map(|(book_id, fills)| {
+        MatchingEvent {
+            book_id: crate::order::OrderBookId::new(book_id),
+            fills,
+        }
+    })
+}
+
 fn arb_event_type() -> impl Strategy<Value = EventType> {
     prop_oneof![
         arb_init_arg().prop_map(EventType::Init),
@@ -118,6 +138,7 @@ fn arb_event_type() -> impl Strategy<Value = EventType> {
         arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
         arb_deposit_event().prop_map(EventType::Deposit),
         arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
+        arb_matching_event().prop_map(EventType::Matching),
     ]
 }
 

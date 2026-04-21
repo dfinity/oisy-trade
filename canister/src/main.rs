@@ -153,6 +153,19 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
+                    book_id: e.book_id.get(),
+                    fills: e
+                        .fills
+                        .into_iter()
+                        .map(|f| event::FillEvent {
+                            maker_order_seq: f.maker_order_seq.get(),
+                            taker_order_seq: f.taker_order_seq.get(),
+                            side: dex_types::Side::from(f.side),
+                            filled_quantity: f.filled_quantity.into(),
+                        })
+                        .collect(),
+                }),
             },
         }
     }

@@ -16,6 +16,7 @@ pub enum EventType {
     AddTradingPair(AddTradingPairEvent),
     Deposit(DepositEvent),
     AddLimitOrder(AddLimitOrderEvent),
+    Matching(MatchingEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -43,6 +44,20 @@ pub struct AddLimitOrderEvent {
     pub side: dex_types::Side,
     pub price: u64,
     pub quantity: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct MatchingEvent {
+    pub book_id: u64,
+    pub fills: Vec<FillEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct FillEvent {
+    pub maker_order_seq: u64,
+    pub taker_order_seq: u64,
+    pub side: dex_types::Side,
+    pub filled_quantity: Nat,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

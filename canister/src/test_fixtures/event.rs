@@ -3,7 +3,8 @@ use crate::order::{
     TokenMetadata,
 };
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, FillEvent,
+    MatchingEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -48,6 +49,7 @@ pub enum WorstCaseEvent {
     AddTradingPair,
     Deposit,
     AddLimitOrder,
+    Matching,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -58,9 +60,15 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::AddTradingPair(_) => Self::AddTradingPair,
             EventType::Deposit(_) => Self::Deposit,
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
+            EventType::Matching(_) => Self::Matching,
         }
     }
 }
+
+/// Upper bound on fills per matching round, used to size the worst-case
+/// [`MatchingEvent`] fixture. Matches the `bench_process_pending_orders_1000`
+/// benchmark workload.
+pub const MAX_FILLS_PER_MATCHING_ROUND: usize = 1_000;
 
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.
@@ -71,6 +79,7 @@ impl WorstCaseEvent {
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
             Self::AddLimitOrder => add_limit_order(),
+            Self::Matching => matching(MAX_FILLS_PER_MATCHING_ROUND),
         })
     }
 
@@ -87,6 +96,7 @@ impl WorstCaseEvent {
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
             Self::AddLimitOrder => 97,
+            Self::Matching => 42_027,
         }
     }
 }
@@ -147,6 +157,21 @@ fn deposit(amount: Quantity) -> EventType {
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
+    })
+}
+
+fn matching(fill_count: usize) -> EventType {
+    let fills = (0..fill_count)
+        .map(|_| FillEvent {
+            maker_order_seq: OrderSeq::new(u64::MAX),
+            taker_order_seq: OrderSeq::new(u64::MAX),
+            side: Side::Buy,
+            filled_quantity: max_quantity(),
+        })
+        .collect();
+    EventType::Matching(MatchingEvent {
+        book_id: OrderBookId::new(u64::MAX),
+        fills,
     })
 }
 

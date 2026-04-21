@@ -82,6 +82,15 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order, persistence);
         }
+        EventType::Matching(_) => {
+            // Matching and balance settlement mutate state directly inside
+            // `State::process_pending_orders`; the event is record-only.
+            // `replay_events` is currently dead code — if ever reintroduced,
+            // this arm would need to replay `settle_fill` for each
+            // `FillEvent`, resolving principals/prices from `OrderHistory`
+            // (which survives upgrades via stable memory).
+            let _ = persistence;
+        }
     }
 }
 
