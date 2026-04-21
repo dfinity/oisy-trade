@@ -135,15 +135,16 @@ impl StateSnapshot {
             ledger_fee_cache.insert(entry.token, entry.fee);
         }
 
-        State::from_snapshot_parts(
-            self.mode,
-            self.next_book_id,
+        State {
+            mode: self.mode,
+            next_book_id: self.next_book_id,
             tokens,
             trading_pairs,
             order_books,
-            ledger_fee_cache,
-            order_history,
             balances,
-        )
+            order_history,
+            active_tasks: Default::default(),
+            ledger_fee_cache,
+        }
     }
 }

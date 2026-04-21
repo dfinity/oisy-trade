@@ -99,32 +99,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         })
     }
 
-    /// Reassembles a [`State`] from the decoded `StateSnapshot` parts. Used
-    /// by the `post_upgrade` restore path; not exposed for normal construction.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_snapshot_parts(
-        mode: Mode,
-        next_book_id: OrderBookId,
-        tokens: BTreeMap<TokenId, TokenMetadata>,
-        trading_pairs: TradingPairMap,
-        order_books: BTreeMap<OrderBookId, OrderBook>,
-        ledger_fee_cache: BTreeMap<TokenId, Nat>,
-        order_history: OrderHistory<MH>,
-        balances: TokenBalance<MB>,
-    ) -> Self {
-        Self {
-            mode,
-            next_book_id,
-            tokens,
-            trading_pairs,
-            order_books,
-            balances,
-            order_history,
-            active_tasks: BTreeSet::default(),
-            ledger_fee_cache,
-        }
-    }
-
     pub fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
     }
