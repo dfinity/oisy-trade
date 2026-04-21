@@ -78,7 +78,7 @@ pub mod state_snapshot {
         let mut buf = vec![];
         minicbor::encode(snapshot, &mut buf).expect("state snapshot encoding should succeed");
         STATE_SNAPSHOT.with(|cell| {
-            cell.borrow_mut().set(buf);
+            let _ = cell.borrow_mut().set(buf);
         });
     }
 
@@ -97,7 +97,7 @@ pub mod state_snapshot {
             }
             let snapshot = minicbor::decode::<StateSnapshot>(cell.get().as_slice())
                 .expect("state snapshot decoding should succeed");
-            cell.set(Vec::new());
+            let _ = cell.set(Vec::new());
             Some(snapshot)
         })
     }
