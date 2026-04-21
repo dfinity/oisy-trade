@@ -99,11 +99,4 @@ pub mod state_snapshot {
             }
         })
     }
-
-    #[cfg(any(test, feature = "canbench-rs"))]
-    pub fn clear_for_test() {
-        STATE_SNAPSHOT.with(|cell| {
-            cell.borrow_mut().set(Vec::new());
-        });
-    }
 }

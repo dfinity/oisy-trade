@@ -8,14 +8,6 @@
 //! serialized here at `pre_upgrade` and restored at `post_upgrade`. The
 //! `active_tasks` set is intentionally excluded: it tracks in-flight timer
 //! work and is reset to empty after every upgrade.
-//!
-//! Persisted in a `StableCell<Vec<u8>>` backed by its own `MemoryId`; the
-//! CBOR layout below is an upgrade-durable schema. Every struct is decoded
-//! by the next canister version, so the same rules as for the stable-map
-//! schemas apply: a field may only be removed by leaving a gap in the
-//! `#[n(N)]` sequence (never renumber), and any new field must be
-//! `Option<T>` or carry `#[cbor(default)]` so snapshots written by prior
-//! versions still decode.
 
 use super::State;
 use crate::balance::TokenBalance;
