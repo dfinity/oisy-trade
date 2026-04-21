@@ -90,8 +90,10 @@ pub mod state_snapshot {
     /// default). On a successful decode the cell is cleared, so if a future
     /// upgrade skips `pre_upgrade`, the next `post_upgrade` observes an
     /// empty cell and traps instead of restoring stale state from an older
-    /// version. Clearing also releases the cell's stable pages until the
-    /// next `pre_upgrade` rewrites them.
+    /// version. Clearing does not reclaim stable memory pages (stable memory
+    /// on the IC can't shrink) but it does remove the stale payload so later
+    /// loads avoid reading and decoding it until the next `pre_upgrade`
+    /// writes a new snapshot.
     pub fn load() -> Option<StateSnapshot> {
         STATE_SNAPSHOT.with(|cell| {
             let mut cell = cell.borrow_mut();
