@@ -123,8 +123,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
 }
 
 /// Benchmark pre_upgrade + post_upgrade against a fully populated order book
-/// (697 bid + 5000 ask levels from the Binance snapshot). Mirrors PR #58 so
-/// the two upgrade strategies are directly comparable.
+/// (697 bid + 5000 ask levels from the Binance snapshot).
 #[bench(raw)]
 fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
     let depth = load_depth();
@@ -134,8 +133,7 @@ fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
 }
 
 /// Benchmark pre_upgrade + post_upgrade against 1000 resting orders with no
-/// fills (same workload as `bench_process_pending_orders_1000_no_fills`,
-/// matching PR #58's second scenario).
+/// fills.
 #[bench(raw)]
 fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
@@ -144,8 +142,6 @@ fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     bench_upgrade_roundtrip(state)
 }
 
-/// Drives the real `pre_upgrade` / `post_upgrade` lifecycle code against the
-/// given populated state.
 fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canbench_rs::BenchResult {
     // canbench installs the canister via `init`, which already populated
     // the thread-local state. Swap in the benchmark's populated state.
