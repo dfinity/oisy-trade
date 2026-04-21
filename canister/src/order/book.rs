@@ -262,19 +262,19 @@ impl OrderBook {
         self.resting_orders.len()
     }
 
-    pub(crate) fn pending_orders_snapshot(&self) -> Vec<Order> {
-        self.pending_orders.iter().cloned().collect()
+    pub fn pending_orders(&self) -> &VecDeque<Order> {
+        &self.pending_orders
     }
 
-    pub(crate) fn bids_snapshot(&self) -> &BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> {
+    pub fn bids(&self) -> &BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> {
         &self.bids
     }
 
-    pub(crate) fn asks_snapshot(&self) -> &BTreeMap<Price, VecDeque<RestingOrder>> {
+    pub fn asks(&self) -> &BTreeMap<Price, VecDeque<RestingOrder>> {
         &self.asks
     }
 
-    pub(crate) fn filled_orders_snapshot(&self) -> &BTreeSet<OrderSeq> {
+    pub fn filled_orders(&self) -> &BTreeSet<OrderSeq> {
         &self.filled_orders
     }
 

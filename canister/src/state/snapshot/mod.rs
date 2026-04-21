@@ -84,10 +84,7 @@ pub struct OrderBookSnapshot {
     pub bids: Vec<PriceLevel>,
     #[n(6)]
     pub asks: Vec<PriceLevel>,
-    // `n(7)` previously held a `resting_orders` index. The index is fully
-    // derivable from `bids` + `asks` and is rebuilt in `into_book`, so it
-    // is no longer persisted.
-    #[n(8)]
+    #[n(7)]
     pub filled_orders: Vec<OrderSeq>,
 }
 
@@ -193,9 +190,9 @@ impl OrderBookSnapshot {
             next_seq: book.next_seq(),
             tick_size: book.tick_size(),
             lot_size: book.lot_size(),
-            pending_orders: book.pending_orders_snapshot(),
+            pending_orders: book.pending_orders().iter().cloned().collect(),
             bids: book
-                .bids_snapshot()
+                .bids()
                 .iter()
                 .map(|(Reverse(price), orders)| PriceLevel {
                     price: *price,
@@ -203,14 +200,14 @@ impl OrderBookSnapshot {
                 })
                 .collect(),
             asks: book
-                .asks_snapshot()
+                .asks()
                 .iter()
                 .map(|(price, orders)| PriceLevel {
                     price: *price,
                     orders: orders.iter().cloned().collect(),
                 })
                 .collect(),
-            filled_orders: book.filled_orders_snapshot().iter().copied().collect(),
+            filled_orders: book.filled_orders().iter().copied().collect(),
         }
     }
 
