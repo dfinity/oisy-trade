@@ -44,6 +44,14 @@ pub fn init_state(state: State<VMem, VMem>) {
     });
 }
 
+/// Clears the thread-local state. Used by benchmarks (and tests) to simulate a
+/// canister restart between `pre_upgrade` and `post_upgrade` calls so that
+/// `init_state` can be invoked a second time without tripping its assertion.
+#[cfg(any(test, feature = "canbench-rs"))]
+pub fn reset_state() {
+    STATE.with(|s| *s.borrow_mut() = None);
+}
+
 /// Controls whether a state mutation propagates to stable-memory-backed
 /// structures. Normal execution uses [`StableMemoryOptions::Write`]; the
 /// `post_upgrade` replay uses [`StableMemoryOptions::Skip`] because stable

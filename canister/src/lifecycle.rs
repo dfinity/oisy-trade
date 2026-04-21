@@ -25,9 +25,19 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
 }
 
 pub fn pre_upgrade(runtime: &impl Runtime) {
+    #[cfg(feature = "canbench-rs")]
+    let _scope = canbench_rs::bench_scope("pre_upgrade");
     let start = runtime.instruction_counter();
-    let snapshot = state::with_state(StateSnapshot::from_state);
-    storage::state_snapshot::save(&snapshot);
+    let snapshot = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("pre_upgrade::from_state");
+        state::with_state(StateSnapshot::from_state)
+    };
+    {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("pre_upgrade::save_snapshot");
+        storage::state_snapshot::save(&snapshot);
+    }
     let instructions_used = runtime.instruction_counter() - start;
     canlog::log!(
         Priority::Info,
@@ -36,15 +46,31 @@ pub fn pre_upgrade(runtime: &impl Runtime) {
 }
 
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
+    #[cfg(feature = "canbench-rs")]
+    let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
 
-    let order_history = OrderHistory::new(storage::order_history_memory());
-    let balances = TokenBalance::new(storage::balances_memory());
-    let snapshot = storage::state_snapshot::load().expect(
-        "missing state snapshot at post_upgrade — pre_upgrade trapped or was skipped; \
-         manual recovery required",
-    );
-    state::init_state(snapshot.into_state(order_history, balances));
+    let (order_history, balances) = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
+        (
+            OrderHistory::new(storage::order_history_memory()),
+            TokenBalance::new(storage::balances_memory()),
+        )
+    };
+
+    let snapshot = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::load_snapshot");
+        storage::state_snapshot::load().expect(
+            "missing state snapshot at post_upgrade — pre_upgrade trapped or was skipped; \
+             manual recovery required",
+        )
+    };
+    {
+        bench_scopes!("post_upgrade", "post_upgrade::into_state");
+        state::init_state(snapshot.into_state(order_history, balances));
+    }
 
     match arg {
         Some(DexArg::Init(_)) => {
