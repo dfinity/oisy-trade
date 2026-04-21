@@ -12,6 +12,7 @@
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Deployment](#deployment)
+- [Usage](#usage)
 - [Development](#development)
 
 <a id="key-features"></a>
@@ -36,6 +37,13 @@ See the [design document](docs/design.md) for the full architecture.
 | Environment         | Canister ID                                                                                                  | Listings          |
 |---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
 | 🧪 Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
+
+<a id="usage"></a>
+## 📘 Usage
+
+Walk through the main DEX flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the DEX as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
+
+See [`examples/getting_started.ipynb`](examples/getting_started.ipynb).
 
 <a id="development"></a>
 ## 🛠️ Development
