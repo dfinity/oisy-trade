@@ -117,9 +117,14 @@ impl StateSnapshot {
     ) -> State<MH, MB> {
         let mut tokens = BTreeMap::new();
         for entry in self.tokens {
-            tokens.insert(entry.token, entry.metadata);
+            assert!(
+                tokens.insert(entry.token, entry.metadata).is_none(),
+                "invalid snapshot: duplicate token entry for {:?}",
+                entry.token
+            );
         }
 
+        // `TradingPairMap::insert` already panics on duplicate pair or book_id.
         let mut trading_pairs = TradingPairMap::default();
         for entry in self.trading_pairs {
             trading_pairs.insert(entry.pair, entry.book_id);
@@ -127,12 +132,23 @@ impl StateSnapshot {
 
         let mut order_books = BTreeMap::new();
         for book_snapshot in self.order_books {
-            order_books.insert(book_snapshot.id, OrderBook::from(book_snapshot));
+            let id = book_snapshot.id;
+            assert!(
+                order_books
+                    .insert(id, OrderBook::from(book_snapshot))
+                    .is_none(),
+                "invalid snapshot: duplicate order book entry for {:?}",
+                id
+            );
         }
 
         let mut ledger_fee_cache = BTreeMap::new();
         for entry in self.ledger_fee_cache {
-            ledger_fee_cache.insert(entry.token, entry.fee);
+            assert!(
+                ledger_fee_cache.insert(entry.token, entry.fee).is_none(),
+                "invalid snapshot: duplicate ledger fee entry for {:?}",
+                entry.token
+            );
         }
 
         State {
