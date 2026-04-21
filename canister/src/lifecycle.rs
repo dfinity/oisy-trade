@@ -68,7 +68,8 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
         )
     };
     {
-        bench_scopes!("post_upgrade", "post_upgrade::into_state");
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::into_state");
         state::init_state(snapshot.into_state(order_history, balances));
     }
 
