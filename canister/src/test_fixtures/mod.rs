@@ -219,13 +219,30 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
-        TokenId,
+        Fill, OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Price,
+        Quantity, Side, TokenId,
     };
     use candid::Principal;
     use proptest::prelude::*;
 
     use super::{LOT_SIZE, TICK_SIZE};
+
+    /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
+    /// lot-aligned non-zero quantity.
+    pub fn arb_pending_order() -> impl Strategy<Value = PendingOrder> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            arb_side(),
+            1..1_000u64, // price in ticks
+            1..1_000u64, // quantity in lots
+        )
+            .prop_map(move |(side, price_ticks, qty_lots)| PendingOrder {
+                side,
+                price: Price::new(price_ticks * tick),
+                quantity: Quantity::from(qty_lots * lot),
+            })
+    }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.
     ///
