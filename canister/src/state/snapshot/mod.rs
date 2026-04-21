@@ -101,32 +101,42 @@ pub struct PriceLevel {
 
 impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
+        let State {
+            mode,
+            next_book_id,
+            tokens,
+            trading_pairs,
+            order_books,
+            // ignored: live in stable memory,
+            balances: _,
+            // ignored: live in stable memory,
+            order_history: _,
+            // ignored: timers are reset upon upgrades
+            active_tasks: _,
+            ledger_fee_cache,
+        } = state;
         Self {
-            mode: state.mode.clone(),
-            next_book_id: state.next_book_id,
-            tokens: state
-                .tokens
+            mode: mode.clone(),
+            next_book_id: *next_book_id,
+            tokens: tokens
                 .iter()
                 .map(|(token, metadata)| TokenEntry {
                     token: *token,
                     metadata: metadata.clone(),
                 })
                 .collect(),
-            trading_pairs: state
-                .trading_pairs
+            trading_pairs: trading_pairs
                 .iter()
                 .map(|(pair, book_id)| TradingPairEntry {
                     pair: pair.clone(),
                     book_id: *book_id,
                 })
                 .collect(),
-            order_books: state
-                .order_books
+            order_books: order_books
                 .values()
                 .map(OrderBookSnapshot::from_book)
                 .collect(),
-            ledger_fee_cache: state
-                .ledger_fee_cache
+            ledger_fee_cache: ledger_fee_cache
                 .iter()
                 .map(|(token, fee)| LedgerFeeEntry {
                     token: *token,
