@@ -378,7 +378,7 @@ mod get_order_status {
         sell_request.side = dex_types::Side::Sell;
         let sell_id = add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
 
-        crate::process_pending_orders();
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
         assert_eq!(get_order_status(sell_id), OrderStatus::Filled);

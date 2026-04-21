@@ -215,7 +215,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         book.add_pending_order(order);
     }
 
-    pub fn process_pending_orders(&mut self) {
+    pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let pairs: Vec<(TradingPair, OrderBookId)> = self
             .trading_pairs
@@ -234,11 +234,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 book.process_pending_orders()
             };
 
+            let mut fill_records = Vec::with_capacity(output.fills.len());
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("settling");
                 for fill in &output.fills {
                     self.settle_fill(book_id, &pair, fill);
+                    fill_records.push(event::FillEvent {
+                        maker_order_seq: fill.maker_order_seq,
+                        taker_order_seq: fill.taker_order_seq,
+                        side: fill.taker_side,
+                        filled_quantity: fill.quantity,
+                    });
                 }
             }
             {
@@ -253,6 +260,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     self.order_history
                         .set_status(&order_id, OrderStatus::Filled);
                 }
+            }
+            if !fill_records.is_empty() {
+                audit::process_event(
+                    self,
+                    event::EventType::Matching(event::MatchingEvent {
+                        book_id,
+                        fills: fill_records,
+                    }),
+                    runtime,
+                );
             }
         }
     }

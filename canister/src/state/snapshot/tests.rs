@@ -1,6 +1,7 @@
 use super::StateSnapshot;
 use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::StableMemoryOptions;
+use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, state as fresh_state,
 };
@@ -210,7 +211,7 @@ fn should_roundtrip_state_through_snapshot() {
         sell_order,
         StableMemoryOptions::Write,
     );
-    state.process_pending_orders();
+    state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
     // Round-trip via CBOR.
     let snapshot = StateSnapshot::from_state(&state);

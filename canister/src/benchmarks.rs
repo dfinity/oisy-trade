@@ -46,7 +46,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     assert_eq!(book.bids_len(), depth.bids.len());
 
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        state.process_pending_orders(&crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -89,7 +89,7 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), trades.len());
 
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        state.process_pending_orders(&crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -112,7 +112,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), 1_000);
 
     let res = canbench_rs::bench_fn(|| {
-        state.process_pending_orders();
+        state.process_pending_orders(&crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -138,7 +138,7 @@ fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
 fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     place_1000_non_crossing_orders(&mut state);
-    state.process_pending_orders();
+    state.process_pending_orders(&crate::IC_RUNTIME);
     bench_upgrade_roundtrip(state)
 }
 
@@ -278,7 +278,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
         depth.bids.len() + depth.asks.len()
     );
 
-    state.process_pending_orders();
+    state.process_pending_orders(&crate::IC_RUNTIME);
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
