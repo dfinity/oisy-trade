@@ -73,13 +73,16 @@ pub mod state_snapshot {
     use crate::state::StateSnapshot;
 
     /// Writes `snapshot` to the snapshot cell, overwriting any previous
-    /// value. Called from `pre_upgrade`.
-    pub fn save(snapshot: &StateSnapshot) {
+    /// value. Returns the number of encoded bytes so callers can log/monitor
+    /// snapshot size. Called from `pre_upgrade`.
+    pub fn save(snapshot: &StateSnapshot) -> usize {
         let mut buf = vec![];
         minicbor::encode(snapshot, &mut buf).expect("state snapshot encoding should succeed");
+        let size = buf.len();
         STATE_SNAPSHOT.with(|cell| {
             let _ = cell.borrow_mut().set(buf);
         });
+        size
     }
 
     /// Reads the snapshot written by the previous canister version, or

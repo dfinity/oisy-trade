@@ -33,15 +33,15 @@ pub fn pre_upgrade(runtime: &impl Runtime) {
         let _scope = canbench_rs::bench_scope("pre_upgrade::from_state");
         state::with_state(StateSnapshot::from_state)
     };
-    {
+    let snapshot_bytes = {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("pre_upgrade::save_snapshot");
-        storage::state_snapshot::save(&snapshot);
-    }
+        storage::state_snapshot::save(&snapshot)
+    };
     let instructions_used = runtime.instruction_counter() - start;
     canlog::log!(
         Priority::Info,
-        "[pre_upgrade]: state snapshot written, total instructions used: {instructions_used}"
+        "[pre_upgrade]: state snapshot written ({snapshot_bytes} bytes), total instructions used: {instructions_used}"
     );
 }
 
