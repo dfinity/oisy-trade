@@ -1,8 +1,8 @@
 use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
-use crate::state::State;
 use crate::state::audit;
 use crate::state::event::EventType;
+use crate::state::{State, StateSnapshot};
 use crate::{MATCHING_INTERVAL, Runtime, state, storage};
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -24,15 +24,54 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
     canlog::log!(Priority::Info, "[init]: DEX canister initialized");
 }
 
+pub fn pre_upgrade(runtime: &impl Runtime) {
+    #[cfg(feature = "canbench-rs")]
+    let _scope = canbench_rs::bench_scope("pre_upgrade");
+    let start = runtime.instruction_counter();
+    let snapshot = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("pre_upgrade::from_state");
+        state::with_state(StateSnapshot::from_state)
+    };
+    let snapshot_bytes = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("pre_upgrade::save_snapshot");
+        storage::state_snapshot::save(&snapshot)
+    };
+    let instructions_used = runtime.instruction_counter() - start;
+    canlog::log!(
+        Priority::Info,
+        "[pre_upgrade]: state snapshot written ({snapshot_bytes} bytes), total instructions used: {instructions_used}"
+    );
+}
+
 pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
+    #[cfg(feature = "canbench-rs")]
+    let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
 
-    let order_history = OrderHistory::new(storage::order_history_memory());
-    let balances = TokenBalance::new(storage::balances_memory());
-    let state =
-        storage::with_event_iter(|events| audit::replay_events(events, order_history, balances));
-    state::init_state(state);
-    let replayed_events = storage::total_event_count();
+    let (order_history, balances) = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
+        (
+            OrderHistory::new(storage::order_history_memory()),
+            TokenBalance::new(storage::balances_memory()),
+        )
+    };
+
+    let snapshot = {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::load_snapshot");
+        storage::state_snapshot::load().expect(
+            "missing state snapshot at post_upgrade — pre_upgrade trapped or was skipped; \
+             manual recovery required",
+        )
+    };
+    {
+        #[cfg(feature = "canbench-rs")]
+        let _scope = canbench_rs::bench_scope("post_upgrade::into_state");
+        state::init_state(snapshot.into_state(order_history, balances));
+    }
 
     match arg {
         Some(DexArg::Init(_)) => {
@@ -49,9 +88,7 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let instructions_used = runtime.instruction_counter() - start;
     canlog::log!(
         Priority::Info,
-        "[post_upgrade]: replayed {} events, total instructions used: {}",
-        replayed_events,
-        instructions_used,
+        "[post_upgrade]: state restored from snapshot, total instructions used: {instructions_used}",
     );
     setup_timers();
 }

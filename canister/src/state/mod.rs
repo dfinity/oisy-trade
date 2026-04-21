@@ -1,8 +1,10 @@
 pub mod audit;
 pub mod event;
 mod map;
+pub mod snapshot;
 
 pub use map::TradingPairMap;
+pub use snapshot::StateSnapshot;
 
 #[cfg(test)]
 mod tests;
@@ -40,6 +42,14 @@ pub fn init_state(state: State<VMem, VMem>) {
         assert!(current.is_none(), "State already initialized!");
         *current = Some(state);
     });
+}
+
+/// Clears the thread-local state. Used by benchmarks (and tests) to simulate a
+/// canister restart between `pre_upgrade` and `post_upgrade` calls so that
+/// `init_state` can be invoked a second time without tripping its assertion.
+#[cfg(any(test, feature = "canbench-rs"))]
+pub fn reset_state() {
+    STATE.with(|s| *s.borrow_mut() = None);
 }
 
 /// Controls whether a state mutation propagates to stable-memory-backed

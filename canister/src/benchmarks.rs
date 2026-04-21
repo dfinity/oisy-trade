@@ -105,38 +105,11 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
 fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     let pair = trading_pair();
-    let num_orders = 1_000u64;
-
-    for i in 0..num_orders / 2 {
-        let principal = user(i);
-        fund_user(&mut state, principal);
-        place_order(
-            &mut state,
-            principal,
-            PendingOrder {
-                side: Side::Buy,
-                price: Price::new(200_000_000), // 2.000 USDT
-                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
-            },
-        );
-    }
-    for i in 0..num_orders / 2 {
-        let principal = user(500 + i);
-        fund_user(&mut state, principal);
-        place_order(
-            &mut state,
-            principal,
-            PendingOrder {
-                side: Side::Sell,
-                price: Price::new(300_000_000), // 3.000 USDT
-                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
-            },
-        );
-    }
+    place_1000_non_crossing_orders(&mut state);
 
     let book = state.get_order_book(&pair).unwrap();
     let num_resting_orders_before = book.resting_orders_len();
-    assert_eq!(book.pending_orders_len(), num_orders as usize);
+    assert_eq!(book.pending_orders_len(), 1_000);
 
     let res = canbench_rs::bench_fn(|| {
         state.process_pending_orders();
@@ -144,12 +117,41 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
-    assert_eq!(
-        book.resting_orders_len(),
-        num_resting_orders_before + num_orders as usize
-    );
+    assert_eq!(book.resting_orders_len(), num_resting_orders_before + 1_000);
 
     res
+}
+
+/// Benchmark pre_upgrade + post_upgrade against a fully populated order book
+/// (697 bid + 5000 ask levels from the Binance snapshot).
+#[bench(raw)]
+fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+    bench_upgrade_roundtrip(state)
+}
+
+/// Benchmark pre_upgrade + post_upgrade against 1000 resting orders with no
+/// fills.
+#[bench(raw)]
+fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
+    let mut state = new_state();
+    place_1000_non_crossing_orders(&mut state);
+    state.process_pending_orders();
+    bench_upgrade_roundtrip(state)
+}
+
+fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canbench_rs::BenchResult {
+    // canbench installs the canister via `init`, which already populated
+    // the thread-local state. Swap in the benchmark's populated state.
+    crate::state::reset_state();
+    crate::state::init_state(state);
+    canbench_rs::bench_fn(|| {
+        crate::lifecycle::pre_upgrade(&crate::IC_RUNTIME);
+        crate::state::reset_state();
+        crate::lifecycle::post_upgrade(None, &crate::IC_RUNTIME);
+    })
 }
 
 #[derive(Deserialize)]
@@ -282,6 +284,39 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
     assert_eq!(book.pending_orders_len(), 0);
     assert_eq!(book.bids_len(), depth.bids.len());
     assert_eq!(book.asks_len(), depth.asks.len());
+}
+
+/// Places 1000 non-crossing limit orders (500 Buy at 2.000, 500 Sell at 3.000)
+/// across 1000 distinct users. The wide spread guarantees zero fills when
+/// matching runs, so every order ends up as a resting order.
+fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem>) {
+    let half = 500u64;
+    for i in 0..half {
+        let principal = user(i);
+        fund_user(state, principal);
+        place_order(
+            state,
+            principal,
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(200_000_000), // 2.000 USDT
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
+    }
+    for i in 0..half {
+        let principal = user(half + i);
+        fund_user(state, principal);
+        place_order(
+            state,
+            principal,
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(300_000_000), // 3.000 USDT
+                quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+            },
+        );
+    }
 }
 
 /// Generate a unique principal from a sequential counter.

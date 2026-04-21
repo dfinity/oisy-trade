@@ -846,3 +846,33 @@ mod history {
         }
     }
 }
+
+mod book_snapshot {
+    use crate::order::{OrderBook, OrderBookSnapshot};
+    use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_pending_order};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_snapshot(
+            to_process in prop::collection::vec(arb_pending_order(), 0..100),
+            to_leave_pending in prop::collection::vec(arb_pending_order(), 0..50),
+        ) {
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            for pending in to_process {
+                let seq = book.next_seq();
+                book.add_pending_order(pending.into_order(seq));
+            }
+            book.process_pending_orders();
+            for pending in to_leave_pending {
+                let seq = book.next_seq();
+                book.add_pending_order(pending.into_order(seq));
+            }
+
+            let snapshot = OrderBookSnapshot::from(&book);
+            let restored = OrderBook::from(snapshot);
+
+            prop_assert_eq!(book, restored);
+        }
+    }
+}

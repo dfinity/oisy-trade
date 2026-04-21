@@ -1,4 +1,5 @@
 use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
+use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -395,4 +396,124 @@ pub enum MatchOrderError {
         quantity: Quantity,
         lot_size: LotSize,
     },
+}
+
+/// CBOR-encoded view of [`OrderBook`] used for pre/post-upgrade persistence.
+/// The derived `resting_orders` index is intentionally omitted and rebuilt
+/// from `bids` + `asks` in `From<OrderBookSnapshot> for OrderBook`.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct OrderBookSnapshot {
+    #[n(0)]
+    pub id: OrderBookId,
+    #[n(1)]
+    pub next_seq: OrderSeq,
+    #[n(2)]
+    pub tick_size: TickSize,
+    #[n(3)]
+    pub lot_size: LotSize,
+    #[n(4)]
+    pub pending_orders: Vec<Order>,
+    /// Bid side, stored with the natural (un-reversed) price. Converted back
+    /// to a `BTreeMap<Reverse<Price>, …>` on restore.
+    #[n(5)]
+    pub bids: Vec<PriceLevel>,
+    #[n(6)]
+    pub asks: Vec<PriceLevel>,
+    #[n(7)]
+    pub filled_orders: Vec<OrderSeq>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PriceLevel {
+    #[n(0)]
+    pub price: Price,
+    #[n(1)]
+    pub orders: Vec<RestingOrder>,
+}
+
+impl From<&OrderBook> for OrderBookSnapshot {
+    fn from(book: &OrderBook) -> Self {
+        Self {
+            id: book.id,
+            next_seq: book.next_seq,
+            tick_size: book.tick_size,
+            lot_size: book.lot_size,
+            pending_orders: book.pending_orders.iter().cloned().collect(),
+            bids: book
+                .bids
+                .iter()
+                .map(|(Reverse(price), orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            asks: book
+                .asks
+                .iter()
+                .map(|(price, orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            filled_orders: book.filled_orders.iter().copied().collect(),
+        }
+    }
+}
+
+impl From<OrderBookSnapshot> for OrderBook {
+    fn from(snapshot: OrderBookSnapshot) -> Self {
+        let pending_orders: VecDeque<Order> = snapshot.pending_orders.into_iter().collect();
+        let mut bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut asks: BTreeMap<Price, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut resting_orders: BTreeMap<OrderSeq, (Side, Price)> = BTreeMap::new();
+
+        for level in snapshot.bids {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Buy, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                bids.insert(Reverse(price), VecDeque::from(orders))
+                    .is_none(),
+                "invalid order book snapshot: duplicate bid price level {:?}",
+                price
+            );
+        }
+        for level in snapshot.asks {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Sell, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                asks.insert(price, VecDeque::from(orders)).is_none(),
+                "invalid order book snapshot: duplicate ask price level {:?}",
+                price
+            );
+        }
+
+        let filled_orders = snapshot.filled_orders.into_iter().collect();
+        Self {
+            id: snapshot.id,
+            next_seq: snapshot.next_seq,
+            tick_size: snapshot.tick_size,
+            lot_size: snapshot.lot_size,
+            pending_orders,
+            bids,
+            asks,
+            resting_orders,
+            filled_orders,
+        }
+    }
 }
