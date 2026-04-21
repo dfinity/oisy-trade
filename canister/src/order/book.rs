@@ -468,16 +468,38 @@ impl From<OrderBookSnapshot> for OrderBook {
         let mut resting_orders: BTreeMap<OrderSeq, (Side, Price)> = BTreeMap::new();
 
         for level in snapshot.bids {
-            for order in &level.orders {
-                resting_orders.insert(order.id(), (Side::Buy, level.price));
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Buy, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
             }
-            bids.insert(Reverse(level.price), VecDeque::from(level.orders));
+            assert!(
+                bids.insert(Reverse(price), VecDeque::from(orders)).is_none(),
+                "invalid order book snapshot: duplicate bid price level {:?}",
+                price
+            );
         }
         for level in snapshot.asks {
-            for order in &level.orders {
-                resting_orders.insert(order.id(), (Side::Sell, level.price));
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Sell, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
             }
-            asks.insert(level.price, VecDeque::from(level.orders));
+            assert!(
+                asks.insert(price, VecDeque::from(orders)).is_none(),
+                "invalid order book snapshot: duplicate ask price level {:?}",
+                price
+            );
         }
 
         let filled_orders = snapshot.filled_orders.into_iter().collect();
