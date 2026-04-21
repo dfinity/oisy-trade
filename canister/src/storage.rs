@@ -84,19 +84,54 @@ pub mod state_snapshot {
 
     /// Reads the snapshot written by the previous canister version, or
     /// `None` on a fresh install (the cell still holds the `Vec::new()`
-    /// default).
+    /// default). On a successful decode the cell is cleared, so if a future
+    /// upgrade skips `pre_upgrade`, the next `post_upgrade` observes an
+    /// empty cell and traps instead of restoring stale state from an older
+    /// version. Clearing also releases the cell's stable pages until the
+    /// next `pre_upgrade` rewrites them.
     pub fn load() -> Option<StateSnapshot> {
         STATE_SNAPSHOT.with(|cell| {
-            let cell = cell.borrow();
-            let bytes = cell.get();
-            if bytes.is_empty() {
-                None
-            } else {
-                Some(
-                    minicbor::decode::<StateSnapshot>(bytes.as_slice())
-                        .expect("state snapshot decoding should succeed"),
-                )
+            let mut cell = cell.borrow_mut();
+            if cell.get().is_empty() {
+                return None;
             }
+            let snapshot = minicbor::decode::<StateSnapshot>(cell.get().as_slice())
+                .expect("state snapshot decoding should succeed");
+            cell.set(Vec::new());
+            Some(snapshot)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::state_snapshot;
+    use crate::state::StateSnapshot;
+    use dex_types_internal::Mode;
+
+    fn empty_snapshot() -> StateSnapshot {
+        StateSnapshot {
+            mode: Mode::GeneralAvailability,
+            next_book_id: Default::default(),
+            tokens: vec![],
+            trading_pairs: vec![],
+            order_books: vec![],
+            ledger_fee_cache: vec![],
+        }
+    }
+
+    #[test]
+    fn load_consumes_snapshot_so_a_skipped_pre_upgrade_traps() {
+        let snapshot = empty_snapshot();
+        state_snapshot::save(&snapshot);
+
+        let first = state_snapshot::load().expect("first load should find the saved snapshot");
+        assert_eq!(first, snapshot);
+
+        let second = state_snapshot::load();
+        assert!(
+            second.is_none(),
+            "second load should return None after the cell was consumed"
+        );
     }
 }
