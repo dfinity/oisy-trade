@@ -479,7 +479,8 @@ impl From<OrderBookSnapshot> for OrderBook {
                 );
             }
             assert!(
-                bids.insert(Reverse(price), VecDeque::from(orders)).is_none(),
+                bids.insert(Reverse(price), VecDeque::from(orders))
+                    .is_none(),
                 "invalid order book snapshot: duplicate bid price level {:?}",
                 price
             );
