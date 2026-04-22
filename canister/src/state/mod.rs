@@ -240,8 +240,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 continue;
             }
 
-            // Settlement + status transitions happen inside `apply_state_transition`,
-            // which dispatches to `record_matching_event`.
             audit::process_event(
                 self,
                 event::EventType::Matching(event::MatchingEvent { book_id, output }),
@@ -251,12 +249,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Apply settlement and status transitions from a single matching round.
-    /// Called from [`audit::process_event`]'s `apply_state_transition` arm for
-    /// `EventType::Matching`, both on the primary path and during any event
-    /// replay. `StableMemoryOptions::Skip` gates only stable-memory writes
-    /// (balance transfers and order-status updates) — the lookups and
-    /// computations in between still run so replay mirrors the production
-    /// code path for debugging.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,

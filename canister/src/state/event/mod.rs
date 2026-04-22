@@ -78,12 +78,7 @@ pub struct AddLimitOrderEvent {
     pub quantity: Quantity,
 }
 
-/// One matching round on a single [`OrderBookId`]. Wraps the engine's
-/// [`MatchingOutput`] — fills, resting_orders, filled_orders — so the event
-/// carries enough data to replay both settlement and order-status transitions.
-/// Principals, prices, and the trading pair are *not* duplicated; they are
-/// recoverable from [`crate::order::OrderHistory`] and
-/// [`crate::state::State::trading_pairs`] via `(book_id, order_seq)`.
+/// One matching round on a single [`OrderBookId`].
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct MatchingEvent {
     #[n(0)]
