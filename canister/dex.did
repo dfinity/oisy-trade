@@ -265,12 +265,15 @@ type DepositEvent = record {
     amount : nat;
 };
 
-/// One matching round on a single order book. Wraps the engine's
-/// MatchingOutput so the event carries fills, resting_orders, and
-/// filled_orders — enough to replay both settlement and status transitions.
-/// Principals and trading pair are not duplicated; they are recoverable
-/// from OrderHistory and trading_pairs using (book_id, order_seq).
+/// Engine drove a matching round on `book_id`, processing these orders in
+/// FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
+    book_id : nat64;
+    orders : vec nat64;
+};
+
+/// Settlement + status outcome of the matching round on `book_id`.
+type SettlingEvent = record {
     book_id : nat64;
     output : MatchingOutput;
 };
@@ -297,6 +300,7 @@ type EventType = variant {
     AddTradingPair : AddTradingPairEvent;
     Deposit : DepositEvent;
     AddLimitOrder : AddLimitOrderEvent;
+    Settling : SettlingEvent;
     Matching : MatchingEvent;
 };
 
