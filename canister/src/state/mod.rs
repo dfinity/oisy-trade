@@ -13,9 +13,9 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    Fill, LotSize, MatchOrderError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    Fill, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
+    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
@@ -78,6 +78,14 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
+    /// Matching outputs awaiting their `SettlingEvent`, keyed by book.
+    /// Populated by `record_matching_event`; drained by
+    /// `record_settling_event`. Normally empty between messages because
+    /// matching and settling happen atomically inside
+    /// `process_pending_orders`; carried in the snapshot anyway so a
+    /// half-round state (e.g. a trap between the two events) is recoverable
+    /// across upgrades.
+    pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
 }
 
 impl<MH: Memory, MB: Memory> State<MH, MB> {
@@ -96,6 +104,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
+            pending_settlement: BTreeMap::default(),
         })
     }
 
@@ -223,55 +232,95 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .map(|(_, book_id)| *book_id)
             .collect();
         for book_id in book_ids {
-            let output = {
-                #[cfg(feature = "canbench-rs")]
-                let _p = canbench_rs::bench_scope("matching");
+            let orders: Vec<OrderSeq> = {
                 let book = self
                     .order_books
-                    .get_mut(&book_id)
+                    .get(&book_id)
                     .expect("BUG: trading pair registered but order book missing");
-                book.process_pending_orders()
+                book.pending_order_seqs().collect()
             };
-
-            if output.fills.is_empty()
-                && output.resting_orders.is_empty()
-                && output.filled_orders.is_empty()
-            {
+            if orders.is_empty() {
                 continue;
             }
 
+            // Matching event drives the engine via `record_matching_event`
+            // and parks the output in `state.pending_settlement`.
             audit::process_event(
                 self,
-                event::EventType::Matching(event::MatchingEvent { book_id, output }),
+                event::EventType::Matching(event::MatchingEvent { book_id, orders }),
+                runtime,
+            );
+
+            // Read the output back out to build SettlingEvent; the event
+            // carries it on the wire for audit-log completeness, while
+            // `record_settling_event` will drain and verify against the
+            // stored value.
+            let output = self
+                .pending_settlement
+                .get(&book_id)
+                .cloned()
+                .expect("BUG: Matching apply did not park a pending settlement");
+            audit::process_event(
+                self,
+                event::EventType::Settling(event::SettlingEvent { book_id, output }),
                 runtime,
             );
         }
     }
 
-    /// Apply settlement and status transitions from a single matching round.
+    /// Drive engine matching for the given book and park the resulting
+    /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
+    /// [`event::SettlingEvent`] to drain. Called from
+    /// [`audit::apply_state_transition`] for `EventType::Matching` on both
+    /// the primary path and replay — the behaviour is identical in both.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
+        _persistence: StableMemoryOptions,
+    ) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("matching");
+        let book = self
+            .order_books
+            .get_mut(&event.book_id)
+            .expect("BUG: trading pair registered but order book missing");
+        let pending: Vec<OrderSeq> = book.pending_order_seqs().collect();
+        assert_eq!(
+            pending, event.orders,
+            "BUG: pending queue diverges from MatchingEvent.orders for book {:?}",
+            event.book_id,
+        );
+        let output = book.process_pending_orders();
+        // Park the output for the paired `SettlingEvent` to drain. Insert
+        // overwrites any stale entry rather than asserting `None`: a missing
+        // prior `SettlingEvent` (e.g., a skipped settle round in some future
+        // code path) should not turn into a hard trap here.
+        self.pending_settlement.insert(event.book_id, output);
+    }
+
+    /// Apply settlement and status transitions from a single matching round.
+    pub fn record_settling_event(
+        &mut self,
+        event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        // Re-run matching on `Skip` to advance the book's heap state during
-        // event replay — `replay_events` dispatches events individually and
-        // does not invoke `process_pending_orders`, which is where matching
-        // is driven on the primary path. On `Write` the outer
-        // `process_pending_orders` has already drained the pending queue.
-        if matches!(persistence, StableMemoryOptions::Skip) {
-            let book = self
-                .order_books
-                .get_mut(&event.book_id)
-                .expect("BUG: trading pair registered but order book missing");
-            let _ = book.process_pending_orders();
+        // Drain the bridge if present. If a preceding `MatchingEvent` parked
+        // an output, verify it matches the event — the output on the wire is
+        // authoritative for settlement, so we don't panic if `pending_settlement`
+        // is empty (e.g., on out-of-order replay or partial history).
+        if let Some(stored) = self.pending_settlement.remove(&event.book_id) {
+            assert_eq!(
+                stored, event.output,
+                "BUG: SettlingEvent.output diverges from pending_settlement for book {:?}",
+                event.book_id,
+            );
         }
 
         let pair = self
             .trading_pairs
             .get_pair(&event.book_id)
             .cloned()
-            .expect("BUG: unknown trading pair in MatchingEvent");
+            .expect("BUG: unknown trading pair in SettlingEvent");
         {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("settling");
@@ -502,6 +551,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
+            pending_settlement,
         } = self;
         Self {
             mode: mode.clone(),
@@ -513,6 +563,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
+            pending_settlement: pending_settlement.clone(),
         }
     }
 }
@@ -530,6 +581,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
+            pending_settlement,
         } = self;
         let Self {
             mode: other_mode,
@@ -541,6 +593,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
+            pending_settlement: other_pending_settlement,
         } = other;
         mode == other_mode
             && next_book_id == other_next_book_id
@@ -551,6 +604,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
+            && pending_settlement == other_pending_settlement
     }
 }
 

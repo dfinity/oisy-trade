@@ -4,7 +4,7 @@ use crate::order::{
     TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
-use crate::state::event::{AddLimitOrderEvent, DepositEvent, MatchingEvent};
+use crate::state::event::{AddLimitOrderEvent, DepositEvent, MatchingEvent, SettlingEvent};
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata, state,
@@ -267,11 +267,20 @@ fn should_replay_matching() {
     let runtime = crate::test_fixtures::mocks::mock_runtime_for(Principal::anonymous());
     normal.process_pending_orders(&runtime);
 
-    // Construct the expected MatchingEvent: sell (placed second) is the taker
-    // that crosses the resting buy; both orders are fully filled.
-    let expected_matching = Event {
+    // The primary path's process_pending_orders first emits a MatchingEvent
+    // (with the FIFO order of pending seqs at round entry — buy then sell)
+    // and then a SettlingEvent (with the MatchingOutput: one fill where sell
+    // is the taker that crosses the resting buy; both orders fully filled).
+    let matching_event = Event {
         timestamp: 7,
         payload: EventType::Matching(MatchingEvent {
+            book_id,
+            orders: vec![buy_id.seq(), sell_id.seq()],
+        }),
+    };
+    let settling_event = Event {
+        timestamp: 8,
+        payload: EventType::Settling(SettlingEvent {
             book_id,
             output: MatchingOutput {
                 fills: vec![Fill {
@@ -328,7 +337,8 @@ fn should_replay_matching() {
                     quantity: Quantity::from(quantity),
                 }),
             },
-            expected_matching,
+            matching_event,
+            settling_event,
         ],
         normal.order_history.clone(),
         normal.balances.clone(),

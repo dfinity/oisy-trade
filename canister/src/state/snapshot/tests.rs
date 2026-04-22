@@ -8,13 +8,17 @@ use crate::test_fixtures::{
 use candid::Principal;
 
 mod schema_stability {
-    use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
+    use super::super::{
+        LedgerFeeEntry, PendingSettlementEntry, StateSnapshot, TokenEntry, TradingPairEntry,
+    };
     use crate::order::{
-        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PendingOrder, Price, PriceLevel,
-        Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+        Fill, LotSize, MatchingOutput, OrderBookId, OrderBookSnapshot, OrderSeq, PendingOrder,
+        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
+        TradingPair,
     };
     use candid::{Nat, Principal};
     use dex_types_internal::Mode;
+    use std::collections::BTreeSet;
     use std::num::NonZeroU64;
 
     /// Fixture exercising every `#[n(N)]` field reachable from `StateSnapshot`:
@@ -97,6 +101,21 @@ mod schema_stability {
                 token: token_a,
                 fee: Nat::from(100_000u64),
             }],
+            pending_settlement: vec![PendingSettlementEntry {
+                book_id,
+                output: MatchingOutput {
+                    fills: vec![Fill {
+                        taker_order_seq: OrderSeq::new(5),
+                        taker_side: Side::Buy,
+                        taker_price: Price::new(100),
+                        maker_order_seq: OrderSeq::new(6),
+                        maker_price: Price::new(100),
+                        quantity: Quantity::from(1_000_000u64),
+                    }],
+                    resting_orders: BTreeSet::new(),
+                    filled_orders: BTreeSet::from([OrderSeq::new(5), OrderSeq::new(6)]),
+                },
+            }],
         }
     }
 
@@ -114,9 +133,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        86820080810882828141018261410882814102826142068182828141018141028107818881078103\
+        87820080810882828141018261410882814102826142068182828141018141028107818881078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810481828141011a000186a0";
+        186e818281021a0007a12081810481828141011a000186a081828107838186810582008081186481\
+        068118641a000f4240808281058106";
 
     #[test]
     fn should_match_golden_encoding() {

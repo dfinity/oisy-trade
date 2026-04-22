@@ -16,6 +16,7 @@ pub enum EventType {
     AddTradingPair(AddTradingPairEvent),
     Deposit(DepositEvent),
     AddLimitOrder(AddLimitOrderEvent),
+    Settling(SettlingEvent),
     Matching(MatchingEvent),
 }
 
@@ -48,6 +49,12 @@ pub struct AddLimitOrderEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct MatchingEvent {
+    pub book_id: u64,
+    pub orders: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SettlingEvent {
     pub book_id: u64,
     pub output: MatchingOutput,
 }

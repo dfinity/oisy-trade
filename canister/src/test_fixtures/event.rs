@@ -4,6 +4,7 @@ use crate::order::{
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, MatchingEvent,
+    SettlingEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -49,6 +50,7 @@ pub enum WorstCaseEvent {
     Deposit,
     AddLimitOrder,
     Matching,
+    Settling,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -60,14 +62,15 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Deposit(_) => Self::Deposit,
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
             EventType::Matching(_) => Self::Matching,
+            EventType::Settling(_) => Self::Settling,
         }
     }
 }
 
-/// Upper bound on fills per matching round, used to size the worst-case
-/// [`MatchingEvent`] fixture. Matches the `bench_process_pending_orders_1000`
-/// benchmark workload.
-pub const MAX_FILLS_PER_MATCHING_ROUND: usize = 1_000;
+/// Upper bound on orders processed per matching round, used to size the
+/// worst-case `Matching` / `Settling` fixtures. Matches the
+/// `bench_process_pending_orders_1000` benchmark workload.
+pub const MAX_ORDERS_PER_MATCHING_ROUND: usize = 1_000;
 
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.
@@ -78,7 +81,8 @@ impl WorstCaseEvent {
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
             Self::AddLimitOrder => add_limit_order(),
-            Self::Matching => matching(MAX_FILLS_PER_MATCHING_ROUND),
+            Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
+            Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
         })
     }
 
@@ -95,7 +99,8 @@ impl WorstCaseEvent {
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
             Self::AddLimitOrder => 97,
-            Self::Matching => 57_472,
+            Self::Matching => 10_027,
+            Self::Settling => 57_472,
         }
     }
 }
@@ -159,7 +164,16 @@ fn deposit(amount: Quantity) -> EventType {
     })
 }
 
-fn matching(fill_count: usize) -> EventType {
+fn matching(order_count: usize) -> EventType {
+    EventType::Matching(MatchingEvent {
+        book_id: OrderBookId::new(u64::MAX),
+        orders: (0..order_count as u64)
+            .map(|i| OrderSeq::new(u64::MAX - i))
+            .collect(),
+    })
+}
+
+fn settling(fill_count: usize) -> EventType {
     // Distinct taker/maker seqs so filled_orders reaches 2×fill_count entries
     // (each Fill contributes both a taker and a maker that are fully consumed).
     let fills: Vec<Fill> = (0..fill_count as u64)
@@ -176,7 +190,7 @@ fn matching(fill_count: usize) -> EventType {
         .iter()
         .flat_map(|f| [f.taker_order_seq, f.maker_order_seq])
         .collect();
-    EventType::Matching(MatchingEvent {
+    EventType::Settling(SettlingEvent {
         book_id: OrderBookId::new(u64::MAX),
         output: MatchingOutput {
             fills,

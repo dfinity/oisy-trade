@@ -85,6 +85,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Matching(event) => {
             state.record_matching_event(event, persistence);
         }
+        EventType::Settling(event) => {
+            state.record_settling_event(event, persistence);
+        }
     }
 }
 

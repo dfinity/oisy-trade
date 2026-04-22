@@ -12,7 +12,8 @@
 use super::State;
 use crate::balance::TokenBalance;
 use crate::order::{
-    OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
+    MatchingOutput, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId,
+    TokenMetadata, TradingPair,
 };
 use crate::state::TradingPairMap;
 use candid::Nat;
@@ -38,6 +39,11 @@ pub struct StateSnapshot {
     pub order_books: Vec<OrderBookSnapshot>,
     #[n(5)]
     pub ledger_fee_cache: Vec<LedgerFeeEntry>,
+    /// Matching outputs awaiting settlement, keyed by book. Typically empty
+    /// between messages, but snapshotted so a half-round state (e.g. a trap
+    /// between `MatchingEvent` and `SettlingEvent`) survives the upgrade.
+    #[n(6)]
+    pub pending_settlement: Vec<PendingSettlementEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -64,6 +70,14 @@ pub struct LedgerFeeEntry {
     pub fee: Nat,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PendingSettlementEntry {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub output: MatchingOutput,
+}
+
 impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
@@ -79,6 +93,7 @@ impl StateSnapshot {
             // ignored: timers are reset upon upgrades
             active_tasks: _,
             ledger_fee_cache,
+            pending_settlement,
         } = state;
         Self {
             mode: mode.clone(),
@@ -103,6 +118,13 @@ impl StateSnapshot {
                 .map(|(token, fee)| LedgerFeeEntry {
                     token: *token,
                     fee: fee.clone(),
+                })
+                .collect(),
+            pending_settlement: pending_settlement
+                .iter()
+                .map(|(book_id, output)| PendingSettlementEntry {
+                    book_id: *book_id,
+                    output: output.clone(),
                 })
                 .collect(),
         }
@@ -151,6 +173,17 @@ impl StateSnapshot {
             );
         }
 
+        let mut pending_settlement = BTreeMap::new();
+        for entry in self.pending_settlement {
+            assert!(
+                pending_settlement
+                    .insert(entry.book_id, entry.output)
+                    .is_none(),
+                "invalid snapshot: duplicate pending settlement entry for {:?}",
+                entry.book_id
+            );
+        }
+
         State {
             mode: self.mode,
             next_book_id: self.next_book_id,
@@ -161,6 +194,7 @@ impl StateSnapshot {
             order_history,
             active_tasks: Default::default(),
             ledger_fee_cache,
+            pending_settlement,
         }
     }
 }

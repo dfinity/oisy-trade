@@ -155,6 +155,10 @@ fn get_events(
                 }
                 EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
                     book_id: e.book_id.get(),
+                    orders: e.orders.into_iter().map(|s| s.get()).collect(),
+                }),
+                EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
+                    book_id: e.book_id.get(),
                     output: event::MatchingOutput {
                         fills: e
                             .output

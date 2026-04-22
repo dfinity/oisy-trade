@@ -224,6 +224,7 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, MatchingEvent,
+        SettlingEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -453,7 +454,16 @@ pub mod arbitrary {
     }
 
     pub fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
-        (any::<u64>(), arb_matching_output()).prop_map(|(book_id, output)| MatchingEvent {
+        (any::<u64>(), prop::collection::vec(arb_order_seq(), 0..5)).prop_map(
+            |(book_id, orders)| MatchingEvent {
+                book_id: order::OrderBookId::new(book_id),
+                orders,
+            },
+        )
+    }
+
+    pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
+        (any::<u64>(), arb_matching_output()).prop_map(|(book_id, output)| SettlingEvent {
             book_id: order::OrderBookId::new(book_id),
             output,
         })
@@ -467,6 +477,7 @@ pub mod arbitrary {
             arb_deposit_event().prop_map(EventType::Deposit),
             arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
+            arb_settling_event().prop_map(EventType::Settling),
         ]
     }
 

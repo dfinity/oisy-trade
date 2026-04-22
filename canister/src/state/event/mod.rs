@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, MatchingOutput, OrderBookId, OrderId, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, MatchingOutput, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -32,7 +32,11 @@ pub enum EventType {
     Deposit(#[n(0)] DepositEvent),
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
+    // #[n(5)] keeps its existing wire shape (book_id + MatchingOutput); only
+    // the Rust variant name changes to reflect its narrower concern.
     #[n(5)]
+    Settling(#[n(0)] SettlingEvent),
+    #[n(6)]
     Matching(#[n(0)] MatchingEvent),
 }
 
@@ -78,9 +82,23 @@ pub struct AddLimitOrderEvent {
     pub quantity: Quantity,
 }
 
-/// One matching round on a single [`OrderBookId`].
+/// Authoritative record of which orders the engine processed in a matching
+/// round on `book_id`. Drives `record_matching_event`'s apply: replay pops
+/// exactly these sequences from the book's pending queue, in order.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct MatchingEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub orders: Vec<OrderSeq>,
+}
+
+/// Settlement + status outcome of the matching round on `book_id`.
+/// `record_settling_event` drains [`crate::state::State::pending_settlement`]
+/// (populated by the preceding [`MatchingEvent`]'s apply) and asserts the
+/// stored value matches `output`, catching primary/replay drift.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
