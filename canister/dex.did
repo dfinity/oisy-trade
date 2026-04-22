@@ -280,15 +280,19 @@ type SettlingEvent = record {
     transitions : vec OrderStatusTransition;
 };
 
+/// Balance movement recorded during settlement. `from_order` / `to_order` /
+/// `order` are order sequence numbers (`OrderSeq`) that the canister resolves
+/// to principals via its order history at apply time — they are not user
+/// principals.
 type BalanceOperation = variant {
     Transfer : record {
-        from : nat64;
-        to : nat64;
+        from_order : nat64;
+        to_order : nat64;
         token : PairToken;
         amount : nat;
     };
     Unreserve : record {
-        user : nat64;
+        order : nat64;
         token : PairToken;
         amount : nat;
     };

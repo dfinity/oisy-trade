@@ -102,14 +102,19 @@ pub struct SettlingEvent {
     pub transitions: Vec<OrderStatusTransition>,
 }
 
+/// Participants are identified by `OrderSeq` — the apply path resolves each
+/// seq to a `Principal` via `OrderHistory`. `token` is a `PairToken` selector
+/// resolved to a concrete `TokenId` via the enclosing `SettlingEvent`'s
+/// `book_id`. This keeps each op compact on the wire while still reconstructing
+/// enough context at apply time.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub enum BalanceOperation {
     #[n(0)]
     Transfer {
         #[n(0)]
-        from: OrderSeq,
+        from_order: OrderSeq,
         #[n(1)]
-        to: OrderSeq,
+        to_order: OrderSeq,
         #[n(2)]
         token: PairToken,
         #[n(3)]
@@ -121,7 +126,7 @@ pub enum BalanceOperation {
     #[n(1)]
     Unreserve {
         #[n(0)]
-        user: OrderSeq,
+        order: OrderSeq,
         #[n(1)]
         token: PairToken,
         #[n(2)]

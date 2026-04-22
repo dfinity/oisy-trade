@@ -304,34 +304,34 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             for op in &event.balance_operations {
                 match op {
                     event::BalanceOperation::Transfer {
-                        from,
-                        to,
+                        from_order,
+                        to_order,
                         token,
                         amount,
                     } => {
                         let from_owner = self
                             .order_history
-                            .get(&OrderId::new(event.book_id, *from))
-                            .expect("BUG: missing order_history entry for Transfer.from")
+                            .get(&OrderId::new(event.book_id, *from_order))
+                            .expect("BUG: missing order_history entry for Transfer.from_order")
                             .owner;
                         let to_owner = self
                             .order_history
-                            .get(&OrderId::new(event.book_id, *to))
-                            .expect("BUG: missing order_history entry for Transfer.to")
+                            .get(&OrderId::new(event.book_id, *to_order))
+                            .expect("BUG: missing order_history entry for Transfer.to_order")
                             .owner;
                         let token = pair.token(token);
                         self.balances
                             .transfer(&from_owner, &to_owner, &token, *amount);
                     }
                     event::BalanceOperation::Unreserve {
-                        user,
+                        order,
                         token,
                         amount,
                     } => {
                         let owner = self
                             .order_history
-                            .get(&OrderId::new(event.book_id, *user))
-                            .expect("BUG: missing order_history entry for Unreserve.user")
+                            .get(&OrderId::new(event.book_id, *order))
+                            .expect("BUG: missing order_history entry for Unreserve.order")
                             .owner;
                         let token = pair.token(token);
                         self.balances.unreserve(&owner, &token, *amount);
@@ -358,8 +358,8 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
             Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
         };
         ops.push(event::BalanceOperation::Transfer {
-            from: buyer_seq,
-            to: seller_seq,
+            from_order: buyer_seq,
+            to_order: seller_seq,
             token: order::PairToken::Quote,
             amount: fill.quote_amount(),
         });
@@ -371,14 +371,14 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
                 .checked_mul_quantity(&fill.quantity)
                 .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
             ops.push(event::BalanceOperation::Unreserve {
-                user: fill.taker_order_seq,
+                order: fill.taker_order_seq,
                 token: order::PairToken::Quote,
                 amount: surplus,
             });
         }
         ops.push(event::BalanceOperation::Transfer {
-            from: seller_seq,
-            to: buyer_seq,
+            from_order: seller_seq,
+            to_order: buyer_seq,
             token: order::PairToken::Base,
             amount: fill.quantity,
         });

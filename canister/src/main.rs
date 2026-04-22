@@ -131,22 +131,22 @@ fn get_events(
     ) -> event::BalanceOperation {
         match op {
             dex_canister::state::event::BalanceOperation::Transfer {
-                from,
-                to,
+                from_order,
+                to_order,
                 token,
                 amount,
             } => event::BalanceOperation::Transfer {
-                from: from.get(),
-                to: to.get(),
+                from_order: from_order.get(),
+                to_order: to_order.get(),
                 token: map_pair_token(token),
                 amount: amount.into(),
             },
             dex_canister::state::event::BalanceOperation::Unreserve {
-                user,
+                order,
                 token,
                 amount,
             } => event::BalanceOperation::Unreserve {
-                user: user.get(),
+                order: order.get(),
                 token: map_pair_token(token),
                 amount: amount.into(),
             },

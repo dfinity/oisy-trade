@@ -62,14 +62,19 @@ pub struct SettlingEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub enum BalanceOperation {
+    /// `from_order` / `to_order` are order sequence numbers (`OrderSeq`) that
+    /// resolve to principals via the canister's `OrderHistory` at apply time,
+    /// not user identifiers.
     Transfer {
-        from: u64,
-        to: u64,
+        from_order: u64,
+        to_order: u64,
         token: PairToken,
         amount: Nat,
     },
+    /// `order` is the order sequence number whose reserved balance is being
+    /// released, not a user principal.
     Unreserve {
-        user: u64,
+        order: u64,
         token: PairToken,
         amount: Nat,
     },
