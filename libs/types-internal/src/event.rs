@@ -18,7 +18,6 @@ pub enum EventType {
     AddLimitOrder(AddLimitOrderEvent),
     Settling(SettlingEvent),
     Matching(MatchingEvent),
-    OrderStatus(OrderStatusEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -57,7 +56,8 @@ pub struct MatchingEvent {
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct SettlingEvent {
     pub book_id: u64,
-    pub operations: Vec<BalanceOperation>,
+    pub balance_operations: Vec<BalanceOperation>,
+    pub transitions: Vec<OrderStatusTransition>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -79,12 +79,6 @@ pub enum BalanceOperation {
 pub enum PairToken {
     Base,
     Quote,
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub struct OrderStatusEvent {
-    pub book_id: u64,
-    pub transitions: Vec<OrderStatusTransition>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

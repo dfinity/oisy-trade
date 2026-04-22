@@ -224,7 +224,7 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-        MatchingEvent, OrderStatusEvent, OrderStatusTransition, PairToken, SettlingEvent,
+        MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -489,29 +489,20 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
-    pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (
-            any::<u64>(),
-            prop::collection::vec(arb_balance_operation(), 0..10),
-        )
-            .prop_map(|(book_id, operations)| SettlingEvent {
-                book_id: order::OrderBookId::new(book_id),
-                operations,
-            })
-    }
-
     pub fn arb_order_status_transition() -> impl Strategy<Value = OrderStatusTransition> {
         (arb_order_seq(), arb_order_status())
             .prop_map(|(seq, status)| OrderStatusTransition { seq, status })
     }
 
-    pub fn arb_order_status_event() -> impl Strategy<Value = OrderStatusEvent> {
+    pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
         (
             any::<u64>(),
+            prop::collection::vec(arb_balance_operation(), 0..10),
             prop::collection::vec(arb_order_status_transition(), 0..10),
         )
-            .prop_map(|(book_id, transitions)| OrderStatusEvent {
+            .prop_map(|(book_id, balance_operations, transitions)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
+                balance_operations,
                 transitions,
             })
     }
@@ -525,7 +516,6 @@ pub mod arbitrary {
             arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
-            arb_order_status_event().prop_map(EventType::OrderStatus),
         ]
     }
 

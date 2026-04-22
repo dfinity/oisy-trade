@@ -5,8 +5,8 @@ use crate::order::{
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
-    AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusEvent,
-    OrderStatusTransition, PairToken, SettlingEvent,
+    AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusTransition,
+    PairToken, SettlingEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -288,7 +288,7 @@ fn should_replay_matching() {
         timestamp: 8,
         payload: EventType::Settling(SettlingEvent {
             book_id,
-            operations: vec![
+            balance_operations: vec![
                 BalanceOperation::Transfer {
                     from: buy_id.seq(),
                     to: sell_id.seq(),
@@ -302,12 +302,6 @@ fn should_replay_matching() {
                     amount: Quantity::from(quantity),
                 },
             ],
-        }),
-    };
-    let order_status_event = Event {
-        timestamp: 9,
-        payload: EventType::OrderStatus(OrderStatusEvent {
-            book_id,
             transitions: vec![
                 OrderStatusTransition {
                     seq: buy_id.seq(),
@@ -363,7 +357,6 @@ fn should_replay_matching() {
             },
             matching_event,
             settling_event,
-            order_status_event,
         ],
         normal.order_history.clone(),
         normal.balances.clone(),

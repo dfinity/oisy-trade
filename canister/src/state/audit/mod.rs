@@ -88,9 +88,6 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);
         }
-        EventType::OrderStatus(event) => {
-            state.record_order_status_event(event, persistence);
-        }
     }
 }
 

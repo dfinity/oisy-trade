@@ -248,24 +248,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }
 
             if let Some(output) = self.pending_settlement.get(&book_id).cloned() {
-                let operations = compute_balance_operations(&output);
-                if !operations.is_empty() {
+                let balance_operations = compute_balance_operations(&output);
+                let transitions = compute_order_status_transitions(&output);
+                if !balance_operations.is_empty() || !transitions.is_empty() {
                     audit::process_event(
                         self,
                         event::EventType::Settling(event::SettlingEvent {
                             book_id,
-                            operations,
-                        }),
-                        runtime,
-                    );
-                }
-
-                let transitions = compute_order_status_transitions(&output);
-                if !transitions.is_empty() {
-                    audit::process_event(
-                        self,
-                        event::EventType::OrderStatus(event::OrderStatusEvent {
-                            book_id,
+                            balance_operations,
                             transitions,
                         }),
                         runtime,
@@ -295,67 +285,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.pending_settlement.insert(event.book_id, output);
     }
 
-    /// Apply a declarative list of balance operations. Participants are
-    /// resolved to [`Principal`]s via `order_history`; [`event::PairToken`] is
-    /// resolved to a [`TokenId`] via `trading_pairs`. Stable-memory writes
-    /// are gated by `persistence`.
+    /// Apply a declarative list of balance operations and order-status
+    /// transitions, and drain the `pending_settlement` bridge populated by the
+    /// preceding [`event::MatchingEvent`]. Participants are resolved to
+    /// [`Principal`]s via `order_history`; [`event::PairToken`] is resolved
+    /// to a [`TokenId`] via `trading_pairs`. Stable-memory writes are gated
+    /// by `persistence`; the drain always runs so the bridge never
+    /// accumulates across rounds.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
-        persistence: StableMemoryOptions,
-    ) {
-        if matches!(persistence, StableMemoryOptions::Skip) {
-            return;
-        }
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("settling");
-        let pair = self
-            .trading_pairs
-            .get_pair(&event.book_id)
-            .cloned()
-            .expect("BUG: unknown trading pair in SettlingEvent");
-        for op in &event.operations {
-            match op {
-                event::BalanceOperation::Transfer {
-                    from,
-                    to,
-                    token,
-                    amount,
-                } => {
-                    let from_owner = self
-                        .order_history
-                        .get(&OrderId::new(event.book_id, *from))
-                        .expect("BUG: missing order_history entry for Transfer.from")
-                        .owner;
-                    let to_owner = self
-                        .order_history
-                        .get(&OrderId::new(event.book_id, *to))
-                        .expect("BUG: missing order_history entry for Transfer.to")
-                        .owner;
-                    let token = token_of(&pair, token);
-                    self.balances
-                        .transfer(&from_owner, &to_owner, &token, *amount);
-                }
-                event::BalanceOperation::Unreserve {
-                    user,
-                    token,
-                    amount,
-                } => {
-                    let owner = self
-                        .order_history
-                        .get(&OrderId::new(event.book_id, *user))
-                        .expect("BUG: missing order_history entry for Unreserve.user")
-                        .owner;
-                    let token = token_of(&pair, token);
-                    self.balances.unreserve(&owner, &token, *amount);
-                }
-            }
-        }
-    }
-
-    pub fn record_order_status_event(
-        &mut self,
-        event: &event::OrderStatusEvent,
         persistence: StableMemoryOptions,
     ) {
         self.pending_settlement.remove(&event.book_id);
@@ -363,11 +302,60 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
         }
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("status");
-        for transition in &event.transitions {
-            let order_id = OrderId::new(event.book_id, transition.seq);
-            self.order_history.set_status(&order_id, transition.status);
+
+        let pair = self
+            .trading_pairs
+            .get_pair(&event.book_id)
+            .cloned()
+            .expect("BUG: unknown trading pair in SettlingEvent");
+        {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("settling");
+            for op in &event.balance_operations {
+                match op {
+                    event::BalanceOperation::Transfer {
+                        from,
+                        to,
+                        token,
+                        amount,
+                    } => {
+                        let from_owner = self
+                            .order_history
+                            .get(&OrderId::new(event.book_id, *from))
+                            .expect("BUG: missing order_history entry for Transfer.from")
+                            .owner;
+                        let to_owner = self
+                            .order_history
+                            .get(&OrderId::new(event.book_id, *to))
+                            .expect("BUG: missing order_history entry for Transfer.to")
+                            .owner;
+                        let token = token_of(&pair, token);
+                        self.balances
+                            .transfer(&from_owner, &to_owner, &token, *amount);
+                    }
+                    event::BalanceOperation::Unreserve {
+                        user,
+                        token,
+                        amount,
+                    } => {
+                        let owner = self
+                            .order_history
+                            .get(&OrderId::new(event.book_id, *user))
+                            .expect("BUG: missing order_history entry for Unreserve.user")
+                            .owner;
+                        let token = token_of(&pair, token);
+                        self.balances.unreserve(&owner, &token, *amount);
+                    }
+                }
+            }
+        }
+        {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("status");
+            for transition in &event.transitions {
+                let order_id = OrderId::new(event.book_id, transition.seq);
+                self.order_history.set_status(&order_id, transition.status);
+            }
         }
     }
 }

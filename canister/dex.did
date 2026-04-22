@@ -272,10 +272,12 @@ type MatchingEvent = record {
     orders : vec nat64;
 };
 
-/// Declarative record of the balance operations produced by a matching round.
+/// Declarative record of the balance operations and order-status transitions
+/// produced by a matching round.
 type SettlingEvent = record {
     book_id : nat64;
-    operations : vec BalanceOperation;
+    balance_operations : vec BalanceOperation;
+    transitions : vec OrderStatusTransition;
 };
 
 type BalanceOperation = variant {
@@ -294,12 +296,6 @@ type BalanceOperation = variant {
 
 type PairToken = variant { Base; Quote };
 
-/// Order-status transitions produced by a matching round.
-type OrderStatusEvent = record {
-    book_id : nat64;
-    transitions : vec OrderStatusTransition;
-};
-
 type OrderStatusTransition = record {
     seq : nat64;
     status : OrderStatus;
@@ -314,7 +310,6 @@ type EventType = variant {
     AddLimitOrder : AddLimitOrderEvent;
     Settling : SettlingEvent;
     Matching : MatchingEvent;
-    OrderStatus : OrderStatusEvent;
 };
 
 /// A canister event with a timestamp.

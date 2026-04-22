@@ -4,7 +4,7 @@ use crate::order::{
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-    MatchingEvent, OrderStatusEvent, OrderStatusTransition, PairToken, SettlingEvent,
+    MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -51,7 +51,6 @@ pub enum WorstCaseEvent {
     AddLimitOrder,
     Matching,
     Settling,
-    OrderStatus,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -64,13 +63,12 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
-            EventType::OrderStatus(_) => Self::OrderStatus,
         }
     }
 }
 
 /// Upper bound on orders processed per matching round, used to size the
-/// worst-case `Matching` / `Settling` / `OrderStatus` fixtures. Matches the
+/// worst-case `Matching` / `Settling` fixtures. Matches the
 /// `bench_process_pending_orders_1000` benchmark workload.
 pub const MAX_ORDERS_PER_MATCHING_ROUND: usize = 1_000;
 
@@ -85,7 +83,6 @@ impl WorstCaseEvent {
             Self::AddLimitOrder => add_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
-            Self::OrderStatus => order_status(MAX_ORDERS_PER_MATCHING_ROUND),
         })
     }
 
@@ -103,8 +100,7 @@ impl WorstCaseEvent {
             Self::Deposit => 95,
             Self::AddLimitOrder => 97,
             Self::Matching => 10_027,
-            Self::Settling => 91_327,
-            Self::OrderStatus => 14_027,
+            Self::Settling => 105_330,
         }
     }
 }
@@ -177,46 +173,40 @@ fn matching(order_count: usize) -> EventType {
     })
 }
 
-fn settling(fill_count: usize) -> EventType {
+fn settling(order_count: usize) -> EventType {
     // Each fill produces 3 operations (quote transfer, quote unreserve for
     // buy-taker price improvement, base transfer) — the maximum per fill.
-    let mut operations = Vec::with_capacity(fill_count * 3);
-    for i in 0..fill_count as u64 {
+    let mut balance_operations = Vec::with_capacity(order_count * 3);
+    for i in 0..order_count as u64 {
         let taker = OrderSeq::new(2 * i);
         let maker = OrderSeq::new(2 * i + 1);
-        operations.push(BalanceOperation::Transfer {
+        balance_operations.push(BalanceOperation::Transfer {
             from: taker,
             to: maker,
             token: PairToken::Quote,
             amount: max_quantity(),
         });
-        operations.push(BalanceOperation::Unreserve {
+        balance_operations.push(BalanceOperation::Unreserve {
             user: taker,
             token: PairToken::Quote,
             amount: max_quantity(),
         });
-        operations.push(BalanceOperation::Transfer {
+        balance_operations.push(BalanceOperation::Transfer {
             from: maker,
             to: taker,
             token: PairToken::Base,
             amount: max_quantity(),
         });
     }
-    EventType::Settling(SettlingEvent {
-        book_id: OrderBookId::new(u64::MAX),
-        operations,
-    })
-}
-
-fn order_status(order_count: usize) -> EventType {
     let transitions = (0..order_count as u64)
         .map(|i| OrderStatusTransition {
             seq: OrderSeq::new(u64::MAX - i),
             status: OrderStatus::Filled,
         })
         .collect();
-    EventType::OrderStatus(OrderStatusEvent {
+    EventType::Settling(SettlingEvent {
         book_id: OrderBookId::new(u64::MAX),
+        balance_operations,
         transitions,
     })
 }

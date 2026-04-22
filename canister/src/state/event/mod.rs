@@ -36,8 +36,6 @@ pub enum EventType {
     Settling(#[n(0)] SettlingEvent),
     #[n(6)]
     Matching(#[n(0)] MatchingEvent),
-    #[n(7)]
-    OrderStatus(#[n(0)] OrderStatusEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -93,17 +91,21 @@ pub struct MatchingEvent {
     pub orders: Vec<OrderSeq>,
 }
 
-/// Declarative record of the balance operations produced by a matching round
-/// on `book_id`. `record_settling_event` applies each operation in order;
-/// participants are resolved to `Principal`s via
-/// [`crate::order::OrderHistory`] and tokens to `TokenId`s via
-/// [`crate::state::State::trading_pairs`] at apply time.
+/// Declarative record of the balance operations and order-status transitions
+/// produced by a matching round on `book_id`. `record_settling_event` applies
+/// each operation and each transition in order; participants are resolved to
+/// `Principal`s via [`crate::order::OrderHistory`] and tokens to `TokenId`s
+/// via [`crate::state::State::trading_pairs`] at apply time. `record_settling_event`
+/// also drains the `pending_settlement` bridge populated by the preceding
+/// [`MatchingEvent`].
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
-    pub operations: Vec<BalanceOperation>,
+    pub balance_operations: Vec<BalanceOperation>,
+    #[n(2)]
+    pub transitions: Vec<OrderStatusTransition>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -142,17 +144,6 @@ pub enum PairToken {
     Base,
     #[n(1)]
     Quote,
-}
-
-/// Order-history status transitions that fell out of the matching round on
-/// `book_id`. `record_order_status_event` applies each transition (gated by
-/// persistence) and drains `State::pending_settlement` for this book.
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
-pub struct OrderStatusEvent {
-    #[n(0)]
-    pub book_id: OrderBookId,
-    #[n(1)]
-    pub transitions: Vec<OrderStatusTransition>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

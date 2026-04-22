@@ -193,25 +193,20 @@ fn get_events(
                 }),
                 EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
                     book_id: e.book_id.get(),
-                    operations: e
-                        .operations
+                    balance_operations: e
+                        .balance_operations
                         .into_iter()
                         .map(map_balance_operation)
                         .collect(),
+                    transitions: e
+                        .transitions
+                        .into_iter()
+                        .map(|t| event::OrderStatusTransition {
+                            seq: t.seq.get(),
+                            status: dex_types::OrderStatus::from(t.status),
+                        })
+                        .collect(),
                 }),
-                EventType::OrderStatus(e) => {
-                    event::EventType::OrderStatus(event::OrderStatusEvent {
-                        book_id: e.book_id.get(),
-                        transitions: e
-                            .transitions
-                            .into_iter()
-                            .map(|t| event::OrderStatusTransition {
-                                seq: t.seq.get(),
-                                status: dex_types::OrderStatus::from(t.status),
-                            })
-                            .collect(),
-                    })
-                }
             },
         }
     }
