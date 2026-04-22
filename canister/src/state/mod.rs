@@ -74,18 +74,15 @@ pub struct State<MH: Memory, MB: Memory> {
     // TODO(DEFI-2746): Add support for subaccounts.
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
-    active_tasks: BTreeSet<Task>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Matching outputs awaiting their `SettlingEvent`, keyed by book.
-    /// Populated by `record_matching_event`; drained by
-    /// `record_settling_event`. Normally empty between messages because
+    /// Matching outputs awaiting to be settled.
+    /// Normally empty between messages because
     /// matching and settling happen atomically inside
-    /// `process_pending_orders`; carried in the snapshot anyway so a
-    /// half-round state (e.g. a trap between the two events) is recoverable
-    /// across upgrades.
+    /// `process_pending_orders`.
     pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
+    active_tasks: BTreeSet<Task>,
 }
 
 impl<MH: Memory, MB: Memory> State<MH, MB> {
@@ -267,9 +264,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Drive engine matching for the given book and park the resulting
     /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
-    /// [`event::SettlingEvent`] to drain. Called from
-    /// [`audit::apply_state_transition`] for `EventType::Matching` on both
-    /// the primary path and replay — the behaviour is identical in both.
+    /// [`event::SettlingEvent`] to drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -282,16 +277,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
         let output = book.process_pending_orders(&event.orders);
-        self.pending_settlement.insert(event.book_id, output);
+        assert_eq!(
+            self.pending_settlement.insert(event.book_id, output),
+            None,
+            "BUG: previous round of settling was not completed"
+        );
     }
 
     /// Apply a declarative list of balance operations and order-status
-    /// transitions, and drain the `pending_settlement` bridge populated by the
-    /// preceding [`event::MatchingEvent`]. Participants are resolved to
-    /// [`Principal`]s via `order_history`; [`event::PairToken`] is resolved
-    /// to a [`TokenId`] via `trading_pairs`. Stable-memory writes are gated
-    /// by `persistence`; the drain always runs so the bridge never
-    /// accumulates across rounds.
+    /// transitions.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
@@ -329,7 +323,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                             .get(&OrderId::new(event.book_id, *to))
                             .expect("BUG: missing order_history entry for Transfer.to")
                             .owner;
-                        let token = token_of(&pair, token);
+                        let token = pair.token(token);
                         self.balances
                             .transfer(&from_owner, &to_owner, &token, *amount);
                     }
@@ -343,7 +337,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                             .get(&OrderId::new(event.book_id, *user))
                             .expect("BUG: missing order_history entry for Unreserve.user")
                             .owner;
-                        let token = token_of(&pair, token);
+                        let token = pair.token(token);
                         self.balances.unreserve(&owner, &token, *amount);
                     }
                 }
@@ -357,13 +351,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 self.order_history.set_status(&order_id, transition.status);
             }
         }
-    }
-}
-
-fn token_of(pair: &TradingPair, token: &event::PairToken) -> TokenId {
-    match token {
-        event::PairToken::Base => pair.base,
-        event::PairToken::Quote => pair.quote,
     }
 }
 

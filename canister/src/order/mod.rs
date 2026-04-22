@@ -8,6 +8,7 @@ pub use book::{
 };
 pub use history::OrderHistory;
 
+use crate::state::event::PairToken;
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
 use ic_stable_structures::Storable;
@@ -291,6 +292,15 @@ pub struct TradingPair {
     pub base: TokenId,
     #[n(1)]
     pub quote: TokenId,
+}
+
+impl TradingPair {
+    pub fn token(&self, side: &PairToken) -> TokenId {
+        match side {
+            PairToken::Base => self.base,
+            PairToken::Quote => self.quote,
+        }
+    }
 }
 
 impl From<dex_types::TradingPair> for TradingPair {

@@ -80,9 +80,7 @@ pub struct AddLimitOrderEvent {
     pub quantity: Quantity,
 }
 
-/// Authoritative record of which orders the engine processed in a matching
-/// round on `book_id`. Drives `record_matching_event`'s apply: replay pops
-/// exactly these sequences from the book's pending queue, in order.
+/// Orders processed by the matching engine.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct MatchingEvent {
     #[n(0)]
@@ -91,13 +89,9 @@ pub struct MatchingEvent {
     pub orders: Vec<OrderSeq>,
 }
 
-/// Declarative record of the balance operations and order-status transitions
-/// produced by a matching round on `book_id`. `record_settling_event` applies
-/// each operation and each transition in order; participants are resolved to
-/// `Principal`s via [`crate::order::OrderHistory`] and tokens to `TokenId`s
-/// via [`crate::state::State::trading_pairs`] at apply time. `record_settling_event`
-/// also drains the `pending_settlement` bridge populated by the preceding
-/// [`MatchingEvent`].
+/// Outcome of the matching engine:
+/// * balance transitions between maker/taker
+/// * order transitions
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
@@ -135,9 +129,7 @@ pub enum BalanceOperation {
     },
 }
 
-/// Side of a trading pair for a [`BalanceOperation`]. Resolved to a concrete
-/// [`TokenId`] at apply time via the `book_id` on the enclosing
-/// [`SettlingEvent`].
+/// Side of a trading pair for a [`BalanceOperation`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Decode, Encode)]
 pub enum PairToken {
     #[n(0)]

@@ -188,16 +188,6 @@ impl OrderBook {
 
     /// Match exactly the given pending-order sequences, in order, against
     /// the book.
-    ///
-    /// Pops `expected_seqs.len()` orders from the front of the pending queue
-    /// and asserts that each popped order's sequence matches the corresponding
-    /// `expected_seqs` entry. On the primary path the caller snapshots
-    /// [`OrderBook::pending_order_seqs`] and passes that; on event replay the
-    /// caller passes `MatchingEvent.orders`. Either way, the engine verifies
-    /// the queue matches what the caller expects before consuming it.
-    ///
-    /// Returns fills (for settlement) and the sequences of orders that
-    /// transitioned to resting (for status tracking).
     pub fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
@@ -269,9 +259,6 @@ impl OrderBook {
     }
 
     /// FIFO sequence numbers of the orders currently waiting to be matched.
-    /// Used by `state::process_pending_orders` to snapshot a matching round's
-    /// input for the audit log; `record_matching_event` asserts the queue
-    /// still matches this list before draining it.
     pub fn pending_order_seqs(&self) -> impl Iterator<Item = OrderSeq> + '_ {
         self.pending_orders.iter().map(|order| order.id())
     }
@@ -331,9 +318,6 @@ fn fill_against_queue<K: Ord>(
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
 /// orders that began resting in the book, and orders that were fully filled.
-///
-/// `#[n(N)]` field numbers are the wire contract for audit events; they are
-/// append-only and must never be reassigned.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct MatchingOutput {
     /// Fills executed during this matching round, in execution order.
@@ -388,9 +372,6 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-///
-/// `#[n(N)]` field numbers are the wire contract for audit events; they are
-/// append-only and must never be reassigned.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
