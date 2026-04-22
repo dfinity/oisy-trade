@@ -251,6 +251,14 @@ impl OrderBook {
         self.pending_orders.len()
     }
 
+    /// FIFO sequence numbers of the orders currently waiting to be matched.
+    /// Used by `state::process_pending_orders` to snapshot a matching round's
+    /// input for the audit log; `record_matching_event` asserts the queue
+    /// still matches this list before draining it.
+    pub fn pending_order_seqs(&self) -> impl Iterator<Item = OrderSeq> + '_ {
+        self.pending_orders.iter().map(|order| order.id())
+    }
+
     pub fn bids_len(&self) -> usize {
         self.bids.len()
     }
