@@ -239,32 +239,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     .expect("BUG: trading pair registered but order book missing");
                 book.pending_order_seqs().collect()
             };
-            if orders.is_empty() {
-                continue;
+            if !orders.is_empty() {
+                audit::process_event(
+                    self,
+                    event::EventType::Matching(event::MatchingEvent { book_id, orders }),
+                    runtime,
+                );
             }
 
-            // Matching event drives the engine via `record_matching_event`
-            // and parks the output in `state.pending_settlement`.
-            audit::process_event(
-                self,
-                event::EventType::Matching(event::MatchingEvent { book_id, orders }),
-                runtime,
-            );
-
-            // Read the output back out to build SettlingEvent; the event
-            // carries it on the wire for audit-log completeness, while
-            // `record_settling_event` will drain and verify against the
-            // stored value.
-            let output = self
-                .pending_settlement
-                .get(&book_id)
-                .cloned()
-                .expect("BUG: Matching apply did not park a pending settlement");
-            audit::process_event(
-                self,
-                event::EventType::Settling(event::SettlingEvent { book_id, output }),
-                runtime,
-            );
+            if let Some(output) = self.pending_settlement.get(&book_id) {
+                audit::process_event(
+                    self,
+                    event::EventType::Settling(event::SettlingEvent {
+                        book_id,
+                        output: output.clone(),
+                    }),
+                    runtime,
+                );
+            }
         }
     }
 
@@ -300,17 +292,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        // Drain the bridge if present. If a preceding `MatchingEvent` parked
-        // an output, verify it matches the event — the output on the wire is
-        // authoritative for settlement, so we don't panic if `pending_settlement`
-        // is empty (e.g., on out-of-order replay or partial history).
-        if let Some(stored) = self.pending_settlement.remove(&event.book_id) {
-            assert_eq!(
-                stored, event.output,
-                "BUG: SettlingEvent.output diverges from pending_settlement for book {:?}",
-                event.book_id,
-            );
-        }
+        let stored = self
+            .pending_settlement
+            .remove(&event.book_id)
+            .expect("BUG: missing SettlingEvent");
+        assert_eq!(
+            stored, event.output,
+            "BUG: SettlingEvent.output diverges from pending_settlement for book {:?}",
+            event.book_id,
+        );
 
         let pair = self
             .trading_pairs
