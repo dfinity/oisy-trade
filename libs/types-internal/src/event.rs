@@ -16,6 +16,8 @@ pub enum EventType {
     AddTradingPair(AddTradingPairEvent),
     Deposit(DepositEvent),
     AddLimitOrder(AddLimitOrderEvent),
+    Settling(SettlingEvent),
+    Matching(MatchingEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -43,6 +45,51 @@ pub struct AddLimitOrderEvent {
     pub side: dex_types::Side,
     pub price: u64,
     pub quantity: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct MatchingEvent {
+    pub book_id: u64,
+    pub orders: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SettlingEvent {
+    pub book_id: u64,
+    pub balance_operations: Vec<BalanceOperation>,
+    pub transitions: Vec<OrderStatusTransition>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub enum BalanceOperation {
+    /// `from_order` / `to_order` are order sequence numbers (`OrderSeq`) that
+    /// resolve to principals via the canister's `OrderHistory` at apply time,
+    /// not user identifiers.
+    Transfer {
+        from_order: u64,
+        to_order: u64,
+        token: PairToken,
+        amount: Nat,
+    },
+    /// `order` is the order sequence number whose reserved balance is being
+    /// released, not a user principal.
+    Unreserve {
+        order: u64,
+        token: PairToken,
+        amount: Nat,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub enum PairToken {
+    Base,
+    Quote,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct OrderStatusTransition {
+    pub seq: u64,
+    pub status: dex_types::OrderStatus,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

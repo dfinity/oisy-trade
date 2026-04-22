@@ -19,7 +19,7 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
     );
     // Trigger matching immediately, no need to wait for the periodic timer.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        dex_canister::process_pending_orders();
+        dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
     });
     Ok(order_id)
 }
@@ -119,6 +119,40 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
+    fn map_pair_token(token: dex_canister::order::PairToken) -> event::PairToken {
+        match token {
+            dex_canister::order::PairToken::Base => event::PairToken::Base,
+            dex_canister::order::PairToken::Quote => event::PairToken::Quote,
+        }
+    }
+
+    fn map_balance_operation(
+        op: dex_canister::state::event::BalanceOperation,
+    ) -> event::BalanceOperation {
+        match op {
+            dex_canister::state::event::BalanceOperation::Transfer {
+                from_order,
+                to_order,
+                token,
+                amount,
+            } => event::BalanceOperation::Transfer {
+                from_order: from_order.get(),
+                to_order: to_order.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+            dex_canister::state::event::BalanceOperation::Unreserve {
+                order,
+                token,
+                amount,
+            } => event::BalanceOperation::Unreserve {
+                order: order.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+        }
+    }
+
     fn map_event(event: Event) -> event::Event {
         event::Event {
             timestamp: event.timestamp,
@@ -153,6 +187,26 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
+                    book_id: e.book_id.get(),
+                    orders: e.orders.into_iter().map(|s| s.get()).collect(),
+                }),
+                EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
+                    book_id: e.book_id.get(),
+                    balance_operations: e
+                        .balance_operations
+                        .into_iter()
+                        .map(map_balance_operation)
+                        .collect(),
+                    transitions: e
+                        .transitions
+                        .into_iter()
+                        .map(|t| event::OrderStatusTransition {
+                            seq: t.seq.get(),
+                            status: dex_types::OrderStatus::from(t.status),
+                        })
+                        .collect(),
+                }),
             },
         }
     }

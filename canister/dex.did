@@ -265,6 +265,46 @@ type DepositEvent = record {
     amount : nat;
 };
 
+/// Engine drove a matching round on `book_id`, processing these orders in
+/// FIFO order. Drives replay of the matching engine.
+type MatchingEvent = record {
+    book_id : nat64;
+    orders : vec nat64;
+};
+
+/// Declarative record of the balance operations and order-status transitions
+/// produced by a matching round.
+type SettlingEvent = record {
+    book_id : nat64;
+    balance_operations : vec BalanceOperation;
+    transitions : vec OrderStatusTransition;
+};
+
+/// Balance movement recorded during settlement. `from_order` / `to_order` /
+/// `order` are order sequence numbers (`OrderSeq`) that the canister resolves
+/// to principals via its order history at apply time — they are not user
+/// principals.
+type BalanceOperation = variant {
+    Transfer : record {
+        from_order : nat64;
+        to_order : nat64;
+        token : PairToken;
+        amount : nat;
+    };
+    Unreserve : record {
+        order : nat64;
+        token : PairToken;
+        amount : nat;
+    };
+};
+
+type PairToken = variant { Base; Quote };
+
+type OrderStatusTransition = record {
+    seq : nat64;
+    status : OrderStatus;
+};
+
 /// Type of a canister event.
 type EventType = variant {
     Init : InitArg;
@@ -272,6 +312,8 @@ type EventType = variant {
     AddTradingPair : AddTradingPairEvent;
     Deposit : DepositEvent;
     AddLimitOrder : AddLimitOrderEvent;
+    Settling : SettlingEvent;
+    Matching : MatchingEvent;
 };
 
 /// A canister event with a timestamp.

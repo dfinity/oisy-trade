@@ -684,7 +684,7 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{Order, OrderSeq};
+    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq};
     use crate::test_fixtures::{LOT_SIZE, order_book};
     use std::collections::BTreeSet;
 
@@ -696,10 +696,15 @@ mod process_pending_orders {
         crate::test_fixtures::sell(seq, price, quantity)
     }
 
+    fn process_all_pending_orders(book: &mut OrderBook) -> MatchingOutput {
+        let seqs: Vec<OrderSeq> = book.pending_order_seqs().collect();
+        book.process_pending_orders(&seqs)
+    }
+
     #[test]
     fn should_return_empty_output_when_no_pending_orders() {
         let mut book = order_book();
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert!(output.fills.is_empty());
         assert!(output.resting_orders.is_empty());
@@ -712,7 +717,7 @@ mod process_pending_orders {
         let lot = u64::from(LOT_SIZE);
         book.add_pending_order(buy(0, 100, lot));
 
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert!(output.fills.is_empty());
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ZERO]));
@@ -726,7 +731,7 @@ mod process_pending_orders {
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
 
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert_eq!(output.fills.len(), 1);
         assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker
@@ -742,7 +747,7 @@ mod process_pending_orders {
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, 3 * lot));
 
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert_eq!(output.fills.len(), 1);
         assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker fully filled
@@ -757,10 +762,10 @@ mod process_pending_orders {
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
 
-        let first = book.process_pending_orders();
+        let first = process_all_pending_orders(&mut book);
         assert!(!first.filled_orders.is_empty());
 
-        let second = book.process_pending_orders();
+        let second = process_all_pending_orders(&mut book);
         assert!(second.filled_orders.is_empty());
     }
 }
@@ -863,7 +868,8 @@ mod book_snapshot {
                 let seq = book.next_seq();
                 book.add_pending_order(pending.into_order(seq));
             }
-            book.process_pending_orders();
+            let seqs: Vec<_> = book.pending_order_seqs().collect();
+            book.process_pending_orders(&seqs);
             for pending in to_leave_pending {
                 let seq = book.next_seq();
                 book.add_pending_order(pending.into_order(seq));

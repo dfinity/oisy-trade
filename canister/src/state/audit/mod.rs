@@ -82,6 +82,12 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order, persistence);
         }
+        EventType::Matching(event) => {
+            state.record_matching_event(event, persistence);
+        }
+        EventType::Settling(event) => {
+            state.record_settling_event(event, persistence);
+        }
     }
 }
 
@@ -89,6 +95,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
     order_history: OrderHistory<MH>,
     balances: TokenBalance<MB>,
+    persistence: StableMemoryOptions,
 ) -> State<MH, MB> {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
@@ -103,7 +110,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, StableMemoryOptions::Skip);
+        apply_state_transition(&mut state, &event.payload, persistence);
     }
     state
 }
