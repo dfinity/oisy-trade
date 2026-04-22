@@ -1,15 +1,17 @@
 use super::*;
 use crate::order::{
-    OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+    Fill, MatchingOutput, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, Side,
+    TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
-use crate::state::event::{AddLimitOrderEvent, DepositEvent};
+use crate::state::event::{AddLimitOrderEvent, DepositEvent, MatchingEvent};
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata, state,
 };
 use candid::Principal;
 use dex_types_internal::Mode;
+use std::collections::BTreeSet;
 
 #[test]
 fn should_replay_init_event() {
@@ -183,6 +185,150 @@ fn should_replay_add_limit_order() {
                     quantity: Quantity::from(order_quantity),
                 }),
             },
+        ],
+        normal.order_history.clone(),
+        normal.balances.clone(),
+    );
+    assert_eq!(replayed, normal);
+}
+
+#[test]
+fn should_replay_matching() {
+    let base = Principal::from_slice(&[0x01]);
+    let quote = Principal::from_slice(&[0x02]);
+    let buyer = Principal::from_slice(&[0x03]);
+    let seller = Principal::from_slice(&[0x04]);
+    let price = 100u64;
+    let quantity = 1_000_000u64;
+    let book_id = OrderBookId::ZERO;
+
+    let pair = TradingPair {
+        base: TokenId::new(base),
+        quote: TokenId::new(quote),
+    };
+
+    // Build `normal` by going through the primary path: trading pair,
+    // fund both users, record a crossing buy + sell, run matching.
+    let mut normal = state();
+    normal.record_trading_pair(
+        book_id,
+        pair.clone(),
+        base_metadata(),
+        quote_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+    normal.deposit(
+        buyer,
+        TokenId::new(quote),
+        Quantity::from(price * quantity),
+        StableMemoryOptions::Write,
+    );
+    normal.deposit(
+        seller,
+        TokenId::new(base),
+        Quantity::from(quantity),
+        StableMemoryOptions::Write,
+    );
+    let (buy_id, buy_order) = normal
+        .validate_limit_order(
+            buyer,
+            pair.clone(),
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(price),
+                quantity: Quantity::from(quantity),
+            },
+        )
+        .unwrap();
+    normal.record_limit_order(
+        buyer,
+        buy_id.book_id(),
+        buy_order,
+        StableMemoryOptions::Write,
+    );
+    let (sell_id, sell_order) = normal
+        .validate_limit_order(
+            seller,
+            pair.clone(),
+            PendingOrder {
+                side: Side::Sell,
+                price: Price::new(price),
+                quantity: Quantity::from(quantity),
+            },
+        )
+        .unwrap();
+    normal.record_limit_order(
+        seller,
+        sell_id.book_id(),
+        sell_order,
+        StableMemoryOptions::Write,
+    );
+    let runtime = crate::test_fixtures::mocks::mock_runtime_for(Principal::anonymous());
+    normal.process_pending_orders(&runtime);
+
+    // Construct the expected MatchingEvent: sell (placed second) is the taker
+    // that crosses the resting buy; both orders are fully filled.
+    let expected_matching = Event {
+        timestamp: 7,
+        payload: EventType::Matching(MatchingEvent {
+            book_id,
+            output: MatchingOutput {
+                fills: vec![Fill {
+                    taker_order_seq: sell_id.seq(),
+                    taker_side: Side::Sell,
+                    taker_price: Price::new(price),
+                    maker_order_seq: buy_id.seq(),
+                    maker_price: Price::new(price),
+                    quantity: Quantity::from(quantity),
+                }],
+                resting_orders: BTreeSet::new(),
+                filled_orders: BTreeSet::from([buy_id.seq(), sell_id.seq()]),
+            },
+        }),
+    };
+
+    let replayed = replay_events(
+        vec![
+            init_event(Mode::GeneralAvailability),
+            add_trading_pair_event(base, quote),
+            Event {
+                timestamp: 3,
+                payload: EventType::Deposit(DepositEvent {
+                    user: buyer,
+                    token: TokenId::new(quote),
+                    amount: Quantity::from(price * quantity),
+                }),
+            },
+            Event {
+                timestamp: 4,
+                payload: EventType::Deposit(DepositEvent {
+                    user: seller,
+                    token: TokenId::new(base),
+                    amount: Quantity::from(quantity),
+                }),
+            },
+            Event {
+                timestamp: 5,
+                payload: EventType::AddLimitOrder(AddLimitOrderEvent {
+                    user: buyer,
+                    order_id: buy_id,
+                    side: Side::Buy,
+                    price: Price::new(price),
+                    quantity: Quantity::from(quantity),
+                }),
+            },
+            Event {
+                timestamp: 6,
+                payload: EventType::AddLimitOrder(AddLimitOrderEvent {
+                    user: seller,
+                    order_id: sell_id,
+                    side: Side::Sell,
+                    price: Price::new(price),
+                    quantity: Quantity::from(quantity),
+                }),
+            },
+            expected_matching,
         ],
         normal.order_history.clone(),
         normal.balances.clone(),

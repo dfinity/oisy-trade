@@ -254,6 +254,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         event: &event::MatchingEvent,
         persistence: StableMemoryOptions,
     ) {
+        // Re-run matching on `Skip` to advance the book's heap state during
+        // event replay — `replay_events` dispatches events individually and
+        // does not invoke `process_pending_orders`, which is where matching
+        // is driven on the primary path. On `Write` the outer
+        // `process_pending_orders` has already drained the pending queue.
+        if matches!(persistence, StableMemoryOptions::Skip) {
+            let book = self
+                .order_books
+                .get_mut(&event.book_id)
+                .expect("BUG: trading pair registered but order book missing");
+            let _ = book.process_pending_orders();
+        }
+
         let pair = self
             .trading_pairs
             .get_pair(&event.book_id)
