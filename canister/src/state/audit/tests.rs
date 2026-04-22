@@ -6,7 +6,7 @@ use crate::order::{
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusTransition,
-    PairToken, SettlingEvent,
+    PairToken, SettlingEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -101,6 +101,25 @@ impl Scenario {
         self.events.push(Event {
             timestamp,
             payload: EventType::Deposit(DepositEvent {
+                user,
+                token,
+                amount,
+            }),
+        });
+        self
+    }
+
+    /// Debits `amount` of `token` from `user`'s free balance on the primary
+    /// path and records the matching `WithdrawEvent`. Panics if the balance
+    /// is insufficient (the test is expected to fund the user first).
+    fn with_withdraw(mut self, user: Principal, token: TokenId, amount: Quantity) -> Self {
+        self.state
+            .withdraw(user, token, amount)
+            .expect("test setup: insufficient balance for withdraw");
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::Withdraw(WithdrawEvent {
                 user,
                 token,
                 amount,
@@ -239,6 +258,31 @@ fn should_replay_deposit() {
     Scenario::new()
         .with_trading_pair()
         .with_deposit(user_1(), TokenId::new(base()), Quantity::from(1_000_000u64))
+        .assert_replay_matches();
+}
+
+#[test]
+fn should_replay_withdraw() {
+    let deposit_amount = 1_000_000u64;
+    let withdraw_amount = 700_000u64;
+    Scenario::new()
+        .with_trading_pair()
+        .with_deposit(
+            user_1(),
+            TokenId::new(base()),
+            Quantity::from(deposit_amount),
+        )
+        .with_withdraw(
+            user_1(),
+            TokenId::new(base()),
+            Quantity::from(withdraw_amount),
+        )
+        .assert_balance(
+            user_1(),
+            TokenId::new(base()),
+            deposit_amount - withdraw_amount,
+            0u64,
+        )
         .assert_replay_matches();
 }
 

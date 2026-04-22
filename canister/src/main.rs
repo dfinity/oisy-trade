@@ -175,6 +175,11 @@ fn get_events(
                     token: dex_types::TokenId::from(e.token),
                     amount: e.amount.into(),
                 }),
+                EventType::Withdraw(e) => event::EventType::Withdraw(event::WithdrawEvent {
+                    user: e.user,
+                    token: dex_types::TokenId::from(e.token),
+                    amount: e.amount.into(),
+                }),
                 EventType::AddLimitOrder(e) => {
                     event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                         user: e.user,

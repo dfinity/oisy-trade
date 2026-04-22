@@ -2,7 +2,7 @@ benches:
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 1161372217
+      instructions: 1161411403
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -98,7 +98,7 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 1050504894
+        instructions: 1050544072
         heap_increase: 0
         stable_memory_increase: 0
       status:
@@ -109,7 +109,7 @@ benches:
   bench_process_pending_orders_1000_no_fills:
     total:
       calls: 1
-      instructions: 80803332
+      instructions: 80803371
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -151,7 +151,7 @@ benches:
   bench_process_pending_orders_1_large:
     total:
       calls: 1
-      instructions: 926805127
+      instructions: 926841379
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -237,7 +237,7 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 851932853
+        instructions: 851969097
         heap_increase: 0
         stable_memory_increase: 0
       status:
@@ -248,13 +248,13 @@ benches:
   bench_read_events:
     total:
       calls: 1
-      instructions: 12577511
+      instructions: 12585755
       heap_increase: 5
       stable_memory_increase: 0
     scopes:
       AddLimitOrder:
         calls: 1
-        instructions: 8196
+        instructions: 8122
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
@@ -279,12 +279,17 @@ benches:
         stable_memory_increase: 0
       Settling:
         calls: 1
-        instructions: 12092725
+        instructions: 12092858
         heap_increase: 5
         stable_memory_increase: 0
       Upgrade:
         calls: 1
         instructions: 17831
+        heap_increase: 0
+        stable_memory_increase: 0
+      Withdraw:
+        calls: 1
+        instructions: 7048
         heap_increase: 0
         stable_memory_increase: 0
   bench_upgrade_1000_no_fills:
@@ -374,13 +379,13 @@ benches:
   bench_write_events:
     total:
       calls: 1
-      instructions: 17309043
+      instructions: 17250494
       heap_increase: 7
       stable_memory_increase: 0
     scopes:
       AddLimitOrder:
         calls: 1
-        instructions: 11739
+        instructions: 11299
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
@@ -405,12 +410,17 @@ benches:
         stable_memory_increase: 0
       Settling:
         calls: 1
-        instructions: 16614500
+        instructions: 16545151
         heap_increase: 6
         stable_memory_increase: 0
       Upgrade:
         calls: 1
         instructions: 19465
+        heap_increase: 0
+        stable_memory_increase: 0
+      Withdraw:
+        calls: 1
+        instructions: 10077
         heap_increase: 0
         stable_memory_increase: 0
 version: 0.4.1

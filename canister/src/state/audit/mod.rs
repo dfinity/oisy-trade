@@ -3,7 +3,7 @@ use crate::Runtime;
 use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType,
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, WithdrawEvent,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
@@ -18,6 +18,16 @@ pub fn process_event<MH: Memory, MB: Memory>(
     runtime: &impl Runtime,
 ) {
     apply_state_transition(state, &payload, StableMemoryOptions::Write);
+    storage::record_event(runtime.time(), payload);
+}
+
+/// Append `payload` to the event log without applying it to `state`. Use this
+/// when the primary path has already mutated state through a direct call
+/// (e.g. `withdraw`, where the debit has to happen *before* the async ledger
+/// call for concurrency safety). Replaying the event through
+/// [`apply_state_transition`] reproduces the direct mutation, so replay
+/// equivalence is preserved.
+pub fn record_event(payload: EventType, runtime: &impl Runtime) {
     storage::record_event(runtime.time(), payload);
 }
 
@@ -65,6 +75,17 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             amount,
         }) => {
             state.deposit(*user, *token, *amount, persistence);
+        }
+        EventType::Withdraw(WithdrawEvent {
+            user,
+            token,
+            amount,
+        }) => {
+            if matches!(persistence, StableMemoryOptions::Write) {
+                state
+                    .withdraw(*user, *token, *amount)
+                    .expect("BUG: insufficient balance for withdraw event");
+            }
         }
         EventType::AddLimitOrder(AddLimitOrderEvent {
             user,

@@ -857,6 +857,8 @@ async fn should_replay_events_on_upgrade() {
 
 #[tokio::test]
 async fn should_withdraw_and_receive_tokens_on_ledger() {
+    use dex_types_internal::event::EventType;
+
     let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x01]);
     let client = setup.dex_client_with_caller(user);
@@ -898,6 +900,21 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     // User received (withdraw_amount - fee) on the ledger
     let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
     assert_eq!(ledger_balance, Nat::from(withdraw_amount) - fee);
+
+    // The successful withdrawal is recorded in the audit log.
+    setup.assert_that_events().await.satisfy(|events| {
+        let withdraw = events
+            .iter()
+            .find(|e| matches!(e, EventType::Withdraw(_)))
+            .expect("expected a Withdraw event in the log");
+        assert_matches!(withdraw, EventType::Withdraw(e) => {
+            assert_eq!(*e, dex_types_internal::event::WithdrawEvent {
+                user,
+                token: cksol.clone(),
+                amount: Nat::from(withdraw_amount),
+            });
+        });
+    });
 
     setup.drop().await;
 }

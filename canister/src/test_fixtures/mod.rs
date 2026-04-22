@@ -224,7 +224,7 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-        MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent,
+        MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent, WithdrawEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -418,6 +418,16 @@ pub mod arbitrary {
         })
     }
 
+    pub fn arb_withdraw_event() -> impl Strategy<Value = WithdrawEvent> {
+        (arb_principal(), arb_token_id(), arb_quantity()).prop_map(|(user, token, amount)| {
+            WithdrawEvent {
+                user,
+                token,
+                amount,
+            }
+        })
+    }
+
     pub fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         (
             arb_principal(),
@@ -513,6 +523,7 @@ pub mod arbitrary {
             arb_upgrade_arg().prop_map(EventType::Upgrade),
             arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
             arb_deposit_event().prop_map(EventType::Deposit),
+            arb_withdraw_event().prop_map(EventType::Withdraw),
             arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),

@@ -196,9 +196,23 @@ pub async fn withdraw(
     }
 
     match outcome.result {
-        Ok(response) => Ok(response),
+        Ok(response) => {
+            // The balance debit happened synchronously before the async
+            // ledger call (for concurrency safety), so the event is appended
+            // record-only — replay re-applies the debit through
+            // `apply_state_transition`.
+            let event = state::event::WithdrawEvent {
+                user: caller,
+                token: order::TokenId::from(token_id),
+                amount,
+            };
+            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            Ok(response)
+        }
         Err(e) => {
-            // Credit back on failure so the user doesn't lose funds.
+            // Credit back on failure so the user doesn't lose funds. No event
+            // is emitted: replay then sees no WithdrawEvent for the failed
+            // call, mirroring the net-zero state mutation on the primary path.
             state::with_state_mut(|s| {
                 s.deposit(
                     caller,
