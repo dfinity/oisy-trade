@@ -201,10 +201,13 @@ pub async fn withdraw(
             // ledger call (for concurrency safety), so the event is appended
             // record-only — replay re-applies the debit through
             // `apply_state_transition`.
+            let block_index = u64::try_from(&response.block_index.0)
+                .expect("BUG: ledger block_index exceeds u64::MAX");
             let event = state::event::WithdrawEvent {
                 user: caller,
                 token: order::TokenId::from(token_id),
                 amount,
+                block_index,
             };
             state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
             Ok(response)

@@ -419,13 +419,18 @@ pub mod arbitrary {
     }
 
     pub fn arb_withdraw_event() -> impl Strategy<Value = WithdrawEvent> {
-        (arb_principal(), arb_token_id(), arb_quantity()).prop_map(|(user, token, amount)| {
-            WithdrawEvent {
+        (
+            arb_principal(),
+            arb_token_id(),
+            arb_quantity(),
+            any::<u64>(),
+        )
+            .prop_map(|(user, token, amount, block_index)| WithdrawEvent {
                 user,
                 token,
                 amount,
-            }
-        })
+                block_index,
+            })
     }
 
     pub fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {

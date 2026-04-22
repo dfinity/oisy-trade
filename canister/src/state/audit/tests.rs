@@ -110,9 +110,17 @@ impl Scenario {
     }
 
     /// Debits `amount` of `token` from `user`'s free balance on the primary
-    /// path and records the matching `WithdrawEvent`. Panics if the balance
-    /// is insufficient (the test is expected to fund the user first).
-    fn with_withdraw(mut self, user: Principal, token: TokenId, amount: Quantity) -> Self {
+    /// path and records the matching `WithdrawEvent`. `block_index` is the
+    /// ledger block index the production path would receive from the ledger.
+    /// Panics if the balance is insufficient (the test is expected to fund
+    /// the user first).
+    fn with_withdraw(
+        mut self,
+        user: Principal,
+        token: TokenId,
+        amount: Quantity,
+        block_index: u64,
+    ) -> Self {
         self.state
             .withdraw(user, token, amount)
             .expect("test setup: insufficient balance for withdraw");
@@ -123,6 +131,7 @@ impl Scenario {
                 user,
                 token,
                 amount,
+                block_index,
             }),
         });
         self
@@ -276,6 +285,7 @@ fn should_replay_withdraw() {
             user_1(),
             TokenId::new(base()),
             Quantity::from(withdraw_amount),
+            42,
         )
         .assert_balance(
             user_1(),

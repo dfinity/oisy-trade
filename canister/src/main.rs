@@ -179,6 +179,7 @@ fn get_events(
                     user: e.user,
                     token: dex_types::TokenId::from(e.token),
                     amount: e.amount.into(),
+                    block_index: e.block_index,
                 }),
                 EventType::AddLimitOrder(e) => {
                     event::EventType::AddLimitOrder(event::AddLimitOrderEvent {

@@ -70,7 +70,8 @@ pub struct DepositEvent {
 
 /// A successful withdrawal: `amount` of `token` was debited from `user`'s free
 /// balance and the corresponding ledger transfer to the user's account
-/// completed. Failed withdrawals (ledger errors) do not appear in the log.
+/// completed at `block_index`. Failed withdrawals (ledger errors) do not
+/// appear in the log.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct WithdrawEvent {
     #[cbor(n(0), with = "icrc_cbor::principal")]
@@ -79,6 +80,8 @@ pub struct WithdrawEvent {
     pub token: TokenId,
     #[n(2)]
     pub amount: Quantity,
+    #[n(3)]
+    pub block_index: u64,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

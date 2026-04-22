@@ -883,13 +883,15 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
 
     // Withdraw half
     let withdraw_amount = 5_000_000u64;
-    let result = client
+    let response = client
         .withdraw(WithdrawRequest {
             token_id: cksol.clone(),
             amount: Nat::from(withdraw_amount),
         })
-        .await;
-    assert!(result.is_ok(), "withdrawal should succeed: {result:?}");
+        .await
+        .expect("withdrawal should succeed");
+    let expected_block_index =
+        u64::try_from(&response.block_index.0).expect("ledger block_index fits in u64");
 
     // DEX balance decreased by the full withdraw amount
     assert_eq!(
@@ -901,7 +903,8 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
     assert_eq!(ledger_balance, Nat::from(withdraw_amount) - fee);
 
-    // The successful withdrawal is recorded in the audit log.
+    // The successful withdrawal is recorded in the audit log, including the
+    // ledger block index returned from the transfer.
     setup.assert_that_events().await.satisfy(|events| {
         let withdraw = events
             .iter()
@@ -912,6 +915,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
                 user,
                 token: cksol.clone(),
                 amount: Nat::from(withdraw_amount),
+                block_index: expected_block_index,
             });
         });
     });

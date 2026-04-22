@@ -80,6 +80,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             user,
             token,
             amount,
+            block_index: _,
         }) => {
             if matches!(persistence, StableMemoryOptions::Write) {
                 state

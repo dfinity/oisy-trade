@@ -101,7 +101,7 @@ impl WorstCaseEvent {
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
-            Self::Withdraw => 95,
+            Self::Withdraw => 104,
             Self::AddLimitOrder => 97,
             Self::Matching => 10_027,
             Self::Settling => 105_330,
@@ -173,6 +173,7 @@ fn withdraw(amount: Quantity) -> EventType {
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
+        block_index: u64::MAX,
     })
 }
 

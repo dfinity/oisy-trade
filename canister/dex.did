@@ -270,6 +270,7 @@ type WithdrawEvent = record {
     user : principal;
     token : TokenId;
     amount : nat;
+    block_index : nat64;
 };
 
 /// Engine drove a matching round on `book_id`, processing these orders in
