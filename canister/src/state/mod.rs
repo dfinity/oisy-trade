@@ -291,13 +291,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
-        // `book.process_pending_orders` asserts the queue head matches each
-        // `expected_seq` in order and pops exactly that many orders.
         let output = book.process_pending_orders(&event.orders);
-        // Park the output for the paired `SettlingEvent` to drain. Insert
-        // overwrites any stale entry rather than asserting `None`: a missing
-        // prior `SettlingEvent` (e.g., a skipped settle round in some future
-        // code path) should not turn into a hard trap here.
         self.pending_settlement.insert(event.book_id, output);
     }
 
@@ -359,10 +353,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply order-status transitions from a matching round and drain the
-    /// `pending_settlement` bridge for this book — `OrderStatus` is the
-    /// final event in the `Matching` + `Settling` + `OrderStatus` triplet,
-    /// so the bridge never accumulates across rounds.
     pub fn record_order_status_event(
         &mut self,
         event: &event::OrderStatusEvent,
@@ -390,6 +380,9 @@ fn token_of(pair: &TradingPair, token: &event::PairToken) -> TokenId {
 }
 
 fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOperation> {
+    if output.fills.is_empty() {
+        return Vec::new();
+    }
     let mut ops = Vec::with_capacity(output.fills.len() * 3);
     for fill in &output.fills {
         let (buyer_seq, seller_seq) = match fill.taker_side {
