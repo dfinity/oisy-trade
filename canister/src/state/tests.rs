@@ -836,12 +836,12 @@ mod settle_fills {
                 }
 
                 let mut state1 = state.clone();
-                state1.settle_fill(BOOK_ID, &pair, &fill1);
-                state1.settle_fill(BOOK_ID, &pair, &fill2);
+                state1.settle_fill(BOOK_ID, &pair, &fill1, StableMemoryOptions::Write);
+                state1.settle_fill(BOOK_ID, &pair, &fill2, StableMemoryOptions::Write);
 
                 let mut state2 = state;
-                state2.settle_fill(BOOK_ID, &pair, &fill2);
-                state2.settle_fill(BOOK_ID, &pair, &fill1);
+                state2.settle_fill(BOOK_ID, &pair, &fill2, StableMemoryOptions::Write);
+                state2.settle_fill(BOOK_ID, &pair, &fill1, StableMemoryOptions::Write);
 
                 prop_assert_eq!(state1, state2);
             }

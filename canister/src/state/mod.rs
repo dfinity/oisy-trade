@@ -239,7 +239,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("settling");
                 for fill in &output.fills {
-                    self.settle_fill(book_id, &pair, fill);
+                    self.settle_fill(book_id, &pair, fill, StableMemoryOptions::Write);
                     fill_records.push(event::FillEvent {
                         maker_order_seq: fill.maker_order_seq,
                         taker_order_seq: fill.taker_order_seq,
@@ -274,7 +274,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub(crate) fn settle_fill(&mut self, book_id: OrderBookId, pair: &TradingPair, fill: &Fill) {
+    pub(crate) fn settle_fill(
+        &mut self,
+        book_id: OrderBookId,
+        pair: &TradingPair,
+        fill: &Fill,
+        persistence: StableMemoryOptions,
+    ) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("state::settle_fill");
         let taker = {
@@ -302,12 +308,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let quote_amount = fill.quote_amount();
         let base_amount = *fill.base_amount();
 
+        // `StableMemoryOptions::Skip` gates only the stable-memory writes
+        // (balance transfers); lookups and computations above still run so
+        // replay mirrors the production code path for debugging.
+        let write_balances = matches!(persistence, StableMemoryOptions::Write);
+
         // Quote side: buyer pays reserved, seller receives free
         {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::balance_update");
-            self.balances
-                .transfer(&buyer, &seller, &pair.quote, quote_amount);
+            if write_balances {
+                self.balances
+                    .transfer(&buyer, &seller, &pair.quote, quote_amount);
+            }
             // Unreserve buy-taker surplus (price improvement)
             if fill.taker_side == Side::Buy
                 && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
@@ -316,7 +329,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 let surplus = price_diff
                     .checked_mul_quantity(&fill.quantity)
                     .expect("BUG: price_diff * quantity overflow — already validated in validate_limit_order");
-                self.balances.unreserve(&taker, &pair.quote, surplus);
+                if write_balances {
+                    self.balances.unreserve(&taker, &pair.quote, surplus);
+                }
             }
         }
 
@@ -324,8 +339,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("state::balance_update");
-            self.balances
-                .transfer(&seller, &buyer, &pair.base, base_amount);
+            if write_balances {
+                self.balances
+                    .transfer(&seller, &buyer, &pair.base, base_amount);
+            }
         }
     }
 
