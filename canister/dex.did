@@ -265,20 +265,29 @@ type DepositEvent = record {
     amount : nat;
 };
 
-/// One matching round on a single order book. Principals, prices, and
-/// trading pair are not duplicated here — recover them via OrderHistory
-/// and trading_pairs using (book_id, order_seq).
+/// One matching round on a single order book. Wraps the engine's
+/// MatchingOutput so the event carries fills, resting_orders, and
+/// filled_orders — enough to replay both settlement and status transitions.
+/// Principals and trading pair are not duplicated; they are recoverable
+/// from OrderHistory and trading_pairs using (book_id, order_seq).
 type MatchingEvent = record {
     book_id : nat64;
-    fills : vec FillEvent;
+    output : MatchingOutput;
 };
 
-/// A single maker/taker match produced during a matching round.
-type FillEvent = record {
-    maker_order_seq : nat64;
+type MatchingOutput = record {
+    fills : vec Fill;
+    resting_orders : vec nat64;
+    filled_orders : vec nat64;
+};
+
+type Fill = record {
     taker_order_seq : nat64;
-    side : Side;
-    filled_quantity : nat;
+    taker_side : Side;
+    taker_price : nat64;
+    maker_order_seq : nat64;
+    maker_price : nat64;
+    quantity : nat;
 };
 
 /// Type of a canister event.
