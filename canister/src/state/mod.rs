@@ -244,16 +244,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
 
-            if let Some(output) = self.pending_settlement.get(&book_id).cloned() {
-                audit::process_event(
-                    self,
-                    event::EventType::Settling(event::SettlingEvent {
-                        book_id,
-                        balance_operations: compute_balance_operations(&output),
-                        transitions: compute_order_status_transitions(&output),
-                    }),
-                    runtime,
-                );
+            let settling_event = self.pending_settlement.get(&book_id).map(|output| {
+                event::EventType::Settling(event::SettlingEvent {
+                    book_id,
+                    balance_operations: compute_balance_operations(output),
+                    transitions: compute_order_status_transitions(output),
+                })
+            });
+            if let Some(event) = settling_event {
+                audit::process_event(self, event, runtime);
             }
         }
     }
