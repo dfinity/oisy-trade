@@ -284,13 +284,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
-        let pending: Vec<OrderSeq> = book.pending_order_seqs().collect();
-        assert_eq!(
-            pending, event.orders,
-            "BUG: pending queue diverges from MatchingEvent.orders for book {:?}",
-            event.book_id,
-        );
-        let output = book.process_pending_orders();
+        // `book.process_pending_orders` asserts the queue head matches each
+        // `expected_seq` in order and pops exactly that many orders.
+        let output = book.process_pending_orders(&event.orders);
         // Park the output for the paired `SettlingEvent` to drain. Insert
         // overwrites any stale entry rather than asserting `None`: a missing
         // prior `SettlingEvent` (e.g., a skipped settle round in some future

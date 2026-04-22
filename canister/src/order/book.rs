@@ -186,15 +186,32 @@ impl OrderBook {
         self.next_seq.increment();
     }
 
-    /// Drain the pending queue and match each order against the book.
+    /// Match exactly the given pending-order sequences, in order, against
+    /// the book.
+    ///
+    /// Pops `expected_seqs.len()` orders from the front of the pending queue
+    /// and asserts that each popped order's sequence matches the corresponding
+    /// `expected_seqs` entry. On the primary path the caller snapshots
+    /// [`OrderBook::pending_order_seqs`] and passes that; on event replay the
+    /// caller passes `MatchingEvent.orders`. Either way, the engine verifies
+    /// the queue matches what the caller expects before consuming it.
     ///
     /// Returns fills (for settlement) and the sequences of orders that
     /// transitioned to resting (for status tracking).
-    pub fn process_pending_orders(&mut self) -> MatchingOutput {
+    pub fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
-        while let Some(order) = self.pending_orders.pop_front() {
+        for expected_seq in expected_seqs {
+            let order = self
+                .pending_orders
+                .pop_front()
+                .expect("BUG: fewer pending orders than expected sequences");
+            assert_eq!(
+                order.id(),
+                *expected_seq,
+                "BUG: pending order seq mismatch at the head of the queue"
+            );
             match self.match_order(order) {
                 Ok(result) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
