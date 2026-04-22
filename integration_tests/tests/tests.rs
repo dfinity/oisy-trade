@@ -639,7 +639,7 @@ async fn should_fail_add_trading_pair() {
 
 #[tokio::test]
 async fn should_replay_events_on_upgrade() {
-    use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types_internal::event::EventType;
 
     /// Asserts that the values produced by each `$observe` expression are unchanged after
@@ -751,6 +751,103 @@ async fn should_replay_events_on_upgrade() {
                     seq: 0,
                     status: dex_types::OrderStatus::Open,
                 }],
+            });
+        });
+    });
+
+    // 5) Crossing buy fully fills the resting sell from step 4. Settling now
+    // carries two Transfer ops and two Filled transitions; equal prices mean
+    // no Unreserve (the price-improvement path is covered in the unit test
+    // `should_replay_matching_with_price_improvement`).
+    let buyer = Principal::from_slice(&[0x42]);
+    let price: u64 = 100;
+    let quote_reserved = price * deposit_amount;
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(quote_reserved + 2 * QUOTE_LEDGER_FEE)
+        .approve(quote_reserved + QUOTE_LEDGER_FEE)
+        .deposit(quote_reserved)
+        .execute()
+        .await;
+    let buy_order_id = setup
+        .dex_client_with_caller(buyer)
+        .add_limit_order(dex_types::LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: dex_types::Side::Buy,
+            price,
+            quantity: Nat::from(deposit_amount),
+        })
+        .await
+        .unwrap();
+    // Let the matching timer fire so both orders transition to Filled before
+    // snapshotting.
+    setup.env().tick().await;
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.dex_client().get_order_status(order_id.clone()),
+        setup.dex_client().get_order_status(buy_order_id.clone()),
+        setup.dex_client().get_balance(setup.base_token_id()),
+        setup.dex_client().get_balance(setup.quote_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.base_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.quote_token_id()),
+    );
+    setup.assert_that_events().await.satisfy(|events| {
+        // Step 4 produced 6 events; step 5 adds Deposit (buyer) + AddLimitOrder
+        // + Matching + Settling.
+        assert_eq!(events.len(), 10);
+        assert_matches!(&events[6], EventType::Deposit(e) => {
+            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+                user: buyer,
+                token: setup.quote_token_id(),
+                amount: Nat::from(quote_reserved),
+            });
+        });
+        assert_matches!(&events[7], EventType::AddLimitOrder(e) => {
+            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+                user: buyer,
+                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 1 },
+                side: dex_types::Side::Buy,
+                price,
+                quantity: Nat::from(deposit_amount),
+            });
+        });
+        assert_matches!(&events[8], EventType::Matching(e) => {
+            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+                book_id: 0,
+                orders: vec![1],
+            });
+        });
+        assert_matches!(&events[9], EventType::Settling(e) => {
+            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
+                book_id: 0,
+                balance_operations: vec![
+                    dex_types_internal::event::BalanceOperation::Transfer {
+                        from: 1, // buyer seq
+                        to: 0,   // seller seq
+                        token: dex_types_internal::event::PairToken::Quote,
+                        amount: Nat::from(quote_reserved),
+                    },
+                    dex_types_internal::event::BalanceOperation::Transfer {
+                        from: 0,
+                        to: 1,
+                        token: dex_types_internal::event::PairToken::Base,
+                        amount: Nat::from(deposit_amount),
+                    },
+                ],
+                transitions: vec![
+                    dex_types_internal::event::OrderStatusTransition {
+                        seq: 0,
+                        status: dex_types::OrderStatus::Filled,
+                    },
+                    dex_types_internal::event::OrderStatusTransition {
+                        seq: 1,
+                        status: dex_types::OrderStatus::Filled,
+                    },
+                ],
             });
         });
     });

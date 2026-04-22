@@ -88,23 +88,6 @@ pub struct OrderStatusTransition {
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub struct MatchingOutput {
-    pub fills: Vec<Fill>,
-    pub resting_orders: Vec<u64>,
-    pub filled_orders: Vec<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub struct Fill {
-    pub taker_order_seq: u64,
-    pub taker_side: dex_types::Side,
-    pub taker_price: u64,
-    pub maker_order_seq: u64,
-    pub maker_price: u64,
-    pub quantity: Nat,
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct OrderId {
     pub book_id: u64,
     pub seq: u64,
