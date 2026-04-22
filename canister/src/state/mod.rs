@@ -244,9 +244,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
 
-            // Always paired with the preceding MatchingEvent: every processed
-            // order ends up in exactly one of `resting_orders` / `filled_orders`,
-            // so `transitions` is always non-empty here.
             if let Some(output) = self.pending_settlement.get(&book_id).cloned() {
                 audit::process_event(
                     self,
@@ -264,10 +261,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Drive engine matching for the given book and park the resulting
     /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
     /// [`event::SettlingEvent`] to drain.
-    ///
-    /// `persistence` is unused: [`OrderBook`] and [`State::pending_settlement`]
-    /// both live on the heap (snapshotted at `pre_upgrade`), so this path has
-    /// no stable-memory writes to gate.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
