@@ -119,6 +119,40 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
+    fn map_pair_token(token: dex_canister::state::event::PairToken) -> event::PairToken {
+        match token {
+            dex_canister::state::event::PairToken::Base => event::PairToken::Base,
+            dex_canister::state::event::PairToken::Quote => event::PairToken::Quote,
+        }
+    }
+
+    fn map_balance_operation(
+        op: dex_canister::state::event::BalanceOperation,
+    ) -> event::BalanceOperation {
+        match op {
+            dex_canister::state::event::BalanceOperation::Transfer {
+                from,
+                to,
+                token,
+                amount,
+            } => event::BalanceOperation::Transfer {
+                from: from.get(),
+                to: to.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+            dex_canister::state::event::BalanceOperation::Unreserve {
+                user,
+                token,
+                amount,
+            } => event::BalanceOperation::Unreserve {
+                user: user.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+        }
+    }
+
     fn map_event(event: Event) -> event::Event {
         event::Event {
             timestamp: event.timestamp,
@@ -159,34 +193,25 @@ fn get_events(
                 }),
                 EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
                     book_id: e.book_id.get(),
-                    output: event::MatchingOutput {
-                        fills: e
-                            .output
-                            .fills
+                    operations: e
+                        .operations
+                        .into_iter()
+                        .map(map_balance_operation)
+                        .collect(),
+                }),
+                EventType::OrderStatus(e) => {
+                    event::EventType::OrderStatus(event::OrderStatusEvent {
+                        book_id: e.book_id.get(),
+                        transitions: e
+                            .transitions
                             .into_iter()
-                            .map(|f| event::Fill {
-                                taker_order_seq: f.taker_order_seq.get(),
-                                taker_side: dex_types::Side::from(f.taker_side),
-                                taker_price: f.taker_price.get(),
-                                maker_order_seq: f.maker_order_seq.get(),
-                                maker_price: f.maker_price.get(),
-                                quantity: f.quantity.into(),
+                            .map(|t| event::OrderStatusTransition {
+                                seq: t.seq.get(),
+                                status: dex_types::OrderStatus::from(t.status),
                             })
                             .collect(),
-                        resting_orders: e
-                            .output
-                            .resting_orders
-                            .into_iter()
-                            .map(|s| s.get())
-                            .collect(),
-                        filled_orders: e
-                            .output
-                            .filled_orders
-                            .into_iter()
-                            .map(|s| s.get())
-                            .collect(),
-                    },
-                }),
+                    })
+                }
             },
         }
     }

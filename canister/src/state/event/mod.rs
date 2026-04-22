@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, MatchingOutput, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize,
-    TokenId, TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -32,12 +32,12 @@ pub enum EventType {
     Deposit(#[n(0)] DepositEvent),
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
-    // #[n(5)] keeps its existing wire shape (book_id + MatchingOutput); only
-    // the Rust variant name changes to reflect its narrower concern.
     #[n(5)]
     Settling(#[n(0)] SettlingEvent),
     #[n(6)]
     Matching(#[n(0)] MatchingEvent),
+    #[n(7)]
+    OrderStatus(#[n(0)] OrderStatusEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -93,16 +93,74 @@ pub struct MatchingEvent {
     pub orders: Vec<OrderSeq>,
 }
 
-/// Settlement + status outcome of the matching round on `book_id`.
-/// `record_settling_event` drains [`crate::state::State::pending_settlement`]
-/// (populated by the preceding [`MatchingEvent`]'s apply) and asserts the
-/// stored value matches `output`, catching primary/replay drift.
+/// Declarative record of the balance operations produced by a matching round
+/// on `book_id`. `record_settling_event` applies each operation in order;
+/// participants are resolved to `Principal`s via
+/// [`crate::order::OrderHistory`] and tokens to `TokenId`s via
+/// [`crate::state::State::trading_pairs`] at apply time.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
-    pub output: MatchingOutput,
+    pub operations: Vec<BalanceOperation>,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub enum BalanceOperation {
+    #[n(0)]
+    Transfer {
+        #[n(0)]
+        from: OrderSeq,
+        #[n(1)]
+        to: OrderSeq,
+        #[n(2)]
+        token: PairToken,
+        #[n(3)]
+        amount: Quantity,
+    },
+    /// Today's only producer is the buy-taker price-improvement refund
+    /// (always quote). The `token` field stays explicit so a future cancel
+    /// flow can unreserve base as well.
+    #[n(1)]
+    Unreserve {
+        #[n(0)]
+        user: OrderSeq,
+        #[n(1)]
+        token: PairToken,
+        #[n(2)]
+        amount: Quantity,
+    },
+}
+
+/// Side of a trading pair for a [`BalanceOperation`]. Resolved to a concrete
+/// [`TokenId`] at apply time via the `book_id` on the enclosing
+/// [`SettlingEvent`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Decode, Encode)]
+pub enum PairToken {
+    #[n(0)]
+    Base,
+    #[n(1)]
+    Quote,
+}
+
+/// Order-history status transitions that fell out of the matching round on
+/// `book_id`. `record_order_status_event` applies each transition (gated by
+/// persistence) and drains `State::pending_settlement` for this book.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct OrderStatusEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub transitions: Vec<OrderStatusTransition>,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct OrderStatusTransition {
+    #[n(0)]
+    pub seq: OrderSeq,
+    #[n(1)]
+    pub status: OrderStatus,
 }
 
 impl Storable for Event {

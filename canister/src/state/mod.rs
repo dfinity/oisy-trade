@@ -13,8 +13,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    Fill, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
-    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
+    LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
     TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
@@ -247,15 +247,30 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
 
-            if let Some(output) = self.pending_settlement.get(&book_id) {
-                audit::process_event(
-                    self,
-                    event::EventType::Settling(event::SettlingEvent {
-                        book_id,
-                        output: output.clone(),
-                    }),
-                    runtime,
-                );
+            if let Some(output) = self.pending_settlement.get(&book_id).cloned() {
+                let operations = compute_balance_operations(&output);
+                if !operations.is_empty() {
+                    audit::process_event(
+                        self,
+                        event::EventType::Settling(event::SettlingEvent {
+                            book_id,
+                            operations,
+                        }),
+                        runtime,
+                    );
+                }
+
+                let transitions = compute_order_status_transitions(&output);
+                if !transitions.is_empty() {
+                    audit::process_event(
+                        self,
+                        event::EventType::OrderStatus(event::OrderStatusEvent {
+                            book_id,
+                            transitions,
+                        }),
+                        runtime,
+                    );
+                }
             }
         }
     }
@@ -286,123 +301,151 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.pending_settlement.insert(event.book_id, output);
     }
 
-    /// Apply settlement and status transitions from a single matching round.
+    /// Apply a declarative list of balance operations. Participants are
+    /// resolved to [`Principal`]s via `order_history`; [`event::PairToken`] is
+    /// resolved to a [`TokenId`] via `trading_pairs`. Stable-memory writes
+    /// are gated by `persistence`.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        let stored = self
-            .pending_settlement
-            .remove(&event.book_id)
-            .expect("BUG: missing SettlingEvent");
-        assert_eq!(
-            stored, event.output,
-            "BUG: SettlingEvent.output diverges from pending_settlement for book {:?}",
-            event.book_id,
-        );
-
+        if matches!(persistence, StableMemoryOptions::Skip) {
+            return;
+        }
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("settling");
         let pair = self
             .trading_pairs
             .get_pair(&event.book_id)
             .cloned()
             .expect("BUG: unknown trading pair in SettlingEvent");
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("settling");
-            for fill in &event.output.fills {
-                self.settle_fill(event.book_id, &pair, fill, persistence);
-            }
-        }
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("status");
-            if matches!(persistence, StableMemoryOptions::Write) {
-                for seq in &event.output.resting_orders {
-                    let order_id = OrderId::new(event.book_id, *seq);
-                    self.order_history.set_status(&order_id, OrderStatus::Open);
+        for op in &event.operations {
+            match op {
+                event::BalanceOperation::Transfer {
+                    from,
+                    to,
+                    token,
+                    amount,
+                } => {
+                    let from_owner = self
+                        .order_history
+                        .get(&OrderId::new(event.book_id, *from))
+                        .expect("BUG: missing order_history entry for Transfer.from")
+                        .owner;
+                    let to_owner = self
+                        .order_history
+                        .get(&OrderId::new(event.book_id, *to))
+                        .expect("BUG: missing order_history entry for Transfer.to")
+                        .owner;
+                    let token = token_of(&pair, token);
+                    self.balances
+                        .transfer(&from_owner, &to_owner, &token, *amount);
                 }
-                for seq in &event.output.filled_orders {
-                    let order_id = OrderId::new(event.book_id, *seq);
-                    self.order_history
-                        .set_status(&order_id, OrderStatus::Filled);
+                event::BalanceOperation::Unreserve {
+                    user,
+                    token,
+                    amount,
+                } => {
+                    let owner = self
+                        .order_history
+                        .get(&OrderId::new(event.book_id, *user))
+                        .expect("BUG: missing order_history entry for Unreserve.user")
+                        .owner;
+                    let token = token_of(&pair, token);
+                    self.balances.unreserve(&owner, &token, *amount);
                 }
             }
         }
     }
 
-    pub(crate) fn settle_fill(
+    /// Apply order-status transitions from a matching round and drain the
+    /// `pending_settlement` bridge for this book — `OrderStatus` is the
+    /// final event in the `Matching` + `Settling` + `OrderStatus` triplet,
+    /// so the bridge never accumulates across rounds.
+    pub fn record_order_status_event(
         &mut self,
-        book_id: OrderBookId,
-        pair: &TradingPair,
-        fill: &Fill,
+        event: &event::OrderStatusEvent,
         persistence: StableMemoryOptions,
     ) {
-        #[cfg(feature = "canbench-rs")]
-        let _p = canbench_rs::bench_scope("state::settle_fill");
-        let taker = {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::order_history_get");
-            self.order_history
-                .get(&OrderId::new(book_id, fill.taker_order_seq))
-                .expect("BUG: taker not found in order_history")
-                .owner
-        };
-        let maker = {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::order_history_get");
-            self.order_history
-                .get(&OrderId::new(book_id, fill.maker_order_seq))
-                .expect("BUG: maker not found in order_history")
-                .owner
-        };
+        self.pending_settlement.remove(&event.book_id);
 
-        let (buyer, seller) = match fill.taker_side {
-            Side::Buy => (taker, maker),
-            Side::Sell => (maker, taker),
-        };
-
-        let quote_amount = fill.quote_amount();
-        let base_amount = *fill.base_amount();
-
-        // `StableMemoryOptions::Skip` gates only the stable-memory writes
-        // (balance transfers); lookups and computations above still run so
-        // replay mirrors the production code path for debugging.
-        let write_balances = matches!(persistence, StableMemoryOptions::Write);
-
-        // Quote side: buyer pays reserved, seller receives free
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::balance_update");
-            if write_balances {
-                self.balances
-                    .transfer(&buyer, &seller, &pair.quote, quote_amount);
-            }
-            // Unreserve buy-taker surplus (price improvement)
-            if fill.taker_side == Side::Buy
-                && let Some(price_diff) = fill.taker_price.checked_sub(fill.maker_price)
-                && !price_diff.is_zero()
-            {
-                let surplus = price_diff
-                    .checked_mul_quantity(&fill.quantity)
-                    .expect("BUG: price_diff * quantity overflow — already validated in validate_limit_order");
-                if write_balances {
-                    self.balances.unreserve(&taker, &pair.quote, surplus);
-                }
-            }
+        if matches!(persistence, StableMemoryOptions::Skip) {
+            return;
         }
-
-        // Base side: seller pays reserved, buyer receives free
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("state::balance_update");
-            if write_balances {
-                self.balances
-                    .transfer(&seller, &buyer, &pair.base, base_amount);
-            }
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("status");
+        for transition in &event.transitions {
+            let order_id = OrderId::new(event.book_id, transition.seq);
+            self.order_history.set_status(&order_id, transition.status);
         }
     }
+}
 
+fn token_of(pair: &TradingPair, token: &event::PairToken) -> TokenId {
+    match token {
+        event::PairToken::Base => pair.base,
+        event::PairToken::Quote => pair.quote,
+    }
+}
+
+fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOperation> {
+    let mut ops = Vec::with_capacity(output.fills.len() * 3);
+    for fill in &output.fills {
+        let (buyer_seq, seller_seq) = match fill.taker_side {
+            Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
+            Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
+        };
+        ops.push(event::BalanceOperation::Transfer {
+            from: buyer_seq,
+            to: seller_seq,
+            token: event::PairToken::Quote,
+            amount: fill.quote_amount(),
+        });
+        if fill.taker_side == Side::Buy
+            && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
+            && !diff.is_zero()
+        {
+            let surplus = diff
+                .checked_mul_quantity(&fill.quantity)
+                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
+            ops.push(event::BalanceOperation::Unreserve {
+                user: fill.taker_order_seq,
+                token: event::PairToken::Quote,
+                amount: surplus,
+            });
+        }
+        ops.push(event::BalanceOperation::Transfer {
+            from: seller_seq,
+            to: buyer_seq,
+            token: event::PairToken::Base,
+            amount: fill.quantity,
+        });
+    }
+    ops
+}
+
+fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
+    output
+        .resting_orders
+        .iter()
+        .map(|seq| event::OrderStatusTransition {
+            seq: *seq,
+            status: OrderStatus::Open,
+        })
+        .chain(
+            output
+                .filled_orders
+                .iter()
+                .map(|seq| event::OrderStatusTransition {
+                    seq: *seq,
+                    status: OrderStatus::Filled,
+                }),
+        )
+        .collect()
+}
+
+impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
         self.order_history.get(&order_id).map(|r| r.status)
     }

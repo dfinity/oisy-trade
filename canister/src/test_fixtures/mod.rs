@@ -223,8 +223,8 @@ pub mod arbitrary {
         OrderStatus, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
-        AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, MatchingEvent,
-        SettlingEvent,
+        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
+        MatchingEvent, OrderStatusEvent, OrderStatusTransition, PairToken, SettlingEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -462,11 +462,58 @@ pub mod arbitrary {
         )
     }
 
+    pub fn arb_pair_token() -> impl Strategy<Value = PairToken> {
+        prop_oneof![Just(PairToken::Base), Just(PairToken::Quote)]
+    }
+
+    pub fn arb_balance_operation() -> impl Strategy<Value = BalanceOperation> {
+        let transfer = (
+            arb_order_seq(),
+            arb_order_seq(),
+            arb_pair_token(),
+            arb_quantity(),
+        )
+            .prop_map(|(from, to, token, amount)| BalanceOperation::Transfer {
+                from,
+                to,
+                token,
+                amount,
+            });
+        let unreserve = (arb_order_seq(), arb_pair_token(), arb_quantity()).prop_map(
+            |(user, token, amount)| BalanceOperation::Unreserve {
+                user,
+                token,
+                amount,
+            },
+        );
+        prop_oneof![transfer, unreserve]
+    }
+
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (any::<u64>(), arb_matching_output()).prop_map(|(book_id, output)| SettlingEvent {
-            book_id: order::OrderBookId::new(book_id),
-            output,
-        })
+        (
+            any::<u64>(),
+            prop::collection::vec(arb_balance_operation(), 0..10),
+        )
+            .prop_map(|(book_id, operations)| SettlingEvent {
+                book_id: order::OrderBookId::new(book_id),
+                operations,
+            })
+    }
+
+    pub fn arb_order_status_transition() -> impl Strategy<Value = OrderStatusTransition> {
+        (arb_order_seq(), arb_order_status())
+            .prop_map(|(seq, status)| OrderStatusTransition { seq, status })
+    }
+
+    pub fn arb_order_status_event() -> impl Strategy<Value = OrderStatusEvent> {
+        (
+            any::<u64>(),
+            prop::collection::vec(arb_order_status_transition(), 0..10),
+        )
+            .prop_map(|(book_id, transitions)| OrderStatusEvent {
+                book_id: order::OrderBookId::new(book_id),
+                transitions,
+            })
     }
 
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
@@ -478,6 +525,7 @@ pub mod arbitrary {
             arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
+            arb_order_status_event().prop_map(EventType::OrderStatus),
         ]
     }
 

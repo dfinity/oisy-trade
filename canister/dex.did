@@ -272,25 +272,37 @@ type MatchingEvent = record {
     orders : vec nat64;
 };
 
-/// Settlement + status outcome of the matching round on `book_id`.
+/// Declarative record of the balance operations produced by a matching round.
 type SettlingEvent = record {
     book_id : nat64;
-    output : MatchingOutput;
+    operations : vec BalanceOperation;
 };
 
-type MatchingOutput = record {
-    fills : vec Fill;
-    resting_orders : vec nat64;
-    filled_orders : vec nat64;
+type BalanceOperation = variant {
+    Transfer : record {
+        from : nat64;
+        to : nat64;
+        token : PairToken;
+        amount : nat;
+    };
+    Unreserve : record {
+        user : nat64;
+        token : PairToken;
+        amount : nat;
+    };
 };
 
-type Fill = record {
-    taker_order_seq : nat64;
-    taker_side : Side;
-    taker_price : nat64;
-    maker_order_seq : nat64;
-    maker_price : nat64;
-    quantity : nat;
+type PairToken = variant { Base; Quote };
+
+/// Order-status transitions produced by a matching round.
+type OrderStatusEvent = record {
+    book_id : nat64;
+    transitions : vec OrderStatusTransition;
+};
+
+type OrderStatusTransition = record {
+    seq : nat64;
+    status : OrderStatus;
 };
 
 /// Type of a canister event.
@@ -302,6 +314,7 @@ type EventType = variant {
     AddLimitOrder : AddLimitOrderEvent;
     Settling : SettlingEvent;
     Matching : MatchingEvent;
+    OrderStatus : OrderStatusEvent;
 };
 
 /// A canister event with a timestamp.

@@ -1,17 +1,19 @@
 use super::*;
 use crate::order::{
-    Fill, MatchingOutput, OrderBookId, OrderId, OrderSeq, PendingOrder, Price, Quantity, Side,
-    TokenId, TradingPair,
+    OrderBookId, OrderId, OrderSeq, OrderStatus, PendingOrder, Price, Quantity, Side, TokenId,
+    TradingPair,
 };
 use crate::state::StableMemoryOptions;
-use crate::state::event::{AddLimitOrderEvent, DepositEvent, MatchingEvent, SettlingEvent};
+use crate::state::event::{
+    AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusEvent,
+    OrderStatusTransition, PairToken, SettlingEvent,
+};
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata, state,
 };
 use candid::Principal;
 use dex_types_internal::Mode;
-use std::collections::BTreeSet;
 
 #[test]
 fn should_replay_init_event() {
@@ -278,22 +280,44 @@ fn should_replay_matching() {
             orders: vec![buy_id.seq(), sell_id.seq()],
         }),
     };
+    // Sell-taker at `price` matches the resting Buy at `price` for the full
+    // quantity. No price improvement → no Unreserve op. Settlement:
+    //   1. maker (buyer) pays `price × quantity` quote to taker (seller).
+    //   2. taker (seller) pays `quantity` base to maker (buyer).
     let settling_event = Event {
         timestamp: 8,
         payload: EventType::Settling(SettlingEvent {
             book_id,
-            output: MatchingOutput {
-                fills: vec![Fill {
-                    taker_order_seq: sell_id.seq(),
-                    taker_side: Side::Sell,
-                    taker_price: Price::new(price),
-                    maker_order_seq: buy_id.seq(),
-                    maker_price: Price::new(price),
-                    quantity: Quantity::from(quantity),
-                }],
-                resting_orders: BTreeSet::new(),
-                filled_orders: BTreeSet::from([buy_id.seq(), sell_id.seq()]),
-            },
+            operations: vec![
+                BalanceOperation::Transfer {
+                    from: buy_id.seq(),
+                    to: sell_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(price * quantity),
+                },
+                BalanceOperation::Transfer {
+                    from: sell_id.seq(),
+                    to: buy_id.seq(),
+                    token: PairToken::Base,
+                    amount: Quantity::from(quantity),
+                },
+            ],
+        }),
+    };
+    let order_status_event = Event {
+        timestamp: 9,
+        payload: EventType::OrderStatus(OrderStatusEvent {
+            book_id,
+            transitions: vec![
+                OrderStatusTransition {
+                    seq: buy_id.seq(),
+                    status: OrderStatus::Filled,
+                },
+                OrderStatusTransition {
+                    seq: sell_id.seq(),
+                    status: OrderStatus::Filled,
+                },
+            ],
         }),
     };
 
@@ -339,6 +363,7 @@ fn should_replay_matching() {
             },
             matching_event,
             settling_event,
+            order_status_event,
         ],
         normal.order_history.clone(),
         normal.balances.clone(),
