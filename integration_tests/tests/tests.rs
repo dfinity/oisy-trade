@@ -723,7 +723,11 @@ async fn should_replay_events_on_upgrade() {
         setup.dex_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
-        assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
+        // Init + AddTradingPair + Deposit + AddLimitOrder + Matching + Settling.
+        // The resting sell has no cross: Matching enumerates the pending seq,
+        // Settling carries no balance operations but records the Pending->Open
+        // transition.
+        assert_eq!(events.len(), 6);
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
             assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
                 user: setup.user(),
@@ -731,6 +735,22 @@ async fn should_replay_events_on_upgrade() {
                 side: dex_types::Side::Sell,
                 price: 100,
                 quantity: Nat::from(deposit_amount),
+            });
+        });
+        assert_matches!(&events[4], EventType::Matching(e) => {
+            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+                book_id: 0,
+                orders: vec![0],
+            });
+        });
+        assert_matches!(&events[5], EventType::Settling(e) => {
+            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
+                book_id: 0,
+                balance_operations: vec![],
+                transitions: vec![dex_types_internal::event::OrderStatusTransition {
+                    seq: 0,
+                    status: dex_types::OrderStatus::Open,
+                }],
             });
         });
     });
