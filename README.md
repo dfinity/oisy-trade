@@ -43,7 +43,7 @@ See the [design document](docs/design.md) for the full architecture.
 
 Walk through the main DEX flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the DEX as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
 
-See [`examples/getting_started.ipynb`](examples/getting_started.ipynb).
+See [`examples/getting_started.md`](examples/getting_started.md).
 
 <a id="development"></a>
 ## 🛠️ Development
