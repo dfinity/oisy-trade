@@ -95,6 +95,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
     order_history: OrderHistory<MH>,
     balances: TokenBalance<MB>,
+    persistence: StableMemoryOptions,
 ) -> State<MH, MB> {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
@@ -109,7 +110,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, StableMemoryOptions::Skip);
+        apply_state_transition(&mut state, &event.payload, persistence);
     }
     state
 }
