@@ -306,13 +306,19 @@ fn fill_against_queue<K: Ord>(
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
 /// orders that began resting in the book, and orders that were fully filled.
-#[derive(Debug)]
+///
+/// `#[n(N)]` field numbers are the wire contract for audit events; they are
+/// append-only and must never be reassigned.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct MatchingOutput {
     /// Fills executed during this matching round, in execution order.
+    #[n(0)]
     pub fills: Vec<Fill>,
     /// Orders that were not fully filled and are now resting in the book.
+    #[n(1)]
     pub resting_orders: BTreeSet<OrderSeq>,
     /// Orders that were fully filled and removed from the book.
+    #[n(2)]
     pub filled_orders: BTreeSet<OrderSeq>,
 }
 
@@ -357,19 +363,28 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `#[n(N)]` field numbers are the wire contract for audit events; they are
+/// append-only and must never be reassigned.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
+    #[n(0)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
+    #[n(1)]
     pub taker_side: Side,
     /// The limit price of the taker order.
+    #[n(2)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
+    #[n(3)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
+    #[n(4)]
     pub maker_price: Price,
     /// The quantity filled.
+    #[n(5)]
     pub quantity: Quantity,
 }
 
