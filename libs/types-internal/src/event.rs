@@ -49,15 +49,24 @@ pub struct AddLimitOrderEvent {
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct MatchingEvent {
     pub book_id: u64,
-    pub fills: Vec<FillEvent>,
+    pub output: MatchingOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub struct FillEvent {
-    pub maker_order_seq: u64,
+pub struct MatchingOutput {
+    pub fills: Vec<Fill>,
+    pub resting_orders: Vec<u64>,
+    pub filled_orders: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct Fill {
     pub taker_order_seq: u64,
-    pub side: dex_types::Side,
-    pub filled_quantity: Nat,
+    pub taker_side: dex_types::Side,
+    pub taker_price: u64,
+    pub maker_order_seq: u64,
+    pub maker_price: u64,
+    pub quantity: Nat,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

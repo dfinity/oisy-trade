@@ -1,10 +1,9 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, FillEvent,
-    MatchingEvent,
+    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, MatchingEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -96,7 +95,7 @@ impl WorstCaseEvent {
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
             Self::AddLimitOrder => 97,
-            Self::Matching => 42_027,
+            Self::Matching => 57_472,
         }
     }
 }
@@ -161,17 +160,29 @@ fn deposit(amount: Quantity) -> EventType {
 }
 
 fn matching(fill_count: usize) -> EventType {
-    let fills = (0..fill_count)
-        .map(|_| FillEvent {
-            maker_order_seq: OrderSeq::new(u64::MAX),
-            taker_order_seq: OrderSeq::new(u64::MAX),
-            side: Side::Buy,
-            filled_quantity: max_quantity(),
+    // Distinct taker/maker seqs so filled_orders reaches 2×fill_count entries
+    // (each Fill contributes both a taker and a maker that are fully consumed).
+    let fills: Vec<Fill> = (0..fill_count as u64)
+        .map(|i| Fill {
+            taker_order_seq: OrderSeq::new(2 * i),
+            taker_side: Side::Buy,
+            taker_price: Price::new(u64::MAX),
+            maker_order_seq: OrderSeq::new(2 * i + 1),
+            maker_price: Price::new(u64::MAX),
+            quantity: max_quantity(),
         })
+        .collect();
+    let filled_orders = fills
+        .iter()
+        .flat_map(|f| [f.taker_order_seq, f.maker_order_seq])
         .collect();
     EventType::Matching(MatchingEvent {
         book_id: OrderBookId::new(u64::MAX),
-        fills,
+        output: MatchingOutput {
+            fills,
+            resting_orders: Default::default(),
+            filled_orders,
+        },
     })
 }
 

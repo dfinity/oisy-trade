@@ -155,16 +155,33 @@ fn get_events(
                 }
                 EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
                     book_id: e.book_id.get(),
-                    fills: e
-                        .fills
-                        .into_iter()
-                        .map(|f| event::FillEvent {
-                            maker_order_seq: f.maker_order_seq.get(),
-                            taker_order_seq: f.taker_order_seq.get(),
-                            side: dex_types::Side::from(f.side),
-                            filled_quantity: f.filled_quantity.into(),
-                        })
-                        .collect(),
+                    output: event::MatchingOutput {
+                        fills: e
+                            .output
+                            .fills
+                            .into_iter()
+                            .map(|f| event::Fill {
+                                taker_order_seq: f.taker_order_seq.get(),
+                                taker_side: dex_types::Side::from(f.taker_side),
+                                taker_price: f.taker_price.get(),
+                                maker_order_seq: f.maker_order_seq.get(),
+                                maker_price: f.maker_price.get(),
+                                quantity: f.quantity.into(),
+                            })
+                            .collect(),
+                        resting_orders: e
+                            .output
+                            .resting_orders
+                            .into_iter()
+                            .map(|s| s.get())
+                            .collect(),
+                        filled_orders: e
+                            .output
+                            .filled_orders
+                            .into_iter()
+                            .map(|s| s.get())
+                            .collect(),
+                    },
                 }),
             },
         }

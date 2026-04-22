@@ -217,12 +217,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
-        let pairs: Vec<(TradingPair, OrderBookId)> = self
+        let book_ids: Vec<OrderBookId> = self
             .trading_pairs
             .iter()
-            .map(|(pair, book_id)| (pair.clone(), *book_id))
+            .map(|(_, book_id)| *book_id)
             .collect();
-        for (pair, book_id) in pairs {
+        for book_id in book_ids {
             let output = {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("matching");
@@ -230,46 +230,63 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     .order_books
                     .get_mut(&book_id)
                     .expect("BUG: trading pair registered but order book missing");
-
                 book.process_pending_orders()
             };
 
-            let mut fill_records = Vec::with_capacity(output.fills.len());
+            if output.fills.is_empty()
+                && output.resting_orders.is_empty()
+                && output.filled_orders.is_empty()
             {
-                #[cfg(feature = "canbench-rs")]
-                let _p = canbench_rs::bench_scope("settling");
-                for fill in &output.fills {
-                    self.settle_fill(book_id, &pair, fill, StableMemoryOptions::Write);
-                    fill_records.push(event::FillEvent {
-                        maker_order_seq: fill.maker_order_seq,
-                        taker_order_seq: fill.taker_order_seq,
-                        side: fill.taker_side,
-                        filled_quantity: fill.quantity,
-                    });
-                }
+                continue;
             }
-            {
-                #[cfg(feature = "canbench-rs")]
-                let _p = canbench_rs::bench_scope("status");
-                for seq in output.resting_orders {
-                    let order_id = OrderId::new(book_id, seq);
+
+            // Settlement + status transitions happen inside `apply_state_transition`,
+            // which dispatches to `record_matching_event`.
+            audit::process_event(
+                self,
+                event::EventType::Matching(event::MatchingEvent { book_id, output }),
+                runtime,
+            );
+        }
+    }
+
+    /// Apply settlement and status transitions from a single matching round.
+    /// Called from [`audit::process_event`]'s `apply_state_transition` arm for
+    /// `EventType::Matching`, both on the primary path and during any event
+    /// replay. `StableMemoryOptions::Skip` gates only stable-memory writes
+    /// (balance transfers and order-status updates) — the lookups and
+    /// computations in between still run so replay mirrors the production
+    /// code path for debugging.
+    pub fn record_matching_event(
+        &mut self,
+        event: &event::MatchingEvent,
+        persistence: StableMemoryOptions,
+    ) {
+        let pair = self
+            .trading_pairs
+            .get_pair(&event.book_id)
+            .cloned()
+            .expect("BUG: unknown trading pair in MatchingEvent");
+        {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("settling");
+            for fill in &event.output.fills {
+                self.settle_fill(event.book_id, &pair, fill, persistence);
+            }
+        }
+        {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("status");
+            if matches!(persistence, StableMemoryOptions::Write) {
+                for seq in &event.output.resting_orders {
+                    let order_id = OrderId::new(event.book_id, *seq);
                     self.order_history.set_status(&order_id, OrderStatus::Open);
                 }
-                for seq in output.filled_orders {
-                    let order_id = OrderId::new(book_id, seq);
+                for seq in &event.output.filled_orders {
+                    let order_id = OrderId::new(event.book_id, *seq);
                     self.order_history
                         .set_status(&order_id, OrderStatus::Filled);
                 }
-            }
-            if !fill_records.is_empty() {
-                audit::process_event(
-                    self,
-                    event::EventType::Matching(event::MatchingEvent {
-                        book_id,
-                        fills: fill_records,
-                    }),
-                    runtime,
-                );
             }
         }
     }

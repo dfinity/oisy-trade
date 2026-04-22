@@ -111,23 +111,48 @@ fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
         )
 }
 
-fn arb_fill_event() -> impl Strategy<Value = FillEvent> {
-    (arb_order_seq(), arb_order_seq(), arb_side(), arb_quantity()).prop_map(
-        |(maker_order_seq, taker_order_seq, side, filled_quantity)| FillEvent {
-            maker_order_seq,
-            taker_order_seq,
-            side,
-            filled_quantity,
-        },
+fn arb_fill() -> impl Strategy<Value = crate::order::Fill> {
+    (
+        arb_order_seq(),
+        arb_side(),
+        arb_price(),
+        arb_order_seq(),
+        arb_price(),
+        arb_quantity(),
     )
+        .prop_map(
+            |(taker_order_seq, taker_side, taker_price, maker_order_seq, maker_price, quantity)| {
+                crate::order::Fill {
+                    taker_order_seq,
+                    taker_side,
+                    taker_price,
+                    maker_order_seq,
+                    maker_price,
+                    quantity,
+                }
+            },
+        )
+}
+
+fn arb_matching_output() -> impl Strategy<Value = crate::order::MatchingOutput> {
+    (
+        prop::collection::vec(arb_fill(), 0..5),
+        prop::collection::btree_set(arb_order_seq(), 0..5),
+        prop::collection::btree_set(arb_order_seq(), 0..5),
+    )
+        .prop_map(
+            |(fills, resting_orders, filled_orders)| crate::order::MatchingOutput {
+                fills,
+                resting_orders,
+                filled_orders,
+            },
+        )
 }
 
 fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
-    (any::<u64>(), prop::collection::vec(arb_fill_event(), 0..5)).prop_map(|(book_id, fills)| {
-        MatchingEvent {
-            book_id: crate::order::OrderBookId::new(book_id),
-            fills,
-        }
+    (any::<u64>(), arb_matching_output()).prop_map(|(book_id, output)| MatchingEvent {
+        book_id: crate::order::OrderBookId::new(book_id),
+        output,
     })
 }
 

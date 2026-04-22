@@ -1,5 +1,5 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
+    LotSize, MatchingOutput, OrderBookId, OrderId, Price, Quantity, Side, TickSize, TokenId,
     TokenMetadata,
 };
 use candid::Principal;
@@ -78,29 +78,18 @@ pub struct AddLimitOrderEvent {
     pub quantity: Quantity,
 }
 
-/// One matching round on a single [`OrderBookId`], grouping every fill that
-/// occurred in that round. Principals, prices, and trading pair are *not*
-/// duplicated — they are recoverable from [`crate::order::OrderHistory`] and
+/// One matching round on a single [`OrderBookId`]. Wraps the engine's
+/// [`MatchingOutput`] — fills, resting_orders, filled_orders — so the event
+/// carries enough data to replay both settlement and order-status transitions.
+/// Principals, prices, and the trading pair are *not* duplicated; they are
+/// recoverable from [`crate::order::OrderHistory`] and
 /// [`crate::state::State::trading_pairs`] via `(book_id, order_seq)`.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct MatchingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
-    pub fills: Vec<FillEvent>,
-}
-
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
-pub struct FillEvent {
-    #[n(0)]
-    pub maker_order_seq: OrderSeq,
-    #[n(1)]
-    pub taker_order_seq: OrderSeq,
-    /// Taker side — direction of the trade from the aggressor's point of view.
-    #[n(2)]
-    pub side: Side,
-    #[n(3)]
-    pub filled_quantity: Quantity,
+    pub output: MatchingOutput,
 }
 
 impl Storable for Event {
