@@ -220,11 +220,12 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord, OrderSeq,
-        OrderStatus, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+        OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+        TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-        MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent,
+        MatchingEvent, OrderStatusTransition, SettlingEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};

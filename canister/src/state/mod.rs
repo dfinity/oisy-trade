@@ -13,8 +13,8 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
+    self, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
+    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
     TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
@@ -360,7 +360,7 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
         ops.push(event::BalanceOperation::Transfer {
             from: buyer_seq,
             to: seller_seq,
-            token: event::PairToken::Quote,
+            token: order::PairToken::Quote,
             amount: fill.quote_amount(),
         });
         if fill.taker_side == Side::Buy
@@ -372,14 +372,14 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
                 .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
             ops.push(event::BalanceOperation::Unreserve {
                 user: fill.taker_order_seq,
-                token: event::PairToken::Quote,
+                token: order::PairToken::Quote,
                 amount: surplus,
             });
         }
         ops.push(event::BalanceOperation::Transfer {
             from: seller_seq,
             to: buyer_seq,
-            token: event::PairToken::Base,
+            token: order::PairToken::Base,
             amount: fill.quantity,
         });
     }

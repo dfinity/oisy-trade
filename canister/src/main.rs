@@ -119,10 +119,10 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
-    fn map_pair_token(token: dex_canister::state::event::PairToken) -> event::PairToken {
+    fn map_pair_token(token: dex_canister::order::PairToken) -> event::PairToken {
         match token {
-            dex_canister::state::event::PairToken::Base => event::PairToken::Base,
-            dex_canister::state::event::PairToken::Quote => event::PairToken::Quote,
+            dex_canister::order::PairToken::Base => event::PairToken::Base,
+            dex_canister::order::PairToken::Quote => event::PairToken::Quote,
         }
     }
 

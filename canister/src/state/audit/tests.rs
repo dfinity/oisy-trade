@@ -1,12 +1,13 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+    OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TokenId,
+    TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusTransition,
-    PairToken, SettlingEvent,
+    SettlingEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{

@@ -1,10 +1,10 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-    MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent,
+    MatchingEvent, OrderStatusTransition, SettlingEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};

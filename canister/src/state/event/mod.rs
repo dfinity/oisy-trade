@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -127,15 +127,6 @@ pub enum BalanceOperation {
         #[n(2)]
         amount: Quantity,
     },
-}
-
-/// Side of a trading pair for a [`BalanceOperation`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Decode, Encode)]
-pub enum PairToken {
-    #[n(0)]
-    Base,
-    #[n(1)]
-    Quote,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
