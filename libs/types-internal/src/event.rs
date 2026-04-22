@@ -41,10 +41,10 @@ pub struct DepositEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct WithdrawEvent {
+    pub block_index: u64,
     pub user: Principal,
     pub token: TokenId,
     pub amount: Nat,
-    pub block_index: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

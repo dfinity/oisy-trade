@@ -74,14 +74,14 @@ pub struct DepositEvent {
 /// appear in the log.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct WithdrawEvent {
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub user: Principal,
-    #[n(1)]
-    pub token: TokenId,
-    #[n(2)]
-    pub amount: Quantity,
-    #[n(3)]
+    #[n(0)]
     pub block_index: u64,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    pub user: Principal,
+    #[n(2)]
+    pub token: TokenId,
+    #[n(3)]
+    pub amount: Quantity,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

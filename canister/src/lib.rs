@@ -204,10 +204,10 @@ pub async fn withdraw(
             let block_index = u64::try_from(&response.block_index.0)
                 .expect("BUG: ledger block_index exceeds u64::MAX");
             let event = state::event::WithdrawEvent {
+                block_index,
                 user: caller,
                 token: order::TokenId::from(token_id),
                 amount,
-                block_index,
             };
             state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
             Ok(response)

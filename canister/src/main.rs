@@ -176,10 +176,10 @@ fn get_events(
                     amount: e.amount.into(),
                 }),
                 EventType::Withdraw(e) => event::EventType::Withdraw(event::WithdrawEvent {
+                    block_index: e.block_index,
                     user: e.user,
                     token: dex_types::TokenId::from(e.token),
                     amount: e.amount.into(),
-                    block_index: e.block_index,
                 }),
                 EventType::AddLimitOrder(e) => {
                     event::EventType::AddLimitOrder(event::AddLimitOrderEvent {

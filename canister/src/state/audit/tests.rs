@@ -128,10 +128,10 @@ impl Scenario {
         self.events.push(Event {
             timestamp,
             payload: EventType::Withdraw(WithdrawEvent {
+                block_index,
                 user,
                 token,
                 amount,
-                block_index,
             }),
         });
         self

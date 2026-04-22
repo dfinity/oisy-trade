@@ -77,10 +77,10 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.deposit(*user, *token, *amount, persistence);
         }
         EventType::Withdraw(WithdrawEvent {
+            block_index: _,
             user,
             token,
             amount,
-            block_index: _,
         }) => {
             if matches!(persistence, StableMemoryOptions::Write) {
                 state

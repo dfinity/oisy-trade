@@ -170,10 +170,10 @@ fn deposit(amount: Quantity) -> EventType {
 
 fn withdraw(amount: Quantity) -> EventType {
     EventType::Withdraw(WithdrawEvent {
+        block_index: u64::MAX,
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
-        block_index: u64::MAX,
     })
 }
 

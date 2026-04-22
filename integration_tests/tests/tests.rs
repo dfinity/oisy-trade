@@ -912,10 +912,10 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
             .expect("expected a Withdraw event in the log");
         assert_matches!(withdraw, EventType::Withdraw(e) => {
             assert_eq!(*e, dex_types_internal::event::WithdrawEvent {
+                block_index: expected_block_index,
                 user,
                 token: cksol.clone(),
                 amount: Nat::from(withdraw_amount),
-                block_index: expected_block_index,
             });
         });
     });

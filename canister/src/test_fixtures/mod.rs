@@ -420,16 +420,16 @@ pub mod arbitrary {
 
     pub fn arb_withdraw_event() -> impl Strategy<Value = WithdrawEvent> {
         (
+            any::<u64>(),
             arb_principal(),
             arb_token_id(),
             arb_quantity(),
-            any::<u64>(),
         )
-            .prop_map(|(user, token, amount, block_index)| WithdrawEvent {
+            .prop_map(|(block_index, user, token, amount)| WithdrawEvent {
+                block_index,
                 user,
                 token,
                 amount,
-                block_index,
             })
     }
 
