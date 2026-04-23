@@ -45,6 +45,15 @@ Walk through the main DEX flows against the staging canister using only the [`ic
 
 See [`examples/getting_started.md`](examples/getting_started.md).
 
+
+### 🤖Agents
+
+Talk to your agent to interact with the DEX 😎:
+
+![Agent placing an order](examples/agent_place_order.png?raw=true "Agent placing an order")
+
+See [`examples/agents.md`](examples/agents.md).
+
 <a id="development"></a>
 ## 🛠️ Development
 
