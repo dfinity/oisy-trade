@@ -5,9 +5,11 @@ type OrderId = text;
 
 /// Side of an order.
 type Side = variant {
-    /// Buy order (bid).
+    /// Buy order (bid). On submission reserves `price × quantity` of the
+    /// *quote* token from the caller's on-DEX free balance.
     Buy;
-    /// Sell order (ask).
+    /// Sell order (ask). On submission reserves `quantity` of the *base*
+    /// token from the caller's on-DEX free balance.
     Sell;
 };
 
@@ -25,9 +27,11 @@ type LimitOrderRequest = record {
     pair : TradingPair;
     /// Whether this is a buy or sell order.
     side : Side;
-    /// Limit price in quote token units per base token unit.
+    /// Limit price in quote base units per base base unit.
+    /// Must be a positive multiple of the pair's `tick_size`.
     price : nat64;
-    /// Order quantity in base token units.
+    /// Order quantity in base base units.
+    /// Must be a positive multiple of the pair's `lot_size`.
     quantity : nat;
 };
 
@@ -42,7 +46,9 @@ type AddLimitOrderError = variant {
     InvalidPrice : record { price : nat64; tick_size : nat64 };
     /// The quantity is not a positive multiple of the lot size.
     InvalidQuantity : record { quantity : nat; lot_size : nat64 };
-    /// The user does not have enough balance to place the order.
+    /// The caller's on-DEX free balance in `token` is below `required`.
+    /// For a `Sell`, `token` is the base and `required` is `quantity`.
+    /// For a `Buy`, `token` is the quote and `required` is `price × quantity`.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
@@ -118,7 +124,10 @@ type DepositError = variant {
 type DepositRequest = record {
     /// The token to deposit.
     token_id : TokenId;
-    /// The amount to deposit.
+    /// The amount to deposit, in the token's base units.
+    /// The caller's ICRC-2 allowance to the DEX on the token ledger must cover
+    /// `amount + ledger_fee` (the `icrc2_transfer_from` fee is charged against
+    /// the allowance on top of the transferred amount).
     amount : nat;
 };
 
@@ -134,9 +143,11 @@ type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 type WithdrawRequest = record {
     /// The token to withdraw.
     token_id : TokenId;
-    /// The amount to withdraw from the caller's free balance.
-    /// The ledger transfer fee is deducted from this amount,
-    /// so the caller receives amount minus fee on the ledger.
+    /// The amount to withdraw from the caller's on-DEX free balance, in the
+    /// token's base units. The ledger transfer fee is deducted from this
+    /// amount, so the caller receives `amount - ledger_fee` on the ledger;
+    /// `amount` must therefore be ≥ `ledger_fee` (otherwise the call rejects
+    /// with `AmountTooSmall`).
     amount : nat;
 };
 
@@ -161,7 +172,8 @@ type WithdrawError = variant {
     UnsupportedToken : record { token_id : TokenId };
     /// The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
-    /// The requested amount is too small to cover the ledger transfer fee.
+    /// The requested amount is below the ledger's transfer fee.
+    /// `min_amount` is the ledger's `icrc1_fee`.
     AmountTooSmall : record { min_amount : nat };
     /// The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
@@ -344,8 +356,11 @@ type GetEventsResult = record {
 };
 
 service : (DexArg) -> {
-    /// Submit a new limit order. The order is queued for *asynchronous* processing
-    /// and an order ID is immediately returned.
+    /// Submit a new limit order. The order is queued for *asynchronous*
+    /// processing by the matching engine; an `OrderId` is returned
+    /// immediately. An `Ok` response means the order was accepted into the
+    /// queue, not that it filled — poll `get_order_status` to observe the
+    /// actual lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
     /// Query the status of an order by its ID.
@@ -354,16 +369,24 @@ service : (DexArg) -> {
     /// Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
 
-    /// Deposit tokens into the DEX. Calls icrc2_transfer_from on the token ledger
-    /// to transfer the specified amount from the caller to the DEX canister,
-    /// then credits the caller's internal balance. The caller shall have previously
-    /// approved the DEX canister to spend the specified amount on their behalf by
-    /// calling icrc2_approve on the token ledger.
+    /// Deposit tokens into the DEX. Calls `icrc2_transfer_from` on the token
+    /// ledger to pull `amount` from the caller to the DEX canister, then
+    /// credits the caller's on-DEX free balance.
+    ///
+    /// The caller must have previously called `icrc2_approve` authorizing the
+    /// DEX as spender. The ledger charges its fee on both `icrc2_approve` and
+    /// `icrc2_transfer_from`, so:
+    /// - the allowance must cover `amount + ledger_fee`;
+    /// - the caller's on-ledger balance must cover `amount + 2 × ledger_fee`.
     deposit : (DepositRequest) -> (DepositResult);
 
-    /// Withdraw tokens from the DEX. Debits the caller's free balance and
-    /// transfers (amount - ledger fee) to the caller via icrc1_transfer on the
-    /// token ledger. Amounts locked in open orders cannot be withdrawn.
+    /// Withdraw tokens from the DEX. Debits `amount` from the caller's on-DEX
+    /// free balance and transfers `amount - ledger_fee` to the caller via
+    /// `icrc1_transfer` on the token ledger.
+    ///
+    /// `amount` must be ≥ the token ledger's fee (otherwise `AmountTooSmall`).
+    /// Only free balance is eligible — funds reserved by open orders are not
+    /// withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
 
     /// Query the caller's balance for a given token.
