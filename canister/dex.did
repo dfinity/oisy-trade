@@ -265,6 +265,14 @@ type DepositEvent = record {
     amount : nat;
 };
 
+/// Event payload for a successful withdrawal.
+type WithdrawEvent = record {
+    block_index : nat64;
+    user : principal;
+    token : TokenId;
+    amount : nat;
+};
+
 /// Engine drove a matching round on `book_id`, processing these orders in
 /// FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -314,6 +322,7 @@ type EventType = variant {
     AddLimitOrder : AddLimitOrderEvent;
     Settling : SettlingEvent;
     Matching : MatchingEvent;
+    Withdraw : WithdrawEvent;
 };
 
 /// A canister event with a timestamp.

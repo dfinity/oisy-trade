@@ -196,9 +196,26 @@ pub async fn withdraw(
     }
 
     match outcome.result {
-        Ok(response) => Ok(response),
+        Ok(response) => {
+            // The balance debit happened synchronously before the async
+            // ledger call (for concurrency safety), so the event is appended
+            // record-only — replay re-applies the debit through
+            // `apply_state_transition`.
+            let block_index = u64::try_from(&response.block_index.0)
+                .expect("BUG: ledger block_index exceeds u64::MAX");
+            let event = state::event::WithdrawEvent {
+                block_index,
+                user: caller,
+                token: order::TokenId::from(token_id),
+                amount,
+            };
+            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            Ok(response)
+        }
         Err(e) => {
-            // Credit back on failure so the user doesn't lose funds.
+            // Credit back on failure so the user doesn't lose funds. No event
+            // is emitted: replay then sees no WithdrawEvent for the failed
+            // call, mirroring the net-zero state mutation on the primary path.
             state::with_state_mut(|s| {
                 s.deposit(
                     caller,

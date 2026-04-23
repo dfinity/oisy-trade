@@ -18,6 +18,7 @@ pub enum EventType {
     AddLimitOrder(AddLimitOrderEvent),
     Settling(SettlingEvent),
     Matching(MatchingEvent),
+    Withdraw(WithdrawEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -33,6 +34,14 @@ pub struct AddTradingPairEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct DepositEvent {
+    pub user: Principal,
+    pub token: TokenId,
+    pub amount: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct WithdrawEvent {
+    pub block_index: u64,
     pub user: Principal,
     pub token: TokenId,
     pub amount: Nat,

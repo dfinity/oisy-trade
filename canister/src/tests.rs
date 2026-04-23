@@ -402,6 +402,8 @@ mod get_order_status {
 
 mod withdraw {
     use crate::order::{Quantity, TokenId};
+    use crate::state::event::{Event, EventType, WithdrawEvent};
+    use crate::storage;
     use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
     use crate::{state, withdraw};
     use candid::{Nat, Principal, encode_args};
@@ -490,6 +492,35 @@ mod withdraw {
         });
     }
 
+    /// Returns the sole `WithdrawEvent` recorded in the event log, or panics
+    /// if there are zero or more than one.
+    fn unique_withdraw_event() -> WithdrawEvent {
+        let withdraws: Vec<WithdrawEvent> = storage::with_event_iter(|it| {
+            it.filter_map(|Event { payload, .. }| match payload {
+                EventType::Withdraw(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+        });
+        assert_eq!(
+            withdraws.len(),
+            1,
+            "expected exactly one WithdrawEvent, got {}",
+            withdraws.len()
+        );
+        withdraws.into_iter().next().unwrap()
+    }
+
+    /// Asserts the event log contains no `WithdrawEvent`s. Use this on failure
+    /// paths where the withdrawal did not complete.
+    fn assert_no_withdraw_event() {
+        let count = storage::with_event_iter(|it| {
+            it.filter(|Event { payload, .. }| matches!(payload, EventType::Withdraw(_)))
+                .count()
+        });
+        assert_eq!(count, 0, "expected no WithdrawEvent, got {count}");
+    }
+
     fn decode_transfer_arg(runtime: &CapturingRuntime, call_index: usize) -> TransferArg {
         let calls = runtime.captured_calls();
         let call = &calls[call_index];
@@ -552,6 +583,8 @@ mod withdraw {
         let arg1 = decode_transfer_arg(&runtime, 1);
         assert_eq!(arg1.amount, Nat::from(deposit - 5_000));
         assert_eq!(arg1.fee, Some(Nat::from(5_000u64)));
+        // Failed withdrawals leave no event in the log.
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -584,6 +617,7 @@ mod withdraw {
         );
         assert_balance(deposit);
         assert_cached_fee(5_000);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -616,6 +650,7 @@ mod withdraw {
             ))
         );
         assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -671,6 +706,16 @@ mod withdraw {
         let arg1 = decode_transfer_arg(&runtime, 1);
         assert_eq!(arg1.amount, Nat::from(withdraw_amount - real_fee));
         assert_eq!(arg1.fee, Some(Nat::from(real_fee)));
+        // The successful withdrawal is recorded with the ledger block_index.
+        assert_eq!(
+            unique_withdraw_event(),
+            WithdrawEvent {
+                block_index: 42,
+                user: USER,
+                token: TokenId::from(token_id()),
+                amount: Quantity::from(withdraw_amount),
+            }
+        );
     }
 
     #[tokio::test]
@@ -696,6 +741,7 @@ mod withdraw {
                 token_id: token_id(),
             })
         );
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -724,6 +770,7 @@ mod withdraw {
         );
         // Balance untouched — no debit happened.
         assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -771,6 +818,36 @@ mod withdraw {
         let arg0 = decode_transfer_arg(&runtime, 0);
         assert_eq!(arg0.amount, Nat::from(1u64));
         assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_not_emit_event_on_insufficient_balance() {
+        let deposit = 1_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No ledger expectation — the user-balance check fails before the
+        // async call is made.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit + 1),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::InsufficientBalance {
+                available: Nat::from(deposit),
+            })
+        );
+        assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 }
 

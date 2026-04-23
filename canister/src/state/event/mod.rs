@@ -36,6 +36,8 @@ pub enum EventType {
     Settling(#[n(0)] SettlingEvent),
     #[n(6)]
     Matching(#[n(0)] MatchingEvent),
+    #[n(7)]
+    Withdraw(#[n(0)] WithdrawEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -63,6 +65,22 @@ pub struct DepositEvent {
     #[n(1)]
     pub token: TokenId,
     #[n(2)]
+    pub amount: Quantity,
+}
+
+/// A successful withdrawal: `amount` of `token` was debited from `user`'s free
+/// balance and the corresponding ledger transfer to the user's account
+/// completed at `block_index`. Failed withdrawals (ledger errors) do not
+/// appear in the log.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct WithdrawEvent {
+    #[n(0)]
+    pub block_index: u64,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    pub user: Principal,
+    #[n(2)]
+    pub token: TokenId,
+    #[n(3)]
     pub amount: Quantity,
 }
 

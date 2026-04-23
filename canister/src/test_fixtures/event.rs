@@ -4,7 +4,7 @@ use crate::order::{
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-    MatchingEvent, OrderStatusTransition, SettlingEvent,
+    MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -48,6 +48,7 @@ pub enum WorstCaseEvent {
     Upgrade,
     AddTradingPair,
     Deposit,
+    Withdraw,
     AddLimitOrder,
     Matching,
     Settling,
@@ -60,6 +61,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Upgrade(_) => Self::Upgrade,
             EventType::AddTradingPair(_) => Self::AddTradingPair,
             EventType::Deposit(_) => Self::Deposit,
+            EventType::Withdraw(_) => Self::Withdraw,
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
@@ -80,6 +82,7 @@ impl WorstCaseEvent {
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
+            Self::Withdraw => withdraw(max_quantity()),
             Self::AddLimitOrder => add_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
@@ -98,6 +101,7 @@ impl WorstCaseEvent {
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
+            Self::Withdraw => 104,
             Self::AddLimitOrder => 97,
             Self::Matching => 10_027,
             Self::Settling => 105_330,
@@ -158,6 +162,15 @@ fn add_limit_order() -> EventType {
 
 fn deposit(amount: Quantity) -> EventType {
     EventType::Deposit(DepositEvent {
+        user: max_principal(0),
+        token: TokenId::new(max_principal(1)),
+        amount,
+    })
+}
+
+fn withdraw(amount: Quantity) -> EventType {
+    EventType::Withdraw(WithdrawEvent {
+        block_index: u64::MAX,
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
