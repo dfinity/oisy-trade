@@ -8,21 +8,24 @@ Walkthrough of the core DEX flows against the staging canister, using only the [
 4. Check order status
 5. Withdraw
 
-Run every command below from the same shell — steps share `export`ed variables (`BASE_LEDGER`, `DEX`, `ORDER_ID`, ...).
+The walkthrough uses two configurable identities — one for buy-side operations, one for sell-side — so the flow can exercise both halves of a matched trade. Run every command below from the same shell: steps share `export`ed variables (`BUYER_IDENTITY`, `SELLER_IDENTITY`, `BASE_LEDGER`, `DEX`, ...).
 
 ## Prerequisites
 
 - [`icp` CLI](https://cli.internetcomputer.org/) installed and on `PATH`
 - Run these commands from the **project root** so `--environment staging` resolves the `dex` canister name (defined in `icp.yaml`)
-- An identity configured via `icp identity new` or `icp identity import` — every `deposit`, `add_limit_order`, and `withdraw` runs as the currently-selected identity, and the DEX keys its internal balances off that caller principal
+- Two identities configured via `icp identity new` or `icp identity import` — one acts as the buyer, one as the seller. They may be the same identity if you just want to see the commands run end-to-end against yourself; using two distinct identities lets you demonstrate an actual matched trade.
 
-## Your identity
+## Identities
 
-Principal that will call the DEX and hold token balances.
+Export a buyer and a seller identity. The DEX keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
 
 ```bash
-icp identity default
-icp identity principal
+export BUYER_IDENTITY=<buyer-name>
+export SELLER_IDENTITY=<seller-name>
+
+icp identity principal --identity "$BUYER_IDENTITY"
+icp identity principal --identity "$SELLER_IDENTITY"
 ```
 
 ## Limit Orders 101
@@ -57,33 +60,36 @@ export LOT_SIZE=1_000_000
 
 Every limit order reserves one side of the pair before the matching engine can fill it:
 
-- **Sell** orders reserve `quantity` *base* tokens → you need base in your on-DEX *free* balance
-- **Buy** orders reserve `price × quantity` *quote* tokens → you need quote in your on-DEX *free* balance
+- **Sell** orders reserve `quantity` *base* tokens → the seller needs base in their on-DEX *free* balance
+- **Buy** orders reserve `price × quantity` *quote* tokens → the buyer needs quote in their on-DEX *free* balance
 
-So the token you approve and deposit depends on the side you plan to trade.
+So which identity approves and deposits which token depends on the side it plans to trade.
 
-`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so the DEX must first be approved to spend on your behalf. Two fees are charged to your on-ledger balance:
+`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so the DEX must first be approved to spend on the caller's behalf. Two fees are charged to the on-ledger balance:
 
 1. `icrc2_approve` charges the ledger fee once
 2. `icrc2_transfer_from` (triggered later by `deposit`) charges the ledger fee again, on top of the amount transferred
 
-So to deposit `N`, approve **at least `N + ledger_fee`** and hold **at least `N + 2 × ledger_fee`** on the ledger. Check your on-ledger balance and the ledger fee for whichever column you pick:
+So to deposit `N`, approve **at least `N + ledger_fee`** and hold **at least `N + 2 × ledger_fee`** on the ledger. Check on-ledger balances and ledger fees:
 
 ```bash
-icp token "$BASE_LEDGER" balance --network ic
+# Seller — base ledger (needs base to sell)
+icp token "$BASE_LEDGER" balance --network ic --identity "$SELLER_IDENTITY"
 icp canister call "$BASE_LEDGER" icrc1_fee '()' --query --identity anonymous --network ic
-icp token "$QUOTE_LEDGER" balance --network ic
+
+# Buyer — quote ledger (needs quote to buy)
+icp token "$QUOTE_LEDGER" balance --network ic --identity "$BUYER_IDENTITY"
 icp canister call "$QUOTE_LEDGER" icrc1_fee '()' --query --identity anonymous --network ic
 ```
 
-Then approve and deposit — run the subsection matching the side you plan to trade. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets the DEX on staging (`--environment staging`).
+Then approve and deposit — run each subsection as the appropriate identity. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets the DEX on staging (`--environment staging`).
 
-### Sell orders — deposit *base*
+### Seller — approve + deposit *base*
 
 Deposits 1 lot (= `LOT_SIZE` base-base-units), enough for one sell at `quantity = LOT_SIZE`.
 
 ```bash
-icp canister call "$BASE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic <<EOF
+icp canister call "$BASE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         spender = record { owner = principal "$DEX"; subaccount = null };
@@ -92,7 +98,7 @@ icp canister call "$BASE_LEDGER" icrc2_approve --args-file /dev/stdin --network 
 )
 EOF
 
-icp canister call dex deposit --args-file /dev/stdin --environment staging <<EOF
+icp canister call dex deposit --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$BASE_LEDGER" };
@@ -102,12 +108,12 @@ icp canister call dex deposit --args-file /dev/stdin --environment staging <<EOF
 EOF
 ```
 
-### Buy orders — deposit *quote*
+### Buyer — approve + deposit *quote*
 
 Deposits `TICK_SIZE × LOT_SIZE` quote-base-units (= 10_000 × 1_000_000), enough for one buy at `price = TICK_SIZE`, `quantity = LOT_SIZE`.
 
 ```bash
-icp canister call "$QUOTE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic <<EOF
+icp canister call "$QUOTE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         spender = record { owner = principal "$DEX"; subaccount = null };
@@ -116,7 +122,7 @@ icp canister call "$QUOTE_LEDGER" icrc2_approve --args-file /dev/stdin --network
 )
 EOF
 
-icp canister call dex deposit --args-file /dev/stdin --environment staging <<EOF
+icp canister call dex deposit --args-file /dev/stdin --environment staging --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$QUOTE_LEDGER" };
@@ -128,7 +134,7 @@ EOF
 
 > Candid's record literals use `{` / `}`, which collide with bash variable-expansion rules. Passing the candid via `--args-file /dev/stdin` and a heredoc sidesteps every shell-quoting pitfall — the unquoted `EOF` terminator still expands `$VAR` inside the body.
 
-## 4. Check your on-DEX balance
+## 4. Check on-DEX balances
 
 The DEX tracks balance per `(caller, token)`:
 
@@ -136,8 +142,14 @@ The DEX tracks balance per `(caller, token)`:
 - `reserved` — locked by open orders
 
 ```bash
-icp canister call dex get_balance --args-file /dev/stdin --environment staging --query <<EOF
+# Seller's base balance
+icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
 (record { ledger_id = principal "$BASE_LEDGER" })
+EOF
+
+# Buyer's quote balance
+icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
+(record { ledger_id = principal "$QUOTE_LEDGER" })
 EOF
 ```
 
@@ -145,10 +157,12 @@ EOF
 
 `price` must be a positive multiple of `TICK_SIZE`; `quantity` a positive multiple of `LOT_SIZE`.
 
-Submission is asynchronous: the call returns an order ID immediately, the matching engine processes it on the next canister tick.
+Submission is asynchronous: the call returns an order ID immediately, the matching engine processes it on the next canister tick. Two resting orders with crossing prices fill as soon as they meet.
+
+### Sell (as seller)
 
 ```bash
-icp canister call dex add_limit_order --args-file /dev/stdin --environment staging <<EOF
+icp canister call dex add_limit_order --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         pair     = record { base = principal "$BASE_LEDGER"; quote = principal "$QUOTE_LEDGER" };
@@ -160,16 +174,38 @@ icp canister call dex add_limit_order --args-file /dev/stdin --environment stagi
 EOF
 ```
 
-The response is a `variant { Ok : text }` whose `text` is the 32-char hex order ID. Export it for the next step:
+Paste the returned 32-char hex order ID:
 
 ```bash
-export ORDER_ID=<paste-the-order-id-here>
+export SELL_ORDER_ID=<paste-the-order-id-here>
+```
+
+### Buy (as buyer)
+
+Same `price`/`quantity`, so this order crosses the seller's resting ask and fills both.
+
+```bash
+icp canister call dex add_limit_order --args-file /dev/stdin --environment staging --identity "$BUYER_IDENTITY" <<EOF
+(
+    record {
+        pair     = record { base = principal "$BASE_LEDGER"; quote = principal "$QUOTE_LEDGER" };
+        side     = variant { Buy };
+        price    = $TICK_SIZE : nat64;
+        quantity = $LOT_SIZE  : nat
+    }
+)
+EOF
+```
+
+```bash
+export BUY_ORDER_ID=<paste-the-order-id-here>
 ```
 
 ## 6. Check order status
 
 ```bash
-icp canister call dex get_order_status "(\"$ORDER_ID\")" --environment staging --query --identity anonymous
+icp canister call dex get_order_status "(\"$SELL_ORDER_ID\")" --environment staging --query --identity anonymous
+icp canister call dex get_order_status "(\"$BUY_ORDER_ID\")" --environment staging --query --identity anonymous
 ```
 
 | Status     | Meaning                                   |
@@ -180,12 +216,31 @@ icp canister call dex get_order_status "(\"$ORDER_ID\")" --environment staging -
 | `Canceled` | Canceled                                  |
 | `NotFound` | Unknown order ID                          |
 
+Both orders should reach `Filled` once the matching engine has ticked.
+
 ## 7. Withdraw
 
 Debits `amount` from your on-DEX *free* balance and sends `amount − ledger_fee` to your principal on the ledger. Only `free` funds are eligible; `reserved` funds (locked by open orders) aren't withdrawable until the order fills or is canceled.
 
+After the matched trade in §5 the seller now holds quote and the buyer now holds base. Each withdraws what they received:
+
+### Seller withdraws quote
+
 ```bash
-icp canister call dex withdraw --args-file /dev/stdin --environment staging <<EOF
+icp canister call dex withdraw --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
+(
+    record {
+        token_id = record { ledger_id = principal "$QUOTE_LEDGER" };
+        amount   = 500_000 : nat
+    }
+)
+EOF
+```
+
+### Buyer withdraws base
+
+```bash
+icp canister call dex withdraw --args-file /dev/stdin --environment staging --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$BASE_LEDGER" };
@@ -198,5 +253,4 @@ EOF
 ## What's next
 
 - Inspect the append-only event log via `get_events` — every state change (listings, deposits, orders) is recorded. See `canister/dex.did` for the full schema.
-- Place a **Buy** order: flip `side = variant { Sell }` to `variant { Buy }` in step 5 and make sure you've taken the right-hand column in step 3 to deposit quote tokens.
 - See `integration_tests/` for end-to-end scenarios that exercise every endpoint programmatically.
