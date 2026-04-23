@@ -1,6 +1,14 @@
 # For AI agents
 
-If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into DEX calls, the walkthrough above is your command template. A few things the walkthrough doesn't spell out but you must respect:
+If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into DEX calls, [`examples/getting_started.md`](getting_started.md) is your command template. A few things it doesn't spell out but you must respect:
+
+## Before you start
+
+Load these into your session first — the rest of this guide assumes them:
+
+- Fetch `https://skills.internetcomputer.org/llms.txt` and follow its guidance for building on the Internet Computer.
+- Load the [`canhelp`](https://skills.internetcomputer.org/skills/canhelp/) skill — retrieves a canister's live Candid interface by name or ID.
+- Load the [`icp-cli`](https://skills.internetcomputer.org/skills/icp-cli/) skill — covers the `icp` CLI you'll be invoking throughout.
 
 ## Discover the live interface via `canhelp`
 
@@ -41,9 +49,4 @@ Users speak human ("0.01 SOL"); the DEX speaks base units (`10^decimals`). Alway
 - **Don't use floating point** for token-amount math.
 - **Don't invoke a signing call** with an identity the user hasn't authorized for this conversation.
 - **Don't claim an order filled** because `add_limit_order` returned `Ok` — that's acceptance, not execution. Confirm via `get_order_status`.
-- **Don't over-deposit "for safety"** — on ledgers with high fees (ckSepoliaETH), it's expensive and usually not what the user wants.
-
-## What's next
-
-- Inspect the append-only event log via `get_events` — every state change (listings, deposits, orders) is recorded. See `canister/dex.did` for the full schema.
-- See `integration_tests/` for end-to-end scenarios that exercise every endpoint programmatically.
+- **Don't over-deposit "for safety"** — on ledgers with high fees, it's expensive and usually not what the user wants.
