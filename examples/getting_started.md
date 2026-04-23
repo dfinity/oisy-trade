@@ -218,6 +218,20 @@ icp canister call dex get_order_status "(\"$BUY_ORDER_ID\")" --environment stagi
 
 Both orders should reach `Filled` once the matching engine has ticked.
 
+Re-check balances to confirm the trade settled. The seller's newly received quote `free` should be `price × quantity = 100_000_000_000`, and the buyer's newly received base `free` should be `quantity = 10_000_000`. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read 0.
+
+```bash
+# Seller's quote (credited by the fill)
+icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
+(record { ledger_id = principal "$QUOTE_LEDGER" })
+EOF
+
+# Buyer's base (credited by the fill)
+icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
+(record { ledger_id = principal "$BASE_LEDGER" })
+EOF
+```
+
 ## 7. Withdraw
 
 Debits `amount` from your on-DEX *free* balance and sends `amount − ledger_fee` to your principal on the ledger. Only `free` funds are eligible; `reserved` funds (locked by open orders) aren't withdrawable until the order fills or is canceled.
