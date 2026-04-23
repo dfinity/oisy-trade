@@ -79,8 +79,10 @@ List all available recipes with `just`.
 ### Deploy to staging
 
 Requires the [icp CLI](https://cli.internetcomputer.org/) with an identity that has deployment permissions.
-By default the `hsm` identity is used; override with `just deploy <identity>`.
+By default the `hsm` identity is used; override with `just deploy <identity>`. Pass an optional second argument to read the identity's unlock secret (HSM PIN or encrypted-PEM password) from a file and run non-interactively:
 
 ```bash
-just deploy
+just deploy                                   # default: hsm, interactive unlock
+just deploy dev                               # non-hsm identity, interactive unlock
+just deploy hsm ~/.config/icp/hsm.pin         # non-interactive with PIN file
 ```

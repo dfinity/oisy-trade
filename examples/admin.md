@@ -14,6 +14,7 @@ Run every command below from the same shell — steps share `export`ed variables
 - [`icp` CLI](https://cli.internetcomputer.org/) installed and on `PATH`
 - Run these commands from the **project root** so `--environment staging` resolves the `dex` canister name (defined in `icp.yaml`)
 - An identity that is a controller of the DEX canister. The repo convention is the `hsm` identity — adjust `IDENTITY` below if you use a different one.
+- Optional: `curl` and `jq` — only needed for the Binance sizing sanity check in §2.
 
 ## Setup
 
@@ -24,6 +25,8 @@ export IDENTITY=hsm   # controller identity; matches the default in the justfile
 ```
 
 ### Unlock the identity (HSM PIN / PEM password)
+
+> If your identity is an unencrypted PEM (common in dev), skip this whole subsection and drop `--identity-password-file "$PIN_FILE"` from every command below.
 
 Every signing call below passes `--identity "$IDENTITY"`. If the identity is HSM-linked or password-encrypted, `icp` would prompt on a TTY for its unlock secret. `--identity-password-file <FILE>` reads the secret from a file instead, which is what we use here. Two ways to populate the file:
 
@@ -36,7 +39,7 @@ export PIN_FILE=~/.config/icp/hsm.pin   # adjust to your file
 **B. Prompt once and write a chmod-600 temp file** (removed in the `Clean up` step at the end):
 
 ```bash
-export PIN_FILE=$(mktemp -t icp-identity-)
+export PIN_FILE=$(mktemp -t icp-identity-XXXXXX)
 chmod 600 "$PIN_FILE"
 read -rs -p "Unlock $IDENTITY (HSM PIN or PEM password): " pin && echo
 printf '%s' "$pin" > "$PIN_FILE"
@@ -91,7 +94,7 @@ icp canister install dex --mode upgrade --args '(null)' \
 Base is the asset being bought/sold; quote is the asset prices are denominated in.
 
 ```bash
-export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckSOL (devnet)
+export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckDevnetSOL
 export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 ```
 
@@ -134,7 +137,10 @@ The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`st
 - `tick_size = tickSize_binance × 10^(quote_decimals − base_decimals)`
 - `lot_size  = stepSize_binance × 10^base_decimals`
 
-For `SOLETH` at the time of writing: `tickSize = 0.00001 ETH/SOL`, `stepSize = 0.001 SOL` → DEX `tick_size = 10_000`, `lot_size = 1_000_000`.
+For `SOLETH` at the time of writing: `tickSize = 0.00001 ETH/SOL`, `stepSize = 0.001 SOL`. Plugging into the formulas above (ckDevnetSOL `base_decimals = 9`, ckSepoliaETH `quote_decimals = 18`):
+
+- `tick_size = 0.00001 × 10^(18 − 9) = 0.00001 × 10^9 = 10^4 = 10_000`
+- `lot_size  = 0.001   × 10^9        = 10^6             = 1_000_000`
 
 ```bash
 export TICK_SIZE=10_000

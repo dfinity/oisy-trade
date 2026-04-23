@@ -47,4 +47,4 @@ bench-check:
 # Deploy to staging. Optionally pass a path to a file holding the identity's
 # unlock secret (HSM PIN or encrypted-PEM password) to run non-interactively.
 deploy identity='hsm' password_file='':
-    icp deploy dex --identity {{identity}} {{ if password_file == '' { '' } else { '--identity-password-file ' + password_file } }} --environment staging
+    icp deploy dex --identity "{{identity}}" {{ if password_file == '' { '' } else { '--identity-password-file "' + password_file + '"' } }} --environment staging

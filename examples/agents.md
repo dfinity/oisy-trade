@@ -32,11 +32,11 @@ Users speak human ("0.01 SOL"); the DEX speaks base units (`10^decimals`). Alway
 
 - Convert with integer math — **never floats**.
 - Query `icrc1_fee` before quoting any amount — fees vary wildly between ledgers (e.g. ckDevnetSOL `50`, ckSepoliaETH `10_000_000_000`).
-- Confirm both views with the user: "1_000_000 ckSOL base units = 0.001 SOL".
+- Confirm both views with the user: "1_000_000 ckDevnetSOL base units = 0.001 SOL".
 
 ## Example dialogues
 
-**"What pairs can I trade?"** → `get_trading_pairs`; summarize in human terms ("ckSOL vs ckSepoliaETH, min order 0.001 SOL, price tick 0.00001 ETH/SOL").
+**"What pairs can I trade?"** → `get_trading_pairs`; summarize in human terms ("ckDevnetSOL vs ckSepoliaETH, min order 0.001 SOL, price tick 0.00001 ETH/SOL").
 
 **"Sell 0.01 SOL for ckSepoliaETH at market."** → (1) confirm the pair is listed; (2) convert 0.01 SOL to `10_000_000` base units; (3) verify `quantity` is a multiple of `lot_size`; (4) pick a price (ask if unclear — there's no `get_orderbook`); (5) check the seller's on-DEX free base ≥ `quantity`; (6) place the order as the seller identity; (7) poll `get_order_status` for `Filled`.
 

@@ -48,7 +48,7 @@ icp canister call dex get_trading_pairs '()' --environment staging --query --ide
 Copy the base and quote ledger principals from the output above and export them. The values below are the ckDevnetSOL / ckSepoliaETH pair listed on staging — adjust if you picked a different pair.
 
 ```bash
-export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckSOL (devnet)
+export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckDevnetSOL
 export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 export DEX=proc5-daaaa-aaaar-qb5va-cai           # staging DEX canister
 
@@ -70,7 +70,7 @@ So which identity approves and deposits which token depends on the side it plans
 1. `icrc2_approve` charges the ledger fee once
 2. `icrc2_transfer_from` (triggered later by `deposit`) charges the ledger fee again, on top of the amount transferred
 
-So to deposit `N`, approve **at least `N + ledger_fee`** and hold **at least `N + 2 × ledger_fee`** on the ledger. Fees vary widely per ledger — for the listed pair, ckDevnetSOL charges `50` base units (≈ 5 × 10<sup>-8</sup> SOL) while ckSepoliaETH charges `10_000_000_000` (= 10<sup>-8</sup> ETH). Confirm current values and balances:
+So to deposit `N`, approve **at least `N + ledger_fee`** and hold **at least `N + 2 × ledger_fee`** on the ledger. Fees vary widely per ledger — this walkthrough assumes **ckDevnetSOL = `50`** base units (≈ 5 × 10<sup>-8</sup> SOL) and **ckSepoliaETH = `10_000_000_000`** (= 10<sup>-8</sup> ETH). If the live `icrc1_fee` values below differ from these, adjust the literal `amount` fields in the approve / deposit calls accordingly before running them:
 
 ```bash
 # Seller — base ledger (needs base to sell)
@@ -86,7 +86,7 @@ Then approve and deposit — run each subsection as the appropriate identity. `i
 
 ### Seller — approve + deposit *base*
 
-Deposits 10 lots (= `10 × LOT_SIZE` base-base-units), enough for one sell at `quantity = 10_000_000`. Approval is `10 × LOT_SIZE + ckDevnetSOL_fee = 10_000_000 + 50`.
+Deposits 10 lots (= `10 × LOT_SIZE` base-token base units — the token's smallest indivisible unit, not to be confused with the *base* token in the trading pair), enough for one sell at `quantity = 10_000_000`. Approval is `10 × LOT_SIZE + ckDevnetSOL_fee = 10_000_000 + 50`.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$SELLER_IDENTITY" <<EOF
@@ -110,7 +110,7 @@ EOF
 
 ### Buyer — approve + deposit *quote*
 
-Deposits `10 × TICK_SIZE × LOT_SIZE` quote-base-units (= 10_000 × 10_000_000 = 100_000_000_000), enough for one buy at `price = TICK_SIZE`, `quantity = 10_000_000`. Approval is `deposit + ckSepoliaETH_fee = 100_000_000_000 + 10_000_000_000`. The buyer's ckSepoliaETH on-ledger balance must be at least `deposit + 2 × fee = 120_000_000_000` (≈ 1.2 × 10<sup>-7</sup> ETH) to cover both the `icrc2_approve` fee and the `icrc2_transfer_from` fee on top of the deposit itself.
+Deposits `price × quantity = TICK_SIZE × 10_000_000 = 10_000 × 10_000_000 = 100_000_000_000` quote-base-units, enough for one buy at `price = TICK_SIZE`, `quantity = 10_000_000`. Approval is `deposit + ckSepoliaETH_fee = 100_000_000_000 + 10_000_000_000`. The buyer's ckSepoliaETH on-ledger balance must be at least `deposit + 2 × fee = 120_000_000_000` (≈ 1.2 × 10<sup>-7</sup> ETH) to cover both the `icrc2_approve` fee and the `icrc2_transfer_from` fee on top of the deposit itself.
 
 ```bash
 icp canister call "$QUOTE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$BUYER_IDENTITY" <<EOF
@@ -216,7 +216,7 @@ icp canister call dex get_order_status "(\"$BUY_ORDER_ID\")" --environment stagi
 | `Canceled` | Canceled                                  |
 | `NotFound` | Unknown order ID                          |
 
-Both orders should reach `Filled` once the matching engine has ticked.
+Both orders should reach `Filled` once the matching engine has ticked. The engine typically processes within a few seconds — if you see `Pending`, wait a moment and re-run the query.
 
 Re-check balances to confirm the trade settled. The seller's newly received quote `free` should be `price × quantity = 100_000_000_000`, and the buyer's newly received base `free` should be `quantity = 10_000_000`. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read 0.
 
@@ -234,20 +234,20 @@ EOF
 
 ## 7. Withdraw
 
-Debits `amount` from your on-DEX *free* balance and sends `amount − ledger_fee` to your principal on the ledger. Only `free` funds are eligible; `reserved` funds (locked by open orders) aren't withdrawable until the order fills or is canceled.
+Debits `amount` from your on-DEX *free* balance and sends `amount − ledger_fee` to your principal on the ledger. `amount` must be **strictly greater** than the current ledger fee — otherwise the call returns `AmountTooSmall`; re-check `icrc1_fee` if unsure. Only `free` funds are eligible; `reserved` funds (locked by open orders) aren't withdrawable until the order fills or is canceled.
 
 After the matched trade in §5 the seller now holds quote and the buyer now holds base. Each withdraws what they received:
 
 ### Seller withdraws quote
 
-Withdraws `50_000_000_000` quote-base-units; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `40_000_000_000` on-ledger.
+Withdraws the seller's full `100_000_000_000` quote-base-units balance; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `90_000_000_000` on-ledger.
 
 ```bash
 icp canister call dex withdraw --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$QUOTE_LEDGER" };
-        amount   = 50_000_000_000 : nat
+        amount   = 100_000_000_000 : nat
     }
 )
 EOF
@@ -255,14 +255,14 @@ EOF
 
 ### Buyer withdraws base
 
-Withdraws `5_000_000` base-base-units; after the ckDevnetSOL fee (`50`), the buyer receives `4_999_950` on-ledger.
+Withdraws the buyer's full `10_000_000` base-base-units balance; after the ckDevnetSOL fee (`50`), the buyer receives `9_999_950` on-ledger.
 
 ```bash
 icp canister call dex withdraw --args-file /dev/stdin --environment staging --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$BASE_LEDGER" };
-        amount   = 5_000_000 : nat
+        amount   = 10_000_000 : nat
     }
 )
 EOF
