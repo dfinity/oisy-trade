@@ -48,7 +48,9 @@ See [`examples/getting_started.md`](examples/getting_started.md).
 
 ### 🤖Agents
 
-Talk to your agent to interact with the DEX 😎:
+Talk to your agent to interact with the DEX 😎.
+
+> Buy 0.01 SOL at a limit price of 0.037 ETH per SOL
 
 ![Agent placing an order](examples/agent_place_order.png?raw=true "Agent placing an order")
 
