@@ -1,10 +1,10 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-    MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent, WithdrawEvent,
+    MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -194,19 +194,19 @@ fn settling(order_count: usize) -> EventType {
         let taker = OrderSeq::new(2 * i);
         let maker = OrderSeq::new(2 * i + 1);
         balance_operations.push(BalanceOperation::Transfer {
-            from: taker,
-            to: maker,
+            from_order: taker,
+            to_order: maker,
             token: PairToken::Quote,
             amount: max_quantity(),
         });
         balance_operations.push(BalanceOperation::Unreserve {
-            user: taker,
+            order: taker,
             token: PairToken::Quote,
             amount: max_quantity(),
         });
         balance_operations.push(BalanceOperation::Transfer {
-            from: maker,
-            to: taker,
+            from_order: maker,
+            to_order: taker,
             token: PairToken::Base,
             amount: max_quantity(),
         });

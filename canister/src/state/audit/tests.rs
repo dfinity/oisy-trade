@@ -1,12 +1,13 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side, TokenId, TradingPair,
+    OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TokenId,
+    TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusTransition,
-    PairToken, SettlingEvent, WithdrawEvent,
+    SettlingEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -360,14 +361,14 @@ fn should_replay_matching() {
                 book_id,
                 balance_operations: vec![
                     BalanceOperation::Transfer {
-                        from: buy_id.seq(),
-                        to: sell_id.seq(),
+                        from_order: buy_id.seq(),
+                        to_order: sell_id.seq(),
                         token: PairToken::Quote,
                         amount: Quantity::from(price * quantity),
                     },
                     BalanceOperation::Transfer {
-                        from: sell_id.seq(),
-                        to: buy_id.seq(),
+                        from_order: sell_id.seq(),
+                        to_order: buy_id.seq(),
                         token: PairToken::Base,
                         amount: Quantity::from(quantity),
                     },
@@ -438,19 +439,19 @@ fn should_replay_matching_with_price_improvement() {
                 book_id,
                 balance_operations: vec![
                     BalanceOperation::Transfer {
-                        from: buy_id.seq(),
-                        to: sell_id.seq(),
+                        from_order: buy_id.seq(),
+                        to_order: sell_id.seq(),
                         token: PairToken::Quote,
                         amount: Quantity::from(maker_price * quantity),
                     },
                     BalanceOperation::Unreserve {
-                        user: buy_id.seq(),
+                        order: buy_id.seq(),
                         token: PairToken::Quote,
                         amount: Quantity::from((taker_price - maker_price) * quantity),
                     },
                     BalanceOperation::Transfer {
-                        from: sell_id.seq(),
-                        to: buy_id.seq(),
+                        from_order: sell_id.seq(),
+                        to_order: buy_id.seq(),
                         token: PairToken::Base,
                         amount: Quantity::from(quantity),
                     },

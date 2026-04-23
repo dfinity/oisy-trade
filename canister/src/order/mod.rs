@@ -8,16 +8,26 @@ pub use book::{
 };
 pub use history::OrderHistory;
 
-use crate::state::event::PairToken;
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
+use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
+
+/// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
+/// concrete [`TokenId`] via [`TradingPair::token`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Decode, Encode)]
+pub enum PairToken {
+    #[n(0)]
+    Base,
+    #[n(1)]
+    Quote,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
 pub enum Side {

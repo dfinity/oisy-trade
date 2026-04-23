@@ -220,11 +220,12 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord, OrderSeq,
-        OrderStatus, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+        OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+        TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-        MatchingEvent, OrderStatusTransition, PairToken, SettlingEvent, WithdrawEvent,
+        MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -488,15 +489,17 @@ pub mod arbitrary {
             arb_pair_token(),
             arb_quantity(),
         )
-            .prop_map(|(from, to, token, amount)| BalanceOperation::Transfer {
-                from,
-                to,
-                token,
-                amount,
-            });
+            .prop_map(
+                |(from_order, to_order, token, amount)| BalanceOperation::Transfer {
+                    from_order,
+                    to_order,
+                    token,
+                    amount,
+                },
+            );
         let unreserve = (arb_order_seq(), arb_pair_token(), arb_quantity()).prop_map(
-            |(user, token, amount)| BalanceOperation::Unreserve {
-                user,
+            |(order, token, amount)| BalanceOperation::Unreserve {
+                order,
                 token,
                 amount,
             },

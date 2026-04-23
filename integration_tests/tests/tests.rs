@@ -826,14 +826,14 @@ async fn should_replay_events_on_upgrade() {
                 book_id: 0,
                 balance_operations: vec![
                     dex_types_internal::event::BalanceOperation::Transfer {
-                        from: 1, // buyer seq
-                        to: 0,   // seller seq
+                        from_order: 1, // buyer seq
+                        to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
-                        from: 0,
-                        to: 1,
+                        from_order: 0,
+                        to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
                     },

@@ -273,6 +273,7 @@ mod settle_fills {
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
+    use proptest::prelude::*;
     use std::collections::BTreeMap;
 
     type TestState = State<VectorMemory, VectorMemory>;
@@ -766,8 +767,59 @@ mod settle_fills {
     // The old `settle_fill_ordering` proptest lived here, testing that two
     // `settle_fill` calls on independent fills commuted. `settle_fill` has
     // been retired — settlement is now a flat `Vec<BalanceOperation>` in
-    // `SettlingEvent` and commutativity falls out of the balance primitive
-    // itself (independent transfers trivially commute).
+    // `SettlingEvent`. Commutativity isn't claimed for arbitrary op sequences
+    // (two Transfers from the same debtor can fail depending on order), only
+    // for op sequences produced by `compute_balance_operations` from a valid
+    // `MatchingOutput`.
+
+    proptest! {
+        /// `compute_balance_operations` preserves structural invariants over
+        /// any `MatchingOutput` the arbitrary strategy can produce:
+        /// - never panics
+        /// - emits exactly one Quote Transfer and one Base Transfer per fill
+        /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
+        ///   the buy-taker price-improvement `Unreserve`)
+        /// This covers the fuzz shape the retired `settle_fill_ordering`
+        /// proptest exercised, moved one layer up to the pure compute fn.
+        #[test]
+        fn compute_balance_operations_matches_fill_shape(
+            output in crate::test_fixtures::arbitrary::arb_matching_output()
+        ) {
+            use crate::order::{self, PairToken};
+            use crate::state::event::BalanceOperation;
+
+            let ops = super::super::compute_balance_operations(&output);
+            let fills_len = output.fills.len();
+
+            prop_assert!(
+                ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
+                "ops.len() {} outside [{}, {}] for {} fills",
+                ops.len(), 2 * fills_len, 3 * fills_len, fills_len,
+            );
+
+            let quote_transfers = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Transfer { token: PairToken::Quote, .. }
+            )).count();
+            let base_transfers = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Transfer { token: PairToken::Base, .. }
+            )).count();
+            prop_assert_eq!(quote_transfers, fills_len);
+            prop_assert_eq!(base_transfers, fills_len);
+
+            // Unreserves only fire for buy-taker fills with strictly positive
+            // price improvement.
+            let expected_unreserves = output.fills.iter().filter(|f| {
+                f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
+            }).count();
+            let unreserves = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Unreserve { .. }
+            )).count();
+            prop_assert_eq!(unreserves, expected_unreserves);
+        }
+    }
 
     fn balance(free: u64, reserved: u64) -> Balance {
         Balance::new(free, reserved)
