@@ -430,7 +430,10 @@ mod cancel_limit_order {
             }
         );
 
-        buyer_client.cancel_limit_order(buy_id.clone()).await.unwrap();
+        buyer_client
+            .cancel_limit_order(buy_id.clone())
+            .await
+            .unwrap();
 
         assert_eq!(
             buyer_client.get_order_status(buy_id).await,
@@ -571,7 +574,9 @@ mod cancel_limit_order {
         );
         // Malformed id is also rejected cleanly.
         assert_eq!(
-            client.cancel_limit_order("not-a-valid-id".to_string()).await,
+            client
+                .cancel_limit_order("not-a-valid-id".to_string())
+                .await,
             Err(CancelLimitOrderError::OrderNotFound)
         );
         // Sanity check the malformed id doesn't trap either — round-trip via raw candid.
@@ -940,7 +945,7 @@ async fn should_fail_add_trading_pair() {
 
 #[tokio::test]
 async fn should_replay_events_on_upgrade() {
-    use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types_internal::event::EventType;
 
     /// Asserts that the values produced by each `$observe` expression are unchanged after
@@ -1024,7 +1029,11 @@ async fn should_replay_events_on_upgrade() {
         setup.dex_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
-        assert_eq!(events.len(), 4); // Init + AddTradingPair + Deposit + AddLimitOrder
+        // Init + AddTradingPair + Deposit + AddLimitOrder + Matching + Settling.
+        // The resting sell has no cross: Matching enumerates the pending seq,
+        // Settling carries no balance operations but records the Pending->Open
+        // transition.
+        assert_eq!(events.len(), 6);
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
             assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
                 user: setup.user(),
@@ -1034,6 +1043,119 @@ async fn should_replay_events_on_upgrade() {
                 quantity: Nat::from(deposit_amount),
             });
         });
+        assert_matches!(&events[4], EventType::Matching(e) => {
+            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+                book_id: 0,
+                orders: vec![0],
+            });
+        });
+        assert_matches!(&events[5], EventType::Settling(e) => {
+            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
+                book_id: 0,
+                balance_operations: vec![],
+                transitions: vec![dex_types_internal::event::OrderStatusTransition {
+                    seq: 0,
+                    status: dex_types::OrderStatus::Open,
+                }],
+            });
+        });
+    });
+
+    // 5) Crossing buy fully fills the resting sell from step 4. Settling now
+    // carries two Transfer ops and two Filled transitions; equal prices mean
+    // no Unreserve (the price-improvement path is covered in the unit test
+    // `should_replay_matching_with_price_improvement`).
+    let buyer = Principal::from_slice(&[0x42]);
+    let price: u64 = 100;
+    let quote_reserved = price * deposit_amount;
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(quote_reserved + 2 * QUOTE_LEDGER_FEE)
+        .approve(quote_reserved + QUOTE_LEDGER_FEE)
+        .deposit(quote_reserved)
+        .execute()
+        .await;
+    let buy_order_id = setup
+        .dex_client_with_caller(buyer)
+        .add_limit_order(dex_types::LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: dex_types::Side::Buy,
+            price,
+            quantity: Nat::from(deposit_amount),
+        })
+        .await
+        .unwrap();
+    // Let the matching timer fire so both orders transition to Filled before
+    // snapshotting.
+    setup.env().tick().await;
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.dex_client().get_order_status(order_id.clone()),
+        setup.dex_client().get_order_status(buy_order_id.clone()),
+        setup.dex_client().get_balance(setup.base_token_id()),
+        setup.dex_client().get_balance(setup.quote_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.base_token_id()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_balance(setup.quote_token_id()),
+    );
+    setup.assert_that_events().await.satisfy(|events| {
+        // Step 4 produced 6 events; step 5 adds Deposit (buyer) + AddLimitOrder
+        // + Matching + Settling.
+        assert_eq!(events.len(), 10);
+        assert_matches!(&events[6], EventType::Deposit(e) => {
+            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+                user: buyer,
+                token: setup.quote_token_id(),
+                amount: Nat::from(quote_reserved),
+            });
+        });
+        assert_matches!(&events[7], EventType::AddLimitOrder(e) => {
+            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+                user: buyer,
+                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 1 },
+                side: dex_types::Side::Buy,
+                price,
+                quantity: Nat::from(deposit_amount),
+            });
+        });
+        assert_matches!(&events[8], EventType::Matching(e) => {
+            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+                book_id: 0,
+                orders: vec![1],
+            });
+        });
+        assert_matches!(&events[9], EventType::Settling(e) => {
+            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
+                book_id: 0,
+                balance_operations: vec![
+                    dex_types_internal::event::BalanceOperation::Transfer {
+                        from_order: 1, // buyer seq
+                        to_order: 0,   // seller seq
+                        token: dex_types_internal::event::PairToken::Quote,
+                        amount: Nat::from(quote_reserved),
+                    },
+                    dex_types_internal::event::BalanceOperation::Transfer {
+                        from_order: 0,
+                        to_order: 1,
+                        token: dex_types_internal::event::PairToken::Base,
+                        amount: Nat::from(deposit_amount),
+                    },
+                ],
+                transitions: vec![
+                    dex_types_internal::event::OrderStatusTransition {
+                        seq: 0,
+                        status: dex_types::OrderStatus::Filled,
+                    },
+                    dex_types_internal::event::OrderStatusTransition {
+                        seq: 1,
+                        status: dex_types::OrderStatus::Filled,
+                    },
+                ],
+            });
+        });
     });
 
     setup.drop().await;
@@ -1041,6 +1163,8 @@ async fn should_replay_events_on_upgrade() {
 
 #[tokio::test]
 async fn should_withdraw_and_receive_tokens_on_ledger() {
+    use dex_types_internal::event::EventType;
+
     let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x01]);
     let client = setup.dex_client_with_caller(user);
@@ -1065,13 +1189,15 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
 
     // Withdraw half
     let withdraw_amount = 5_000_000u64;
-    let result = client
+    let response = client
         .withdraw(WithdrawRequest {
             token_id: cksol.clone(),
             amount: Nat::from(withdraw_amount),
         })
-        .await;
-    assert!(result.is_ok(), "withdrawal should succeed: {result:?}");
+        .await
+        .expect("withdrawal should succeed");
+    let expected_block_index =
+        u64::try_from(&response.block_index.0).expect("ledger block_index fits in u64");
 
     // DEX balance decreased by the full withdraw amount
     assert_eq!(
@@ -1082,6 +1208,23 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     // User received (withdraw_amount - fee) on the ledger
     let ledger_balance = setup.base_token_ledger().icrc1_balance_of(user).await;
     assert_eq!(ledger_balance, Nat::from(withdraw_amount) - fee);
+
+    // The successful withdrawal is recorded in the audit log, including the
+    // ledger block index returned from the transfer.
+    setup.assert_that_events().await.satisfy(|events| {
+        let withdraw = events
+            .iter()
+            .find(|e| matches!(e, EventType::Withdraw(_)))
+            .expect("expected a Withdraw event in the log");
+        assert_matches!(withdraw, EventType::Withdraw(e) => {
+            assert_eq!(*e, dex_types_internal::event::WithdrawEvent {
+                block_index: expected_block_index,
+                user,
+                token: cksol.clone(),
+                amount: Nat::from(withdraw_amount),
+            });
+        });
+    });
 
     setup.drop().await;
 }

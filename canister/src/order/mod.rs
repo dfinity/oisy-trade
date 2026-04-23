@@ -3,18 +3,32 @@ mod history;
 #[cfg(test)]
 mod tests;
 
-pub use book::{Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, RemovedOrder};
+pub use book::{
+    Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
+    RemovedOrder,
+};
 pub use history::OrderHistory;
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
+use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
+
+/// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
+/// concrete [`TokenId`] via [`TradingPair::token`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Decode, Encode)]
+pub enum PairToken {
+    #[n(0)]
+    Base,
+    #[n(1)]
+    Quote,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
 pub enum Side {
@@ -281,10 +295,23 @@ impl From<TokenMetadata> for dex_types::TokenMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+)]
 pub struct TradingPair {
+    #[n(0)]
     pub base: TokenId,
+    #[n(1)]
     pub quote: TokenId,
+}
+
+impl TradingPair {
+    pub fn token(&self, side: &PairToken) -> TokenId {
+        match side {
+            PairToken::Base => self.base,
+            PairToken::Quote => self.quote,
+        }
+    }
 }
 
 impl From<dex_types::TradingPair> for TradingPair {
@@ -419,7 +446,7 @@ impl Quantity {
         }
     }
 
-    pub fn is_zero(&self) -> bool {
+    pub const fn is_zero(&self) -> bool {
         self.high == 0 && self.low == 0
     }
 
@@ -646,11 +673,15 @@ impl PendingOrder {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct Order {
+    #[n(0)]
     id: OrderSeq,
+    #[n(1)]
     side: Side,
+    #[n(2)]
     price: Price,
+    #[n(3)]
     remaining_quantity: Quantity,
 }
 
@@ -681,9 +712,11 @@ impl Order {
 
 /// An order resting in the order book. Only carries the ID and remaining
 /// quantity — side and price are implicit from the book's structure.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct RestingOrder {
+    #[n(0)]
     id: OrderSeq,
+    #[n(1)]
     remaining_quantity: Quantity,
 }
 

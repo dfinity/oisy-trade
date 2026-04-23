@@ -86,13 +86,13 @@ pub fn cancel_limit_order(
     Ok(())
 }
 
-pub fn process_pending_orders() {
+pub fn process_pending_orders(runtime: &impl Runtime) {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
         None => return,
     };
 
-    state::with_state_mut(|s| s.process_pending_orders());
+    state::with_state_mut(|s| s.process_pending_orders(runtime));
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
@@ -216,11 +216,33 @@ pub async fn withdraw(
     }
 
     match outcome.result {
-        Ok(response) => Ok(response),
+        Ok(response) => {
+            // The balance debit happened synchronously before the async
+            // ledger call (for concurrency safety), so the event is appended
+            // record-only — replay re-applies the debit through
+            // `apply_state_transition`.
+            let block_index = u64::try_from(&response.block_index.0)
+                .expect("BUG: ledger block_index exceeds u64::MAX");
+            let event = state::event::WithdrawEvent {
+                block_index,
+                user: caller,
+                token: order::TokenId::from(token_id),
+                amount,
+            };
+            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            Ok(response)
+        }
         Err(e) => {
-            // Credit back on failure so the user doesn't lose funds.
+            // Credit back on failure so the user doesn't lose funds. No event
+            // is emitted: replay then sees no WithdrawEvent for the failed
+            // call, mirroring the net-zero state mutation on the primary path.
             state::with_state_mut(|s| {
-                s.deposit(caller, order::TokenId::from(token_id), amount);
+                s.deposit(
+                    caller,
+                    order::TokenId::from(token_id),
+                    amount,
+                    state::StableMemoryOptions::Write,
+                );
             });
             Err(e)
         }

@@ -1,9 +1,10 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
+    AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
+    Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -47,8 +48,11 @@ pub enum WorstCaseEvent {
     Upgrade,
     AddTradingPair,
     Deposit,
+    Withdraw,
     AddLimitOrder,
     CancelLimitOrder,
+    Matching,
+    Settling,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -58,11 +62,19 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Upgrade(_) => Self::Upgrade,
             EventType::AddTradingPair(_) => Self::AddTradingPair,
             EventType::Deposit(_) => Self::Deposit,
+            EventType::Withdraw(_) => Self::Withdraw,
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
             EventType::CancelLimitOrder(_) => Self::CancelLimitOrder,
+            EventType::Matching(_) => Self::Matching,
+            EventType::Settling(_) => Self::Settling,
         }
     }
 }
+
+/// Upper bound on orders processed per matching round, used to size the
+/// worst-case `Matching` / `Settling` fixtures. Matches the
+/// `bench_process_pending_orders_1000` benchmark workload.
+pub const MAX_ORDERS_PER_MATCHING_ROUND: usize = 1_000;
 
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.
@@ -72,8 +84,11 @@ impl WorstCaseEvent {
             Self::Upgrade => upgrade_restricted(),
             Self::AddTradingPair => add_trading_pair(),
             Self::Deposit => deposit(max_quantity()),
+            Self::Withdraw => withdraw(max_quantity()),
             Self::AddLimitOrder => add_limit_order(),
             Self::CancelLimitOrder => cancel_limit_order(),
+            Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
+            Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
         })
     }
 
@@ -89,8 +104,11 @@ impl WorstCaseEvent {
             Self::Upgrade => 328,
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
+            Self::Withdraw => 104,
             Self::AddLimitOrder => 97,
             Self::CancelLimitOrder => 66,
+            Self::Matching => 10_027,
+            Self::Settling => 105_330,
         }
     }
 }
@@ -158,6 +176,62 @@ fn deposit(amount: Quantity) -> EventType {
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
+    })
+}
+
+fn withdraw(amount: Quantity) -> EventType {
+    EventType::Withdraw(WithdrawEvent {
+        block_index: u64::MAX,
+        user: max_principal(0),
+        token: TokenId::new(max_principal(1)),
+        amount,
+    })
+}
+
+fn matching(order_count: usize) -> EventType {
+    EventType::Matching(MatchingEvent {
+        book_id: OrderBookId::new(u64::MAX),
+        orders: (0..order_count as u64)
+            .map(|i| OrderSeq::new(u64::MAX - i))
+            .collect(),
+    })
+}
+
+fn settling(order_count: usize) -> EventType {
+    // Each fill produces 3 operations (quote transfer, quote unreserve for
+    // buy-taker price improvement, base transfer) — the maximum per fill.
+    let mut balance_operations = Vec::with_capacity(order_count * 3);
+    for i in 0..order_count as u64 {
+        let taker = OrderSeq::new(2 * i);
+        let maker = OrderSeq::new(2 * i + 1);
+        balance_operations.push(BalanceOperation::Transfer {
+            from_order: taker,
+            to_order: maker,
+            token: PairToken::Quote,
+            amount: max_quantity(),
+        });
+        balance_operations.push(BalanceOperation::Unreserve {
+            order: taker,
+            token: PairToken::Quote,
+            amount: max_quantity(),
+        });
+        balance_operations.push(BalanceOperation::Transfer {
+            from_order: maker,
+            to_order: taker,
+            token: PairToken::Base,
+            amount: max_quantity(),
+        });
+    }
+    let transitions = (0..order_count as u64)
+        .map(|i| OrderStatusTransition {
+            seq: OrderSeq::new(u64::MAX - i),
+            status: OrderStatus::Filled,
+        })
+        .collect();
+    EventType::Settling(SettlingEvent {
+        book_id: OrderBookId::new(u64::MAX),
+        balance_operations,
+        transitions,
     })
 }
 

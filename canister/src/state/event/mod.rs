@@ -1,5 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
+    TickSize, TokenId, TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -32,6 +33,12 @@ pub enum EventType {
     #[n(4)]
     AddLimitOrder(#[n(0)] AddLimitOrderEvent),
     #[n(5)]
+    Settling(#[n(0)] SettlingEvent),
+    #[n(6)]
+    Matching(#[n(0)] MatchingEvent),
+    #[n(7)]
+    Withdraw(#[n(0)] WithdrawEvent),
+    #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
 }
 
@@ -63,6 +70,22 @@ pub struct DepositEvent {
     pub amount: Quantity,
 }
 
+/// A successful withdrawal: `amount` of `token` was debited from `user`'s free
+/// balance and the corresponding ledger transfer to the user's account
+/// completed at `block_index`. Failed withdrawals (ledger errors) do not
+/// appear in the log.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct WithdrawEvent {
+    #[n(0)]
+    pub block_index: u64,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    pub user: Principal,
+    #[n(2)]
+    pub token: TokenId,
+    #[n(3)]
+    pub amount: Quantity,
+}
+
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddLimitOrderEvent {
     #[cbor(n(0), with = "icrc_cbor::principal")]
@@ -75,6 +98,68 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
+}
+
+/// Orders processed by the matching engine.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct MatchingEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub orders: Vec<OrderSeq>,
+}
+
+/// Outcome of the matching engine:
+/// * balance transitions between maker/taker
+/// * order transitions
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct SettlingEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub balance_operations: Vec<BalanceOperation>,
+    #[n(2)]
+    pub transitions: Vec<OrderStatusTransition>,
+}
+
+/// Participants are identified by `OrderSeq` — the apply path resolves each
+/// seq to a `Principal` via `OrderHistory`. `token` is a `PairToken` selector
+/// resolved to a concrete `TokenId` via the enclosing `SettlingEvent`'s
+/// `book_id`. This keeps each op compact on the wire while still reconstructing
+/// enough context at apply time.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub enum BalanceOperation {
+    #[n(0)]
+    Transfer {
+        #[n(0)]
+        from_order: OrderSeq,
+        #[n(1)]
+        to_order: OrderSeq,
+        #[n(2)]
+        token: PairToken,
+        #[n(3)]
+        amount: Quantity,
+    },
+    /// Today's only producer is the buy-taker price-improvement refund
+    /// (always quote). The `token` field stays explicit so a future cancel
+    /// flow can unreserve base as well.
+    #[n(1)]
+    Unreserve {
+        #[n(0)]
+        order: OrderSeq,
+        #[n(1)]
+        token: PairToken,
+        #[n(2)]
+        amount: Quantity,
+    },
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct OrderStatusTransition {
+    #[n(0)]
+    pub seq: OrderSeq,
+    #[n(1)]
+    pub status: OrderStatus,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

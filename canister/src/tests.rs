@@ -293,7 +293,12 @@ mod add_limit_order {
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
         state::with_state_mut(|s| {
-            s.deposit(DEFAULT_USER, pair.quote, required.into());
+            s.deposit(
+                DEFAULT_USER,
+                pair.quote,
+                required.into(),
+                state::StableMemoryOptions::Write,
+            );
         });
 
         add_limit_order(order, &runtime).unwrap();
@@ -322,7 +327,12 @@ mod add_limit_order {
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
         state::with_state_mut(|s| {
-            s.deposit(DEFAULT_USER, pair.base, quantity.into());
+            s.deposit(
+                DEFAULT_USER,
+                pair.base,
+                quantity.into(),
+                state::StableMemoryOptions::Write,
+            );
         });
 
         add_limit_order(order, &runtime).unwrap();
@@ -400,7 +410,7 @@ mod cancel_limit_order {
         let mut sell_request = limit_order_request();
         sell_request.side = dex_types::Side::Sell;
         add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
-        crate::process_pending_orders();
+        crate::process_pending_orders(&mock_runtime_for(buyer));
 
         let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
@@ -453,7 +463,7 @@ mod get_order_status {
         sell_request.side = dex_types::Side::Sell;
         let sell_id = add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
 
-        crate::process_pending_orders();
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
         assert_eq!(get_order_status(sell_id), OrderStatus::Filled);
@@ -477,6 +487,8 @@ mod get_order_status {
 
 mod withdraw {
     use crate::order::{Quantity, TokenId};
+    use crate::state::event::{Event, EventType, WithdrawEvent};
+    use crate::storage;
     use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
     use crate::{state, withdraw};
     use candid::{Nat, Principal, encode_args};
@@ -504,7 +516,12 @@ mod withdraw {
                     decimals: 8,
                 },
             );
-            s.deposit(USER, TokenId::from(token_id()), Quantity::from(amount));
+            s.deposit(
+                USER,
+                TokenId::from(token_id()),
+                Quantity::from(amount),
+                state::StableMemoryOptions::Write,
+            );
         });
     }
 
@@ -558,6 +575,35 @@ mod withdraw {
                 Nat::from(expected)
             );
         });
+    }
+
+    /// Returns the sole `WithdrawEvent` recorded in the event log, or panics
+    /// if there are zero or more than one.
+    fn unique_withdraw_event() -> WithdrawEvent {
+        let withdraws: Vec<WithdrawEvent> = storage::with_event_iter(|it| {
+            it.filter_map(|Event { payload, .. }| match payload {
+                EventType::Withdraw(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+        });
+        assert_eq!(
+            withdraws.len(),
+            1,
+            "expected exactly one WithdrawEvent, got {}",
+            withdraws.len()
+        );
+        withdraws.into_iter().next().unwrap()
+    }
+
+    /// Asserts the event log contains no `WithdrawEvent`s. Use this on failure
+    /// paths where the withdrawal did not complete.
+    fn assert_no_withdraw_event() {
+        let count = storage::with_event_iter(|it| {
+            it.filter(|Event { payload, .. }| matches!(payload, EventType::Withdraw(_)))
+                .count()
+        });
+        assert_eq!(count, 0, "expected no WithdrawEvent, got {count}");
     }
 
     fn decode_transfer_arg(runtime: &CapturingRuntime, call_index: usize) -> TransferArg {
@@ -622,6 +668,8 @@ mod withdraw {
         let arg1 = decode_transfer_arg(&runtime, 1);
         assert_eq!(arg1.amount, Nat::from(deposit - 5_000));
         assert_eq!(arg1.fee, Some(Nat::from(5_000u64)));
+        // Failed withdrawals leave no event in the log.
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -654,6 +702,7 @@ mod withdraw {
         );
         assert_balance(deposit);
         assert_cached_fee(5_000);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -686,6 +735,7 @@ mod withdraw {
             ))
         );
         assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -741,6 +791,16 @@ mod withdraw {
         let arg1 = decode_transfer_arg(&runtime, 1);
         assert_eq!(arg1.amount, Nat::from(withdraw_amount - real_fee));
         assert_eq!(arg1.fee, Some(Nat::from(real_fee)));
+        // The successful withdrawal is recorded with the ledger block_index.
+        assert_eq!(
+            unique_withdraw_event(),
+            WithdrawEvent {
+                block_index: 42,
+                user: USER,
+                token: TokenId::from(token_id()),
+                amount: Quantity::from(withdraw_amount),
+            }
+        );
     }
 
     #[tokio::test]
@@ -766,6 +826,7 @@ mod withdraw {
                 token_id: token_id(),
             })
         );
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -794,6 +855,7 @@ mod withdraw {
         );
         // Balance untouched — no debit happened.
         assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 
     #[tokio::test]
@@ -841,6 +903,36 @@ mod withdraw {
         let arg0 = decode_transfer_arg(&runtime, 0);
         assert_eq!(arg0.amount, Nat::from(1u64));
         assert_eq!(arg0.fee, Some(Nat::from(withdraw_amount - 1)));
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_not_emit_event_on_insufficient_balance() {
+        let deposit = 1_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No ledger expectation — the user-balance check fails before the
+        // async call is made.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit + 1),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::InsufficientBalance {
+                available: Nat::from(deposit),
+            })
+        );
+        assert_balance(deposit);
+        assert_no_withdraw_event();
     }
 }
 

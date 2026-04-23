@@ -1,4 +1,5 @@
 use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
+use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -185,15 +186,22 @@ impl OrderBook {
         self.next_seq.increment();
     }
 
-    /// Drain the pending queue and match each order against the book.
-    ///
-    /// Returns fills (for settlement) and the sequences of orders that
-    /// transitioned to resting (for status tracking).
-    pub fn process_pending_orders(&mut self) -> MatchingOutput {
+    /// Match exactly the given pending-order sequences, in order, against
+    /// the book.
+    pub fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
-        while let Some(order) = self.pending_orders.pop_front() {
+        for expected_seq in expected_seqs {
+            let order = self
+                .pending_orders
+                .pop_front()
+                .expect("BUG: fewer pending orders than expected sequences");
+            assert_eq!(
+                order.id(),
+                *expected_seq,
+                "BUG: pending order seq mismatch at the head of the queue"
+            );
             match self.match_order(order) {
                 Ok(result) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
@@ -254,10 +262,7 @@ impl OrderBook {
     /// is not in either location (e.g. fully filled or never placed).
     pub fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
         if let Some(pos) = self.pending_orders.iter().position(|o| o.id() == seq) {
-            let order = self
-                .pending_orders
-                .remove(pos)
-                .expect("position is valid");
+            let order = self.pending_orders.remove(pos).expect("position is valid");
             return Some(RemovedOrder {
                 side: order.side(),
                 price: order.price(),
@@ -279,6 +284,11 @@ impl OrderBook {
 
     pub fn pending_orders_len(&self) -> usize {
         self.pending_orders.len()
+    }
+
+    /// FIFO sequence numbers of the orders currently waiting to be matched.
+    pub fn pending_order_seqs(&self) -> impl Iterator<Item = OrderSeq> + '_ {
+        self.pending_orders.iter().map(|order| order.id())
     }
 
     pub fn bids_len(&self) -> usize {
@@ -365,13 +375,16 @@ fn remove_from_level<K: Ord>(
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
 /// orders that began resting in the book, and orders that were fully filled.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct MatchingOutput {
     /// Fills executed during this matching round, in execution order.
+    #[n(0)]
     pub fills: Vec<Fill>,
     /// Orders that were not fully filled and are now resting in the book.
+    #[n(1)]
     pub resting_orders: BTreeSet<OrderSeq>,
     /// Orders that were fully filled and removed from the book.
+    #[n(2)]
     pub filled_orders: BTreeSet<OrderSeq>,
 }
 
@@ -416,19 +429,25 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
+    #[n(0)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
+    #[n(1)]
     pub taker_side: Side,
     /// The limit price of the taker order.
+    #[n(2)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
+    #[n(3)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
+    #[n(4)]
     pub maker_price: Price,
     /// The quantity filled.
+    #[n(5)]
     pub quantity: Quantity,
 }
 
@@ -455,4 +474,124 @@ pub enum MatchOrderError {
         quantity: Quantity,
         lot_size: LotSize,
     },
+}
+
+/// CBOR-encoded view of [`OrderBook`] used for pre/post-upgrade persistence.
+/// The derived `resting_orders` index is intentionally omitted and rebuilt
+/// from `bids` + `asks` in `From<OrderBookSnapshot> for OrderBook`.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct OrderBookSnapshot {
+    #[n(0)]
+    pub id: OrderBookId,
+    #[n(1)]
+    pub next_seq: OrderSeq,
+    #[n(2)]
+    pub tick_size: TickSize,
+    #[n(3)]
+    pub lot_size: LotSize,
+    #[n(4)]
+    pub pending_orders: Vec<Order>,
+    /// Bid side, stored with the natural (un-reversed) price. Converted back
+    /// to a `BTreeMap<Reverse<Price>, …>` on restore.
+    #[n(5)]
+    pub bids: Vec<PriceLevel>,
+    #[n(6)]
+    pub asks: Vec<PriceLevel>,
+    #[n(7)]
+    pub filled_orders: Vec<OrderSeq>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PriceLevel {
+    #[n(0)]
+    pub price: Price,
+    #[n(1)]
+    pub orders: Vec<RestingOrder>,
+}
+
+impl From<&OrderBook> for OrderBookSnapshot {
+    fn from(book: &OrderBook) -> Self {
+        Self {
+            id: book.id,
+            next_seq: book.next_seq,
+            tick_size: book.tick_size,
+            lot_size: book.lot_size,
+            pending_orders: book.pending_orders.iter().cloned().collect(),
+            bids: book
+                .bids
+                .iter()
+                .map(|(Reverse(price), orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            asks: book
+                .asks
+                .iter()
+                .map(|(price, orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            filled_orders: book.filled_orders.iter().copied().collect(),
+        }
+    }
+}
+
+impl From<OrderBookSnapshot> for OrderBook {
+    fn from(snapshot: OrderBookSnapshot) -> Self {
+        let pending_orders: VecDeque<Order> = snapshot.pending_orders.into_iter().collect();
+        let mut bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut asks: BTreeMap<Price, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut resting_orders: BTreeMap<OrderSeq, (Side, Price)> = BTreeMap::new();
+
+        for level in snapshot.bids {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Buy, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                bids.insert(Reverse(price), VecDeque::from(orders))
+                    .is_none(),
+                "invalid order book snapshot: duplicate bid price level {:?}",
+                price
+            );
+        }
+        for level in snapshot.asks {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Sell, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                asks.insert(price, VecDeque::from(orders)).is_none(),
+                "invalid order book snapshot: duplicate ask price level {:?}",
+                price
+            );
+        }
+
+        let filled_orders = snapshot.filled_orders.into_iter().collect();
+        Self {
+            id: snapshot.id,
+            next_seq: snapshot.next_seq,
+            tick_size: snapshot.tick_size,
+            lot_size: snapshot.lot_size,
+            pending_orders,
+            bids,
+            asks,
+            resting_orders,
+            filled_orders,
+        }
+    }
 }

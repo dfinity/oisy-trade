@@ -1,6 +1,9 @@
 mod balance {
     use crate::balance::{Balance, InsufficientBalanceError};
     use crate::order::Quantity;
+    use crate::test_fixtures::arbitrary::arb_balance;
+    use ic_stable_structures::Storable;
+    use proptest::prelude::*;
 
     #[test]
     fn should_reserve_from_free_balance() {
@@ -16,7 +19,7 @@ mod balance {
     fn should_fail_to_reserve_more_than_free() {
         let mut balance = Balance::zero();
         balance.deposit(Quantity::from(50));
-        let balance_before_reserve = balance.clone();
+        let balance_before_reserve = balance;
 
         assert_eq!(
             balance.reserve(Quantity::from(100)).unwrap_err(),
@@ -60,7 +63,7 @@ mod balance {
     #[test]
     fn should_fail_to_withdraw_more_than_free() {
         let mut balance = Balance::new(50u64, 30u64);
-        let balance_before = balance.clone();
+        let balance_before = balance;
 
         assert_eq!(
             balance.withdraw(Quantity::from(60)).unwrap_err(),
@@ -90,141 +93,14 @@ mod balance {
         let mut balance = Balance::new(100u64, 10u64);
         balance.unreserve(Quantity::from(20));
     }
-}
 
-mod user_balance {
-    use crate::balance::user::UserBalance;
-    use crate::balance::{Balance, InsufficientBalanceError};
-    use crate::order::Quantity;
-    use candid::Principal;
-
-    #[test]
-    fn should_deposit_to_new_user() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(100u64, 0u64)));
-    }
-
-    #[test]
-    fn should_deposit_to_existing_user() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(50u64));
-        ub.deposit(alice(), Quantity::from(30u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(80u64, 0u64)));
-    }
-
-    #[test]
-    fn should_reserve_from_deposited() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-
-        ub.reserve(&alice(), Quantity::from(40u64)).unwrap();
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(60u64, 40u64)));
-    }
-
-    #[test]
-    fn should_fail_reserve_with_insufficient_free() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(10u64));
-
-        let err = ub.reserve(&alice(), Quantity::from(50u64)).unwrap_err();
-
-        assert_eq!(
-            err,
-            InsufficientBalanceError {
-                available: Quantity::from(10u64),
-                required: Quantity::from(50u64),
-            }
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: user balance missing for reserve")]
-    fn should_panic_reserve_missing_user() {
-        let mut ub = UserBalance::default();
-        let _ = ub.reserve(&alice(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_transfer_reserved_to_free() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.deposit(bob(), Quantity::from(10u64));
-        ub.reserve(&alice(), Quantity::from(100u64)).unwrap();
-
-        // Bob exists
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(10u64, 0u64)));
-
-        ub.transfer(&alice(), &bob(), Quantity::from(60u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(0u64, 40u64)));
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(70u64, 0u64)));
-    }
-
-    #[test]
-    fn should_transfer_creating_creditor_entry() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(50u64));
-        ub.reserve(&alice(), Quantity::from(50u64)).unwrap();
-
-        // Bob doesn't exist yet
-        assert_eq!(ub.get(&bob()), None);
-        ub.transfer(&alice(), &bob(), Quantity::from(50u64));
-
-        assert_eq!(ub.get(&bob()), Some(&Balance::new(50u64, 0u64)));
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: debtor balance missing")]
-    fn should_panic_transfer_missing_debtor() {
-        let mut ub = UserBalance::default();
-        ub.transfer(&alice(), &bob(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_transfer_self_trade() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.reserve(&alice(), Quantity::from(60u64)).unwrap();
-
-        ub.transfer(&alice(), &alice(), Quantity::from(60u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(100u64, 0u64)));
-    }
-
-    #[test]
-    fn should_unreserve() {
-        let mut ub = UserBalance::default();
-        ub.deposit(alice(), Quantity::from(100u64));
-        ub.reserve(&alice(), Quantity::from(80u64)).unwrap();
-
-        ub.unreserve(&alice(), Quantity::from(30u64));
-
-        assert_eq!(ub.get(&alice()), Some(&Balance::new(50u64, 50u64)));
-    }
-
-    #[test]
-    #[should_panic(expected = "BUG: user balance missing for unreserve")]
-    fn should_panic_unreserve_missing_user() {
-        let mut ub = UserBalance::default();
-        ub.unreserve(&alice(), Quantity::from(10u64));
-    }
-
-    #[test]
-    fn should_return_none_for_unknown_user() {
-        let ub = UserBalance::default();
-        assert_eq!(ub.get(&alice()), None);
-    }
-
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
-    }
-
-    fn bob() -> Principal {
-        Principal::from_slice(&[0x02])
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_stable_bytes(balance in arb_balance()) {
+            let bytes = balance.to_bytes();
+            let decoded = Balance::from_bytes(bytes);
+            prop_assert_eq!(decoded, balance);
+        }
     }
 }
 
@@ -240,7 +116,7 @@ mod token_balance {
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(100u64, 0u64))
+            Some(Balance::new(100u64, 0u64))
         );
     }
 
@@ -248,15 +124,6 @@ mod token_balance {
     fn should_return_none_for_unknown_balance() {
         let tb = TokenBalance::default();
         assert_eq!(tb.get_balance(&alice(), &token_a()), None);
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::ZERO);
-    }
-
-    #[test]
-    fn should_get_free_balance() {
-        let mut tb = TokenBalance::default();
-        tb.deposit(alice(), token_a(), Quantity::from(100u64));
-
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(100u64));
     }
 
     #[test]
@@ -269,7 +136,7 @@ mod token_balance {
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(60u64, 40u64))
+            Some(Balance::new(60u64, 40u64))
         );
     }
 
@@ -279,8 +146,14 @@ mod token_balance {
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
         tb.deposit(alice(), token_b(), Quantity::from(200u64));
 
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(100u64));
-        assert_eq!(tb.get_free(&alice(), &token_b()), Quantity::from(200u64));
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(100u64, 0u64))
+        );
+        assert_eq!(
+            tb.get_balance(&alice(), &token_b()),
+            Some(Balance::new(200u64, 0u64))
+        );
     }
 
     #[test]
@@ -291,11 +164,14 @@ mod token_balance {
         tb.withdraw(&alice(), &token_a(), Quantity::from(40u64))
             .unwrap();
 
-        assert_eq!(tb.get_free(&alice(), &token_a()), Quantity::from(60u64));
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(60u64, 0u64))
+        );
     }
 
     #[test]
-    fn should_fail_to_withdraw_from_missing_token() {
+    fn should_fail_to_withdraw_from_missing_entry() {
         let mut tb = TokenBalance::default();
 
         let err = tb
@@ -312,31 +188,85 @@ mod token_balance {
     }
 
     #[test]
-    #[should_panic(expected = "BUG: token balance missing")]
-    fn should_panic_reserve_missing_token() {
+    fn should_fail_to_reserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        let _ = tb.reserve(&alice(), &token_a(), Quantity::from(10u64));
+
+        let err = tb
+            .reserve(&alice(), &token_a(), Quantity::from(10u64))
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: Quantity::from(10u64),
+            }
+        );
     }
 
     #[test]
-    fn should_transfer_via_token_mut() {
+    fn should_transfer_between_users() {
         let bob = Principal::from_slice(&[0x02]);
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
         tb.reserve(&alice(), &token_a(), Quantity::from(100u64))
             .unwrap();
 
-        tb.token_mut(&token_a())
-            .transfer(&alice(), &bob, Quantity::from(100u64));
+        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(100u64));
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
-            Some(&Balance::new(0u64, 0u64))
+            Some(Balance::new(0u64, 0u64))
         );
         assert_eq!(
             tb.get_balance(&bob, &token_a()),
-            Some(&Balance::new(100u64, 0u64))
+            Some(Balance::new(100u64, 0u64))
         );
+    }
+
+    #[test]
+    fn should_transfer_self_trade_preserves_free_and_clears_reserved() {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(100u64));
+        tb.reserve(&alice(), &token_a(), Quantity::from(60u64))
+            .unwrap();
+
+        tb.transfer(&alice(), &alice(), &token_a(), Quantity::from(60u64));
+
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(100u64, 0u64))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: debtor balance missing")]
+    fn should_panic_transfer_missing_debtor() {
+        let bob = Principal::from_slice(&[0x02]);
+        let mut tb = TokenBalance::default();
+        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(10u64));
+    }
+
+    #[test]
+    fn should_unreserve_back_to_free() {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(100u64));
+        tb.reserve(&alice(), &token_a(), Quantity::from(80u64))
+            .unwrap();
+
+        tb.unreserve(&alice(), &token_a(), Quantity::from(30u64));
+
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(50u64, 50u64))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: user balance missing for unreserve")]
+    fn should_panic_unreserve_missing_entry() {
+        let mut tb = TokenBalance::default();
+        tb.unreserve(&alice(), &token_a(), Quantity::from(10u64));
     }
 
     fn alice() -> Principal {
@@ -349,5 +279,21 @@ mod token_balance {
 
     fn token_b() -> TokenId {
         TokenId::new(Principal::from_slice(&[0xB0]))
+    }
+}
+
+mod key {
+    use super::super::BalanceKey;
+    use crate::test_fixtures::arbitrary::arb_balance_key;
+    use ic_stable_structures::Storable;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_stable_bytes(key in arb_balance_key()) {
+            let bytes = key.to_bytes();
+            let decoded = BalanceKey::from_bytes(bytes);
+            prop_assert_eq!(decoded, key);
+        }
     }
 }

@@ -1,8 +1,10 @@
 use super::{StableMemoryOptions, State};
 use crate::Runtime;
+use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
+    WithdrawEvent,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
@@ -11,13 +13,27 @@ use ic_stable_structures::Memory;
 #[cfg(test)]
 mod tests;
 
-pub fn process_event<M: Memory>(state: &mut State<M>, payload: EventType, runtime: &impl Runtime) {
+pub fn process_event<MH: Memory, MB: Memory>(
+    state: &mut State<MH, MB>,
+    payload: EventType,
+    runtime: &impl Runtime,
+) {
     apply_state_transition(state, &payload, StableMemoryOptions::Write);
     storage::record_event(runtime.time(), payload);
 }
 
-fn apply_state_transition<M: Memory>(
-    state: &mut State<M>,
+/// Append `payload` to the event log without applying it to `state`. Use this
+/// when the primary path has already mutated state through a direct call
+/// (e.g. `withdraw`, where the debit has to happen *before* the async ledger
+/// call for concurrency safety). Replaying the event through
+/// [`apply_state_transition`] reproduces the direct mutation, so replay
+/// equivalence is preserved.
+pub fn record_event(payload: EventType, runtime: &impl Runtime) {
+    storage::record_event(runtime.time(), payload);
+}
+
+fn apply_state_transition<MH: Memory, MB: Memory>(
+    state: &mut State<MH, MB>,
     payload: &EventType,
     persistence: StableMemoryOptions,
 ) {
@@ -59,7 +75,19 @@ fn apply_state_transition<M: Memory>(
             token,
             amount,
         }) => {
-            state.deposit(*user, *token, *amount);
+            state.deposit(*user, *token, *amount, persistence);
+        }
+        EventType::Withdraw(WithdrawEvent {
+            block_index: _,
+            user,
+            token,
+            amount,
+        }) => {
+            if matches!(persistence, StableMemoryOptions::Write) {
+                state
+                    .withdraw(*user, *token, *amount)
+                    .expect("BUG: insufficient balance for withdraw event");
+            }
         }
         EventType::AddLimitOrder(AddLimitOrderEvent {
             user,
@@ -78,15 +106,23 @@ fn apply_state_transition<M: Memory>(
             state.record_limit_order(*user, book_id, order, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { user, order_id }) => {
-            state.record_cancel_limit_order(*user, *order_id, persistence);
+            state.record_cancel_order(*user, *order_id, persistence);
+        }
+        EventType::Matching(event) => {
+            state.record_matching_event(event, persistence);
+        }
+        EventType::Settling(event) => {
+            state.record_settling_event(event, persistence);
         }
     }
 }
 
-pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
+pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
-    order_history: OrderHistory<M>,
-) -> State<M> {
+    order_history: OrderHistory<MH>,
+    balances: TokenBalance<MB>,
+    persistence: StableMemoryOptions,
+) -> State<MH, MB> {
     let mut events_iter = events.into_iter();
     let mut state = match events_iter
         .next()
@@ -95,11 +131,12 @@ pub fn replay_events<M: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history).expect("BUG: state initialization should succeed"),
+        } => State::new(init_arg, order_history, balances)
+            .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, StableMemoryOptions::Skip);
+        apply_state_transition(&mut state, &event.payload, persistence);
     }
     state
 }
