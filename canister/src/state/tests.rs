@@ -192,7 +192,7 @@ mod add_limit_order {
 
 mod cancel_limit_order {
     use crate::balance::Balance;
-    use crate::order::{OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side};
+    use crate::order::{OrderBookId, OrderId, OrderStatus, Price, Quantity, Side};
     use crate::state::audit::replay_events;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event,
@@ -202,6 +202,7 @@ mod cancel_limit_order {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
         self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        place_order,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode};
@@ -429,35 +430,6 @@ mod cancel_limit_order {
         state
     }
 
-    fn place_order(
-        state: &mut State<VectorMemory, VectorMemory>,
-        user: Principal,
-        side: Side,
-        price: u64,
-        quantity: impl Into<Quantity>,
-    ) -> OrderId {
-        let pair = icp_ckbtc_trading_pair();
-        let pending = PendingOrder {
-            side,
-            price: Price::new(price),
-            quantity: quantity.into(),
-        };
-        let (token, required) = match pending.side {
-            Side::Buy => (
-                pair.quote,
-                pending
-                    .price
-                    .checked_mul_quantity(&pending.quantity)
-                    .unwrap(),
-            ),
-            Side::Sell => (pair.base, pending.quantity),
-        };
-        state.deposit(user, token, required, StableMemoryOptions::Write);
-        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-        state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
-        order_id
-    }
-
     fn balance(free: u64, reserved: u64) -> Balance {
         Balance::new(free, reserved)
     }
@@ -537,8 +509,8 @@ mod validate_overflow_invariant {
 
 mod settle_fills {
     use crate::balance::Balance;
-    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
-    use crate::state::{StableMemoryOptions, State};
+    use crate::order::{OrderBookId, Price, Quantity, Side};
+    use crate::state::State;
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
@@ -771,8 +743,8 @@ mod settle_fills {
         let user = Principal::from_slice(&[0x42]);
 
         // Same user places both buy and sell
-        place_buy_order_for(&mut state, user, 100, lot);
-        place_sell_order_for(&mut state, user, 100, lot);
+        test_fixtures::place_order(&mut state, user, Side::Buy, 100, lot);
+        test_fixtures::place_order(&mut state, user, Side::Sell, 100, lot);
 
         let base_before = state.get_balance(&user, &pair.base);
         let quote_before = state.get_balance(&user, &pair.quote);
@@ -818,8 +790,8 @@ mod settle_fills {
         let seller_b = Principal::from_slice(&[0x0B]);
 
         // Two sellers place 1 lot each at different prices
-        place_sell_order_for(&mut state, seller_a, 90, lot);
-        place_sell_order_for(&mut state, seller_b, 100, lot);
+        test_fixtures::place_order(&mut state, seller_a, Side::Sell, 90, lot);
+        test_fixtures::place_order(&mut state, seller_b, Side::Sell, 100, lot);
 
         // Buy taker sweeps both
         place_buy_order(&mut state, 100, 2 * lot);
@@ -897,7 +869,7 @@ mod settle_fills {
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
-        place_buy_order_for(state, BUYER, price, quantity)
+        test_fixtures::place_order(state, BUYER, Side::Buy, price, quantity)
     }
 
     fn place_sell_order(
@@ -905,54 +877,7 @@ mod settle_fills {
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
-        place_sell_order_for(state, SELLER, price, quantity)
-    }
-
-    fn place_buy_order_for(
-        state: &mut TestState,
-        user: Principal,
-        price: u64,
-        quantity: impl Into<Quantity>,
-    ) -> crate::order::OrderId {
-        place_order(state, user, Side::Buy, price, quantity)
-    }
-
-    fn place_sell_order_for(
-        state: &mut TestState,
-        user: Principal,
-        price: u64,
-        quantity: impl Into<Quantity>,
-    ) -> crate::order::OrderId {
-        place_order(state, user, Side::Sell, price, quantity)
-    }
-
-    fn place_order(
-        state: &mut TestState,
-        user: Principal,
-        side: Side,
-        price: u64,
-        quantity: impl Into<Quantity>,
-    ) -> crate::order::OrderId {
-        let pair = icp_ckbtc_trading_pair();
-        let pending = PendingOrder {
-            side,
-            price: Price::new(price),
-            quantity: quantity.into(),
-        };
-        let deposit = match pending.side {
-            Side::Buy => (
-                pair.quote,
-                pending
-                    .price
-                    .checked_mul_quantity(&pending.quantity)
-                    .unwrap(),
-            ),
-            Side::Sell => (pair.base, pending.quantity),
-        };
-        state.deposit(user, deposit.0, deposit.1, StableMemoryOptions::Write);
-        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-        state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
-        order_id
+        test_fixtures::place_order(state, SELLER, Side::Sell, price, quantity)
     }
 
     mod order_status {

@@ -2,14 +2,14 @@ pub mod event;
 
 use crate::balance::TokenBalance;
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
-    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderSeq, PendingOrder,
+    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
-use ic_stable_structures::VectorMemory;
+use ic_stable_structures::{Memory, VectorMemory};
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -193,6 +193,39 @@ pub fn init_state_with_order_book() {
             LOT_SIZE,
         );
     });
+}
+
+/// Deposit exactly the reserve needed to cover a `side`/`price`/`quantity`
+/// limit order on the default trading pair, then place the order against
+/// `state`. Returns the assigned `OrderId`. Consolidates the various
+/// `place_{buy,sell}_order[_for]` helpers used across unit tests.
+pub fn place_order<MH: Memory, MB: Memory>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    side: Side,
+    price: u64,
+    quantity: impl Into<Quantity>,
+) -> OrderId {
+    let pair = icp_ckbtc_trading_pair();
+    let pending = PendingOrder {
+        side,
+        price: Price::new(price),
+        quantity: quantity.into(),
+    };
+    let (token, required) = match pending.side {
+        Side::Buy => (
+            pair.quote,
+            pending
+                .price
+                .checked_mul_quantity(&pending.quantity)
+                .unwrap(),
+        ),
+        Side::Sell => (pair.base, pending.quantity),
+    };
+    state.deposit(user, token, required, StableMemoryOptions::Write);
+    let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    order_id
 }
 
 /// Fund the given user with a large balance for both tokens of the default
