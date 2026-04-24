@@ -294,13 +294,40 @@ impl OrderBook {
     }
 }
 
+/// Sum the remaining quantities of every resting order at a price level.
+/// Saturates to [`Quantity::MAX`] on overflow so a query can never trap.
+/// Overflow is practically unreachable — it would require aggregating
+/// resting orders whose combined size exceeds 2^256 - 1.
 fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
-    queue
-        .iter()
-        .try_fold(Quantity::ZERO, |acc, order| {
-            acc.checked_add(*order.remaining_quantity())
-        })
-        .expect("BUG: aggregate quantity at a price level overflowed u256")
+    queue.iter().fold(Quantity::ZERO, |acc, order| {
+        acc.checked_add(*order.remaining_quantity())
+            .unwrap_or(Quantity::MAX)
+    })
+}
+
+#[cfg(test)]
+mod sum_remaining_tests {
+    use super::*;
+    use crate::order::{OrderSeq, PendingOrder};
+
+    fn resting(quantity: Quantity) -> RestingOrder {
+        RestingOrder::from(
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(1),
+                quantity,
+            }
+            .into_order(OrderSeq::new(0)),
+        )
+    }
+
+    #[test]
+    fn should_saturate_on_u256_overflow() {
+        let mut queue = VecDeque::new();
+        queue.push_back(resting(Quantity::MAX));
+        queue.push_back(resting(Quantity::from(1u64)));
+        assert_eq!(sum_remaining(&queue), Quantity::MAX);
+    }
 }
 
 fn fill_against_queue<K: Ord>(
