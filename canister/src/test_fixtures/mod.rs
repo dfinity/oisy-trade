@@ -521,8 +521,7 @@ pub mod arbitrary {
     }
 
     pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {
-        (arb_principal(), arb_order_id())
-            .prop_map(|(user, order_id)| CancelLimitOrderEvent { user, order_id })
+        arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
     }
 
     pub fn arb_matching_output() -> impl Strategy<Value = MatchingOutput> {

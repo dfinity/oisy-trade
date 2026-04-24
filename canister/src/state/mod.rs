@@ -240,23 +240,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub fn record_cancel_order(
-        &mut self,
-        user: Principal,
-        order_id: OrderId,
-        persistence: StableMemoryOptions,
-    ) {
+    pub fn record_cancel_order(&mut self, order_id: OrderId, persistence: StableMemoryOptions) {
         let (book_id, seq) = order_id.into_parts();
         let pair = self
             .trading_pairs
             .get_pair(&book_id)
             .expect("BUG: unknown trading pair for canceled order")
             .clone();
-        let original_quantity = self
+        let order_record = self
             .order_history
             .get(&order_id)
-            .expect("BUG: canceled order missing from history")
-            .quantity;
+            .expect("BUG: canceled order missing from history");
+        let user = order_record.owner;
+        let original_quantity = order_record.quantity;
         let book = self
             .order_books
             .get_mut(&book_id)

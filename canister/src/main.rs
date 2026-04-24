@@ -211,7 +211,6 @@ fn get_events(
                 }
                 EventType::CancelLimitOrder(e) => {
                     event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
-                        user: e.user,
                         order_id: event::OrderId {
                             book_id: e.order_id.book_id().get(),
                             seq: e.order_id.seq().get(),

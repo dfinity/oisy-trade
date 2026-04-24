@@ -59,7 +59,6 @@ pub struct AddLimitOrderEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct CancelLimitOrderEvent {
-    pub user: Principal,
     pub order_id: OrderId,
 }
 

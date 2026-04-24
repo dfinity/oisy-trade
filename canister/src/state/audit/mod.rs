@@ -105,8 +105,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order, persistence);
         }
-        EventType::CancelLimitOrder(CancelLimitOrderEvent { user, order_id }) => {
-            state.record_cancel_order(*user, *order_id, persistence);
+        EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
+            state.record_cancel_order(*order_id, persistence);
         }
         EventType::Matching(event) => {
             state.record_matching_event(event, persistence);

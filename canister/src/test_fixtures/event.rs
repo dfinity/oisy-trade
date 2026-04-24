@@ -106,7 +106,7 @@ impl WorstCaseEvent {
             Self::Deposit => 95,
             Self::Withdraw => 104,
             Self::AddLimitOrder => 97,
-            Self::CancelLimitOrder => 66,
+            Self::CancelLimitOrder => 35,
             Self::Matching => 10_027,
             Self::Settling => 105_330,
         }
@@ -166,7 +166,6 @@ fn add_limit_order() -> EventType {
 
 fn cancel_limit_order() -> EventType {
     EventType::CancelLimitOrder(CancelLimitOrderEvent {
-        user: max_principal(0),
         order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
     })
 }

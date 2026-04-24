@@ -184,11 +184,11 @@ impl Scenario {
             .validate_cancel_limit_order(user, order_id)
             .expect("test setup: order must be cancelable");
         self.state
-            .record_cancel_order(user, order_id, StableMemoryOptions::Write);
+            .record_cancel_order(order_id, StableMemoryOptions::Write);
         let timestamp = self.timestamp();
         self.events.push(Event {
             timestamp,
-            payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { user, order_id }),
+            payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }),
         });
         self
     }

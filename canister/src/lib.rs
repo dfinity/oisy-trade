@@ -77,10 +77,7 @@ pub fn cancel_limit_order(
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
     state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
     state::with_state_mut(|s| {
-        let event = state::event::CancelLimitOrderEvent {
-            user: caller,
-            order_id: id,
-        };
+        let event = state::event::CancelLimitOrderEvent { order_id: id };
         state::audit::process_event(s, state::event::EventType::CancelLimitOrder(event), runtime);
     });
     Ok(())

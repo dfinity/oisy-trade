@@ -293,9 +293,10 @@ type WithdrawEvent = record {
     amount : nat;
 };
 
-/// Event payload for cancelling a limit order.
+/// Event payload for cancelling a limit order. The principal is not
+/// carried here — consumers resolve ownership via `order_id` against the
+/// order history if needed.
 type CancelLimitOrderEvent = record {
-    user : principal;
     order_id : EventOrderId;
 };
 

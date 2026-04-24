@@ -165,9 +165,7 @@ pub struct OrderStatusTransition {
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct CancelLimitOrderEvent {
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub user: Principal,
-    #[n(1)]
+    #[n(0)]
     pub order_id: OrderId,
 }
 
