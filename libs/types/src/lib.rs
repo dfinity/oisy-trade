@@ -129,6 +129,19 @@ pub enum GetOrderBookTickerError {
     UnknownTradingPair,
 }
 
+/// Request for the `get_order_book_depth` query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetOrderBookDepthRequest {
+    /// The trading pair whose depth should be returned.
+    pub trading_pair: TradingPair,
+    /// Maximum number of price levels returned per side.
+    /// When `None`, [`DEFAULT_DEPTH_LIMIT`] is used. Values greater than
+    /// [`MAX_DEPTH_LIMIT`] are rejected with
+    /// [`GetOrderBookDepthError::LimitTooLarge`]. A value of `Some(0)` is
+    /// accepted and returns empty bids/asks vectors.
+    pub limit: Option<u32>,
+}
+
 /// Error returned by the `get_order_book_depth` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookDepthError {

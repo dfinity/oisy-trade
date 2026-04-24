@@ -8,9 +8,10 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
-    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair,
-    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -105,11 +106,10 @@ impl<R: Runtime> DexClient<R> {
     /// Query price-aggregated depth for a trading pair on the DEX canister.
     pub async fn get_order_book_depth(
         &self,
-        pair: TradingPair,
-        limit: Option<u32>,
+        request: GetOrderBookDepthRequest,
     ) -> Result<OrderBookDepth, GetOrderBookDepthError> {
         self.runtime
-            .call(self.dex_canister, "get_order_book_depth", (pair, limit), 0)
+            .call(self.dex_canister, "get_order_book_depth", (request,), 0)
             .await
             .unwrap()
     }

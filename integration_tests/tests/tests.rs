@@ -1160,9 +1160,16 @@ mod order_book {
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types::{
-        GetOrderBookDepthError, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-        OrderBookTicker, PriceLevel, Side, TradingPair,
+        GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError,
+        LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel, Side, TradingPair,
     };
+
+    fn depth_request(pair: TradingPair, limit: Option<u32>) -> GetOrderBookDepthRequest {
+        GetOrderBookDepthRequest {
+            trading_pair: pair,
+            limit,
+        }
+    }
 
     fn level(price: u64, quantity: u64) -> PriceLevel {
         PriceLevel {
@@ -1239,7 +1246,7 @@ mod order_book {
         assert_eq!(
             setup
                 .dex_client()
-                .get_order_book_depth(unknown_pair(), None)
+                .get_order_book_depth(depth_request(unknown_pair(), None))
                 .await,
             Err(GetOrderBookDepthError::UnknownTradingPair)
         );
@@ -1260,7 +1267,7 @@ mod order_book {
             })
         );
         assert_eq!(
-            client.get_order_book_depth(pair, None).await,
+            client.get_order_book_depth(depth_request(pair, None)).await,
             Ok(OrderBookDepth {
                 bids: vec![],
                 asks: vec![]
@@ -1304,7 +1311,7 @@ mod order_book {
             })
         );
         assert_eq!(
-            client.get_order_book_depth(pair, None).await,
+            client.get_order_book_depth(depth_request(pair, None)).await,
             Ok(OrderBookDepth {
                 bids: vec![level(100, 4_000_000), level(90, 2_000_000)],
                 asks: vec![level(110, 7_000_000), level(120, 4_000_000)],
@@ -1329,7 +1336,7 @@ mod order_book {
         let pair = setup.trading_pair();
         let depth = setup
             .dex_client()
-            .get_order_book_depth(pair, Some(2))
+            .get_order_book_depth(depth_request(pair, Some(2)))
             .await
             .unwrap();
         assert_eq!(
@@ -1347,7 +1354,7 @@ mod order_book {
         assert_eq!(
             setup
                 .dex_client()
-                .get_order_book_depth(setup.trading_pair(), Some(1_001))
+                .get_order_book_depth(depth_request(setup.trading_pair(), Some(1_001)))
                 .await,
             Err(GetOrderBookDepthError::LimitTooLarge {
                 requested: 1_001,
@@ -1366,7 +1373,7 @@ mod order_book {
 
         let depth = setup
             .dex_client()
-            .get_order_book_depth(setup.trading_pair(), Some(0))
+            .get_order_book_depth(depth_request(setup.trading_pair(), Some(0)))
             .await
             .unwrap();
         assert_eq!(depth.bids, vec![]);

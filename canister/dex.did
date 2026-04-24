@@ -96,6 +96,17 @@ type GetOrderBookTickerError = variant {
 
 type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBookTickerError };
 
+// Request for the `get_order_book_depth` query.
+type GetOrderBookDepthRequest = record {
+    // The trading pair whose depth should be returned.
+    trading_pair : TradingPair;
+    // Maximum number of price levels returned per side. When absent, the DEX
+    // returns 100 levels per side. The maximum accepted value is 1000; above
+    // that the query returns `LimitTooLarge`. `opt 0` is accepted and returns
+    // empty `bids`/`asks` vectors.
+    limit : opt nat32;
+};
+
 // Error returned by the `get_order_book_depth` query.
 type GetOrderBookDepthError = variant {
     // The requested trading pair is not registered on the DEX.
@@ -418,14 +429,10 @@ service : (DexArg) -> {
     // the book is empty.
     get_order_book_ticker : (TradingPair) -> (GetOrderBookTickerResult) query;
 
-    // Query price-aggregated depth for a trading pair.
-    //
-    // `limit` is the maximum number of price levels returned per side. When
-    // omitted, the DEX returns 100 levels per side. The maximum accepted value
-    // is 1000; above that the query returns `LimitTooLarge`. Passing `0` is
-    // accepted and returns empty `bids`/`asks` vectors. Returns
-    // `UnknownTradingPair` if the pair is not registered.
-    get_order_book_depth : (TradingPair, opt nat32) -> (GetOrderBookDepthResult) query;
+    // Query price-aggregated depth for a trading pair. See
+    // `GetOrderBookDepthRequest` for the semantics of the `limit` field.
+    // Returns `UnknownTradingPair` if the pair is not registered.
+    get_order_book_depth : (GetOrderBookDepthRequest) -> (GetOrderBookDepthResult) query;
 
     // Deposit tokens into the DEX. Calls `icrc2_transfer_from` on the token
     // ledger to pull `amount` from the caller to the DEX canister, then

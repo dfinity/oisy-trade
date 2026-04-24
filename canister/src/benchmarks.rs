@@ -175,9 +175,12 @@ fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
     install_populated_state();
-    let pair = dex_types::TradingPair::from(trading_pair());
+    let request = dex_types::GetOrderBookDepthRequest {
+        trading_pair: dex_types::TradingPair::from(trading_pair()),
+        limit: None,
+    };
     canbench_rs::bench_fn(|| {
-        let _depth = crate::get_order_book_depth(pair, None);
+        let _depth = crate::get_order_book_depth(request.clone());
     })
 }
 
@@ -187,9 +190,12 @@ fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     install_populated_state();
-    let pair = dex_types::TradingPair::from(trading_pair());
+    let request = dex_types::GetOrderBookDepthRequest {
+        trading_pair: dex_types::TradingPair::from(trading_pair()),
+        limit: Some(crate::MAX_DEPTH_LIMIT),
+    };
     canbench_rs::bench_fn(|| {
-        let _depth = crate::get_order_book_depth(pair, Some(crate::MAX_DEPTH_LIMIT));
+        let _depth = crate::get_order_book_depth(request.clone());
     })
 }
 

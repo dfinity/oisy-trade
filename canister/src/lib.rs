@@ -1,8 +1,9 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DEFAULT_DEPTH_LIMIT,
-    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
-    LimitOrderRequest, MAX_DEPTH_LIMIT, OrderBookDepth, OrderBookTicker, OrderId, OrderStatus,
-    PriceLevel, TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, PriceLevel, TradingPair,
+    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -101,10 +102,9 @@ pub fn get_order_book_ticker(
 }
 
 pub fn get_order_book_depth(
-    pair: TradingPair,
-    limit: Option<u32>,
+    request: GetOrderBookDepthRequest,
 ) -> Result<OrderBookDepth, GetOrderBookDepthError> {
-    let limit = match limit {
+    let limit = match request.limit {
         None => DEFAULT_DEPTH_LIMIT,
         Some(n) if n <= MAX_DEPTH_LIMIT => n,
         Some(n) => {
@@ -114,7 +114,7 @@ pub fn get_order_book_depth(
             });
         }
     };
-    let internal_pair = order::TradingPair::from(pair);
+    let internal_pair = order::TradingPair::from(request.trading_pair);
     state::with_state(|s| {
         let book = s
             .get_order_book(&internal_pair)

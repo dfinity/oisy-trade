@@ -1,9 +1,9 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
-    LedgerTransferError, LedgerTransferFromError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -42,10 +42,9 @@ fn get_order_book_ticker(pair: TradingPair) -> Result<OrderBookTicker, GetOrderB
 
 #[ic_cdk::query]
 fn get_order_book_depth(
-    pair: TradingPair,
-    limit: Option<u32>,
+    request: GetOrderBookDepthRequest,
 ) -> Result<OrderBookDepth, GetOrderBookDepthError> {
-    dex_canister::get_order_book_depth(pair, limit)
+    dex_canister::get_order_book_depth(request)
 }
 
 #[ic_cdk::update]

@@ -1,7 +1,7 @@
 use crate::{
-    AddLimitOrderError, Balance, GetOrderBookDepthError, GetOrderBookTickerError,
-    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, Token,
-    TokenId, TokenMetadata, TradingPair, TradingPairInfo,
+    AddLimitOrderError, Balance, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus,
+    PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair, TradingPairInfo,
 };
 use candid::{Nat, Principal};
 
@@ -169,6 +169,24 @@ fn should_serialize_order_book_depth() {
     let encoded = candid::encode_one(&depth).unwrap();
     let decoded: OrderBookDepth = candid::decode_one(&encoded).unwrap();
     assert_eq!(depth, decoded);
+}
+
+#[test]
+fn should_serialize_get_order_book_depth_request() {
+    for request in [
+        GetOrderBookDepthRequest {
+            trading_pair: test_trading_pair(),
+            limit: None,
+        },
+        GetOrderBookDepthRequest {
+            trading_pair: test_trading_pair(),
+            limit: Some(50),
+        },
+    ] {
+        let encoded = candid::encode_one(&request).unwrap();
+        let decoded: GetOrderBookDepthRequest = candid::decode_one(&encoded).unwrap();
+        assert_eq!(request, decoded);
+    }
 }
 
 #[test]
