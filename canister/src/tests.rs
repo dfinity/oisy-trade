@@ -349,6 +349,7 @@ mod add_limit_order {
 }
 
 mod cancel_limit_order {
+    use crate::order::OrderId;
     use crate::state::with_state_mut;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
@@ -374,17 +375,11 @@ mod cancel_limit_order {
     fn should_reject_cancel_of_unknown_order() {
         init_state_with_order_book();
         let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
-        // Valid hex format but refers to a non-existent book/seq.
-        let result = cancel_limit_order("ffffffffffffffffffffffffffffffff".to_string(), &runtime);
-        assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
-    }
 
-    #[test]
-    fn should_reject_cancel_with_malformed_order_id() {
-        init_state_with_order_book();
-        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
-        let result = cancel_limit_order("not-a-valid-id".to_string(), &runtime);
-        assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+        for unknown_order_id in [OrderId::ZERO.to_string(), "not-a-valid-id".to_string()] {
+            let result = cancel_limit_order(unknown_order_id, &runtime);
+            assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+        }
     }
 
     #[test]

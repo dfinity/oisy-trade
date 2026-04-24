@@ -161,6 +161,11 @@ pub struct OrderId {
 }
 
 impl OrderId {
+    pub const ZERO: Self = Self {
+        book_id: OrderBookId::ZERO,
+        seq: OrderSeq::ZERO,
+    };
+
     pub fn new(book_id: OrderBookId, seq: OrderSeq) -> Self {
         Self { book_id, seq }
     }
