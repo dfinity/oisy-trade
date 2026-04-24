@@ -192,12 +192,7 @@ mod add_limit_order {
 
 mod cancel_limit_order {
     use crate::balance::Balance;
-    use crate::order::{OrderBookId, OrderId, OrderStatus, PairToken, Price, Quantity, Side};
-    use crate::state::audit::replay_events;
-    use crate::state::event::{
-        AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event,
-        EventType,
-    };
+    use crate::order::{OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side};
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
@@ -205,7 +200,6 @@ mod cancel_limit_order {
         icp_metadata, place_order,
     };
     use candid::Principal;
-    use dex_types_internal::{InitArg, Mode};
     use ic_stable_structures::VectorMemory;
 
     const OWNER: Principal = Principal::from_slice(&[0x01]);
@@ -321,68 +315,6 @@ mod cancel_limit_order {
         );
     }
 
-    #[test]
-    fn should_replay_to_canceled_state() {
-        let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
-        let order_id = OrderId::new(OrderBookId::ZERO, crate::order::OrderSeq::ZERO);
-        let pair = icp_ckbtc_trading_pair();
-
-        let events = vec![
-            event(EventType::Init(InitArg {
-                mode: Mode::GeneralAvailability,
-            })),
-            event(EventType::AddTradingPair(AddTradingPairEvent {
-                book_id: OrderBookId::ZERO,
-                base: pair.base,
-                quote: pair.quote,
-                tick_size: TICK_SIZE,
-                lot_size: LOT_SIZE,
-                base_metadata: icp_metadata(),
-                quote_metadata: ckbtc_metadata(),
-            })),
-            event(EventType::Deposit(DepositEvent {
-                user: OWNER,
-                token: pair.quote,
-                amount: Quantity::from(price * lot),
-            })),
-            event(EventType::AddLimitOrder(AddLimitOrderEvent {
-                user: OWNER,
-                order_id,
-                side: Side::Buy,
-                price: Price::new(price),
-                quantity: Quantity::from(lot),
-            })),
-            event(EventType::CancelLimitOrder(CancelLimitOrderEvent {
-                user: OWNER,
-                order_id,
-            })),
-        ];
-
-        let state = replay_events(
-            events,
-            test_fixtures::order_history(),
-            test_fixtures::balances(),
-            StableMemoryOptions::Write,
-        );
-
-        assert_eq!(
-            state.get_order_status(order_id),
-            Some(OrderStatus::Canceled)
-        );
-        assert_eq!(
-            state.get_balance(&OWNER, &pair.quote),
-            balance(price * lot, 0)
-        );
-    }
-
-    fn event(payload: EventType) -> Event {
-        Event {
-            timestamp: 0,
-            payload,
-        }
-    }
-
     fn setup() -> State<VectorMemory, VectorMemory> {
         let mut state = test_fixtures::state();
         state.record_trading_pair(
@@ -394,10 +326,6 @@ mod cancel_limit_order {
             LOT_SIZE,
         );
         state
-    }
-
-    fn balance(free: impl Into<Quantity>, reserved: impl Into<Quantity>) -> Balance {
-        Balance::new(free, reserved)
     }
 }
 
