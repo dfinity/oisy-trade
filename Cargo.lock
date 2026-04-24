@@ -87,7 +87,7 @@ checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
 dependencies = [
  "getrandom 0.2.15",
  "instant",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -546,11 +546,11 @@ dependencies = [
  "canlog",
  "dex_types",
  "dex_types_internal",
- "ic-cdk 0.20.0",
+ "ic-cdk 0.20.1",
  "ic-cdk-timers",
  "ic-http-types",
  "ic-metrics-encoder",
- "ic-stable-structures 0.7.2",
+ "ic-stable-structures",
  "icrc-cbor",
  "icrc-ledger-types",
  "minicbor",
@@ -560,6 +560,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.28.0",
+ "tokio",
 ]
 
 [[package]]
@@ -569,7 +570,7 @@ dependencies = [
  "async-trait",
  "candid",
  "dex_types",
- "ic-cdk 0.20.0",
+ "ic-cdk 0.20.1",
  "serde",
 ]
 
@@ -584,7 +585,7 @@ dependencies = [
  "dex_client",
  "dex_types",
  "dex_types_internal",
- "ic-cdk 0.20.0",
+ "ic-cdk 0.20.1",
  "ic-http-types",
  "ic-metrics-assert",
  "icrc-ledger-types",
@@ -1072,13 +1073,13 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057912339f889013f42b36cc0623585949ed278457efb32aef041bdc48acb111"
+checksum = "a64dfa64757e7bfdd3bd6048c35e1edd74b69325deeed6bcaafedbc864c645fc"
 dependencies = [
  "candid",
  "ic-cdk-executor",
- "ic-cdk-macros 0.20.0",
+ "ic-cdk-macros 0.20.1",
  "ic-error-types",
  "ic0",
  "pin-project-lite",
@@ -1112,9 +1113,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk-macros"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b140627c01710ac185fbc984ab1fda1781ffef4abbd952e07383350899b0952b"
+checksum = "fd0794365edf9997b1114b4ea10358c6af1317e39fc6611b4fc67053a44ec8f1"
 dependencies = [
  "candid",
  "darling 0.23.0",
@@ -1199,15 +1200,6 @@ checksum = "36e10842d8cc059a437567811d966cd8fab06e79d3382e4535db2a501cadb192"
 
 [[package]]
 name = "ic-stable-structures"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d30d4cf17aff1024e13133897048bcba580e063c9000571ab766ca37e2996f4"
-dependencies = [
- "ic_principal",
-]
-
-[[package]]
-name = "ic-stable-structures"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee3372ddc0cf2a747fc26ce2d075a240ed6bfab151e63bc70109e8967f7ce6f"
@@ -1235,9 +1227,9 @@ dependencies = [
 
 [[package]]
 name = "ic0"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1499d08fd5be8f790d477e1865d63bab6a8d748300e141270c4296e6d5fdd6bc"
+checksum = "c77c8932bff1f09502d0d8c079d5a206a06afe523e35e816162cf4d30b5bf80d"
 
 [[package]]
 name = "ic_principal"
@@ -1267,15 +1259,14 @@ dependencies = [
 
 [[package]]
 name = "icrc-ledger-types"
-version = "0.1.13"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "263acc94fa47008ad00f76b8d3694efe7f8361870c9ec92cddcc588b571518b7"
+checksum = "a11c866a01b93ef6bd0e3dc01374df41bc70a8b79027a2fd120543a094668978"
 dependencies = [
  "base32",
  "candid",
  "crc32fast",
  "hex",
- "ic-stable-structures 0.6.9",
  "icrc-cbor",
  "minicbor",
  "num-bigint",
@@ -2050,7 +2041,7 @@ dependencies = [
  "bitflags",
  "lazy_static",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "rand_xorshift",
  "regex-syntax",
@@ -2150,9 +2141,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -2983,9 +2974,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.51.1"
+version = "1.52.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
+checksum = "b67dee974fe86fd92cc45b7a95fdd2f99a36a6d7b0d431a231178d3d670bbcc6"
 dependencies = [
  "bytes",
  "libc",

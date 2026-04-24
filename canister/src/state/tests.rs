@@ -48,8 +48,15 @@ mod assert_caller_is_allowed {
         state.assert_caller_is_allowed(&mock);
     }
 
-    fn state(mode: Mode) -> State {
-        State::try_from(dex_types_internal::InitArg { mode }).unwrap()
+    fn state(
+        mode: Mode,
+    ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
+        State::new(
+            dex_types_internal::InitArg { mode },
+            crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
+        )
+        .unwrap()
     }
 }
 
@@ -183,16 +190,93 @@ mod add_limit_order {
     }
 }
 
+mod validate_overflow_invariant {
+    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+    use crate::state::AddLimitOrderError;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
+    use candid::Principal;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
+    proptest! {
+        // `record_limit_order` and `settle_fill` rely on `price * quantity`
+        // not overflowing once an order has passed `validate_limit_order`.
+        // Settlement computes `maker_price × fill.quantity` regardless of
+        // the maker's side, so the invariant must hold for Buy and Sell alike.
+        // This biconditional pins that guarantee: validation rejects with
+        // `AmountExceedsMaximum` exactly when the multiplication would overflow.
+        #[test]
+        fn validate_rejects_iff_price_times_quantity_overflows(
+            price_raw in 1u64..=u64::MAX,
+            quantity in arb_quantity(),
+            side in arb_side(),
+        ) {
+            // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
+            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
+            let tick = TickSize::new(NonZeroU64::new(1).unwrap());
+            let lot = LotSize::new(NonZeroU64::new(1).unwrap());
+
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair.clone(),
+                icp_metadata(),
+                ckbtc_metadata(),
+                tick,
+                lot,
+            );
+
+            let price = Price::new(price_raw);
+            let fits = price.checked_mul_quantity(&quantity).is_some();
+
+            let result = state.validate_limit_order(
+                Principal::from_slice(&[0x01]),
+                pair,
+                PendingOrder {
+                    side,
+                    price,
+                    quantity,
+                },
+            );
+
+            let rejected_for_overflow =
+                matches!(result, Err(AddLimitOrderError::AmountExceedsMaximum));
+            prop_assert_eq!(
+                rejected_for_overflow,
+                !fits,
+                "result was {:?}, fits={}",
+                result,
+                fits
+            );
+        }
+    }
+}
+
 mod settle_fills {
     use crate::balance::Balance;
     use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
-    use crate::state::State;
+    use crate::state::{StableMemoryOptions, State};
+    use crate::test_fixtures;
+    use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
-    use dex_types_internal::{InitArg, Mode};
+    use ic_stable_structures::VectorMemory;
+    use proptest::prelude::*;
     use std::collections::BTreeMap;
+
+    type TestState = State<VectorMemory, VectorMemory>;
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -207,7 +291,7 @@ mod settle_fills {
         place_buy_order(&mut state, price, lot);
         place_sell_order(&mut state, price, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -232,7 +316,7 @@ mod settle_fills {
         place_sell_order(&mut state, 90, lot);
         place_buy_order(&mut state, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -258,7 +342,7 @@ mod settle_fills {
         place_buy_order(&mut state, 110, lot);
         place_sell_order(&mut state, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -284,7 +368,7 @@ mod settle_fills {
         place_buy_order(&mut state, 100, 3 * lot);
         place_sell_order(&mut state, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -311,7 +395,7 @@ mod settle_fills {
         place_sell_order(&mut state, 100, lot);
         place_buy_order(&mut state, 100, 2 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -334,7 +418,7 @@ mod settle_fills {
         place_sell_order(&mut state, 90, lot);
         place_buy_order(&mut state, 100, 3 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -361,7 +445,7 @@ mod settle_fills {
         place_buy_order(&mut state, 100, lot);
         place_sell_order(&mut state, 100, 3 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -389,7 +473,7 @@ mod settle_fills {
         place_buy_order(&mut state, 110, lot);
         place_sell_order(&mut state, 100, 2 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -419,19 +503,31 @@ mod settle_fills {
 
         let base_before = state.get_balance(&user, &pair.base);
         let quote_before = state.get_balance(&user, &pair.quote);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         let base_after = state.get_balance(&user, &pair.base);
         let quote_after = state.get_balance(&user, &pair.quote);
 
         // Total tokens unchanged: base and quote just move between free/reserved
         assert_eq!(
-            base_before.free().clone() + base_before.reserved().clone(),
-            base_after.free().clone() + base_after.reserved().clone(),
+            base_before
+                .free()
+                .checked_add(*base_before.reserved())
+                .unwrap(),
+            base_after
+                .free()
+                .checked_add(*base_after.reserved())
+                .unwrap(),
             "base token total changed"
         );
         assert_eq!(
-            quote_before.free().clone() + quote_before.reserved().clone(),
-            quote_after.free().clone() + quote_after.reserved().clone(),
+            quote_before
+                .free()
+                .checked_add(*quote_before.reserved())
+                .unwrap(),
+            quote_after
+                .free()
+                .checked_add(*quote_after.reserved())
+                .unwrap(),
             "quote token total changed"
         );
         // After self-trade: all reserved released, net balances same as deposited
@@ -456,7 +552,7 @@ mod settle_fills {
         place_buy_order(&mut state, 100, 2 * lot);
         let participants = [BUYER, seller_a, seller_b];
         let totals_before = snapshot_balances(&state, &participants);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
         assert_eq!(state.get_balance(&BUYER, &pair.base), balance(2 * lot, 0));
@@ -485,14 +581,16 @@ mod settle_fills {
         let pair = icp_ckbtc_trading_pair();
         let price = 100u64;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
-        let quantity = Quantity::from(u64::from(LOT_SIZE)) * Quantity::from(u64::MAX);
+        let quantity = Quantity::from(u64::from(LOT_SIZE))
+            .checked_mul_u64(u64::MAX)
+            .unwrap();
 
-        place_buy_order(&mut state, price, quantity.clone());
-        place_sell_order(&mut state, price, quantity.clone());
+        place_buy_order(&mut state, price, quantity);
+        place_sell_order(&mut state, price, quantity);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders();
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-        let quote_total = Price::new(price).mul_quantity(&quantity);
+        let quote_total = Price::new(price).checked_mul_quantity(&quantity).unwrap();
 
         // Buyer received all base tokens
         let buyer_base = state.get_balance(&BUYER, &pair.base);
@@ -507,11 +605,8 @@ mod settle_fills {
         assert_token_conservation(&state, &totals_before);
     }
 
-    fn setup() -> State {
-        let mut state = State::try_from(InitArg {
-            mode: Mode::GeneralAvailability,
-        })
-        .unwrap();
+    fn setup() -> TestState {
+        let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();
         state.record_trading_pair(
             OrderBookId::ZERO,
@@ -525,7 +620,7 @@ mod settle_fills {
     }
 
     fn place_buy_order(
-        state: &mut State,
+        state: &mut TestState,
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
@@ -533,7 +628,7 @@ mod settle_fills {
     }
 
     fn place_sell_order(
-        state: &mut State,
+        state: &mut TestState,
         price: u64,
         quantity: impl Into<Quantity>,
     ) -> crate::order::OrderId {
@@ -541,7 +636,7 @@ mod settle_fills {
     }
 
     fn place_buy_order_for(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
@@ -550,7 +645,7 @@ mod settle_fills {
     }
 
     fn place_sell_order_for(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         price: u64,
         quantity: impl Into<Quantity>,
@@ -559,7 +654,7 @@ mod settle_fills {
     }
 
     fn place_order(
-        state: &mut State,
+        state: &mut TestState,
         user: Principal,
         side: Side,
         price: u64,
@@ -572,18 +667,24 @@ mod settle_fills {
             quantity: quantity.into(),
         };
         let deposit = match pending.side {
-            Side::Buy => (pair.quote, pending.price.mul_quantity(&pending.quantity)),
-            Side::Sell => (pair.base, pending.quantity.clone()),
+            Side::Buy => (
+                pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity(&pending.quantity)
+                    .unwrap(),
+            ),
+            Side::Sell => (pair.base, pending.quantity),
         };
-        state.deposit(user, deposit.0, deposit.1);
+        state.deposit(user, deposit.0, deposit.1, StableMemoryOptions::Write);
         let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-        state.record_limit_order(user, order_id.book_id(), order);
+        state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
         order_id
     }
 
     mod order_status {
         use super::*;
-        use dex_types::OrderStatus;
+        use crate::order::OrderStatus;
 
         #[test]
         fn should_return_pending_before_matching() {
@@ -591,7 +692,7 @@ mod settle_fills {
             let lot = u64::from(LOT_SIZE);
             let buy_id = place_buy_order(&mut state, 100, lot);
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Pending);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
         }
 
         #[test]
@@ -599,9 +700,9 @@ mod settle_fills {
             let mut state = setup();
             let lot = u64::from(LOT_SIZE);
             let buy_id = place_buy_order(&mut state, 100, lot);
-            state.process_pending_orders();
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
         }
 
         #[test]
@@ -610,10 +711,10 @@ mod settle_fills {
             let lot = u64::from(LOT_SIZE);
             let buy_id = place_buy_order(&mut state, 100, lot);
             let sell_id = place_sell_order(&mut state, 100, lot);
-            state.process_pending_orders();
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
         }
 
         #[test]
@@ -623,10 +724,10 @@ mod settle_fills {
             // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
             let sell_id = place_sell_order(&mut state, 100, 3 * lot);
             let buy_id = place_buy_order(&mut state, 100, lot);
-            state.process_pending_orders();
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Filled);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
         }
 
         #[test]
@@ -636,10 +737,10 @@ mod settle_fills {
             // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
             let sell_id = place_sell_order(&mut state, 100, lot);
             let buy_id = place_buy_order(&mut state, 100, 3 * lot);
-            state.process_pending_orders();
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(buy_id), OrderStatus::Open);
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
         }
 
         #[test]
@@ -648,106 +749,75 @@ mod settle_fills {
             let lot = u64::from(LOT_SIZE);
             // Sell rests with 2 lots; two successive buys deplete it
             let sell_id = place_sell_order(&mut state, 100, 2 * lot);
-            state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
             let buy1_id = place_buy_order(&mut state, 100, lot);
-            state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Open);
-            assert_eq!(state.get_order_status(buy1_id), OrderStatus::Filled);
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+            assert_eq!(state.get_order_status(buy1_id), Some(OrderStatus::Filled));
 
             let buy2_id = place_buy_order(&mut state, 100, lot);
-            state.process_pending_orders();
-            assert_eq!(state.get_order_status(sell_id), OrderStatus::Filled);
-            assert_eq!(state.get_order_status(buy2_id), OrderStatus::Filled);
+            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+            assert_eq!(state.get_order_status(buy2_id), Some(OrderStatus::Filled));
         }
     }
 
-    mod settle_fill_ordering {
-        use super::*;
-        use crate::order::{OrderBookId, OrderId, OrderRecord};
-        use crate::test_fixtures::arbitrary::arb_fill;
-        use dex_types::OrderStatus;
-        use proptest::prelude::*;
+    // The old `settle_fill_ordering` proptest lived here, testing that two
+    // `settle_fill` calls on independent fills commuted. `settle_fill` has
+    // been retired — settlement is now a flat `Vec<BalanceOperation>` in
+    // `SettlingEvent`. Commutativity isn't claimed for arbitrary op sequences
+    // (two Transfers from the same debtor can fail depending on order), only
+    // for op sequences produced by `compute_balance_operations` from a valid
+    // `MatchingOutput`.
 
-        const BOOK_ID: OrderBookId = OrderBookId::ZERO;
+    proptest! {
+        /// `compute_balance_operations` preserves structural invariants over
+        /// any `MatchingOutput` the arbitrary strategy can produce:
+        /// - never panics
+        /// - emits exactly one Quote Transfer and one Base Transfer per fill
+        /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
+        ///   the buy-taker price-improvement `Unreserve`)
+        /// This covers the fuzz shape the retired `settle_fill_ordering`
+        /// proptest exercised, moved one layer up to the pure compute fn.
+        #[test]
+        fn compute_balance_operations_matches_fill_shape(
+            output in crate::test_fixtures::arbitrary::arb_matching_output()
+        ) {
+            use crate::order::{self, PairToken};
+            use crate::state::event::BalanceOperation;
 
-        proptest! {
-            #[test]
-            fn should_produce_same_state_regardless_of_fill_order(
-                fill1 in arb_fill(0),
-                fill2 in arb_fill(1),
-                // Small range so principals can collide (self-trade, shared maker/taker)
-                buyer1_id in 1..=4u8,
-                seller1_id in 1..=4u8,
-                buyer2_id in 1..=4u8,
-                seller2_id in 1..=4u8,
-            ) {
-                let mut state = setup();
-                let pair = icp_ckbtc_trading_pair();
-                let principals: [(Principal, Principal); 2] = [
-                    (Principal::from_slice(&[buyer1_id]), Principal::from_slice(&[seller1_id])),
-                    (Principal::from_slice(&[buyer2_id]), Principal::from_slice(&[seller2_id])),
-                ];
+            let ops = super::super::compute_balance_operations(&output);
+            let fills_len = output.fills.len();
 
-                // Register orders and fund balances for each fill
-                for (i, fill) in [&fill1, &fill2].iter().enumerate() {
-                    let (buyer, seller) = principals[i];
-                    let (taker_owner, maker_owner) = match fill.taker_side {
-                        Side::Buy => (buyer, seller),
-                        Side::Sell => (seller, buyer),
-                    };
+            prop_assert!(
+                ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
+                "ops.len() {} outside [{}, {}] for {} fills",
+                ops.len(), 2 * fills_len, 3 * fills_len, fills_len,
+            );
 
-                    state.order_history.insert_once(
-                        OrderId::new(BOOK_ID, fill.taker_order_seq),
-                        OrderRecord {
-                            owner: taker_owner,
-                            pair: pair.clone(),
-                            side: fill.taker_side,
-                            price: fill.taker_price,
-                            quantity: fill.quantity.clone(),
-                            status: OrderStatus::Open,
-                        },
-                    );
-                    let maker_side = match fill.taker_side {
-                        Side::Buy => Side::Sell,
-                        Side::Sell => Side::Buy,
-                    };
-                    state.order_history.insert_once(
-                        OrderId::new(BOOK_ID, fill.maker_order_seq),
-                        OrderRecord {
-                            owner: maker_owner,
-                            pair: pair.clone(),
-                            side: maker_side,
-                            price: fill.maker_price,
-                            quantity: fill.quantity.clone(),
-                            status: OrderStatus::Open,
-                        },
-                    );
+            let quote_transfers = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Transfer { token: PairToken::Quote, .. }
+            )).count();
+            let base_transfers = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Transfer { token: PairToken::Base, .. }
+            )).count();
+            prop_assert_eq!(quote_transfers, fills_len);
+            prop_assert_eq!(base_transfers, fills_len);
 
-                    // Buyer reserved at their order price (taker_price for buy
-                    // takers, maker_price for sell takers where maker is buyer).
-                    let buyer_price = match fill.taker_side {
-                        Side::Buy => fill.taker_price,
-                        Side::Sell => fill.maker_price,
-                    };
-                    let buy_reserve = buyer_price.mul_quantity(&fill.quantity);
-                    state.deposit(buyer, pair.quote, buy_reserve.clone());
-                    state.balance_mut(buyer, pair.quote).reserve(buy_reserve).unwrap();
-                    state.deposit(seller, pair.base, fill.quantity.clone());
-                    state.balance_mut(seller, pair.base).reserve(fill.quantity.clone()).unwrap();
-                }
-
-                let mut state1 = state.clone();
-                state1.settle_fill(BOOK_ID, &pair, &fill1);
-                state1.settle_fill(BOOK_ID, &pair, &fill2);
-
-                let mut state2 = state;
-                state2.settle_fill(BOOK_ID, &pair, &fill2);
-                state2.settle_fill(BOOK_ID, &pair, &fill1);
-
-                prop_assert_eq!(state1, state2);
-            }
+            // Unreserves only fire for buy-taker fills with strictly positive
+            // price improvement.
+            let expected_unreserves = output.fills.iter().filter(|f| {
+                f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
+            }).count();
+            let unreserves = ops.iter().filter(|o| matches!(
+                o,
+                BalanceOperation::Unreserve { .. }
+            )).count();
+            prop_assert_eq!(unreserves, expected_unreserves);
         }
     }
 
@@ -758,7 +828,7 @@ mod settle_fills {
     type BalanceSnapshot = BTreeMap<Principal, (Balance, Balance)>;
 
     /// Snapshot base and quote balances for each principal.
-    fn snapshot_balances(state: &State, principals: &[Principal]) -> BalanceSnapshot {
+    fn snapshot_balances(state: &TestState, principals: &[Principal]) -> BalanceSnapshot {
         let pair = icp_ckbtc_trading_pair();
         principals
             .iter()
@@ -775,7 +845,7 @@ mod settle_fills {
     }
 
     /// Assert that the total base and quote tokens across all principals are unchanged.
-    fn assert_token_conservation(state: &State, before: &BalanceSnapshot) {
+    fn assert_token_conservation(state: &TestState, before: &BalanceSnapshot) {
         let principals: Vec<Principal> = before.keys().copied().collect();
         let after = snapshot_balances(state, &principals);
 
@@ -784,8 +854,16 @@ mod settle_fills {
                 (Quantity::ZERO, Quantity::ZERO),
                 |(base_acc, quote_acc), (base, quote)| {
                     (
-                        base_acc + base.free().clone() + base.reserved().clone(),
-                        quote_acc + quote.free().clone() + quote.reserved().clone(),
+                        base_acc
+                            .checked_add(*base.free())
+                            .unwrap()
+                            .checked_add(*base.reserved())
+                            .unwrap(),
+                        quote_acc
+                            .checked_add(*quote.free())
+                            .unwrap()
+                            .checked_add(*quote.reserved())
+                            .unwrap(),
                     )
                 },
             )

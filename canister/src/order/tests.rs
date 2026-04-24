@@ -1,5 +1,7 @@
 mod order_id {
     use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use crate::test_fixtures::arbitrary::arb_order_id;
+    use ic_stable_structures::Storable;
     use proptest::prelude::*;
 
     proptest! {
@@ -27,6 +29,249 @@ mod order_id {
         fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
             prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
         }
+
+        #[test]
+        fn should_roundtrip_order_id_through_stable_bytes(
+            id in arb_order_id(),
+        ) {
+            let bytes = id.to_bytes();
+            let decoded = OrderId::from_bytes(bytes);
+            prop_assert_eq!(decoded, id);
+        }
+
+        /// Big-endian encoding makes the stable-memory key order match the
+        /// lexicographic byte order of `(book_id, seq)`, so `StableBTreeMap`
+        /// iteration traverses orders in the same order as a heap `BTreeMap`
+        /// keyed by `OrderId`.
+        #[test]
+        fn should_preserve_order_under_be_encoding(
+            a in any::<(u64, u64)>(),
+            b in any::<(u64, u64)>(),
+        ) {
+            let id_a = OrderId::new(OrderBookId::new(a.0), OrderSeq::new(a.1));
+            let id_b = OrderId::new(OrderBookId::new(b.0), OrderSeq::new(b.1));
+            let bytes_a = id_a.to_bytes();
+            let bytes_b = id_b.to_bytes();
+            prop_assert_eq!(id_a.cmp(&id_b), bytes_a.cmp(&bytes_b));
+        }
+    }
+}
+
+mod quantity {
+    use crate::order::{LotSize, Quantity};
+    use candid::Nat;
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    // CBOR unsigned integer: 1 byte (0–23), 2 bytes (24–255), ..., 9 bytes (u64::MAX)
+    const MAX_U64_CBOR_SIZE: usize = 9;
+    // CBOR PosBignum: Tag(2) [1] + bytes(≤16) [1 + ≤16] = ≤18 bytes
+    const MAX_U128_CBOR_SIZE: usize = 18;
+    // CBOR PosBignum: Tag(2) [1] + bytes(32) [2 + 32, since len > 23] = 35 bytes
+    const MAX_U256_CBOR_SIZE: usize = 35;
+
+    #[test]
+    fn should_reach_exact_max_size() {
+        let max_u64 = Quantity::from(u64::MAX);
+        assert_eq!(encode(&max_u64).len(), MAX_U64_CBOR_SIZE);
+
+        let max_u128 = Quantity::from_u128(u128::MAX);
+        assert_eq!(encode(&max_u128).len(), MAX_U128_CBOR_SIZE);
+
+        let max_u256 = Quantity::MAX;
+        assert_eq!(encode(&max_u256).len(), MAX_U256_CBOR_SIZE);
+    }
+
+    #[test]
+    fn should_checked_sub_with_carry() {
+        // 2^128
+        let a = Quantity::new(1, 0);
+        // 1
+        let b = Quantity::new(0, 1);
+        assert_eq!(a.checked_sub(&b), Some(Quantity::new(0, u128::MAX)));
+
+        assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+
+        // 2^128 + 1
+        let c = Quantity::new(1, 1);
+        assert_eq!(a.checked_sub(&c), None);
+
+        // other.high == u128::MAX with borrow: high + borrow would overflow u128
+        // without checked_add.
+        let d = Quantity::new(u128::MAX, 0);
+        let e = Quantity::new(u128::MAX, 1);
+        assert_eq!(d.checked_sub(&e), None);
+    }
+
+    proptest! {
+        #[test]
+        fn checked_add_commutative(a in arb_quantity(), b in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(b), b.checked_add(a));
+        }
+
+        #[test]
+        fn checked_add_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_add(Quantity::ZERO), Some(a));
+        }
+
+        #[test]
+        fn checked_add_then_sub_roundtrip(a in arb_quantity(), b in arb_quantity()) {
+            if let Some(sum) = a.checked_add(b) {
+                prop_assert_eq!(sum.checked_sub(&b), Some(a));
+                prop_assert_eq!(sum.checked_sub(&a), Some(b));
+            }
+        }
+
+        #[test]
+        fn checked_sub_self_is_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_sub_returns_none_on_underflow(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+        ) {
+            if a < b {
+                prop_assert_eq!(a.checked_sub(&b), None);
+            }
+        }
+
+        #[test]
+        fn checked_mul_u64_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(1), Some(a));
+        }
+
+        #[test]
+        fn checked_mul_u64_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u64(0), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_mul_u64_distributes_over_add(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+            c in 1..1000u64,
+        ) {
+            // With small quantities and c < 1000, no overflow is possible.
+            // (a + b) * c == a * c + b * c
+            let left = a.checked_add(b).and_then(|s| s.checked_mul_u64(c));
+            let right = a.checked_mul_u64(c)
+                .and_then(|ac| b.checked_mul_u64(c).and_then(|bc| ac.checked_add(bc)));
+            prop_assert_eq!(left, right);
+        }
+
+        #[test]
+        fn nat_roundtrip(a in arb_quantity()) {
+            let nat: Nat = a.into();
+            let back = Quantity::try_from(nat).unwrap();
+            prop_assert_eq!(a, back);
+        }
+
+        #[test]
+        fn nat_exceeding_u256_max_fails(offset in 1..u64::MAX) {
+            let max_nat: Nat = Quantity::MAX.into();
+            let too_large = max_nat + Nat::from(offset);
+            prop_assert!(Quantity::try_from(too_large).is_err());
+        }
+
+        #[test]
+        fn from_u64_roundtrip(v in any::<u64>()) {
+            let q = Quantity::from(v);
+            let nat: Nat = q.into();
+            prop_assert_eq!(nat, Nat::from(v));
+        }
+
+        #[test]
+        fn ordering_consistent_with_nat(a in arb_small_quantity(), b in arb_small_quantity()) {
+            let nat_a: Nat = a.into();
+            let nat_b: Nat = b.into();
+            prop_assert_eq!(a.cmp(&b), nat_a.cmp(&nat_b));
+        }
+
+        #[test]
+        fn is_multiple_of_consistent(
+            base in 1..u128::MAX,
+            lot in 1..10_000u64,
+        ) {
+            let lot_size = LotSize::new(NonZeroU64::new(lot).unwrap());
+            let q = Quantity::from_u128(base);
+
+            prop_assert_eq!(base.is_multiple_of(lot as u128), q.is_multiple_of(lot_size));
+
+            let q = Quantity::from_u128(base).checked_mul_u64(lot).unwrap();
+            prop_assert!(q.is_multiple_of(lot_size));
+        }
+
+        #[test]
+        fn is_zero_iff_default(high in any::<u128>(), low in any::<u128>()) {
+            let q = Quantity::new(high, low);
+            prop_assert_eq!(q.is_zero(), high == 0 && low == 0);
+        }
+
+        #[test]
+        fn cbor_roundtrip(a in arb_quantity()) {
+            let mut buf = Vec::new();
+            minicbor::encode(a, &mut buf).unwrap();
+            let decoded: Quantity = minicbor::decode(&buf).unwrap();
+            prop_assert_eq!(a, decoded);
+        }
+
+        #[test]
+        fn cbor_u64_quantity_is_compact(a in arb_u64_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U64_CBOR_SIZE,
+                "u64 quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U64_CBOR_SIZE,
+            );
+        }
+
+        #[test]
+        fn cbor_u128_quantity_is_compact(a in arb_u128_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U128_CBOR_SIZE,
+                "u128 quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U128_CBOR_SIZE,
+            );
+        }
+
+        #[test]
+        fn cbor_any_quantity_fits_max(a in arb_quantity()) {
+            let encoded = encode(&a);
+            prop_assert!(
+                encoded.len() <= MAX_U256_CBOR_SIZE,
+                "quantity encoded as {} bytes, max expected {}",
+                encoded.len(),
+                MAX_U256_CBOR_SIZE,
+            );
+        }
+    }
+
+    fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    fn arb_u64_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u64>().prop_map(Quantity::from)
+    }
+
+    // Alias for tests that don't care about the specific range.
+    fn arb_small_quantity() -> impl Strategy<Value = Quantity> {
+        arb_u64_quantity()
+    }
+
+    fn arb_u128_quantity() -> impl Strategy<Value = Quantity> {
+        any::<u128>().prop_map(Quantity::from_u128)
+    }
+
+    fn encode(quantity: &Quantity) -> Vec<u8> {
+        let mut buf = Vec::new();
+        minicbor::encode(quantity, &mut buf).unwrap();
+        buf
     }
 }
 
@@ -439,7 +684,7 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{Order, OrderSeq};
+    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq};
     use crate::test_fixtures::{LOT_SIZE, order_book};
     use std::collections::BTreeSet;
 
@@ -451,14 +696,19 @@ mod process_pending_orders {
         crate::test_fixtures::sell(seq, price, quantity)
     }
 
+    fn process_all_pending_orders(book: &mut OrderBook) -> MatchingOutput {
+        let seqs: Vec<OrderSeq> = book.pending_order_seqs().collect();
+        book.process_pending_orders(&seqs)
+    }
+
     #[test]
     fn should_return_empty_output_when_no_pending_orders() {
         let mut book = order_book();
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert!(output.fills.is_empty());
         assert!(output.resting_orders.is_empty());
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -467,11 +717,11 @@ mod process_pending_orders {
         let lot = u64::from(LOT_SIZE);
         book.add_pending_order(buy(0, 100, lot));
 
-        let output = book.process_pending_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert!(output.fills.is_empty());
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ZERO]));
-        assert!(book.take_filled_orders().is_empty());
+        assert!(output.filled_orders.is_empty());
     }
 
     #[test]
@@ -481,12 +731,11 @@ mod process_pending_orders {
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
 
-        let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker
-        assert!(filled.contains(&OrderSeq::ONE)); // taker
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker
+        assert!(output.filled_orders.contains(&OrderSeq::ONE)); // taker
         assert!(output.resting_orders.is_empty());
     }
 
@@ -498,38 +747,42 @@ mod process_pending_orders {
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, 3 * lot));
 
-        let output = book.process_pending_orders();
-        let filled = book.take_filled_orders();
+        let output = process_all_pending_orders(&mut book);
 
         assert_eq!(output.fills.len(), 1);
-        assert!(filled.contains(&OrderSeq::ZERO)); // maker fully filled
-        assert!(!filled.contains(&OrderSeq::ONE)); // taker not fully filled
+        assert!(output.filled_orders.contains(&OrderSeq::ZERO)); // maker fully filled
+        assert!(!output.filled_orders.contains(&OrderSeq::ONE)); // taker not fully filled
         assert_eq!(output.resting_orders, BTreeSet::from([OrderSeq::ONE])); // taker rests
     }
 
     #[test]
-    fn take_filled_orders_should_drain() {
+    fn should_drain_filled_orders_between_rounds() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         book.add_pending_order(sell(0, 100, lot));
         book.add_pending_order(buy(1, 100, lot));
-        book.process_pending_orders();
 
-        let first_call = book.take_filled_orders();
-        let second_call = book.take_filled_orders();
+        let first = process_all_pending_orders(&mut book);
+        assert!(!first.filled_orders.is_empty());
 
-        assert_eq!(first_call.len(), 2);
-        assert!(second_call.is_empty());
+        let second = process_all_pending_orders(&mut book);
+        assert!(second.filled_orders.is_empty());
     }
 }
 
 mod history {
     use crate::order::{
-        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, Price, Quantity, Side, TokenId,
-        TradingPair,
+        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,
+        Side,
     };
+    use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
-    use dex_types::OrderStatus;
+    use ic_stable_structures::{Storable, VectorMemory};
+    use proptest::{prop_assert_eq, proptest};
+
+    fn history() -> OrderHistory<VectorMemory> {
+        OrderHistory::new(VectorMemory::default())
+    }
 
     fn test_id(seq: u64) -> OrderId {
         OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
@@ -538,10 +791,6 @@ mod history {
     fn test_record() -> OrderRecord {
         OrderRecord {
             owner: Principal::anonymous(),
-            pair: TradingPair {
-                base: TokenId::new(Principal::anonymous()),
-                quote: TokenId::new(Principal::anonymous()),
-            },
             side: Side::Buy,
             price: Price::new(100),
             quantity: Quantity::from(1_000_000u64),
@@ -551,37 +800,85 @@ mod history {
 
     #[test]
     fn insert_once_and_get() {
-        let mut history = OrderHistory::new();
+        let mut history = history();
         let id = test_id(0);
         let record = test_record();
         history.insert_once(id, record.clone());
 
-        assert_eq!(history.get(&id), Some(&record));
+        assert_eq!(history.get(&id), Some(record));
     }
 
     #[test]
     #[should_panic(expected = "duplicate order ID")]
     fn insert_once_panics_on_duplicate() {
-        let mut history = OrderHistory::new();
+        let mut history = history();
         let id = test_id(0);
         history.insert_once(id, test_record());
         history.insert_once(id, test_record());
     }
 
     #[test]
-    fn get_status_returns_not_found_for_missing() {
-        let history = OrderHistory::new();
-        assert_eq!(history.get_status(&test_id(42)), OrderStatus::NotFound);
+    fn get_returns_none_for_missing() {
+        let history = history();
+        assert_eq!(history.get(&test_id(42)), None);
     }
 
     #[test]
-    fn get_status_mut_updates_status() {
-        let mut history = OrderHistory::new();
+    fn set_status_updates_status() {
+        let mut history = history();
         let id = test_id(0);
         history.insert_once(id, test_record());
 
-        assert_eq!(history.get_status(&id), OrderStatus::Pending);
-        *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
-        assert_eq!(history.get_status(&id), OrderStatus::Filled);
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Pending),
+        );
+        history.set_status(&id, OrderStatus::Filled);
+        assert_eq!(
+            history.get(&id).map(|r| r.status),
+            Some(OrderStatus::Filled),
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn should_store_order_record(
+            record in arb_order_record(),
+        ) {
+            let bytes = record.to_bytes();
+            let decoded = OrderRecord::from_bytes(bytes);
+            prop_assert_eq!(decoded, record);
+        }
+    }
+}
+
+mod book_snapshot {
+    use crate::order::{OrderBook, OrderBookSnapshot};
+    use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_pending_order};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_snapshot(
+            to_process in prop::collection::vec(arb_pending_order(), 0..100),
+            to_leave_pending in prop::collection::vec(arb_pending_order(), 0..50),
+        ) {
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            for pending in to_process {
+                let seq = book.next_seq();
+                book.add_pending_order(pending.into_order(seq));
+            }
+            let seqs: Vec<_> = book.pending_order_seqs().collect();
+            book.process_pending_orders(&seqs);
+            for pending in to_leave_pending {
+                let seq = book.next_seq();
+                book.add_pending_order(pending.into_order(seq));
+            }
+
+            let snapshot = OrderBookSnapshot::from(&book);
+            let restored = OrderBook::from(snapshot);
+
+            prop_assert_eq!(book, restored);
+        }
     }
 }

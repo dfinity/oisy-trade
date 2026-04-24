@@ -1,7 +1,8 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, LedgerTransferFromError, LimitOrderRequest, OrderId,
-    OrderStatus, TokenId, TradingPairInfo,
+    DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
+    LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -18,7 +19,7 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
     );
     // Trigger matching immediately, no need to wait for the periodic timer.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        dex_canister::process_pending_orders();
+        dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
     });
     Ok(order_id)
 }
@@ -53,10 +54,44 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
                     err
                 )
             }
-            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
+            DepositError::AmountExceedsMaximum
+            | DepositError::UnsupportedToken { .. }
+            | DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
                 ..
             }) => {
+                // do not log errors due to user actions
+            }
+        },
+    }
+    result
+}
+
+#[ic_cdk::update]
+async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
+    let withdraw_dbg = format!("{request:?}");
+    let result = dex_canister::withdraw(request, &dex_canister::IC_RUNTIME).await;
+    match &result {
+        Ok(response) => canlog::log!(
+            Priority::Info,
+            "[withdraw]: successful withdrawal for request {withdraw_dbg}, block_index={}",
+            response.block_index
+        ),
+        Err(err) => match err {
+            WithdrawError::CallFailed { .. }
+            | WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
+            | WithdrawError::LedgerError(LedgerTransferError::InternalError(_))
+            | WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { .. }) => {
+                canlog::log!(
+                    Priority::Debug,
+                    "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
+                    err
+                )
+            }
+            WithdrawError::AmountExceedsMaximum
+            | WithdrawError::UnsupportedToken { .. }
+            | WithdrawError::InsufficientBalance { .. }
+            | WithdrawError::AmountTooSmall { .. } => {
                 // do not log errors due to user actions
             }
         },
@@ -84,6 +119,40 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
+    fn map_pair_token(token: dex_canister::order::PairToken) -> event::PairToken {
+        match token {
+            dex_canister::order::PairToken::Base => event::PairToken::Base,
+            dex_canister::order::PairToken::Quote => event::PairToken::Quote,
+        }
+    }
+
+    fn map_balance_operation(
+        op: dex_canister::state::event::BalanceOperation,
+    ) -> event::BalanceOperation {
+        match op {
+            dex_canister::state::event::BalanceOperation::Transfer {
+                from_order,
+                to_order,
+                token,
+                amount,
+            } => event::BalanceOperation::Transfer {
+                from_order: from_order.get(),
+                to_order: to_order.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+            dex_canister::state::event::BalanceOperation::Unreserve {
+                order,
+                token,
+                amount,
+            } => event::BalanceOperation::Unreserve {
+                order: order.get(),
+                token: map_pair_token(token),
+                amount: amount.into(),
+            },
+        }
+    }
+
     fn map_event(event: Event) -> event::Event {
         event::Event {
             timestamp: event.timestamp,
@@ -106,6 +175,12 @@ fn get_events(
                     token: dex_types::TokenId::from(e.token),
                     amount: e.amount.into(),
                 }),
+                EventType::Withdraw(e) => event::EventType::Withdraw(event::WithdrawEvent {
+                    block_index: e.block_index,
+                    user: e.user,
+                    token: dex_types::TokenId::from(e.token),
+                    amount: e.amount.into(),
+                }),
                 EventType::AddLimitOrder(e) => {
                     event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                         user: e.user,
@@ -118,6 +193,26 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
+                    book_id: e.book_id.get(),
+                    orders: e.orders.into_iter().map(|s| s.get()).collect(),
+                }),
+                EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
+                    book_id: e.book_id.get(),
+                    balance_operations: e
+                        .balance_operations
+                        .into_iter()
+                        .map(map_balance_operation)
+                        .collect(),
+                    transitions: e
+                        .transitions
+                        .into_iter()
+                        .map(|t| event::OrderStatusTransition {
+                            seq: t.seq.get(),
+                            status: dex_types::OrderStatus::from(t.status),
+                        })
+                        .collect(),
+                }),
             },
         }
     }
@@ -137,6 +232,11 @@ fn get_events(
 #[ic_cdk::init]
 fn init(arg: DexArg) {
     dex_canister::lifecycle::init(arg, &dex_canister::IC_RUNTIME);
+}
+
+#[ic_cdk::pre_upgrade]
+fn pre_upgrade() {
+    dex_canister::lifecycle::pre_upgrade(&dex_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::post_upgrade]
@@ -269,7 +369,7 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
                 "order_book_bid_levels",
                 "Number of distinct bid price levels.",
             )?;
-            for (pair, book_id) in s.trading_pairs() {
+            for (pair, book_id) in s.trading_pairs().iter() {
                 let book = s.order_book(book_id).expect("BUG: missing order book");
                 let pair_label = format_pair(s, pair);
                 bid_levels = bid_levels.value(&[("pair", &pair_label)], book.bids_len() as f64)?;
@@ -280,7 +380,7 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
                 "order_book_ask_levels",
                 "Number of distinct ask price levels.",
             )?;
-            for (pair, book_id) in s.trading_pairs() {
+            for (pair, book_id) in s.trading_pairs().iter() {
                 let book = s.order_book(book_id).expect("BUG: missing order book");
                 let pair_label = format_pair(s, pair);
                 ask_levels = ask_levels.value(&[("pair", &pair_label)], book.asks_len() as f64)?;
@@ -292,11 +392,13 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
             use std::collections::HashMap;
             let mut counts: HashMap<(dex_canister::order::TradingPair, &'static str), u64> =
                 HashMap::new();
-            for (_id, record) in s.order_history().iter() {
-                let status_label = format_status(&record.status);
-                *counts
-                    .entry((record.pair.clone(), status_label))
-                    .or_default() += 1;
+            for (id, record) in s.order_history().iter() {
+                let book_id = id.book_id();
+                let Some(pair) = s.trading_pairs().get_pair(&book_id) else {
+                    continue;
+                };
+                let status_label = format_status(record.status.into());
+                *counts.entry((pair.clone(), status_label)).or_default() += 1;
             }
             let mut sorted: Vec<_> = counts.into_iter().collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
@@ -315,7 +417,14 @@ fn encode_metrics(w: &mut ic_metrics_encoder::MetricsEncoder<Vec<u8>>) -> std::i
     })
 }
 
-fn format_pair(s: &dex_canister::state::State, pair: &dex_canister::order::TradingPair) -> String {
+fn format_pair<MH, MB>(
+    s: &dex_canister::state::State<MH, MB>,
+    pair: &dex_canister::order::TradingPair,
+) -> String
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
     let base = s
         .token_metadata(&pair.base)
         .map(|m| m.symbol.as_str())
@@ -327,7 +436,7 @@ fn format_pair(s: &dex_canister::state::State, pair: &dex_canister::order::Tradi
     format!("{base}/{quote}")
 }
 
-fn format_status(status: &dex_types::OrderStatus) -> &'static str {
+fn format_status(status: dex_types::OrderStatus) -> &'static str {
     match status {
         dex_types::OrderStatus::NotFound => "not_found",
         dex_types::OrderStatus::Pending => "pending",

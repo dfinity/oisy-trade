@@ -9,7 +9,7 @@ use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
     DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TokenId,
-    TradingPairInfo,
+    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -94,6 +94,17 @@ impl<R: Runtime> DexClient<R> {
     pub async fn deposit(&self, request: DepositRequest) -> Result<DepositResponse, DepositError> {
         self.runtime
             .call(self.dex_canister, "deposit", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Withdraw tokens from the DEX canister.
+    pub async fn withdraw(
+        &self,
+        request: WithdrawRequest,
+    ) -> Result<WithdrawResponse, WithdrawError> {
+        self.runtime
+            .call(self.dex_canister, "withdraw", (request,), 0)
             .await
             .unwrap()
     }

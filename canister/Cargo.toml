@@ -42,3 +42,4 @@ candid_parser = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
 strum = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+# Commits
+
+* Run formatting (`cargo fmt --all`) and linting (`just lint`) before committing.
+
 # Pull Requests
 
 * When asked to create a PR, always create it in draft mode.

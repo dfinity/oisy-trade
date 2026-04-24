@@ -1,12 +1,15 @@
 pub mod event;
 
+use crate::balance::TokenBalance;
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderSeq, PendingOrder, Price, Quantity, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
+    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
-use crate::state;
+use crate::state::StableMemoryOptions;
+use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
+use ic_stable_structures::VectorMemory;
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -35,10 +38,41 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
-pub fn state() -> state::State {
-    state::State::try_from(dex_types_internal::InitArg {
-        mode: dex_types_internal::Mode::GeneralAvailability,
-    })
+pub fn base_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "BASE".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn quote_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "QUOTE".to_string(),
+        decimals: 8,
+    }
+}
+
+pub fn state() -> state::State<VectorMemory, VectorMemory> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        order_history(),
+        balances(),
+    )
+    .unwrap()
+}
+
+/// Build a fresh `State<VMem, VMem>` backed by production stable memory for
+/// tests that go through `state::init_state` (i.e. the canister thread_local).
+pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> {
+    state::State::new(
+        dex_types_internal::InitArg {
+            mode: dex_types_internal::Mode::GeneralAvailability,
+        },
+        order::OrderHistory::new(crate::storage::order_history_memory()),
+        TokenBalance::new(crate::storage::balances_memory()),
+    )
     .unwrap()
 }
 
@@ -137,10 +171,16 @@ pub fn all_order_types(
 }
 
 pub fn init_state_with_order_book() {
+    let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
+    let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
-        state::State::try_from(dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-        })
+        state::State::new(
+            dex_types_internal::InitArg {
+                mode: dex_types_internal::Mode::GeneralAvailability,
+            },
+            order_history,
+            balances,
+        )
         .unwrap(),
     );
     state::with_state_mut(|s| {
@@ -162,17 +202,55 @@ pub fn fund_user(user: Principal) {
     state::with_state_mut(|s| {
         let pair = icp_ckbtc_trading_pair();
         let amount = Quantity::from(u64::MAX);
-        s.deposit(user, pair.base, amount.clone());
-        s.deposit(user, pair.quote, amount);
+        s.deposit(user, pair.base, amount, StableMemoryOptions::Write);
+        s.deposit(user, pair.quote, amount, StableMemoryOptions::Write);
     });
+}
+
+pub fn order_history() -> OrderHistory<VectorMemory> {
+    OrderHistory::new(VectorMemory::default())
+}
+
+pub fn balances() -> TokenBalance<VectorMemory> {
+    TokenBalance::new(VectorMemory::default())
 }
 
 #[cfg(test)]
 pub mod arbitrary {
-    use crate::order::{Fill, OrderSeq, Price, Quantity, Side};
+    use crate::balance::{Balance, BalanceKey};
+    use crate::order::{
+        self, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord, OrderSeq,
+        OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+        TokenMetadata,
+    };
+    use crate::state::event::{
+        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
+        MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
+    };
+    use candid::Principal;
+    use dex_types_internal::{InitArg, Mode, UpgradeArg};
+    use proptest::collection::btree_set;
     use proptest::prelude::*;
+    use std::num::NonZeroU64;
 
     use super::{LOT_SIZE, TICK_SIZE};
+
+    /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
+    /// lot-aligned non-zero quantity.
+    pub fn arb_pending_order() -> impl Strategy<Value = PendingOrder> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            arb_side(),
+            1..1_000u64, // price in ticks
+            1..1_000u64, // quantity in lots
+        )
+            .prop_map(move |(side, price_ticks, qty_lots)| PendingOrder {
+                side,
+                price: Price::new(price_ticks * tick),
+                quantity: Quantity::from(qty_lots * lot),
+            })
+    }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.
     ///
@@ -212,6 +290,258 @@ pub mod arbitrary {
                 }
             })
     }
+
+    /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
+    /// byte slice (up to 29 bytes), covering the full principal byte-length
+    /// range that appears in canister state.
+    pub fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    pub fn arb_balance_key() -> impl Strategy<Value = BalanceKey> {
+        (arb_principal(), arb_principal())
+            .prop_map(|(token, owner)| BalanceKey::new(TokenId::new(token), owner))
+    }
+
+    pub fn arb_side() -> impl Strategy<Value = Side> {
+        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    }
+
+    pub fn arb_order_status() -> impl Strategy<Value = OrderStatus> {
+        prop_oneof![
+            Just(OrderStatus::Pending),
+            Just(OrderStatus::Open),
+            Just(OrderStatus::Filled),
+            Just(OrderStatus::Canceled),
+        ]
+    }
+
+    pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
+        (any::<u64>(), any::<u64>())
+            .prop_map(|(book, seq)| OrderId::new(OrderBookId::new(book), OrderSeq::new(seq)))
+    }
+
+    pub fn arb_quantity() -> impl Strategy<Value = Quantity> {
+        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    }
+
+    pub fn arb_balance() -> impl Strategy<Value = Balance> {
+        (arb_quantity(), arb_quantity()).prop_map(|(free, reserved)| Balance::new(free, reserved))
+    }
+
+    /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
+    /// lot-aligned non-zero quantity.
+    pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (
+            arb_principal(),
+            arb_side(),
+            1..1_000u64, // price in ticks
+            1..1_000u64, // quantity in lots
+            arb_order_status(),
+        )
+            .prop_map(
+                move |(owner, side, price_ticks, qty_lots, status)| OrderRecord {
+                    owner,
+                    side,
+                    price: Price::new(price_ticks * tick),
+                    quantity: Quantity::from(qty_lots * lot),
+                    status,
+                },
+            )
+    }
+
+    pub fn arb_price() -> impl Strategy<Value = Price> {
+        any::<u64>().prop_map(Price::new)
+    }
+
+    pub fn arb_order_seq() -> impl Strategy<Value = OrderSeq> {
+        any::<u64>().prop_map(OrderSeq::new)
+    }
+
+    pub fn arb_token_id() -> impl Strategy<Value = TokenId> {
+        arb_principal().prop_map(TokenId::new)
+    }
+
+    pub fn arb_token_metadata() -> impl Strategy<Value = TokenMetadata> {
+        ("[a-zA-Z]{1,10}", any::<u8>())
+            .prop_map(|(symbol, decimals)| TokenMetadata { symbol, decimals })
+    }
+
+    pub fn arb_mode() -> impl Strategy<Value = Mode> {
+        prop_oneof![
+            Just(Mode::GeneralAvailability),
+            btree_set(arb_principal(), 0..=5).prop_map(Mode::RestrictedTo),
+        ]
+    }
+
+    pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
+        arb_mode().prop_map(|mode| InitArg { mode })
+    }
+
+    pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
+        prop::option::of(arb_mode()).prop_map(|mode| UpgradeArg { mode })
+    }
+
+    pub fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
+        (
+            any::<u64>(),
+            arb_principal(),
+            arb_principal(),
+            1..u64::MAX,
+            1..u64::MAX,
+            arb_token_metadata(),
+            arb_token_metadata(),
+        )
+            .prop_map(
+                |(book_id, base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
+                    AddTradingPairEvent {
+                        book_id: OrderBookId::new(book_id),
+                        base: TokenId::new(base),
+                        quote: TokenId::new(quote),
+                        tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
+                        lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
+                        base_metadata,
+                        quote_metadata,
+                    }
+                },
+            )
+    }
+
+    pub fn arb_deposit_event() -> impl Strategy<Value = DepositEvent> {
+        (arb_principal(), arb_token_id(), arb_quantity()).prop_map(|(user, token, amount)| {
+            DepositEvent {
+                user,
+                token,
+                amount,
+            }
+        })
+    }
+
+    pub fn arb_withdraw_event() -> impl Strategy<Value = WithdrawEvent> {
+        (
+            any::<u64>(),
+            arb_principal(),
+            arb_token_id(),
+            arb_quantity(),
+        )
+            .prop_map(|(block_index, user, token, amount)| WithdrawEvent {
+                block_index,
+                user,
+                token,
+                amount,
+            })
+    }
+
+    pub fn arb_add_limit_order_event() -> impl Strategy<Value = AddLimitOrderEvent> {
+        (
+            arb_principal(),
+            arb_order_id(),
+            arb_side(),
+            arb_price(),
+            arb_quantity(),
+        )
+            .prop_map(
+                |(user, order_id, side, price, quantity)| AddLimitOrderEvent {
+                    user,
+                    order_id,
+                    side,
+                    price,
+                    quantity,
+                },
+            )
+    }
+
+    pub fn arb_matching_output() -> impl Strategy<Value = MatchingOutput> {
+        // `arb_fill` multiplies its index by 2; cap to u32 range so 2 * index
+        // fits in a u64.
+        let arb_any_fill = any::<u32>().prop_flat_map(|i| arb_fill(i as u64));
+        (
+            prop::collection::vec(arb_any_fill, 0..5),
+            btree_set(arb_order_seq(), 0..5),
+            btree_set(arb_order_seq(), 0..5),
+        )
+            .prop_map(|(fills, resting_orders, filled_orders)| MatchingOutput {
+                fills,
+                resting_orders,
+                filled_orders,
+            })
+    }
+
+    pub fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
+        (any::<u64>(), prop::collection::vec(arb_order_seq(), 0..5)).prop_map(
+            |(book_id, orders)| MatchingEvent {
+                book_id: order::OrderBookId::new(book_id),
+                orders,
+            },
+        )
+    }
+
+    pub fn arb_pair_token() -> impl Strategy<Value = PairToken> {
+        prop_oneof![Just(PairToken::Base), Just(PairToken::Quote)]
+    }
+
+    pub fn arb_balance_operation() -> impl Strategy<Value = BalanceOperation> {
+        let transfer = (
+            arb_order_seq(),
+            arb_order_seq(),
+            arb_pair_token(),
+            arb_quantity(),
+        )
+            .prop_map(
+                |(from_order, to_order, token, amount)| BalanceOperation::Transfer {
+                    from_order,
+                    to_order,
+                    token,
+                    amount,
+                },
+            );
+        let unreserve = (arb_order_seq(), arb_pair_token(), arb_quantity()).prop_map(
+            |(order, token, amount)| BalanceOperation::Unreserve {
+                order,
+                token,
+                amount,
+            },
+        );
+        prop_oneof![transfer, unreserve]
+    }
+
+    pub fn arb_order_status_transition() -> impl Strategy<Value = OrderStatusTransition> {
+        (arb_order_seq(), arb_order_status())
+            .prop_map(|(seq, status)| OrderStatusTransition { seq, status })
+    }
+
+    pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
+        (
+            any::<u64>(),
+            prop::collection::vec(arb_balance_operation(), 0..10),
+            prop::collection::vec(arb_order_status_transition(), 0..10),
+        )
+            .prop_map(|(book_id, balance_operations, transitions)| SettlingEvent {
+                book_id: order::OrderBookId::new(book_id),
+                balance_operations,
+                transitions,
+            })
+    }
+
+    pub fn arb_event_type() -> impl Strategy<Value = EventType> {
+        prop_oneof![
+            arb_init_arg().prop_map(EventType::Init),
+            arb_upgrade_arg().prop_map(EventType::Upgrade),
+            arb_add_trading_pair_event().prop_map(EventType::AddTradingPair),
+            arb_deposit_event().prop_map(EventType::Deposit),
+            arb_withdraw_event().prop_map(EventType::Withdraw),
+            arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
+            arb_matching_event().prop_map(EventType::Matching),
+            arb_settling_event().prop_map(EventType::Settling),
+        ]
+    }
+
+    pub fn arb_event() -> impl Strategy<Value = Event> {
+        (any::<u64>(), arb_event_type())
+            .prop_map(|(timestamp, payload)| Event { timestamp, payload })
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +579,85 @@ pub mod mocks {
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
             fn time(&self) -> u64;
+        }
+    }
+
+    /// A test runtime that captures `call_unbounded_wait` arguments as
+    /// candid-encoded bytes so tests can decode and assert on them.
+    pub struct CapturingRuntime {
+        caller: Principal,
+        responses: std::sync::Mutex<std::collections::VecDeque<Result<Response, CallFailed>>>,
+        captured_calls: std::sync::Mutex<Vec<CapturedCall>>,
+    }
+
+    pub struct CapturedCall {
+        pub canister_id: Principal,
+        pub method: String,
+        args: Vec<u8>,
+    }
+
+    impl CapturedCall {
+        pub fn decode_args<'a, T: candid::utils::ArgumentDecoder<'a>>(&'a self) -> T {
+            candid::decode_args(&self.args).expect("failed to decode captured call args")
+        }
+    }
+
+    impl CapturingRuntime {
+        pub fn new(caller: Principal, responses: Vec<Result<Response, CallFailed>>) -> Self {
+            Self {
+                caller,
+                responses: std::sync::Mutex::new(responses.into()),
+                captured_calls: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        pub fn captured_calls(&self) -> std::sync::MutexGuard<'_, Vec<CapturedCall>> {
+            self.captured_calls.lock().unwrap()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Runtime for CapturingRuntime {
+        async fn call_unbounded_wait<A>(
+            &self,
+            canister_id: Principal,
+            method: &str,
+            args: A,
+        ) -> Result<Response, CallFailed>
+        where
+            A: ArgumentEncoder + Send,
+        {
+            let encoded = candid::encode_args(args).expect("failed to encode args");
+            self.captured_calls.lock().unwrap().push(CapturedCall {
+                canister_id,
+                method: method.to_string(),
+                args: encoded,
+            });
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("no more pre-configured responses")
+        }
+
+        fn msg_caller(&self) -> Principal {
+            self.caller
+        }
+
+        fn canister_self(&self) -> Principal {
+            Principal::anonymous()
+        }
+
+        fn is_controller(&self, _principal: &Principal) -> bool {
+            false
+        }
+
+        fn instruction_counter(&self) -> u64 {
+            0
+        }
+
+        fn time(&self) -> u64 {
+            0
         }
     }
 }

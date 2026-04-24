@@ -1,4 +1,5 @@
 use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
+use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -93,6 +94,8 @@ impl OrderBook {
     /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
     /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
     pub fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let mut fills = Vec::new();
@@ -164,7 +167,7 @@ impl OrderBook {
         }
         if quantity.is_zero() || !quantity.is_multiple_of(self.lot_size) {
             return Err(MatchOrderError::InvalidLotSize {
-                quantity: quantity.clone(),
+                quantity: *quantity,
                 lot_size: self.lot_size,
             });
         }
@@ -183,15 +186,22 @@ impl OrderBook {
         self.next_seq.increment();
     }
 
-    /// Drain the pending queue and match each order against the book.
-    ///
-    /// Returns fills (for settlement) and the sequences of orders that
-    /// transitioned to resting (for status tracking).
-    pub fn process_pending_orders(&mut self) -> MatchingOutput {
+    /// Match exactly the given pending-order sequences, in order, against
+    /// the book.
+    pub fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
-        while let Some(order) = self.pending_orders.pop_front() {
+        for expected_seq in expected_seqs {
+            let order = self
+                .pending_orders
+                .pop_front()
+                .expect("BUG: fewer pending orders than expected sequences");
+            assert_eq!(
+                order.id(),
+                *expected_seq,
+                "BUG: pending order seq mismatch at the head of the queue"
+            );
             match self.match_order(order) {
                 Ok(result) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
@@ -219,19 +229,17 @@ impl OrderBook {
             resting_orders.is_disjoint(&self.filled_orders),
             "BUG: resting and filled sets overlap"
         );
+        let filled_orders = std::mem::take(&mut self.filled_orders);
         MatchingOutput {
             fills: all_fills,
             resting_orders,
+            filled_orders,
         }
     }
 
-    /// Drain and return the set of order sequences that were fully filled
-    /// since the last call.
-    pub fn take_filled_orders(&mut self) -> BTreeSet<OrderSeq> {
-        std::mem::take(&mut self.filled_orders)
-    }
-
     fn insert_order(&mut self, order: Order) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::insert_order");
         let side = order.side();
         let price = order.price();
         assert_eq!(self.resting_orders.insert(order.id(), (side, price)), None);
@@ -248,6 +256,11 @@ impl OrderBook {
 
     pub fn pending_orders_len(&self) -> usize {
         self.pending_orders.len()
+    }
+
+    /// FIFO sequence numbers of the orders currently waiting to be matched.
+    pub fn pending_order_seqs(&self) -> impl Iterator<Item = OrderSeq> + '_ {
+        self.pending_orders.iter().map(|order| order.id())
     }
 
     pub fn bids_len(&self) -> usize {
@@ -271,13 +284,14 @@ fn fill_against_queue<K: Ord>(
     orders_index: &mut BTreeMap<OrderSeq, (Side, Price)>,
     filled_orders: &mut BTreeSet<OrderSeq>,
 ) {
+    #[cfg(feature = "canbench-rs")]
+    let _p = canbench_rs::bench_scope("book::fill_against_queue");
     let resting_orders = entry.get_mut();
     while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
         let Some(resting) = resting_orders.front_mut() else {
             break;
         };
-        let fill_qty =
-            std::cmp::min(order.remaining_quantity(), resting.remaining_quantity()).clone();
+        let fill_qty = *std::cmp::min(order.remaining_quantity(), resting.remaining_quantity());
 
         order.reduce_quantity(&fill_qty);
         resting.reduce_quantity(&fill_qty);
@@ -302,11 +316,19 @@ fn fill_against_queue<K: Ord>(
     }
 }
 
-/// Output of a matching round: fills produced and orders that began resting.
-#[derive(Debug)]
+/// Output of [`OrderBook::process_pending_orders`]: the fills produced,
+/// orders that began resting in the book, and orders that were fully filled.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct MatchingOutput {
+    /// Fills executed during this matching round, in execution order.
+    #[n(0)]
     pub fills: Vec<Fill>,
+    /// Orders that were not fully filled and are now resting in the book.
+    #[n(1)]
     pub resting_orders: BTreeSet<OrderSeq>,
+    /// Orders that were fully filled and removed from the book.
+    #[n(2)]
+    pub filled_orders: BTreeSet<OrderSeq>,
 }
 
 /// The result of matching an incoming order against the book.
@@ -350,20 +372,40 @@ impl MatchResult {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct Fill {
     /// The sequence of the incoming (taker) order.
+    #[n(0)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
+    #[n(1)]
     pub taker_side: Side,
     /// The limit price of the taker order.
+    #[n(2)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
+    #[n(3)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
+    #[n(4)]
     pub maker_price: Price,
     /// The quantity filled.
+    #[n(5)]
     pub quantity: Quantity,
+}
+
+impl Fill {
+    /// The amount of quote tokens exchanged (maker_price × quantity).
+    pub fn quote_amount(&self) -> Quantity {
+        self.quantity
+            .checked_mul_u64(self.maker_price.0)
+            .expect("BUG: validation of order should prevent overflow")
+    }
+
+    /// The amount of base tokens exchanged (same as quantity).
+    pub fn base_amount(&self) -> &Quantity {
+        &self.quantity
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,4 +417,124 @@ pub enum MatchOrderError {
         quantity: Quantity,
         lot_size: LotSize,
     },
+}
+
+/// CBOR-encoded view of [`OrderBook`] used for pre/post-upgrade persistence.
+/// The derived `resting_orders` index is intentionally omitted and rebuilt
+/// from `bids` + `asks` in `From<OrderBookSnapshot> for OrderBook`.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct OrderBookSnapshot {
+    #[n(0)]
+    pub id: OrderBookId,
+    #[n(1)]
+    pub next_seq: OrderSeq,
+    #[n(2)]
+    pub tick_size: TickSize,
+    #[n(3)]
+    pub lot_size: LotSize,
+    #[n(4)]
+    pub pending_orders: Vec<Order>,
+    /// Bid side, stored with the natural (un-reversed) price. Converted back
+    /// to a `BTreeMap<Reverse<Price>, …>` on restore.
+    #[n(5)]
+    pub bids: Vec<PriceLevel>,
+    #[n(6)]
+    pub asks: Vec<PriceLevel>,
+    #[n(7)]
+    pub filled_orders: Vec<OrderSeq>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PriceLevel {
+    #[n(0)]
+    pub price: Price,
+    #[n(1)]
+    pub orders: Vec<RestingOrder>,
+}
+
+impl From<&OrderBook> for OrderBookSnapshot {
+    fn from(book: &OrderBook) -> Self {
+        Self {
+            id: book.id,
+            next_seq: book.next_seq,
+            tick_size: book.tick_size,
+            lot_size: book.lot_size,
+            pending_orders: book.pending_orders.iter().cloned().collect(),
+            bids: book
+                .bids
+                .iter()
+                .map(|(Reverse(price), orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            asks: book
+                .asks
+                .iter()
+                .map(|(price, orders)| PriceLevel {
+                    price: *price,
+                    orders: orders.iter().cloned().collect(),
+                })
+                .collect(),
+            filled_orders: book.filled_orders.iter().copied().collect(),
+        }
+    }
+}
+
+impl From<OrderBookSnapshot> for OrderBook {
+    fn from(snapshot: OrderBookSnapshot) -> Self {
+        let pending_orders: VecDeque<Order> = snapshot.pending_orders.into_iter().collect();
+        let mut bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut asks: BTreeMap<Price, VecDeque<RestingOrder>> = BTreeMap::new();
+        let mut resting_orders: BTreeMap<OrderSeq, (Side, Price)> = BTreeMap::new();
+
+        for level in snapshot.bids {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Buy, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                bids.insert(Reverse(price), VecDeque::from(orders))
+                    .is_none(),
+                "invalid order book snapshot: duplicate bid price level {:?}",
+                price
+            );
+        }
+        for level in snapshot.asks {
+            let PriceLevel { price, orders } = level;
+            for order in &orders {
+                assert!(
+                    resting_orders
+                        .insert(order.id(), (Side::Sell, price))
+                        .is_none(),
+                    "invalid order book snapshot: duplicate resting order sequence {:?}",
+                    order.id()
+                );
+            }
+            assert!(
+                asks.insert(price, VecDeque::from(orders)).is_none(),
+                "invalid order book snapshot: duplicate ask price level {:?}",
+                price
+            );
+        }
+
+        let filled_orders = snapshot.filled_orders.into_iter().collect();
+        Self {
+            id: snapshot.id,
+            next_seq: snapshot.next_seq,
+            tick_size: snapshot.tick_size,
+            lot_size: snapshot.lot_size,
+            pending_orders,
+            bids,
+            asks,
+            resting_orders,
+            filled_orders,
+        }
+    }
 }

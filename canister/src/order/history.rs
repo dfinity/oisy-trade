@@ -1,36 +1,74 @@
-use super::{OrderId, Price, Quantity, Side, TradingPair};
+use super::{OrderId, OrderStatus, Price, Quantity, Side};
 use candid::Principal;
-use dex_types::OrderStatus;
-use std::collections::BTreeMap;
+use ic_stable_structures::storable::Bound;
+use ic_stable_structures::{Memory, StableBTreeMap, Storable};
+use std::borrow::Cow;
 
 /// Record of an order from submission through terminal state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`],
+/// so the CBOR layout is an upgrade-durable schema: removing or renumbering a
+/// field breaks decoding of records written by prior canister versions. New
+/// fields must be added with `#[cbor(n(N), default)]` or an `Option<T>` type.
+/// The trading pair is deliberately not stored — it is derivable from the
+/// `OrderBookId` embedded in the [`OrderId`] via the trading-pair registry.
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct OrderRecord {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
     pub owner: Principal,
-    pub pair: TradingPair,
+    #[n(1)]
     pub side: Side,
+    #[n(2)]
     pub price: Price,
+    #[n(3)]
     pub quantity: Quantity,
+    #[n(4)]
     pub status: OrderStatus,
 }
 
-/// Tracks all orders from submission to terminal state.
-///
-/// Wraps the underlying storage to provide a seam for future trimming
-/// or migration to stable memory.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OrderHistory {
-    orders: BTreeMap<OrderId, OrderRecord>,
+impl Storable for OrderRecord {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("order record encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf).expect("order record encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode order record bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
 }
 
-impl OrderHistory {
-    /// Creates an empty order history.
-    pub fn new() -> Self {
-        Self::default()
+pub struct OrderHistory<M: Memory> {
+    orders: StableBTreeMap<OrderId, OrderRecord, M>,
+}
+
+impl<M: Memory> std::fmt::Debug for OrderHistory<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OrderHistory")
+            .field("len", &self.orders.len())
+            .finish()
+    }
+}
+
+impl<M: Memory> OrderHistory<M> {
+    pub fn new(memory: M) -> Self {
+        Self {
+            orders: StableBTreeMap::init(memory),
+        }
     }
 
     /// Insert a new order record. Panics if the order ID already exists.
     pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
+        bench_scopes!("order_history", "order_history::insert_once");
         assert_eq!(
             self.orders.insert(id, record),
             None,
@@ -38,52 +76,48 @@ impl OrderHistory {
         );
     }
 
-    /// Returns the record for the given order, or `None` if absent.
-    pub fn get(&self, id: &OrderId) -> Option<&OrderRecord> {
+    /// Returns a copy of the record for the given order, or `None` if absent.
+    pub fn get(&self, id: &OrderId) -> Option<OrderRecord> {
+        bench_scopes!("order_history", "order_history::get");
         self.orders.get(id)
     }
 
-    /// Returns a mutable reference to the status of the given order, or `None` if absent.
-    ///
-    /// # Example
-    ///
-    /// Change the status of an order from Pending to Filled:
-    /// ```
-    /// # use dex_canister::order::{OrderHistory, OrderRecord, OrderId, OrderBookId, OrderSeq, Price, Quantity, Side, TradingPair, TokenId};
-    /// # use dex_types::OrderStatus;
-    /// # use candid::Principal;
-    /// let mut history = OrderHistory::new();
-    /// let id = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    /// let pair = TradingPair {
-    ///     base: TokenId::new(Principal::anonymous()),
-    ///     quote: TokenId::new(Principal::anonymous()),
-    /// };
-    /// history.insert_once(id, OrderRecord {
-    ///     owner: Principal::anonymous(),
-    ///     pair,
-    ///     side: Side::Buy,
-    ///     price: Price::new(100),
-    ///     quantity: Quantity::from(1_000_000u64),
-    ///     status: OrderStatus::Pending,
-    /// });
-    ///
-    /// *history.get_status_mut(&id).unwrap() = OrderStatus::Filled;
-    /// assert_eq!(history.get_status(&id), OrderStatus::Filled);
-    /// ```
-    pub fn get_status_mut(&mut self, id: &OrderId) -> Option<&mut OrderStatus> {
-        self.orders.get_mut(id).map(|r| &mut r.status)
+    /// Updates the status of an existing order. Panics if the order is unknown.
+    pub fn set_status(&mut self, id: &OrderId, status: OrderStatus) {
+        bench_scopes!("order_history", "order_history::set_status");
+        let mut record = self
+            .orders
+            .get(id)
+            .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
+        record.status = status;
+        self.orders.insert(*id, record);
     }
 
     /// Returns an iterator over all order records.
-    pub fn iter(&self) -> impl Iterator<Item = (&OrderId, &OrderRecord)> {
-        self.orders.iter()
-    }
-
-    /// Returns the status of the given order, or [`OrderStatus::NotFound`] if absent.
-    pub fn get_status(&self, id: &OrderId) -> OrderStatus {
+    pub fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.orders
-            .get(id)
-            .map(|r| r.status.clone())
-            .unwrap_or(OrderStatus::NotFound)
+            .iter()
+            .map(|entry| (*entry.key(), entry.value()))
     }
 }
+
+#[cfg(test)]
+impl Clone for OrderHistory<ic_stable_structures::VectorMemory> {
+    fn clone(&self) -> Self {
+        let mut fresh = Self::new(ic_stable_structures::VectorMemory::default());
+        for (id, record) in self.iter() {
+            fresh.insert_once(id, record);
+        }
+        fresh
+    }
+}
+
+#[cfg(test)]
+impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+#[cfg(test)]
+impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}

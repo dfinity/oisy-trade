@@ -1,10 +1,22 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo,
+    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
 pub use runtime::{IC_RUNTIME, Runtime};
+
+/// Open a pair of canbench scopes: an aggregate scope and a specific scope.
+/// Both are no-ops when the `canbench-rs` feature is not enabled.
+macro_rules! bench_scopes {
+    ($aggregate:expr, $specific:expr) => {
+        #[cfg(feature = "canbench-rs")]
+        let _aggregate = canbench_rs::bench_scope($aggregate);
+        #[cfg(feature = "canbench-rs")]
+        let _specific = canbench_rs::bench_scope($specific);
+    };
+}
 
 pub mod balance;
 pub mod cbor;
@@ -37,7 +49,8 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder::from(request);
+    let pending = order::PendingOrder::try_from(request)
+        .map_err(|_| AddLimitOrderError::AmountExceedsMaximum)?;
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
@@ -46,25 +59,27 @@ pub fn add_limit_order(
             order_id,
             side: order.side(),
             price: order.price(),
-            quantity: order.remaining_quantity().clone(),
+            quantity: *order.remaining_quantity(),
         };
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
     Ok(order_id.to_string())
 }
 
-pub fn process_pending_orders() {
+pub fn process_pending_orders(runtime: &impl Runtime) {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
         None => return,
     };
 
-    state::with_state_mut(|s| s.process_pending_orders());
+    state::with_state_mut(|s| s.process_pending_orders(runtime));
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     match order_id.parse::<order::OrderId>() {
-        Ok(id) => state::with_state(|s| s.get_order_status(id)),
+        Ok(id) => state::with_state(|s| s.get_order_status(id))
+            .map(Into::into)
+            .unwrap_or(OrderStatus::NotFound),
         Err(e) => panic!("ERROR: invalid order id: {}", e),
     }
 }
@@ -100,15 +115,31 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     })
 }
 
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn deposit(
     request: DepositRequest,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let token_id = request.token_id.clone();
-    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let amount = order::Quantity::from(request.amount.clone());
+    let internal_token = order::TokenId::from(token_id.clone());
+    if !state::with_state(|s| s.is_known_token(&internal_token)) {
+        return Err(DepositError::UnsupportedToken { token_id });
+    }
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| DepositError::AmountExceedsMaximum)?;
     let caller = runtime.msg_caller();
+
+    let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
+    if existing
+        .free()
+        .checked_add(*existing.reserved())
+        .and_then(|held| held.checked_add(amount))
+        .is_none()
+    {
+        return Err(DepositError::AmountExceedsMaximum);
+    }
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -121,6 +152,81 @@ pub async fn deposit(
     });
 
     Ok(deposit_response)
+}
+
+// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
+// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
+pub async fn withdraw(
+    request: WithdrawRequest,
+    runtime: &impl Runtime,
+) -> Result<WithdrawResponse, WithdrawError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let token_id = request.token_id.clone();
+    let internal_token = order::TokenId::from(token_id.clone());
+    if !state::with_state(|s| s.is_known_token(&internal_token)) {
+        return Err(WithdrawError::UnsupportedToken { token_id });
+    }
+    let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
+
+    if request.amount == 0u64 {
+        return Err(WithdrawError::AmountTooSmall {
+            min_amount: cached_fee + 1u64,
+        });
+    }
+
+    let caller = runtime.msg_caller();
+    let amount = order::Quantity::try_from(request.amount.clone())
+        .map_err(|_| WithdrawError::AmountExceedsMaximum)?;
+
+    // Debit the full amount from the user's free balance.
+    state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
+        WithdrawError::InsufficientBalance {
+            available: e.available.into(),
+        }
+    })?;
+
+    // Perform the ledger transfer (with automatic BadFee retry).
+    let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
+
+    // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
+    if let Some(fee) = outcome.ledger_fee {
+        state::with_state_mut(|s| {
+            s.set_cached_ledger_fee(order::TokenId::from(token_id.clone()), fee);
+        });
+    }
+
+    match outcome.result {
+        Ok(response) => {
+            // The balance debit happened synchronously before the async
+            // ledger call (for concurrency safety), so the event is appended
+            // record-only — replay re-applies the debit through
+            // `apply_state_transition`.
+            let block_index = u64::try_from(&response.block_index.0)
+                .expect("BUG: ledger block_index exceeds u64::MAX");
+            let event = state::event::WithdrawEvent {
+                block_index,
+                user: caller,
+                token: order::TokenId::from(token_id),
+                amount,
+            };
+            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            Ok(response)
+        }
+        Err(e) => {
+            // Credit back on failure so the user doesn't lose funds. No event
+            // is emitted: replay then sees no WithdrawEvent for the failed
+            // call, mirroring the net-zero state mutation on the primary path.
+            state::with_state_mut(|s| {
+                s.deposit(
+                    caller,
+                    order::TokenId::from(token_id),
+                    amount,
+                    state::StableMemoryOptions::Write,
+                );
+            });
+            Err(e)
+        }
+    }
 }
 
 pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {
