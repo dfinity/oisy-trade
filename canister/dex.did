@@ -27,10 +27,10 @@ type LimitOrderRequest = record {
     pair : TradingPair;
     // Whether this is a buy or sell order.
     side : Side;
-    // Limit price in quote base units per base base unit.
+    // Limit price in quote token units per base token unit.
     // Must be a positive multiple of the pair's `tick_size`.
     price : nat64;
-    // Order quantity in base base units.
+    // Order quantity in base token units.
     // Must be a positive multiple of the pair's `lot_size`.
     quantity : nat;
 };
@@ -66,9 +66,9 @@ type TradingPairInfo = record {
 
 // A single price level in an order book, aggregated across all resting orders at that price.
 type PriceLevel = record {
-    // Price in quote base units per base base unit.
+    // Price in quote token units per base token unit.
     price : nat64;
-    // Total quantity in base base units across all resting orders at this price.
+    // Total quantity in base token units across all resting orders at this price.
     quantity : nat;
 };
 

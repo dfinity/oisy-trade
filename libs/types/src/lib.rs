@@ -91,9 +91,9 @@ pub struct TradingPairInfo {
 /// A single price level in an order book, aggregated across all resting orders at that price.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct PriceLevel {
-    /// Price in quote base units per base base unit.
+    /// Price in quote token units per base token unit.
     pub price: u64,
-    /// Total quantity in base base units across all resting orders at this price.
+    /// Total quantity in base token units across all resting orders at this price.
     pub quantity: Nat,
 }
 
