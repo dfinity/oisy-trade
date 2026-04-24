@@ -263,8 +263,8 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord, OrderSeq,
-        OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+        self, CanceledOrderInfo, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord,
+        OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
         TokenMetadata,
     };
     use crate::state::event::{
@@ -377,7 +377,9 @@ pub mod arbitrary {
             Just(OrderStatus::Pending),
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
-            Just(OrderStatus::Canceled),
+            arb_quantity().prop_map(|filled_quantity| OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity,
+            })),
         ]
     }
 

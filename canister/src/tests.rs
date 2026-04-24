@@ -439,7 +439,9 @@ mod cancel_limit_order {
         assert_eq!(result, Ok(()));
         assert_eq!(
             crate::get_order_status(order_id),
-            dex_types::OrderStatus::Canceled
+            dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                filled_quantity: candid::Nat::from(0u64),
+            })
         );
     }
 }

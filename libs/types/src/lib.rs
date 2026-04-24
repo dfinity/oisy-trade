@@ -113,7 +113,19 @@ pub enum OrderStatus {
     /// The order has been fully filled.
     Filled,
     /// The order has been canceled.
-    Canceled,
+    Canceled(CanceledOrderInfo),
+}
+
+/// Details about a canceled order.
+///
+/// Refund token and amount are derivable from the order's
+/// [`OrderRecord`] + trading pair + `filled_quantity`, so they are not
+/// duplicated here — only the non-derivable piece is stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct CanceledOrderInfo {
+    /// Quantity that had already filled before the cancel landed.
+    /// Zero for a never-matched order; `original − remaining` otherwise.
+    pub filled_quantity: Nat,
 }
 
 /// A token identified by its ledger canister ID.

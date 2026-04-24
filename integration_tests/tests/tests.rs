@@ -281,10 +281,12 @@ mod add_limit_order {
 }
 
 mod cancel_limit_order {
-    use candid::{Encode, Principal};
+    use candid::{Nat, Principal};
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_types::{Balance, CancelLimitOrderError, LimitOrderRequest, OrderStatus, Side};
+    use dex_types::{
+        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderStatus, Side,
+    };
 
     #[tokio::test]
     async fn should_cancel_buy_order_and_refund_quote_balance() {
@@ -315,7 +317,9 @@ mod cancel_limit_order {
 
         assert_eq!(
             client.get_order_status(order_id).await,
-            OrderStatus::Canceled
+            OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity: Nat::from(0u64),
+            })
         );
         assert_eq!(
             client.get_balance(quote).await,
@@ -357,7 +361,9 @@ mod cancel_limit_order {
 
         assert_eq!(
             client.get_order_status(order_id).await,
-            OrderStatus::Canceled
+            OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity: Nat::from(0u64),
+            })
         );
         assert_eq!(
             client.get_balance(base).await,
@@ -437,7 +443,9 @@ mod cancel_limit_order {
 
         assert_eq!(
             buyer_client.get_order_status(buy_id).await,
-            OrderStatus::Canceled
+            OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity: Nat::from(1_000_000u64),
+            })
         );
         assert_eq!(
             buyer_client.get_balance(setup.quote_token_id()).await,

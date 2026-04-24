@@ -1,8 +1,8 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TokenId,
-    TradingPair,
+    CanceledOrderInfo, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+    Side, TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
@@ -523,7 +523,12 @@ fn should_replay_cancel_pending_order() {
     scenario
         .with_cancel(user_1(), buy_id)
         .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
-        .assert_order_status(buy_id, OrderStatus::Canceled)
+        .assert_order_status(
+            buy_id,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity: Quantity::ZERO,
+            }),
+        )
         .assert_replay_matches();
 }
 
@@ -603,7 +608,12 @@ fn should_replay_cancel_partially_filled_order() {
         .assert_balance(seller, TokenId::new(base()), 0u64, 0u64)
         .assert_balance(seller, TokenId::new(quote()), price * quantity, 0u64)
         .assert_order_status(sell_id, OrderStatus::Filled)
-        .assert_order_status(buy_id, OrderStatus::Canceled)
+        .assert_order_status(
+            buy_id,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                filled_quantity: Quantity::from(quantity),
+            }),
+        )
         .assert_replay_matches();
 }
 

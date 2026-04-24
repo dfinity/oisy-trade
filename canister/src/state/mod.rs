@@ -13,9 +13,9 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
-    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, RemovedOrder, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity,
+    RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
@@ -236,7 +236,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
             OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+            OrderStatus::Canceled(_) => Err(CancelLimitOrderError::OrderAlreadyCanceled),
         }
     }
 
@@ -252,6 +252,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_pair(&book_id)
             .expect("BUG: unknown trading pair for canceled order")
             .clone();
+        let original_quantity = self
+            .order_history
+            .get(&order_id)
+            .expect("BUG: canceled order missing from history")
+            .quantity;
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -276,9 +281,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 ),
                 Side::Sell => (pair.base, remaining_quantity),
             };
+            let filled_quantity = original_quantity
+                .checked_sub(&remaining_quantity)
+                .expect("BUG: remaining > original quantity");
             self.balances.unreserve(&user, &token, amount);
-            self.order_history
-                .set_status(&order_id, OrderStatus::Canceled);
+            self.order_history.set_status(
+                &order_id,
+                OrderStatus::Canceled(CanceledOrderInfo { filled_quantity }),
+            );
         }
     }
 
