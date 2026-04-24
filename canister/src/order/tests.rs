@@ -781,6 +781,47 @@ mod order_book {
             assert_eq!(book.bid_levels(10).count(), 0);
             assert_eq!(book.ask_levels(10).count(), 0);
         }
+
+        #[test]
+        fn should_saturate_aggregated_quantity_on_overflow() {
+            use crate::order::{
+                OrderBook, OrderBookId, OrderBookSnapshot, PendingOrder, PriceLevel, RestingOrder,
+                Side,
+            };
+
+            fn resting(seq: u64, quantity: Quantity) -> RestingOrder {
+                RestingOrder::from(
+                    PendingOrder {
+                        side: Side::Buy,
+                        price: Price::new(1),
+                        quantity,
+                    }
+                    .into_order(OrderSeq::new(seq)),
+                )
+            }
+
+            // Two resting orders at the same bid price whose quantities would
+            // overflow u256. `bid_levels` must report `Quantity::MAX` rather
+            // than trap on overflow.
+            let snapshot = OrderBookSnapshot {
+                id: OrderBookId::ZERO,
+                next_seq: OrderSeq::new(2),
+                tick_size: TICK_SIZE,
+                lot_size: LOT_SIZE,
+                pending_orders: vec![],
+                bids: vec![PriceLevel {
+                    price: Price::new(100),
+                    orders: vec![resting(0, Quantity::MAX), resting(1, Quantity::from(1u64))],
+                }],
+                asks: vec![],
+                filled_orders: vec![],
+            };
+            let book = OrderBook::from(snapshot);
+
+            let (price, quantity) = book.bid_levels(1).next().unwrap();
+            assert_eq!(price, Price::new(100));
+            assert_eq!(quantity, Quantity::MAX);
+        }
     }
 }
 

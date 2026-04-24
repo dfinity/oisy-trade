@@ -305,31 +305,6 @@ fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
     })
 }
 
-#[cfg(test)]
-mod sum_remaining_tests {
-    use super::*;
-    use crate::order::{OrderSeq, PendingOrder};
-
-    fn resting(quantity: Quantity) -> RestingOrder {
-        RestingOrder::from(
-            PendingOrder {
-                side: Side::Buy,
-                price: Price::new(1),
-                quantity,
-            }
-            .into_order(OrderSeq::new(0)),
-        )
-    }
-
-    #[test]
-    fn should_saturate_on_u256_overflow() {
-        let mut queue = VecDeque::new();
-        queue.push_back(resting(Quantity::MAX));
-        queue.push_back(resting(Quantity::from(1u64)));
-        assert_eq!(sum_remaining(&queue), Quantity::MAX);
-    }
-}
-
 fn fill_against_queue<K: Ord>(
     maker_price: Price,
     mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<RestingOrder>>,
