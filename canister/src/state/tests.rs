@@ -260,6 +260,19 @@ mod cancel_limit_order {
         assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
     }
 
+    #[test]
+    fn should_refund_residual_of_partially_filled_sell() {
+        let mut state = setup();
+        let lot = u64::from(LOT_SIZE);
+        // Maker buys 1 lot; taker sells 3 lots — taker partially fills and rests with 2 lots.
+        place_order(&mut state, STRANGER, Side::Buy, 100, lot);
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, 3 * lot);
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+
+        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
+    }
+
     /// Cancels `order_id` owned by `user` and asserts the canonical refund
     /// invariant: every reserved unit (base and/or quote) moves into free,
     /// reserved goes to zero on both tokens, and the order becomes Canceled.
