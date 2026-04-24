@@ -14,8 +14,8 @@ use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity,
-    RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
@@ -240,18 +240,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub fn record_cancel_order(&mut self, order_id: OrderId, persistence: StableMemoryOptions) {
+    /// Book-side step of a cancel: remove the order from pending / resting.
+    /// The complementary balance refund and status transition are carried by
+    /// the follow-up [`event::SettlingEvent`] — this mirrors the split used
+    /// by the matching flow. Returns the data needed to construct that
+    /// settling event (the live path uses it; replay discards it and relies
+    /// on the separately-dispatched `SettlingEvent` to apply the refund).
+    pub fn apply_cancel_to_book(&mut self, order_id: OrderId) -> CancelSettlement {
         let (book_id, seq) = order_id.into_parts();
-        let pair = self
-            .trading_pairs
-            .get_pair(&book_id)
-            .expect("BUG: unknown trading pair for canceled order")
-            .clone();
         let order_record = self
             .order_history
             .get(&order_id)
             .expect("BUG: canceled order missing from history");
-        let user = order_record.owner;
         let original_quantity = order_record.quantity;
         let book = self
             .order_books
@@ -267,25 +267,41 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         } = book
             .remove_order(seq)
             .expect("BUG: canceled order not found in book");
-        if matches!(persistence, StableMemoryOptions::Write) {
-            let (token, amount) = match side {
-                Side::Buy => (
-                    pair.quote,
-                    price
-                        .checked_mul_quantity(&remaining_quantity)
-                        .expect("BUG: price * remaining overflow — validated at placement"),
-                ),
-                Side::Sell => (pair.base, remaining_quantity),
-            };
-            let filled_quantity = original_quantity
-                .checked_sub(&remaining_quantity)
-                .expect("BUG: remaining > original quantity");
-            self.balances.unreserve(&user, &token, amount);
-            self.order_history.set_status(
-                &order_id,
-                OrderStatus::Canceled(CanceledOrderInfo { filled_quantity }),
-            );
+        let (refund_token, refund_amount) = match side {
+            Side::Buy => (
+                PairToken::Quote,
+                price
+                    .checked_mul_quantity(&remaining_quantity)
+                    .expect("BUG: price * remaining overflow — validated at placement"),
+            ),
+            Side::Sell => (PairToken::Base, remaining_quantity),
+        };
+        let filled_quantity = original_quantity
+            .checked_sub(&remaining_quantity)
+            .expect("BUG: remaining > original quantity");
+        CancelSettlement {
+            book_id,
+            seq,
+            refund_token,
+            refund_amount,
+            filled_quantity,
         }
+    }
+
+    /// Convenience wrapper: apply the full live-path cancel in one call —
+    /// book removal + settling — and return the constructed
+    /// [`event::SettlingEvent`] so the caller can forward it to the audit
+    /// log. Equivalent to [`Self::apply_cancel_to_book`] followed by
+    /// [`Self::record_settling_event`].
+    pub fn cancel_order(
+        &mut self,
+        order_id: OrderId,
+        persistence: StableMemoryOptions,
+    ) -> event::SettlingEvent {
+        let settlement = self.apply_cancel_to_book(order_id);
+        let settling_event = settlement.into_settling_event();
+        self.record_settling_event(&settling_event, persistence);
+        settling_event
     }
 
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
@@ -407,6 +423,37 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 let order_id = OrderId::new(event.book_id, transition.seq);
                 self.order_history.set_status(&order_id, transition.status);
             }
+        }
+    }
+}
+
+/// The outcome of removing an order from the book during a cancel. Used by
+/// the live path to build the follow-up [`event::SettlingEvent`] that carries
+/// the refund and the `Canceled` status transition.
+#[derive(Clone, Debug)]
+pub struct CancelSettlement {
+    pub book_id: OrderBookId,
+    pub seq: OrderSeq,
+    pub refund_token: PairToken,
+    pub refund_amount: Quantity,
+    pub filled_quantity: Quantity,
+}
+
+impl CancelSettlement {
+    fn into_settling_event(self) -> event::SettlingEvent {
+        event::SettlingEvent {
+            book_id: self.book_id,
+            balance_operations: vec![event::BalanceOperation::Unreserve {
+                order: self.seq,
+                token: self.refund_token,
+                amount: self.refund_amount,
+            }],
+            transitions: vec![event::OrderStatusTransition {
+                seq: self.seq,
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    filled_quantity: self.filled_quantity,
+                }),
+            }],
         }
     }
 }

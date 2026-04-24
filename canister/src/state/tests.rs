@@ -298,7 +298,7 @@ mod cancel_limit_order {
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
 
         state.validate_cancel_limit_order(user, order_id).unwrap();
-        state.record_cancel_order(order_id, StableMemoryOptions::Write);
+        state.cancel_order(order_id, StableMemoryOptions::Write);
 
         let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
         assert_eq!(

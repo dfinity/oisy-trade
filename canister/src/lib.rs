@@ -77,8 +77,17 @@ pub fn cancel_limit_order(
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
     state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
     state::with_state_mut(|s| {
-        let event = state::event::CancelLimitOrderEvent { order_id: id };
-        state::audit::process_event(s, state::event::EventType::CancelLimitOrder(event), runtime);
+        // Live-path: apply book removal + settling atomically, then append
+        // the two corresponding audit-log events so replay can reconstruct
+        // the same state by dispatching them independently.
+        let settling_event = s.cancel_order(id, state::StableMemoryOptions::Write);
+        state::audit::record_event(
+            state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {
+                order_id: id,
+            }),
+            runtime,
+        );
+        state::audit::record_event(state::event::EventType::Settling(settling_event), runtime);
     });
     Ok(())
 }

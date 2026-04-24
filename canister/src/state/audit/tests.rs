@@ -177,18 +177,26 @@ impl Scenario {
     }
 
     /// Cancels `order_id` for `user` on the primary path and records the
-    /// matching `CancelLimitOrderEvent`. Panics if validation would reject
-    /// (the test is expected to set up a cancelable order first).
+    /// two corresponding audit-log events (`CancelLimitOrderEvent` for the
+    /// book mutation, then a `SettlingEvent` for the refund + status
+    /// transition). Panics if validation would reject (the test is expected
+    /// to set up a cancelable order first).
     fn with_cancel(mut self, user: Principal, order_id: OrderId) -> Self {
         self.state
             .validate_cancel_limit_order(user, order_id)
             .expect("test setup: order must be cancelable");
-        self.state
-            .record_cancel_order(order_id, StableMemoryOptions::Write);
-        let timestamp = self.timestamp();
+        let settling_event = self
+            .state
+            .cancel_order(order_id, StableMemoryOptions::Write);
+        let cancel_ts = self.timestamp();
+        let settling_ts = self.timestamp();
         self.events.push(Event {
-            timestamp,
+            timestamp: cancel_ts,
             payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }),
+        });
+        self.events.push(Event {
+            timestamp: settling_ts,
+            payload: EventType::Settling(settling_event),
         });
         self
     }
