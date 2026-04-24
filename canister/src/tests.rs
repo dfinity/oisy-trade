@@ -402,9 +402,10 @@ mod cancel_limit_order {
         fund_user(owner);
         let runtime = mock_runtime_for(owner);
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+        assert_eq!(cancel_limit_order(order_id.clone(), &runtime), Ok(()));
 
-        cancel_limit_order(order_id.clone(), &runtime).unwrap();
         let result = cancel_limit_order(order_id, &runtime);
+
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyCanceled));
     }
 
