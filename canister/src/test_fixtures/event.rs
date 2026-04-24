@@ -3,8 +3,8 @@ use crate::order::{
     TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-    MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
+    Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -50,6 +50,7 @@ pub enum WorstCaseEvent {
     Deposit,
     Withdraw,
     AddLimitOrder,
+    CancelLimitOrder,
     Matching,
     Settling,
 }
@@ -63,6 +64,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Deposit(_) => Self::Deposit,
             EventType::Withdraw(_) => Self::Withdraw,
             EventType::AddLimitOrder(_) => Self::AddLimitOrder,
+            EventType::CancelLimitOrder(_) => Self::CancelLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
         }
@@ -84,6 +86,7 @@ impl WorstCaseEvent {
             Self::Deposit => deposit(max_quantity()),
             Self::Withdraw => withdraw(max_quantity()),
             Self::AddLimitOrder => add_limit_order(),
+            Self::CancelLimitOrder => cancel_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
         })
@@ -103,6 +106,7 @@ impl WorstCaseEvent {
             Self::Deposit => 95,
             Self::Withdraw => 104,
             Self::AddLimitOrder => 97,
+            Self::CancelLimitOrder => 35,
             Self::Matching => 10_027,
             Self::Settling => 105_330,
         }
@@ -157,6 +161,12 @@ fn add_limit_order() -> EventType {
         side: Side::Buy,
         price: Price::new(u64::MAX),
         quantity: max_quantity(),
+    })
+}
+
+fn cancel_limit_order() -> EventType {
+    EventType::CancelLimitOrder(CancelLimitOrderEvent {
+        order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
     })
 }
 

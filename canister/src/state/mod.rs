@@ -13,9 +13,9 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
-    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
-    TokenMetadata, TradingPair,
+    self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
@@ -77,9 +77,12 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Stores on the heap settlements that are not yet recorded in stable memory.
-    /// Normally empty between messages — producers and their paired
-    /// settling happen atomically inside a single message processing.
+    /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
+    /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
+    /// for cancels) and drained by the paired `SettlingEvent` dispatch in
+    /// [`Self::record_settling_event`]. Normally empty between messages —
+    /// producers and their paired settling happen atomically in the same
+    /// message (see `process_pending_orders` and `cancel_limit_order`).
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
 }
@@ -220,6 +223,99 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         book.add_pending_order(order);
     }
 
+    pub fn cancel_limit_order(
+        &mut self,
+        user: &Principal,
+        order_id: OrderId,
+        runtime: &impl Runtime,
+    ) -> Result<OrderRecord, CancelLimitOrderError> {
+        self.validate_cancel_limit_order(user, &order_id)?;
+
+        audit::process_event(
+            self,
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            runtime,
+        );
+
+        while let Some(event) = self.take_next_pending_settling_event() {
+            audit::process_event(self, event::EventType::Settling(event), runtime);
+        }
+
+        let order = self
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
+        assert!(
+            matches!(order.status, OrderStatus::Canceled(_)),
+            "BUG: order {order_id} not canceled"
+        );
+        Ok(order)
+    }
+
+    pub fn validate_cancel_limit_order(
+        &self,
+        caller: &Principal,
+        order_id: &OrderId,
+    ) -> Result<(), CancelLimitOrderError> {
+        let record = self
+            .order_history
+            .get(order_id)
+            .ok_or(CancelLimitOrderError::OrderNotFound)?;
+        if &record.owner != caller {
+            return Err(CancelLimitOrderError::NotOrderOwner);
+        }
+        match record.status {
+            OrderStatus::Pending | OrderStatus::Open => Ok(()),
+            OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
+            OrderStatus::Canceled(_) => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+        }
+    }
+
+    /// Book-side step of a cancel: remove the order from pending / resting
+    /// and push the paired [`event::SettlingEvent`] (one `Unreserve` op and
+    /// one `Canceled` transition) to [`State::pending_settling_events`] for
+    /// the subsequent `SettlingEvent` dispatch to drain. Mirrors
+    /// [`Self::record_matching_event`].
+    pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
+        let (book_id, seq) = order_id.into_parts();
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing for canceled order");
+        // Unreachable: `validate_cancel_limit_order` rejects every status
+        // except `Pending` and `Open`, and the book invariant guarantees those
+        // statuses correspond to entries in `pending_orders` / `resting_orders`.
+        let RemovedOrder {
+            side,
+            price,
+            remaining_quantity,
+        } = book
+            .remove_order(seq)
+            .expect("BUG: canceled order not found in book");
+        let (refund_token, refund_amount) = match side {
+            Side::Buy => (
+                PairToken::Quote,
+                price
+                    .checked_mul_quantity(&remaining_quantity)
+                    .expect("BUG: price * remaining overflow — validated at placement"),
+            ),
+            Side::Sell => (PairToken::Base, remaining_quantity),
+        };
+        self.pending_settling_events
+            .push_back(event::SettlingEvent {
+                book_id,
+                balance_operations: vec![event::BalanceOperation::Unreserve {
+                    order: seq,
+                    token: refund_token,
+                    amount: refund_amount,
+                }],
+                transitions: vec![event::OrderStatusTransition {
+                    seq,
+                    status: OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
+                }],
+            });
+    }
+
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let book_ids: Vec<OrderBookId> = self
@@ -248,7 +344,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Drive engine matching for the given book and push the paired
     /// [`event::SettlingEvent`] (if the round produced any ops) to
     /// [`State::pending_settling_events`] for the subsequent settling
     /// dispatch to drain.
@@ -633,6 +728,14 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CancelLimitOrderError {
+    OrderNotFound,
+    NotOrderOwner,
+    OrderAlreadyFilled,
+    OrderAlreadyCanceled,
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {

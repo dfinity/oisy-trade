@@ -1,6 +1,6 @@
 pub mod event;
 
-use crate::balance::TokenBalance;
+use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
     Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
@@ -9,7 +9,7 @@ use crate::state::StableMemoryOptions;
 use crate::{order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
-use ic_stable_structures::VectorMemory;
+use ic_stable_structures::{Memory, VectorMemory};
 use std::iter::once;
 use std::num::NonZeroU64;
 
@@ -195,6 +195,17 @@ pub fn init_state_with_order_book() {
     });
 }
 
+pub fn balances_pair<MB: Memory>(
+    balances: &TokenBalance<MB>,
+    user: &Principal,
+    pair: &TradingPair,
+) -> (Balance, Balance) {
+    (
+        balances.get_balance(user, &pair.base).unwrap_or_default(),
+        balances.get_balance(user, &pair.quote).unwrap_or_default(),
+    )
+}
+
 /// Fund the given user with a large balance for both tokens of the default
 /// trading pair so that balance checks pass in tests that don't care about
 /// balance validation.
@@ -258,13 +269,14 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord, OrderSeq,
-        OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+        self, CanceledOrderInfo, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord,
+        OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
         TokenMetadata,
     };
     use crate::state::event::{
-        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, DepositEvent, Event, EventType,
-        MatchingEvent, OrderStatusTransition, SettlingEvent, WithdrawEvent,
+        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
+        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent,
+        WithdrawEvent,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -289,6 +301,26 @@ pub mod arbitrary {
                 price: Price::new(price_ticks * tick),
                 quantity: Quantity::from(qty_lots * lot),
             })
+    }
+    /// Strategy for a pending order whose price lives on one side of a fixed
+    /// spread: buys land in `[1, 99] * tick_size`, sells in `[101, 199] *
+    /// tick_size`. That guarantees the full buy book and the full sell book
+    /// never cross, so every generated order rests on the book.
+    pub fn arb_non_matching_pending_order() -> impl Strategy<Value = PendingOrder> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (any::<bool>(), 1..100u64, 1..100u64).prop_map(move |(is_buy, price_offset, qty_lots)| {
+            let (side, price_ticks) = if is_buy {
+                (Side::Buy, price_offset)
+            } else {
+                (Side::Sell, price_offset + 100)
+            };
+            PendingOrder {
+                side,
+                price: Price::new(price_ticks * tick),
+                quantity: Quantity::from(qty_lots * lot),
+            }
+        })
     }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.
@@ -351,7 +383,9 @@ pub mod arbitrary {
             Just(OrderStatus::Pending),
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
-            Just(OrderStatus::Canceled),
+            arb_quantity().prop_map(|remaining_quantity| OrderStatus::Canceled(
+                CanceledOrderInfo { remaining_quantity },
+            )),
         ]
     }
 
@@ -492,6 +526,10 @@ pub mod arbitrary {
             )
     }
 
+    pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {
+        arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
+    }
+
     pub fn arb_matching_output() -> impl Strategy<Value = MatchingOutput> {
         // `arb_fill` multiplies its index by 2; cap to u32 range so 2 * index
         // fits in a u64.
@@ -572,6 +610,7 @@ pub mod arbitrary {
             arb_deposit_event().prop_map(EventType::Deposit),
             arb_withdraw_event().prop_map(EventType::Withdraw),
             arb_add_limit_order_event().prop_map(EventType::AddLimitOrder),
+            arb_cancel_limit_order_event().prop_map(EventType::CancelLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
         ]

@@ -213,6 +213,12 @@ fn get_events(
                         })
                         .collect(),
                 }),
+                // No public-event-log representation yet. The cancel
+                // endpoint isn't exposed in this PR, so no canceled orders
+                // can have been recorded on the live canister.
+                EventType::CancelLimitOrder(_) => {
+                    panic!("BUG: CancelLimitOrder event before the cancel endpoint is wired")
+                }
             },
         }
     }

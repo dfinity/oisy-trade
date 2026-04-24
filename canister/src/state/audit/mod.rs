@@ -3,7 +3,8 @@ use crate::Runtime;
 use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, DepositEvent, Event, EventType, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
+    WithdrawEvent,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
@@ -104,6 +105,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
             state.record_limit_order(*user, book_id, order, persistence);
+        }
+        EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
+            state.record_cancel_limit_order(*order_id);
         }
         EventType::Matching(event) => {
             state.record_matching_event(event);
