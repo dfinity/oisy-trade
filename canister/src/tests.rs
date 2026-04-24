@@ -349,11 +349,26 @@ mod add_limit_order {
 }
 
 mod cancel_limit_order {
+    use crate::state::with_state_mut;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
     use crate::{add_limit_order, cancel_limit_order};
     use candid::Principal;
     use dex_types::CancelLimitOrderError;
+    use dex_types_internal::Mode;
+
+    #[test]
+    #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
+    fn should_fail_when_caller_not_allowed() {
+        let authorized = Principal::from_slice(&[0x42]);
+        let unauthorized = Principal::from_slice(&[0xFF]);
+        init_state_with_order_book();
+        with_state_mut(|s| s.set_mode(Mode::restricted_to(vec![authorized])));
+        let mut runtime = mock_runtime_for(unauthorized);
+        runtime.expect_is_controller().return_const(false);
+
+        let _panic = cancel_limit_order("0x00".to_string(), &runtime);
+    }
 
     #[test]
     fn should_reject_cancel_of_unknown_order() {

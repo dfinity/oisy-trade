@@ -33,12 +33,9 @@ fn cancel_limit_order(order_id: OrderId) -> Result<(), CancelLimitOrderError> {
             "[cancel_limit_order]: canceled order_id={}",
             order_id
         ),
-        Err(err) => canlog::log!(
-            Priority::Debug,
-            "[cancel_limit_order]: cancel for order_id={} failed, error={:?}",
-            order_id,
-            err
-        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
     }
     result
 }
