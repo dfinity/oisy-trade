@@ -78,7 +78,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
     /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
-    /// steps (`record_matching_event` for matches, `apply_cancel_to_book`
+    /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
     /// for cancels) and drained by the paired `SettlingEvent` dispatch in
     /// [`Self::record_settling_event`]. Normally empty between messages —
     /// producers and their paired settling happen atomically in the same
@@ -247,7 +247,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// one `Canceled` transition) to [`State::pending_settling_events`] for
     /// the subsequent `SettlingEvent` dispatch to drain. Mirrors
     /// [`Self::record_matching_event`].
-    pub fn apply_cancel_to_book(&mut self, order_id: OrderId) {
+    pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
         let (book_id, seq) = order_id.into_parts();
         let order_record = self
             .order_history
@@ -307,17 +307,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// book removal + settling — returning both the [`CanceledOrderInfo`]
     /// (to surface in the endpoint response) and the constructed
     /// [`event::SettlingEvent`] (to append to the audit log).
-    /// Equivalent to [`Self::apply_cancel_to_book`] followed by
+    /// Equivalent to [`Self::record_cancel_limit_order`] followed by
     /// [`Self::record_settling_event`].
     pub fn cancel_order(
         &mut self,
         order_id: OrderId,
         persistence: StableMemoryOptions,
     ) -> (CanceledOrderInfo, event::SettlingEvent) {
-        self.apply_cancel_to_book(order_id);
+        self.record_cancel_limit_order(order_id);
         let settling_event = self
             .next_pending_settling_event()
-            .expect("BUG: apply_cancel_to_book did not push a settling event")
+            .expect("BUG: record_cancel_limit_order did not push a settling event")
             .clone();
         let filled_quantity = match settling_event
             .transitions
