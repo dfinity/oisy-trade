@@ -77,11 +77,6 @@ pub fn cancel_limit_order(
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
     state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
     let info = state::with_state_mut(|s| {
-        // Mirrors process_pending_orders: dispatch CancelLimitOrderEvent
-        // (pushes the paired SettlingEvent to pending_settling_events),
-        // take it by value and dispatch — moving the Vec<BalanceOperation>
-        // / Vec<OrderStatusTransition> payload into the dispatcher without
-        // cloning.
         state::audit::process_event(
             s,
             state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {

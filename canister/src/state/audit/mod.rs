@@ -106,11 +106,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_limit_order(*user, book_id, order, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
-            // Book-only step. The complementary balance refund and Canceled
-            // status transition arrive as the subsequent SettlingEvent that
-            // the cancel endpoint emits alongside this event.
             state.record_cancel_limit_order(*order_id);
-            let _ = persistence;
         }
         EventType::Matching(event) => {
             state.record_matching_event(event, persistence);
