@@ -295,12 +295,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             });
     }
 
-    /// Peek at the [`event::SettlingEvent`] pushed by the most recent
-    /// producer step (matching round or cancel book removal). Does not
-    /// drain — the paired [`Self::record_settling_event`] call pops the
-    /// entry when the event is dispatched.
-    pub fn next_pending_settling_event(&self) -> Option<&event::SettlingEvent> {
-        self.pending_settling_events.front()
+    /// Take ownership of the next [`event::SettlingEvent`] pushed by a
+    /// producer step (matching round or cancel book removal). Used by the
+    /// live path to move the event into the dispatcher without cloning its
+    /// `Vec<BalanceOperation>` / `Vec<OrderStatusTransition>`.
+    /// [`Self::record_settling_event`]'s own `pop_front` drain becomes a
+    /// no-op once the queue is emptied here.
+    pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
+        self.pending_settling_events.pop_front()
     }
 
     /// Convenience wrapper: apply the full live-path cancel in one call —
@@ -316,9 +318,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> (CanceledOrderInfo, event::SettlingEvent) {
         self.record_cancel_limit_order(order_id);
         let settling_event = self
-            .next_pending_settling_event()
-            .expect("BUG: record_cancel_limit_order did not push a settling event")
-            .clone();
+            .take_next_pending_settling_event()
+            .expect("BUG: record_cancel_limit_order did not push a settling event");
         let filled_quantity = match settling_event
             .transitions
             .first()
@@ -356,10 +357,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }
 
             // `record_matching_event` pushed the paired SettlingEvent (if the
-            // round produced any ops) to `pending_settling_events`; peek at
-            // the front and dispatch it — the dispatcher drains.
-            let settling_event = self.next_pending_settling_event().cloned();
-            if let Some(event) = settling_event {
+            // round produced any ops) to `pending_settling_events`; take it
+            // and dispatch by value so the Vec<BalanceOperation> /
+            // Vec<OrderStatusTransition> payload moves into the dispatcher
+            // without cloning.
+            if let Some(event) = self.take_next_pending_settling_event() {
                 audit::process_event(self, event::EventType::Settling(event), runtime);
             }
         }

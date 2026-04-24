@@ -79,8 +79,9 @@ pub fn cancel_limit_order(
     let info = state::with_state_mut(|s| {
         // Mirrors process_pending_orders: dispatch CancelLimitOrderEvent
         // (pushes the paired SettlingEvent to pending_settling_events),
-        // peek at it to carry the fill info back to the endpoint, then
-        // dispatch the SettlingEvent which drains the queue entry.
+        // take it by value and dispatch — moving the Vec<BalanceOperation>
+        // / Vec<OrderStatusTransition> payload into the dispatcher without
+        // cloning.
         state::audit::process_event(
             s,
             state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {
@@ -89,9 +90,8 @@ pub fn cancel_limit_order(
             runtime,
         );
         let settling_event = s
-            .next_pending_settling_event()
-            .expect("BUG: CancelLimitOrderEvent did not push a settling event")
-            .clone();
+            .take_next_pending_settling_event()
+            .expect("BUG: CancelLimitOrderEvent did not push a settling event");
         let filled_quantity = match settling_event
             .transitions
             .first()
