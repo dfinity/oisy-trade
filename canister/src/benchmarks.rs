@@ -154,6 +154,53 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
     })
 }
 
+/// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
+/// snapshot. Expected to be O(1): only the first entry of each side is read.
+#[bench(raw)]
+fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let pair = dex_types::TradingPair::from(trading_pair());
+    canbench_rs::bench_fn(|| {
+        let _ticker = crate::get_order_book_ticker(pair);
+    })
+}
+
+/// Benchmark `get_order_book_depth` with the default limit (100 levels per side)
+/// against a fully populated Binance ICP/USDT snapshot. Represents the common
+/// case where a caller wants a reasonable L2 snapshot.
+#[bench(raw)]
+fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let pair = dex_types::TradingPair::from(trading_pair());
+    canbench_rs::bench_fn(|| {
+        let _depth = crate::get_order_book_depth(pair, None);
+    })
+}
+
+/// Benchmark `get_order_book_depth` at the hard cap (1000 levels per side)
+/// against a fully populated Binance ICP/USDT snapshot. Upper bound on the
+/// instructions a single depth query can consume.
+#[bench(raw)]
+fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let pair = dex_types::TradingPair::from(trading_pair());
+    canbench_rs::bench_fn(|| {
+        let _depth = crate::get_order_book_depth(pair, Some(crate::MAX_DEPTH_LIMIT));
+    })
+}
+
+/// Build a freshly populated state from the Binance snapshot and install it
+/// as the canister's thread-local state, so library dispatchers that read via
+/// `state::with_state` observe it. canbench's `init` populated the
+/// thread-local with an empty state, so we reset first.
+fn install_populated_state() {
+    let depth = load_depth();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+    crate::state::reset_state();
+    crate::state::init_state(state);
+}
+
 #[derive(Deserialize)]
 struct DepthSnapshot {
     /// Bid levels as `(price, quantity)` decimal strings, sorted by price descending.
