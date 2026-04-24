@@ -406,8 +406,14 @@ mod cancel_limit_order {
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
         assert_eq!(
             cancel_limit_order(order_id.clone(), &runtime),
-            Ok(dex_types::CanceledOrderInfo {
-                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+            Ok(dex_types::OrderRecord {
+                owner,
+                side: dex_types::Side::Buy,
+                price: 100,
+                quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                }),
             })
         );
 
@@ -445,8 +451,14 @@ mod cancel_limit_order {
         let result = cancel_limit_order(order_id.clone(), &runtime);
         assert_eq!(
             result,
-            Ok(dex_types::CanceledOrderInfo {
-                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+            Ok(dex_types::OrderRecord {
+                owner,
+                side: dex_types::Side::Buy,
+                price: 100,
+                quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                }),
             })
         );
         assert_eq!(

@@ -1,8 +1,8 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
-    CanceledOrderInfo, DepositError, DepositRequest, DepositResponse, LedgerTransferError,
-    LedgerTransferFromError, LimitOrderRequest, OrderId, OrderStatus, TokenId, TradingPairInfo,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    DepositError, DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
+    LimitOrderRequest, OrderId, OrderRecord, OrderStatus, TokenId, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -25,13 +25,12 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
 }
 
 #[ic_cdk::update]
-fn cancel_limit_order(order_id: OrderId) -> Result<CanceledOrderInfo, CancelLimitOrderError> {
+fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrderError> {
     let result = dex_canister::cancel_limit_order(order_id.clone(), &dex_canister::IC_RUNTIME);
     match &result {
-        Ok(_info) => canlog::log!(
+        Ok(record) => canlog::log!(
             Priority::Info,
-            "[cancel_limit_order]: canceled order_id={}",
-            order_id
+            "[cancel_limit_order]: canceled order_id={order_id}: {record:?}"
         ),
         Err(_err) => {
             // do not log errors due to user actions

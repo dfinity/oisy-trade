@@ -94,6 +94,21 @@ type CanceledOrderInfo = record {
     remaining_quantity : nat;
 };
 
+/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// have the whole record already loaded (e.g. `cancel_limit_order`).
+type OrderRecord = record {
+    /// Principal that placed the order.
+    owner : principal;
+    /// Whether the order is a buy or a sell.
+    side : Side;
+    /// Limit price in quote units per base unit, as originally placed.
+    price : nat64;
+    /// Quantity originally placed, in base token units.
+    quantity : nat;
+    /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
+    status : OrderStatus;
+};
+
 /// A token identified by its ledger canister ID.
 type TokenId = record {
     /// The canister ID of the token's ledger.
@@ -378,7 +393,7 @@ service : (DexArg) -> {
 
     /// Cancel a limit order previously submitted by the caller. Any remaining
     /// reserved balance is credited back to the caller's free balance.
-    cancel_limit_order : (OrderId) -> (variant { Ok : CanceledOrderInfo; Err : CancelLimitOrderError });
+    cancel_limit_order : (OrderId) -> (variant { Ok : OrderRecord; Err : CancelLimitOrderError });
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;

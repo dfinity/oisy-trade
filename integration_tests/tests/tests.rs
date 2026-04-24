@@ -285,7 +285,8 @@ mod cancel_limit_order {
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types::{
-        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderStatus, Side,
+        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
+        OrderStatus, Side,
     };
 
     #[tokio::test]
@@ -315,8 +316,14 @@ mod cancel_limit_order {
 
         assert_eq!(
             client.cancel_limit_order(order_id.clone()).await,
-            Ok(CanceledOrderInfo {
-                remaining_quantity: Nat::from(1_000_000u64),
+            Ok(OrderRecord {
+                owner: setup.user(),
+                side: Side::Buy,
+                price: 100,
+                quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(1_000_000u64),
+                }),
             })
         );
 
@@ -364,8 +371,14 @@ mod cancel_limit_order {
 
         assert_eq!(
             client.cancel_limit_order(order_id.clone()).await,
-            Ok(CanceledOrderInfo {
-                remaining_quantity: Nat::from(1_000_000u64),
+            Ok(OrderRecord {
+                owner: setup.user(),
+                side: Side::Sell,
+                price: 100,
+                quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(1_000_000u64),
+                }),
             })
         );
 
@@ -448,8 +461,14 @@ mod cancel_limit_order {
 
         assert_eq!(
             buyer_client.cancel_limit_order(buy_id.clone()).await,
-            Ok(CanceledOrderInfo {
-                remaining_quantity: Nat::from(2_000_000u64),
+            Ok(OrderRecord {
+                owner: buyer,
+                side: Side::Buy,
+                price: 100,
+                quantity: Nat::from(3_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(2_000_000u64),
+                }),
             })
         );
 

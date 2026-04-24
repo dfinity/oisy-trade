@@ -8,7 +8,7 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
-    CanceledOrderInfo, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderRecord,
     OrderStatus, TokenId, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
@@ -78,7 +78,7 @@ impl<R: Runtime> DexClient<R> {
     pub async fn cancel_limit_order(
         &self,
         order_id: OrderId,
-    ) -> Result<CanceledOrderInfo, CancelLimitOrderError> {
+    ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.runtime
             .call(self.dex_canister, "cancel_limit_order", (order_id,), 0)
             .await

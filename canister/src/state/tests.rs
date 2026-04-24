@@ -304,7 +304,7 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
 
-        state.validate_cancel_limit_order(user, order_id).unwrap();
+        state.validate_cancel_limit_order(&user, &order_id).unwrap();
         state.record_cancel_limit_order(order_id);
         let settling_event = state
             .take_next_pending_settling_event()

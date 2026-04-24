@@ -259,7 +259,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
-            .get(&order_id)
+            .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
         if &record.owner != caller {
             return Err(CancelLimitOrderError::NotOrderOwner);

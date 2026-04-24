@@ -1,6 +1,6 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    CanceledOrderInfo, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderRecord,
     OrderStatus, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
@@ -69,41 +69,14 @@ pub fn add_limit_order(
 pub fn cancel_limit_order(
     order_id: OrderId,
     runtime: &impl Runtime,
-) -> Result<CanceledOrderInfo, CancelLimitOrderError> {
+) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let id = order_id
         .parse::<order::OrderId>()
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
-    state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
-    let info = state::with_state_mut(|s| {
-        state::audit::process_event(
-            s,
-            state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {
-                order_id: id,
-            }),
-            runtime,
-        );
-        let settling_event = s
-            .take_next_pending_settling_event()
-            .expect("BUG: CancelLimitOrderEvent did not push a settling event");
-        let remaining_quantity = match settling_event
-            .transitions
-            .first()
-            .expect("BUG: cancel SettlingEvent has no transition")
-            .status
-        {
-            order::OrderStatus::Canceled(info) => info.remaining_quantity,
-            other => panic!("BUG: unexpected cancel transition status {other:?}"),
-        };
-        state::audit::process_event(
-            s,
-            state::event::EventType::Settling(settling_event),
-            runtime,
-        );
-        order::CanceledOrderInfo { remaining_quantity }
-    });
-    Ok(info.into())
+    let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
+    Ok(record.into())
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) {

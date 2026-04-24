@@ -183,7 +183,7 @@ impl Scenario {
     /// to set up a cancelable order first).
     fn with_cancel(mut self, user: Principal, order_id: OrderId) -> Self {
         self.state
-            .validate_cancel_limit_order(user, order_id)
+            .validate_cancel_limit_order(&user, &order_id)
             .expect("test setup: order must be cancelable");
         self.state.record_cancel_limit_order(order_id);
         let settling_event = self

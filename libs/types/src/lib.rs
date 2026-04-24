@@ -132,6 +132,23 @@ pub struct CanceledOrderInfo {
     pub remaining_quantity: Nat,
 }
 
+/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
+/// saving the caller a follow-up status/metadata query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct OrderRecord {
+    /// Principal that placed the order.
+    pub owner: Principal,
+    /// Whether the order is a buy or a sell.
+    pub side: Side,
+    /// Limit price in quote units per base unit, as originally placed.
+    pub price: u64,
+    /// Quantity originally placed, in base token units.
+    pub quantity: Nat,
+    /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
+    pub status: OrderStatus,
+}
+
 /// A token identified by its ledger canister ID.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
