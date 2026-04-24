@@ -256,6 +256,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing for canceled order");
+        // Unreachable: `validate_cancel_limit_order` rejects every status
+        // except `Pending` and `Open`, and the book invariant guarantees those
+        // statuses correspond to entries in `pending_orders` / `resting_orders`.
         let RemovedOrder {
             side,
             price,
