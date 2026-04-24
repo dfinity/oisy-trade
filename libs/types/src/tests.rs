@@ -32,7 +32,7 @@ fn should_serialize_order_status() {
         OrderStatus::Open,
         OrderStatus::Filled,
         OrderStatus::Canceled(CanceledOrderInfo {
-            filled_quantity: Nat::from(0u64),
+            remaining_quantity: Nat::from(0u64),
         }),
     ] {
         let encoded = candid::encode_one(&status).unwrap();

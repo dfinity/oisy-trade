@@ -352,7 +352,9 @@ mod cancel_limit_order {
     use crate::order::OrderId;
     use crate::state::with_state_mut;
     use crate::test_fixtures::mocks::mock_runtime_for;
-    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, init_state_with_order_book, limit_order_request,
+    };
     use crate::{add_limit_order, cancel_limit_order};
     use candid::Principal;
     use dex_types::CancelLimitOrderError;
@@ -405,7 +407,7 @@ mod cancel_limit_order {
         assert_eq!(
             cancel_limit_order(order_id.clone(), &runtime),
             Ok(dex_types::CanceledOrderInfo {
-                filled_quantity: candid::Nat::from(0u64),
+                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
             })
         );
 
@@ -444,13 +446,13 @@ mod cancel_limit_order {
         assert_eq!(
             result,
             Ok(dex_types::CanceledOrderInfo {
-                filled_quantity: candid::Nat::from(0u64),
+                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
             })
         );
         assert_eq!(
             crate::get_order_status(order_id),
             dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                filled_quantity: candid::Nat::from(0u64),
+                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
             })
         );
     }

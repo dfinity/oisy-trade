@@ -123,7 +123,7 @@ mod schema_stability {
                     OrderStatusTransition {
                         seq: OrderSeq::new(6),
                         status: OrderStatus::Canceled(CanceledOrderInfo {
-                            filled_quantity: Quantity::from(1_000_000u64),
+                            remaining_quantity: Quantity::from(1_000_000u64),
                         }),
                     },
                 ],

@@ -213,7 +213,7 @@ mod cancel_limit_order {
         let lot = u64::from(LOT_SIZE);
         let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
 
-        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, 0);
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
     }
 
     #[test]
@@ -222,7 +222,7 @@ mod cancel_limit_order {
         let lot = u64::from(LOT_SIZE);
         let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
 
-        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, 0);
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
     }
 
     #[test]
@@ -233,7 +233,7 @@ mod cancel_limit_order {
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
-        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, 0);
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
     }
 
     #[test]
@@ -244,7 +244,7 @@ mod cancel_limit_order {
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
-        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, 0);
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod cancel_limit_order {
             buy_id,
             PairToken::Quote,
             2 * 100 * lot,
-            lot,
+            2 * lot,
         );
     }
 
@@ -277,23 +277,30 @@ mod cancel_limit_order {
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
-        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, 2 * lot, lot);
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            sell_id,
+            PairToken::Base,
+            2 * lot,
+            2 * lot,
+        );
     }
 
     /// Cancels `order_id` owned by `user` and asserts that exactly
     /// `expected_amount` units of `refund_token` move from reserved to free;
     /// the other token's balance is unchanged and the order status becomes
-    /// `Canceled(CanceledOrderInfo { filled_quantity: expected_filled })`.
+    /// `Canceled(CanceledOrderInfo { remaining_quantity: expected_remaining })`.
     fn assert_cancel_refunds(
         state: &mut State<VectorMemory, VectorMemory>,
         user: Principal,
         order_id: OrderId,
         refund_token: PairToken,
         expected_amount: impl Into<Quantity>,
-        expected_filled: impl Into<Quantity>,
+        expected_remaining: impl Into<Quantity>,
     ) {
         let expected_amount = expected_amount.into();
-        let expected_filled = expected_filled.into();
+        let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
 
@@ -308,7 +315,7 @@ mod cancel_limit_order {
         assert_eq!(
             state.get_order_status(order_id),
             Some(OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: expected_filled,
+                remaining_quantity: expected_remaining,
             })),
         );
         let (refunded_before, refunded_after, untouched_before, untouched_after) =

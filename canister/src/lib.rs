@@ -87,13 +87,13 @@ pub fn cancel_limit_order(
         let settling_event = s
             .take_next_pending_settling_event()
             .expect("BUG: CancelLimitOrderEvent did not push a settling event");
-        let filled_quantity = match settling_event
+        let remaining_quantity = match settling_event
             .transitions
             .first()
             .expect("BUG: cancel SettlingEvent has no transition")
             .status
         {
-            order::OrderStatus::Canceled(info) => info.filled_quantity,
+            order::OrderStatus::Canceled(info) => info.remaining_quantity,
             other => panic!("BUG: unexpected cancel transition status {other:?}"),
         };
         state::audit::process_event(
@@ -101,7 +101,7 @@ pub fn cancel_limit_order(
             state::event::EventType::Settling(settling_event),
             runtime,
         );
-        order::CanceledOrderInfo { filled_quantity }
+        order::CanceledOrderInfo { remaining_quantity }
     });
     Ok(info.into())
 }

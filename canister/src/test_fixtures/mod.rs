@@ -377,9 +377,9 @@ pub mod arbitrary {
             Just(OrderStatus::Pending),
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
-            arb_quantity().prop_map(|filled_quantity| OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity,
-            })),
+            arb_quantity().prop_map(|remaining_quantity| OrderStatus::Canceled(
+                CanceledOrderInfo { remaining_quantity },
+            )),
         ]
     }
 

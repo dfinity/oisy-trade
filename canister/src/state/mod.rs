@@ -249,11 +249,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// [`Self::record_matching_event`].
     pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
         let (book_id, seq) = order_id.into_parts();
-        let order_record = self
-            .order_history
-            .get(&order_id)
-            .expect("BUG: canceled order missing from history");
-        let original_quantity = order_record.quantity;
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -277,9 +272,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             ),
             Side::Sell => (PairToken::Base, remaining_quantity),
         };
-        let filled_quantity = original_quantity
-            .checked_sub(&remaining_quantity)
-            .expect("BUG: remaining > original quantity");
         self.pending_settling_events
             .push_back(event::SettlingEvent {
                 book_id,
@@ -290,7 +282,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 }],
                 transitions: vec![event::OrderStatusTransition {
                     seq,
-                    status: OrderStatus::Canceled(CanceledOrderInfo { filled_quantity }),
+                    status: OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
                 }],
             });
     }

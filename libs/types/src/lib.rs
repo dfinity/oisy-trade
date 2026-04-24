@@ -118,14 +118,18 @@ pub enum OrderStatus {
 
 /// Details about a canceled order.
 ///
-/// Refund token and amount are derivable from the order's
-/// [`OrderRecord`] + trading pair + `filled_quantity`, so they are not
-/// duplicated here — only the non-derivable piece is stored.
+/// Refund token and amount are derivable from the order's placement
+/// details + `remaining_quantity`, so they are not duplicated here —
+/// only the non-derivable piece is stored. Using `remaining_quantity`
+/// rather than `filled_quantity` lets the state-layer produce this
+/// value from `OrderBook::remove_order` alone, without a follow-up
+/// lookup in stable-memory order history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct CanceledOrderInfo {
-    /// Quantity that had already filled before the cancel landed.
-    /// Zero for a never-matched order; `original − remaining` otherwise.
-    pub filled_quantity: Nat,
+    /// Quantity that was still open on the book at the moment of cancel.
+    /// Equals the original placed quantity for a never-matched order, and
+    /// `original − filled` for a partially-filled one.
+    pub remaining_quantity: Nat,
 }
 
 /// A token identified by its ledger canister ID.

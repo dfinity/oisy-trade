@@ -538,7 +538,7 @@ fn should_replay_cancel_pending_order() {
         .assert_order_status(
             buy_id,
             OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: Quantity::ZERO,
+                remaining_quantity: Quantity::from(quantity),
             }),
         )
         .assert_replay_matches();
@@ -623,7 +623,7 @@ fn should_replay_cancel_partially_filled_order() {
         .assert_order_status(
             buy_id,
             OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: Quantity::from(quantity),
+                remaining_quantity: Quantity::from(2 * quantity),
             }),
         )
         .assert_replay_matches();

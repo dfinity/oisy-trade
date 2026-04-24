@@ -85,11 +85,13 @@ type OrderStatus = variant {
 };
 
 /// Details about a canceled order. The refund (token + amount) is derivable
-/// from the order's placement details + `filled_quantity`, so it is not
+/// from the order's placement details + `remaining_quantity`, so it is not
 /// duplicated here.
 type CanceledOrderInfo = record {
-    /// Quantity that had already filled before the cancel landed.
-    filled_quantity : nat;
+    /// Quantity that was still open on the book at the moment of cancel.
+    /// Equals the original placed quantity for a never-matched order, and
+    /// `original − filled` for a partially-filled one.
+    remaining_quantity : nat;
 };
 
 /// A token identified by its ledger canister ID.

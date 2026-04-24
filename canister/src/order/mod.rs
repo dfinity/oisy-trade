@@ -74,9 +74,9 @@ pub enum OrderStatus {
 /// Fill information captured when an order transitions to `Canceled`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct CanceledOrderInfo {
-    /// Quantity that had already filled before the cancel landed.
+    /// Quantity that was still open on the book at the moment of cancel.
     #[n(0)]
-    pub filled_quantity: Quantity,
+    pub remaining_quantity: Quantity,
 }
 
 impl From<OrderStatus> for dex_types::OrderStatus {
@@ -93,7 +93,7 @@ impl From<OrderStatus> for dex_types::OrderStatus {
 impl From<CanceledOrderInfo> for dex_types::CanceledOrderInfo {
     fn from(info: CanceledOrderInfo) -> Self {
         dex_types::CanceledOrderInfo {
-            filled_quantity: info.filled_quantity.into(),
+            remaining_quantity: info.remaining_quantity.into(),
         }
     }
 }

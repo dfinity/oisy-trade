@@ -316,14 +316,14 @@ mod cancel_limit_order {
         assert_eq!(
             client.cancel_limit_order(order_id.clone()).await,
             Ok(CanceledOrderInfo {
-                filled_quantity: Nat::from(0u64),
+                remaining_quantity: Nat::from(1_000_000u64),
             })
         );
 
         assert_eq!(
             client.get_order_status(order_id).await,
             OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: Nat::from(0u64),
+                remaining_quantity: Nat::from(1_000_000u64),
             })
         );
         assert_eq!(
@@ -365,14 +365,14 @@ mod cancel_limit_order {
         assert_eq!(
             client.cancel_limit_order(order_id.clone()).await,
             Ok(CanceledOrderInfo {
-                filled_quantity: Nat::from(0u64),
+                remaining_quantity: Nat::from(1_000_000u64),
             })
         );
 
         assert_eq!(
             client.get_order_status(order_id).await,
             OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: Nat::from(0u64),
+                remaining_quantity: Nat::from(1_000_000u64),
             })
         );
         assert_eq!(
@@ -449,14 +449,14 @@ mod cancel_limit_order {
         assert_eq!(
             buyer_client.cancel_limit_order(buy_id.clone()).await,
             Ok(CanceledOrderInfo {
-                filled_quantity: Nat::from(1_000_000u64),
+                remaining_quantity: Nat::from(2_000_000u64),
             })
         );
 
         assert_eq!(
             buyer_client.get_order_status(buy_id).await,
             OrderStatus::Canceled(CanceledOrderInfo {
-                filled_quantity: Nat::from(1_000_000u64),
+                remaining_quantity: Nat::from(2_000_000u64),
             })
         );
         assert_eq!(
