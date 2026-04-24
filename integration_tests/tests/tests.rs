@@ -1156,32 +1156,24 @@ async fn should_get_logs() {
 }
 
 mod order_book {
+    //! End-to-end smoke test for the order book queries. Dispatcher-level
+    //! coverage (unknown pair, empty book, limit default / cap / zero) lives
+    //! in `canister/src/tests.rs` where the setup is cheap — this test
+    //! exists only to validate the full pipeline over pocket-ic: WASM build,
+    //! candid encoding/decoding, and the matching timer firing.
+
     use candid::{Nat, Principal};
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types::{
-        GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError,
-        LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel, Side, TradingPair,
+        GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
+        Side,
     };
-
-    fn depth_request(pair: TradingPair, limit: Option<u32>) -> GetOrderBookDepthRequest {
-        GetOrderBookDepthRequest {
-            trading_pair: pair,
-            limit,
-        }
-    }
 
     fn level(price: u64, quantity: u64) -> PriceLevel {
         PriceLevel {
             price,
             quantity: Nat::from(quantity),
-        }
-    }
-
-    fn unknown_pair() -> TradingPair {
-        TradingPair {
-            base: Principal::from_slice(&[0xaa]),
-            quote: Principal::from_slice(&[0xbb]),
         }
     }
 
@@ -1228,56 +1220,6 @@ mod order_book {
     }
 
     #[tokio::test]
-    async fn should_return_unknown_trading_pair_error_for_ticker() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        assert_eq!(
-            setup
-                .dex_client()
-                .get_order_book_ticker(unknown_pair())
-                .await,
-            Err(GetOrderBookTickerError::UnknownTradingPair)
-        );
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_unknown_trading_pair_error_for_depth() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        assert_eq!(
-            setup
-                .dex_client()
-                .get_order_book_depth(depth_request(unknown_pair(), None))
-                .await,
-            Err(GetOrderBookDepthError::UnknownTradingPair)
-        );
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_empty_ticker_and_depth_for_empty_book() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let pair = setup.trading_pair();
-        let client = setup.dex_client();
-
-        assert_eq!(
-            client.get_order_book_ticker(pair).await,
-            Ok(OrderBookTicker {
-                bid: None,
-                ask: None
-            })
-        );
-        assert_eq!(
-            client.get_order_book_depth(depth_request(pair, None)).await,
-            Ok(OrderBookDepth {
-                bids: vec![],
-                asks: vec![]
-            })
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_expose_top_of_book_and_aggregated_depth() {
         let setup = Setup::new().await.with_trading_pair().await;
 
@@ -1311,73 +1253,17 @@ mod order_book {
             })
         );
         assert_eq!(
-            client.get_order_book_depth(depth_request(pair, None)).await,
+            client
+                .get_order_book_depth(GetOrderBookDepthRequest {
+                    trading_pair: pair,
+                    limit: None,
+                })
+                .await,
             Ok(OrderBookDepth {
                 bids: vec![level(100, 4_000_000), level(90, 2_000_000)],
                 asks: vec![level(110, 7_000_000), level(120, 4_000_000)],
             })
         );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_truncate_depth_to_requested_limit() {
-        let setup = Setup::new().await.with_trading_pair().await;
-
-        let u1 = Principal::from_slice(&[0x11]);
-        let u2 = Principal::from_slice(&[0x12]);
-        let u3 = Principal::from_slice(&[0x13]);
-        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
-        fund_and_place_buy(&setup, u2, 90, 1_000_000).await;
-        fund_and_place_buy(&setup, u3, 80, 1_000_000).await;
-        setup.env().tick().await;
-
-        let pair = setup.trading_pair();
-        let depth = setup
-            .dex_client()
-            .get_order_book_depth(depth_request(pair, Some(2)))
-            .await
-            .unwrap();
-        assert_eq!(
-            depth.bids,
-            vec![level(100, 1_000_000), level(90, 1_000_000)]
-        );
-        assert_eq!(depth.asks, vec![]);
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_reject_limit_above_max() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        assert_eq!(
-            setup
-                .dex_client()
-                .get_order_book_depth(depth_request(setup.trading_pair(), Some(1_001)))
-                .await,
-            Err(GetOrderBookDepthError::LimitTooLarge {
-                requested: 1_001,
-                max: 1_000,
-            })
-        );
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_return_empty_depth_when_limit_is_zero() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let u1 = Principal::from_slice(&[0x21]);
-        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
-        setup.env().tick().await;
-
-        let depth = setup
-            .dex_client()
-            .get_order_book_depth(depth_request(setup.trading_pair(), Some(0)))
-            .await
-            .unwrap();
-        assert_eq!(depth.bids, vec![]);
-        assert_eq!(depth.asks, vec![]);
 
         setup.drop().await;
     }

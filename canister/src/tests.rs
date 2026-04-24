@@ -851,6 +851,251 @@ mod withdraw {
     }
 }
 
+mod get_order_book_ticker {
+    use crate::get_order_book_ticker;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+    };
+    use candid::{Nat, Principal};
+    use dex_types::{
+        GetOrderBookTickerError, LimitOrderRequest, OrderBookTicker, PriceLevel, Side, TradingPair,
+    };
+
+    fn unknown_pair() -> TradingPair {
+        TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        }
+    }
+
+    fn place(user: Principal, side: Side, price: u64, quantity: u64) {
+        crate::add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side,
+                price,
+                quantity: Nat::from(quantity),
+            },
+            &mock_runtime_for(user),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn should_return_unknown_trading_pair_for_unregistered() {
+        init_state_with_order_book();
+        assert_eq!(
+            get_order_book_ticker(unknown_pair()),
+            Err(GetOrderBookTickerError::UnknownTradingPair),
+        );
+    }
+
+    #[test]
+    fn should_return_empty_ticker_for_empty_book() {
+        init_state_with_order_book();
+        assert_eq!(
+            get_order_book_ticker(icp_ckbtc_trading_pair().into()),
+            Ok(OrderBookTicker {
+                bid: None,
+                ask: None,
+            }),
+        );
+    }
+
+    #[test]
+    fn should_return_best_bid_and_ask_aggregated_across_same_price() {
+        init_state_with_order_book();
+        let u1 = Principal::from_slice(&[0x01]);
+        let u2 = Principal::from_slice(&[0x02]);
+        let u3 = Principal::from_slice(&[0x03]);
+        fund_user(u1);
+        fund_user(u2);
+        fund_user(u3);
+
+        let lot = u64::from(LOT_SIZE);
+        // Two buys at 100, one at 90; one sell at 110. None cross.
+        place(u1, Side::Buy, 100, lot);
+        place(u2, Side::Buy, 100, 3 * lot);
+        place(u3, Side::Buy, 90, 2 * lot);
+        place(u1, Side::Sell, 110, 5 * lot);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        assert_eq!(
+            get_order_book_ticker(icp_ckbtc_trading_pair().into()),
+            Ok(OrderBookTicker {
+                bid: Some(PriceLevel {
+                    price: 100,
+                    quantity: Nat::from(4 * lot),
+                }),
+                ask: Some(PriceLevel {
+                    price: 110,
+                    quantity: Nat::from(5 * lot),
+                }),
+            }),
+        );
+    }
+}
+
+mod get_order_book_depth {
+    use crate::get_order_book_depth;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+    };
+    use candid::{Nat, Principal};
+    use dex_types::{
+        GetOrderBookDepthError, GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth,
+        PriceLevel, Side, TradingPair,
+    };
+
+    fn unknown_pair() -> TradingPair {
+        TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        }
+    }
+
+    fn request(pair: TradingPair, limit: Option<u32>) -> GetOrderBookDepthRequest {
+        GetOrderBookDepthRequest {
+            trading_pair: pair,
+            limit,
+        }
+    }
+
+    fn level(price: u64, quantity: u64) -> PriceLevel {
+        PriceLevel {
+            price,
+            quantity: Nat::from(quantity),
+        }
+    }
+
+    fn place(user: Principal, side: Side, price: u64, quantity: u64) {
+        crate::add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side,
+                price,
+                quantity: Nat::from(quantity),
+            },
+            &mock_runtime_for(user),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn should_return_unknown_trading_pair_for_unregistered() {
+        init_state_with_order_book();
+        assert_eq!(
+            get_order_book_depth(request(unknown_pair(), None)),
+            Err(GetOrderBookDepthError::UnknownTradingPair),
+        );
+    }
+
+    #[test]
+    fn should_return_empty_depth_for_empty_book() {
+        init_state_with_order_book();
+        assert_eq!(
+            get_order_book_depth(request(icp_ckbtc_trading_pair().into(), None)),
+            Ok(OrderBookDepth {
+                bids: vec![],
+                asks: vec![],
+            }),
+        );
+    }
+
+    #[test]
+    fn should_aggregate_across_orders_at_the_same_price() {
+        init_state_with_order_book();
+        let u1 = Principal::from_slice(&[0x01]);
+        let u2 = Principal::from_slice(&[0x02]);
+        let u3 = Principal::from_slice(&[0x03]);
+        let u4 = Principal::from_slice(&[0x04]);
+        fund_user(u1);
+        fund_user(u2);
+        fund_user(u3);
+        fund_user(u4);
+
+        let lot = u64::from(LOT_SIZE);
+        place(u1, Side::Buy, 100, lot);
+        place(u2, Side::Buy, 100, 3 * lot);
+        place(u3, Side::Buy, 90, 2 * lot);
+        place(u4, Side::Sell, 110, 5 * lot);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        assert_eq!(
+            get_order_book_depth(request(icp_ckbtc_trading_pair().into(), None)),
+            Ok(OrderBookDepth {
+                bids: vec![level(100, 4 * lot), level(90, 2 * lot)],
+                asks: vec![level(110, 5 * lot)],
+            }),
+        );
+    }
+
+    #[test]
+    fn should_truncate_to_requested_limit() {
+        init_state_with_order_book();
+        let users: Vec<_> = (1u8..=3).map(|b| Principal::from_slice(&[b])).collect();
+        for u in &users {
+            fund_user(*u);
+        }
+        let lot = u64::from(LOT_SIZE);
+        place(users[0], Side::Buy, 100, lot);
+        place(users[1], Side::Buy, 90, lot);
+        place(users[2], Side::Buy, 80, lot);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        let depth =
+            get_order_book_depth(request(icp_ckbtc_trading_pair().into(), Some(2))).unwrap();
+        assert_eq!(depth.bids, vec![level(100, lot), level(90, lot)]);
+        assert_eq!(depth.asks, vec![]);
+    }
+
+    #[test]
+    fn should_default_to_100_when_limit_is_none() {
+        // Place 101 bids at distinct prices so the default cuts 1 off.
+        init_state_with_order_book();
+        let lot = u64::from(LOT_SIZE);
+        let tick = u64::from(crate::test_fixtures::TICK_SIZE);
+        for i in 0..101u64 {
+            let user = Principal::from_slice(&(i as u16).to_be_bytes());
+            fund_user(user);
+            place(user, Side::Buy, (i + 1) * tick, lot);
+        }
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        let depth = get_order_book_depth(request(icp_ckbtc_trading_pair().into(), None)).unwrap();
+        assert_eq!(depth.bids.len(), 100);
+        assert_eq!(depth.asks.len(), 0);
+    }
+
+    #[test]
+    fn should_reject_limit_above_max() {
+        init_state_with_order_book();
+        assert_eq!(
+            get_order_book_depth(request(icp_ckbtc_trading_pair().into(), Some(1_001))),
+            Err(GetOrderBookDepthError::LimitTooLarge {
+                requested: 1_001,
+                max: 1_000,
+            }),
+        );
+    }
+
+    #[test]
+    fn should_accept_zero_limit_and_return_empty() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        fund_user(user);
+        place(user, Side::Buy, 100, u64::from(LOT_SIZE));
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        let depth =
+            get_order_book_depth(request(icp_ckbtc_trading_pair().into(), Some(0))).unwrap();
+        assert_eq!(depth.bids, vec![]);
+        assert_eq!(depth.asks, vec![]);
+    }
+}
+
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::state::init_state;
