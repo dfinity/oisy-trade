@@ -64,6 +64,40 @@ type TradingPairInfo = record {
     lot_size : nat64;
 };
 
+// A single price level in an order book, aggregated across all resting orders at that price.
+type PriceLevel = record {
+    // Price in quote base units per base base unit.
+    price : nat64;
+    // Total quantity in base base units across all resting orders at this price.
+    quantity : nat;
+};
+
+// Top-of-book view of an order book for a trading pair.
+type OrderBookTicker = record {
+    // Best bid (highest-priced buy level), or `null` if the bid side is empty.
+    bid : opt PriceLevel;
+    // Best ask (lowest-priced sell level), or `null` if the ask side is empty.
+    ask : opt PriceLevel;
+};
+
+// Price-aggregated depth view of an order book for a trading pair.
+type OrderBookDepth = record {
+    // Bid levels sorted by price descending (best bid first).
+    bids : vec PriceLevel;
+    // Ask levels sorted by price ascending (best ask first).
+    asks : vec PriceLevel;
+};
+
+// Error returned by the `get_order_book_depth` query.
+type GetOrderBookDepthError = variant {
+    // The requested trading pair is not registered on the DEX.
+    UnknownTradingPair;
+    // The requested depth limit exceeds the maximum supported value.
+    LimitTooLarge : record { requested : nat32; max : nat32 };
+};
+
+type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBookDepthError };
+
 // Status of an order.
 type OrderStatus = variant {
     // The order was not found.
@@ -368,6 +402,20 @@ service : (DexArg) -> {
 
     // Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
+
+    // Query the top-of-book (best bid and best ask, each aggregated across all
+    // resting orders at that price) for a trading pair. Returns `null` if the
+    // pair is not registered on the DEX. Either side may be `null`
+    // independently when that side of the book is empty.
+    get_order_book_ticker : (TradingPair) -> (opt OrderBookTicker) query;
+
+    // Query price-aggregated depth for a trading pair.
+    //
+    // `limit` is the maximum number of price levels returned per side. When
+    // omitted, the DEX serves a default depth; the maximum accepted value is
+    // the DEX's hard cap (above which the query returns `LimitTooLarge`).
+    // Returns `UnknownTradingPair` if the pair is not registered.
+    get_order_book_depth : (TradingPair, opt nat32) -> (GetOrderBookDepthResult) query;
 
     // Deposit tokens into the DEX. Calls `icrc2_transfer_from` on the token
     // ledger to pull `amount` from the caller to the DEX canister, then
