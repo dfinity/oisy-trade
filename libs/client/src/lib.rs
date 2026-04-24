@@ -8,9 +8,9 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
+    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair,
+    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -92,7 +92,10 @@ impl<R: Runtime> DexClient<R> {
     }
 
     /// Query the top-of-book for a trading pair on the DEX canister.
-    pub async fn get_order_book_ticker(&self, pair: TradingPair) -> Option<OrderBookTicker> {
+    pub async fn get_order_book_ticker(
+        &self,
+        pair: TradingPair,
+    ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
         self.runtime
             .call(self.dex_canister, "get_order_book_ticker", (pair,), 0)
             .await

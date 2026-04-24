@@ -1160,8 +1160,8 @@ mod order_book {
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types::{
-        GetOrderBookDepthError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
-        Side, TradingPair,
+        GetOrderBookDepthError, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+        OrderBookTicker, PriceLevel, Side, TradingPair,
     };
 
     fn level(price: u64, quantity: u64) -> PriceLevel {
@@ -1221,14 +1221,14 @@ mod order_book {
     }
 
     #[tokio::test]
-    async fn should_return_none_ticker_for_unknown_pair() {
+    async fn should_return_unknown_trading_pair_error_for_ticker() {
         let setup = Setup::new().await.with_trading_pair().await;
         assert_eq!(
             setup
                 .dex_client()
                 .get_order_book_ticker(unknown_pair())
                 .await,
-            None
+            Err(GetOrderBookTickerError::UnknownTradingPair)
         );
         setup.drop().await;
     }
@@ -1254,7 +1254,7 @@ mod order_book {
 
         assert_eq!(
             client.get_order_book_ticker(pair).await,
-            Some(OrderBookTicker {
+            Ok(OrderBookTicker {
                 bid: None,
                 ask: None
             })
@@ -1298,7 +1298,7 @@ mod order_book {
 
         assert_eq!(
             client.get_order_book_ticker(pair).await,
-            Some(OrderBookTicker {
+            Ok(OrderBookTicker {
                 bid: Some(level(100, 4_000_000)),
                 ask: Some(level(110, 7_000_000)),
             })

@@ -1,8 +1,8 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, GetOrderBookDepthError, LimitOrderRequest, OrderBookDepth, OrderBookTicker,
-    OrderId, OrderStatus, PriceLevel, TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DEFAULT_DEPTH_LIMIT,
+    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
+    LimitOrderRequest, MAX_DEPTH_LIMIT, OrderBookDepth, OrderBookTicker, OrderId, OrderStatus,
+    PriceLevel, TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -37,11 +37,6 @@ pub mod test_fixtures;
 mod tests;
 
 pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
-
-/// Maximum depth (levels per side) that [`get_order_book_depth`] will serve.
-pub const MAX_DEPTH_LIMIT: u32 = 1_000;
-/// Depth used by [`get_order_book_depth`] when the caller omits the `limit` parameter.
-pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
 pub enum Task {
@@ -90,11 +85,15 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
     }
 }
 
-pub fn get_order_book_ticker(pair: TradingPair) -> Option<OrderBookTicker> {
+pub fn get_order_book_ticker(
+    pair: TradingPair,
+) -> Result<OrderBookTicker, GetOrderBookTickerError> {
     let internal_pair = order::TradingPair::from(pair);
     state::with_state(|s| {
-        let book = s.get_order_book(&internal_pair)?;
-        Some(OrderBookTicker {
+        let book = s
+            .get_order_book(&internal_pair)
+            .ok_or(GetOrderBookTickerError::UnknownTradingPair)?;
+        Ok(OrderBookTicker {
             bid: book.bid_levels(1).next().map(to_price_level),
             ask: book.ask_levels(1).next().map(to_price_level),
         })

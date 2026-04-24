@@ -1,9 +1,9 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, LedgerTransferError,
-    LedgerTransferFromError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookTickerError,
+    LedgerTransferError, LedgerTransferFromError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -36,7 +36,7 @@ fn get_trading_pairs() -> Vec<TradingPairInfo> {
 }
 
 #[ic_cdk::query]
-fn get_order_book_ticker(pair: TradingPair) -> Option<OrderBookTicker> {
+fn get_order_book_ticker(pair: TradingPair) -> Result<OrderBookTicker, GetOrderBookTickerError> {
     dex_canister::get_order_book_ticker(pair)
 }
 
