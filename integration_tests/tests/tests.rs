@@ -280,6 +280,246 @@ mod add_limit_order {
     }
 }
 
+mod cancel_limit_order {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
+        OrderStatus, Side,
+    };
+
+    #[tokio::test]
+    async fn should_cancel_buy_order_and_refund_quote_balance() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+        let quote = setup.quote_token_id();
+
+        // Buy 1M base tokens at price 100 → 100M quote reserved.
+        let required = 100_000_000u64;
+        setup
+            .deposit_flow(setup.user(), quote.clone())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        let order_id = client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: 100,
+                quantity: 1_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            client.cancel_limit_order(order_id.clone()).await,
+            Ok(OrderRecord {
+                owner: setup.user(),
+                side: Side::Buy,
+                price: 100,
+                quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(1_000_000u64),
+                }),
+            })
+        );
+
+        assert_eq!(
+            client.get_order_status(order_id).await,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                remaining_quantity: Nat::from(1_000_000u64),
+            })
+        );
+        assert_eq!(
+            client.get_balance(quote).await,
+            Balance {
+                free: required.into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_cancel_sell_order_and_refund_base_balance() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+        let base = setup.base_token_id();
+
+        // Sell 1M base tokens at price 100 → 1M base reserved.
+        let required = 1_000_000u64;
+        setup
+            .deposit_flow(setup.user(), base.clone())
+            .mint(required + 2 * BASE_LEDGER_FEE)
+            .approve(required + BASE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        let order_id = client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: 100,
+                quantity: 1_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            client.cancel_limit_order(order_id.clone()).await,
+            Ok(OrderRecord {
+                owner: setup.user(),
+                side: Side::Sell,
+                price: 100,
+                quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(1_000_000u64),
+                }),
+            })
+        );
+
+        assert_eq!(
+            client.get_order_status(order_id).await,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                remaining_quantity: Nat::from(1_000_000u64),
+            })
+        );
+        assert_eq!(
+            client.get_balance(base).await,
+            Balance {
+                free: required.into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_cancel_partially_filled_buy_and_refund_residual() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.dex_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.dex_client_with_caller(seller);
+
+        // Buyer wants 3M base @ 100 → reserves 300M quote.
+        // Seller supplies only 1M base @ 100 → fills 1M, 2M residual on buy.
+        let buyer_deposit = 300_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(buyer_deposit + 2 * QUOTE_LEDGER_FEE)
+            .approve(buyer_deposit + QUOTE_LEDGER_FEE)
+            .deposit(buyer_deposit)
+            .execute()
+            .await;
+        let seller_deposit = 1_000_000u64;
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
+            .approve(seller_deposit + BASE_LEDGER_FEE)
+            .deposit(seller_deposit)
+            .execute()
+            .await;
+
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: 100,
+                quantity: 3_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+        seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: 100,
+                quantity: 1_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        // Buyer: 1M base filled, 200M quote still reserved for the 2M residual.
+        assert_eq!(
+            buyer_client.get_order_status(buy_id.clone()).await,
+            OrderStatus::Open
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: 200_000_000u64.into(),
+            }
+        );
+
+        assert_eq!(
+            buyer_client.cancel_limit_order(buy_id.clone()).await,
+            Ok(OrderRecord {
+                owner: buyer,
+                side: Side::Buy,
+                price: 100,
+                quantity: Nat::from(3_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(2_000_000u64),
+                }),
+            })
+        );
+
+        assert_eq!(
+            buyer_client.get_order_status(buy_id).await,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                remaining_quantity: Nat::from(2_000_000u64),
+            })
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 200_000_000u64.into(),
+                reserved: 0u64.into(),
+            }
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.base_token_id()).await,
+            Balance {
+                free: 1_000_000u64.into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_cancel_of_unknown_order() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+
+        // Valid hex format but refers to a non-existent book/seq.
+        assert_eq!(
+            client
+                .cancel_limit_order("ffffffffffffffffffffffffffffffff".to_string())
+                .await,
+            Err(CancelLimitOrderError::OrderNotFound)
+        );
+        // Malformed id is also rejected cleanly.
+        assert_eq!(
+            client
+                .cancel_limit_order("not-a-valid-id".to_string())
+                .await,
+            Err(CancelLimitOrderError::OrderNotFound)
+        );
+
+        setup.drop().await;
+    }
+}
+
 #[tokio::test]
 async fn should_return_empty_trading_pairs() {
     let setup = Setup::new().await;

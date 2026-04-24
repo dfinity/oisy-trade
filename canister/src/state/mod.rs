@@ -730,6 +730,21 @@ pub enum CancelLimitOrderError {
     OrderAlreadyCanceled,
 }
 
+impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+    fn from(err: CancelLimitOrderError) -> Self {
+        match err {
+            CancelLimitOrderError::OrderNotFound => dex_types::CancelLimitOrderError::OrderNotFound,
+            CancelLimitOrderError::NotOrderOwner => dex_types::CancelLimitOrderError::NotOrderOwner,
+            CancelLimitOrderError::OrderAlreadyFilled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+            }
+            CancelLimitOrderError::OrderAlreadyCanceled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+            }
+        }
+    }
+}
+
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
         match err {

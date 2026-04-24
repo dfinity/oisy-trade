@@ -1,7 +1,7 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
+    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderRecord,
+    OrderStatus, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -64,6 +64,19 @@ pub fn add_limit_order(
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
     Ok(order_id.to_string())
+}
+
+pub fn cancel_limit_order(
+    order_id: OrderId,
+    runtime: &impl Runtime,
+) -> Result<OrderRecord, CancelLimitOrderError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let caller = runtime.msg_caller();
+    let id = order_id
+        .parse::<order::OrderId>()
+        .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
+    let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
+    Ok(record.into())
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) {
