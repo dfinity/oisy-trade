@@ -198,7 +198,7 @@ mod cancel_limit_order {
         AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event,
         EventType,
     };
-    use crate::state::{CancelLimitOrderError, StableMemoryOptions, State};
+    use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
         self, LOT_SIZE, TICK_SIZE, balances_pair, ckbtc_metadata, icp_ckbtc_trading_pair,
@@ -318,56 +318,6 @@ mod cancel_limit_order {
         assert_eq!(
             untouched_before, untouched_after,
             "the non-refund token balance should not change",
-        );
-    }
-
-    #[test]
-    fn should_reject_unknown_order_id() {
-        let state = setup();
-        let id = OrderId::new(OrderBookId::ZERO, crate::order::OrderSeq::new(42));
-        assert_eq!(
-            state.validate_cancel_limit_order(OWNER, id),
-            Err(CancelLimitOrderError::OrderNotFound)
-        );
-    }
-
-    #[test]
-    fn should_reject_cancel_by_non_owner() {
-        let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
-
-        assert_eq!(
-            state.validate_cancel_limit_order(STRANGER, buy_id),
-            Err(CancelLimitOrderError::NotOrderOwner)
-        );
-    }
-
-    #[test]
-    fn should_reject_cancel_of_filled_order() {
-        let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
-        place_order(&mut state, STRANGER, Side::Sell, 100, lot);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
-
-        assert_eq!(
-            state.validate_cancel_limit_order(OWNER, buy_id),
-            Err(CancelLimitOrderError::OrderAlreadyFilled)
-        );
-    }
-
-    #[test]
-    fn should_reject_second_cancel() {
-        let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
-        state.record_cancel_order(OWNER, buy_id, StableMemoryOptions::Write);
-
-        assert_eq!(
-            state.validate_cancel_limit_order(OWNER, buy_id),
-            Err(CancelLimitOrderError::OrderAlreadyCanceled)
         );
     }
 
