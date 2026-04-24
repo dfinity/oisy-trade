@@ -1154,3 +1154,224 @@ async fn should_get_logs() {
 
     setup.drop().await;
 }
+
+mod order_book {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        GetOrderBookDepthError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
+        Side, TradingPair,
+    };
+
+    fn level(price: u64, quantity: u64) -> PriceLevel {
+        PriceLevel {
+            price,
+            quantity: Nat::from(quantity),
+        }
+    }
+
+    fn unknown_pair() -> TradingPair {
+        TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        }
+    }
+
+    async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = price * quantity;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn fund_and_place_sell(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = quantity;
+        setup
+            .deposit_flow(user, setup.base_token_id())
+            .mint(required + 2 * BASE_LEDGER_FEE)
+            .approve(required + BASE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn should_return_none_ticker_for_unknown_pair() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        assert_eq!(
+            setup
+                .dex_client()
+                .get_order_book_ticker(unknown_pair())
+                .await,
+            None
+        );
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_unknown_trading_pair_error_for_depth() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        assert_eq!(
+            setup
+                .dex_client()
+                .get_order_book_depth(unknown_pair(), None)
+                .await,
+            Err(GetOrderBookDepthError::UnknownTradingPair)
+        );
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_empty_ticker_and_depth_for_empty_book() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let pair = setup.trading_pair();
+        let client = setup.dex_client();
+
+        assert_eq!(
+            client.get_order_book_ticker(pair).await,
+            Some(OrderBookTicker {
+                bid: None,
+                ask: None
+            })
+        );
+        assert_eq!(
+            client.get_order_book_depth(pair, None).await,
+            Ok(OrderBookDepth {
+                bids: vec![],
+                asks: vec![]
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_expose_top_of_book_and_aggregated_depth() {
+        let setup = Setup::new().await.with_trading_pair().await;
+
+        // Two buyers at price 100, one buyer at price 90; two sellers at 110, one at 120.
+        // The best-bid level aggregates across the two buyers at 100.
+        let u1 = Principal::from_slice(&[0x01]);
+        let u2 = Principal::from_slice(&[0x02]);
+        let u3 = Principal::from_slice(&[0x03]);
+        let u4 = Principal::from_slice(&[0x04]);
+        let u5 = Principal::from_slice(&[0x05]);
+        let u6 = Principal::from_slice(&[0x06]);
+
+        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
+        fund_and_place_buy(&setup, u2, 100, 3_000_000).await;
+        fund_and_place_buy(&setup, u3, 90, 2_000_000).await;
+        fund_and_place_sell(&setup, u4, 110, 2_000_000).await;
+        fund_and_place_sell(&setup, u5, 110, 5_000_000).await;
+        fund_and_place_sell(&setup, u6, 120, 4_000_000).await;
+
+        // Let all matching timers drain.
+        setup.env().tick().await;
+
+        let pair = setup.trading_pair();
+        let client = setup.dex_client();
+
+        assert_eq!(
+            client.get_order_book_ticker(pair).await,
+            Some(OrderBookTicker {
+                bid: Some(level(100, 4_000_000)),
+                ask: Some(level(110, 7_000_000)),
+            })
+        );
+        assert_eq!(
+            client.get_order_book_depth(pair, None).await,
+            Ok(OrderBookDepth {
+                bids: vec![level(100, 4_000_000), level(90, 2_000_000)],
+                asks: vec![level(110, 7_000_000), level(120, 4_000_000)],
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_truncate_depth_to_requested_limit() {
+        let setup = Setup::new().await.with_trading_pair().await;
+
+        let u1 = Principal::from_slice(&[0x11]);
+        let u2 = Principal::from_slice(&[0x12]);
+        let u3 = Principal::from_slice(&[0x13]);
+        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
+        fund_and_place_buy(&setup, u2, 90, 1_000_000).await;
+        fund_and_place_buy(&setup, u3, 80, 1_000_000).await;
+        setup.env().tick().await;
+
+        let pair = setup.trading_pair();
+        let depth = setup
+            .dex_client()
+            .get_order_book_depth(pair, Some(2))
+            .await
+            .unwrap();
+        assert_eq!(
+            depth.bids,
+            vec![level(100, 1_000_000), level(90, 1_000_000)]
+        );
+        assert_eq!(depth.asks, vec![]);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_limit_above_max() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        assert_eq!(
+            setup
+                .dex_client()
+                .get_order_book_depth(setup.trading_pair(), Some(1_001))
+                .await,
+            Err(GetOrderBookDepthError::LimitTooLarge {
+                requested: 1_001,
+                max: 1_000,
+            })
+        );
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_empty_depth_when_limit_is_zero() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let u1 = Principal::from_slice(&[0x21]);
+        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
+        setup.env().tick().await;
+
+        let depth = setup
+            .dex_client()
+            .get_order_book_depth(setup.trading_pair(), Some(0))
+            .await
+            .unwrap();
+        assert_eq!(depth.bids, vec![]);
+        assert_eq!(depth.asks, vec![]);
+
+        setup.drop().await;
+    }
+}
