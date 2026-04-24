@@ -772,7 +772,10 @@ mod process_pending_orders {
 
 mod remove_order {
     use crate::order::{OrderSeq, Price, Quantity, RemovedOrder, Side};
+    use crate::test_fixtures::arbitrary::arb_pending_order;
     use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
 
     #[test]
     fn should_return_none_when_order_is_absent() {
@@ -780,52 +783,37 @@ mod remove_order {
         assert_eq!(book.remove_order(OrderSeq::new(42)), None);
     }
 
-    #[test]
-    fn should_remove_pending_buy_order() {
-        let mut book = order_book();
-        let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(buy(0u64, 100u64, lot));
-        book.add_pending_order(sell(1u64, 200u64, 2 * lot));
+    proptest! {
+        #[test]
+        fn should_remove_any_pending_order_and_preserve_fifo(
+            pendings in vec(arb_pending_order(), 1..100),
+            cancel_index in any::<prop::sample::Index>(),
+        ) {
+            let total = pendings.len();
+            let idx = cancel_index.index(total);
+            let expected = RemovedOrder {
+                side: pendings[idx].side,
+                price: pendings[idx].price,
+                remaining_quantity: pendings[idx].quantity,
+            };
 
-        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
-
-        assert_eq!(
-            removed,
-            RemovedOrder {
-                side: Side::Buy,
-                price: Price::new(100),
-                remaining_quantity: Quantity::from(lot),
+            let mut book = order_book();
+            for (i, p) in pendings.into_iter().enumerate() {
+                book.add_pending_order(p.into_order(OrderSeq::new(i as u64)));
             }
-        );
-        assert_eq!(book.pending_orders_len(), 1);
-        assert_eq!(book.resting_orders_len(), 0);
-    }
 
-    #[test]
-    fn should_remove_pending_sell_order_and_preserve_fifo() {
-        let mut book = order_book();
-        let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(sell(0u64, 100u64, lot));
-        book.add_pending_order(sell(1u64, 100u64, 2 * lot));
-        book.add_pending_order(sell(2u64, 100u64, 3 * lot));
+            let removed = book.remove_order(OrderSeq::new(idx as u64)).unwrap();
+            prop_assert_eq!(removed, expected);
+            prop_assert_eq!(book.pending_orders_len(), total - 1);
+            prop_assert_eq!(book.resting_orders_len(), 0);
 
-        let removed = book.remove_order(OrderSeq::ONE).unwrap();
-
-        assert_eq!(
-            removed,
-            RemovedOrder {
-                side: Side::Sell,
-                price: Price::new(100),
-                remaining_quantity: Quantity::from(2 * lot),
-            }
-        );
-        assert_eq!(book.pending_orders_len(), 2);
-
-        // Processing remaining pending orders should still follow FIFO.
-        let expected_seqs: Vec<_> = book.pending_order_seqs().collect();
-        let output = book.process_pending_orders(&expected_seqs);
-        assert!(output.fills.is_empty());
-        assert_eq!(book.resting_orders_len(), 2);
+            let expected_remaining: Vec<_> = (0..total)
+                .filter(|&i| i != idx)
+                .map(|i| OrderSeq::new(i as u64))
+                .collect();
+            let actual_remaining: Vec<_> = book.pending_order_seqs().collect();
+            prop_assert_eq!(actual_remaining, expected_remaining);
+        }
     }
 
     #[test]
