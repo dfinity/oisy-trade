@@ -296,6 +296,26 @@ pub mod arbitrary {
                 quantity: Quantity::from(qty_lots * lot),
             })
     }
+    /// Strategy for a pending order whose price lives on one side of a fixed
+    /// spread: buys land in `[1, 99] * tick_size`, sells in `[101, 199] *
+    /// tick_size`. That guarantees the full buy book and the full sell book
+    /// never cross, so every generated order rests on the book.
+    pub fn arb_non_matching_pending_order() -> impl Strategy<Value = PendingOrder> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (any::<bool>(), 1..100u64, 1..100u64).prop_map(move |(is_buy, price_offset, qty_lots)| {
+            let (side, price_ticks) = if is_buy {
+                (Side::Buy, price_offset)
+            } else {
+                (Side::Sell, price_offset + 100)
+            };
+            PendingOrder {
+                side,
+                price: Price::new(price_ticks * tick),
+                quantity: Quantity::from(qty_lots * lot),
+            }
+        })
+    }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.
     ///

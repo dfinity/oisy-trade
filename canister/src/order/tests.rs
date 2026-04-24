@@ -771,11 +771,22 @@ mod process_pending_orders {
 }
 
 mod remove_order {
-    use crate::order::{OrderSeq, Price, Quantity, RemovedOrder, Side};
-    use crate::test_fixtures::arbitrary::arb_pending_order;
+    use crate::order::{
+        OrderBookSnapshot, OrderSeq, Price, PriceLevel, Quantity, RemovedOrder, Side,
+    };
+    use crate::test_fixtures::arbitrary::{arb_non_matching_pending_order, arb_pending_order};
     use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
     use proptest::collection::vec;
     use proptest::prelude::*;
+
+    /// Flatten resting-side price levels into an in-priority seq list
+    /// (price-prioritized across levels, FIFO within each level).
+    fn resting_seqs(levels: &[PriceLevel]) -> Vec<OrderSeq> {
+        levels
+            .iter()
+            .flat_map(|level| level.orders.iter().map(|o| o.id()))
+            .collect()
+    }
 
     #[test]
     fn should_return_none_when_order_is_absent() {
@@ -814,33 +825,54 @@ mod remove_order {
             let actual_remaining: Vec<_> = book.pending_order_seqs().collect();
             prop_assert_eq!(actual_remaining, expected_remaining);
         }
-    }
 
-    #[test]
-    fn should_remove_resting_bid_and_preserve_siblings_at_same_level() {
-        let mut book = order_book();
-        let lot = u64::from(LOT_SIZE);
-        // Rest three buy orders at the same price; remove the middle one.
-        book.match_order(buy(0u64, 100u64, lot)).unwrap();
-        book.match_order(buy(1u64, 100u64, 2 * lot)).unwrap();
-        book.match_order(buy(2u64, 100u64, 3 * lot)).unwrap();
+        /// For any non-matching book of arbitrary resting orders, cancelling
+        /// any single order returns the exact resting payload, preserves the
+        /// priority-then-FIFO order on the cancelled side, and leaves the
+        /// opposite side untouched.
+        #[test]
+        fn should_remove_any_resting_order_and_preserve_fifo_on_same_side(
+            orders in vec(arb_non_matching_pending_order(), 1..100),
+            cancel_index in any::<prop::sample::Index>(),
+        ) {
+            let total = orders.len();
+            let idx = cancel_index.index(total);
+            let cancelled_side = orders[idx].side;
+            let expected = RemovedOrder {
+                side: cancelled_side,
+                price: orders[idx].price,
+                remaining_quantity: orders[idx].quantity,
+            };
+            let cancel_seq = OrderSeq::new(idx as u64);
 
-        let removed = book.remove_order(OrderSeq::ONE).unwrap();
-
-        assert_eq!(
-            removed,
-            RemovedOrder {
-                side: Side::Buy,
-                price: Price::new(100),
-                remaining_quantity: Quantity::from(2 * lot),
+            let mut book = order_book();
+            for (i, p) in orders.into_iter().enumerate() {
+                book.match_order(p.into_order(OrderSeq::new(i as u64))).unwrap();
             }
-        );
-        assert_eq!(book.resting_orders_len(), 2);
-        assert_eq!(book.bids_len(), 1);
+            let before = OrderBookSnapshot::from(&book);
 
-        // FIFO preserved among remaining: seq 0 is still the best / first to match.
-        let best = book.best_bid().unwrap();
-        assert_eq!(best.id(), OrderSeq::ZERO);
+            let removed = book.remove_order(cancel_seq).unwrap();
+            prop_assert_eq!(removed, expected);
+            prop_assert_eq!(book.resting_orders_len(), total - 1);
+
+            let after = OrderBookSnapshot::from(&book);
+            let (cancelled_before, cancelled_after, untouched_before, untouched_after) =
+                match cancelled_side {
+                    Side::Buy => (&before.bids, &after.bids, &before.asks, &after.asks),
+                    Side::Sell => (&before.asks, &after.asks, &before.bids, &after.bids),
+                };
+
+            prop_assert_eq!(
+                untouched_before, untouched_after,
+                "opposite side must be unchanged",
+            );
+
+            let expected_seqs: Vec<_> = resting_seqs(cancelled_before)
+                .into_iter()
+                .filter(|s| *s != cancel_seq)
+                .collect();
+            prop_assert_eq!(resting_seqs(cancelled_after), expected_seqs);
+        }
     }
 
     #[test]
