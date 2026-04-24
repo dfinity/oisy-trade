@@ -140,9 +140,10 @@ pub enum BalanceOperation {
         #[n(3)]
         amount: Quantity,
     },
-    /// Today's only producer is the buy-taker price-improvement refund
-    /// (always quote). The `token` field stays explicit so a future cancel
-    /// flow can unreserve base as well.
+    /// Producers: the buy-taker price-improvement refund (always quote) and
+    /// the cancel-limit-order flow (quote for Buy, base for Sell). The
+    /// `token` field is explicit because the cancel side can unreserve
+    /// either token.
     #[n(1)]
     Unreserve {
         #[n(0)]
