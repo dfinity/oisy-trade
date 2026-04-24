@@ -88,6 +88,47 @@ pub struct TradingPairInfo {
     pub lot_size: u64,
 }
 
+/// A single price level in an order book, aggregated across all resting orders at that price.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct PriceLevel {
+    /// Price in quote base units per base base unit.
+    pub price: u64,
+    /// Total quantity in base base units across all resting orders at this price.
+    pub quantity: Nat,
+}
+
+/// Top-of-book view of an order book for a trading pair.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct OrderBookTicker {
+    /// Best bid (highest-priced buy level), or `None` if the bid side is empty.
+    pub bid: Option<PriceLevel>,
+    /// Best ask (lowest-priced sell level), or `None` if the ask side is empty.
+    pub ask: Option<PriceLevel>,
+}
+
+/// Price-aggregated depth view of an order book for a trading pair.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct OrderBookDepth {
+    /// Bid levels sorted by price descending (best bid first).
+    pub bids: Vec<PriceLevel>,
+    /// Ask levels sorted by price ascending (best ask first).
+    pub asks: Vec<PriceLevel>,
+}
+
+/// Error returned by the `get_order_book_depth` query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum GetOrderBookDepthError {
+    /// The requested trading pair is not registered on the DEX.
+    UnknownTradingPair,
+    /// The requested depth limit exceeds the maximum supported value.
+    LimitTooLarge {
+        /// The rejected limit.
+        requested: u32,
+        /// The maximum limit the DEX will serve.
+        max: u32,
+    },
+}
+
 /// Status of an order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum OrderStatus {

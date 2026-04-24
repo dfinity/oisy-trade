@@ -1,6 +1,7 @@
 use crate::{
-    AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, Token, TokenId,
-    TokenMetadata, TradingPair, TradingPairInfo,
+    AddLimitOrderError, Balance, GetOrderBookDepthError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair,
+    TradingPairInfo,
 };
 use candid::{Nat, Principal};
 
@@ -121,6 +122,68 @@ fn should_serialize_balance() {
     let encoded = candid::encode_one(&balance).unwrap();
     let decoded: Balance = candid::decode_one(&encoded).unwrap();
     assert_eq!(balance, decoded);
+}
+
+#[test]
+fn should_serialize_order_book_ticker() {
+    for ticker in [
+        OrderBookTicker {
+            bid: None,
+            ask: None,
+        },
+        OrderBookTicker {
+            bid: Some(PriceLevel {
+                price: 100,
+                quantity: Nat::from(500_000u64),
+            }),
+            ask: Some(PriceLevel {
+                price: 110,
+                quantity: Nat::from(300_000u64),
+            }),
+        },
+    ] {
+        let encoded = candid::encode_one(&ticker).unwrap();
+        let decoded: OrderBookTicker = candid::decode_one(&encoded).unwrap();
+        assert_eq!(ticker, decoded);
+    }
+}
+
+#[test]
+fn should_serialize_order_book_depth() {
+    let depth = OrderBookDepth {
+        bids: vec![
+            PriceLevel {
+                price: 100,
+                quantity: Nat::from(1_000u64),
+            },
+            PriceLevel {
+                price: 99,
+                quantity: Nat::from(2_000u64),
+            },
+        ],
+        asks: vec![PriceLevel {
+            price: 101,
+            quantity: Nat::from(500u64),
+        }],
+    };
+    let encoded = candid::encode_one(&depth).unwrap();
+    let decoded: OrderBookDepth = candid::decode_one(&encoded).unwrap();
+    assert_eq!(depth, decoded);
+}
+
+#[test]
+fn should_serialize_get_order_book_depth_error() {
+    for err in [
+        GetOrderBookDepthError::UnknownTradingPair,
+        GetOrderBookDepthError::LimitTooLarge {
+            requested: 5_000,
+            max: 1_000,
+        },
+    ] {
+        let encoded = candid::encode_one(&err).unwrap();
+        let decoded: GetOrderBookDepthError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(err, decoded);
+    }
 }
 
 #[test]
