@@ -876,16 +876,16 @@ mod remove_order {
     }
 
     #[test]
-    fn should_delete_empty_price_level_when_last_resting_ask_removed() {
+    fn should_delete_empty_price_level_when_last_resting_removed() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         book.match_order(sell(0u64, 100u64, lot)).unwrap();
         book.match_order(sell(1u64, 110u64, 2 * lot)).unwrap();
-
-        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
+        book.match_order(buy(2u64, 90u64, lot)).unwrap();
+        book.match_order(buy(3u64, 80u64, 3 * lot)).unwrap();
 
         assert_eq!(
-            removed,
+            book.remove_order(OrderSeq::ZERO).unwrap(),
             RemovedOrder {
                 side: Side::Sell,
                 price: Price::new(100),
@@ -893,8 +893,22 @@ mod remove_order {
             }
         );
         assert_eq!(book.asks_len(), 1);
-        assert_eq!(book.resting_orders_len(), 1);
+        assert_eq!(book.resting_orders_len(), 3);
         assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(90));
+
+        assert_eq!(
+            book.remove_order(OrderSeq::new(2)).unwrap(),
+            RemovedOrder {
+                side: Side::Buy,
+                price: Price::new(90),
+                remaining_quantity: Quantity::from(lot),
+            }
+        );
+        assert_eq!(book.bids_len(), 1);
+        assert_eq!(book.resting_orders_len(), 2);
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(80));
     }
 
     #[test]
