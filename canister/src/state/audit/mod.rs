@@ -105,7 +105,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_limit_order(*user, book_id, order, persistence);
         }
         EventType::Matching(event) => {
-            state.record_matching_event(event, persistence);
+            state.record_matching_event(event);
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);

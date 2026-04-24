@@ -605,6 +605,108 @@ mod settle_fills {
         assert_token_conservation(&state, &totals_before);
     }
 
+    /// Regression test for the multi-book drain path in
+    /// `process_pending_orders`: two trading pairs both produce a
+    /// `SettlingEvent` in the same call, so the drain loop has to process
+    /// more than one queued event. A bug that pops the queue outside the
+    /// drain loop would silently drop the second book's settlement.
+    #[test]
+    fn should_settle_matches_across_multiple_books() {
+        use crate::order::{TokenId, TokenMetadata, TradingPair};
+
+        let mut state = test_fixtures::state();
+        let lot = u64::from(LOT_SIZE);
+        let price = 100u64;
+
+        // Pair A: ICP/ckBTC (book 0).
+        let pair_a = icp_ckbtc_trading_pair();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair_a.clone(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+        // Pair B: a distinct base/quote token pair on a second book.
+        let base_b = TokenId::new(Principal::from_slice(&[0xB1]));
+        let quote_b = TokenId::new(Principal::from_slice(&[0xB2]));
+        let pair_b = TradingPair {
+            base: base_b,
+            quote: quote_b,
+        };
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            pair_b.clone(),
+            TokenMetadata {
+                symbol: "B".to_string(),
+                decimals: 8,
+            },
+            TokenMetadata {
+                symbol: "Q".to_string(),
+                decimals: 8,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        let buyer_a = Principal::from_slice(&[0x0A, 0x01]);
+        let seller_a = Principal::from_slice(&[0x0A, 0x02]);
+        let buyer_b = Principal::from_slice(&[0x0B, 0x01]);
+        let seller_b = Principal::from_slice(&[0x0B, 0x02]);
+        fn place(
+            state: &mut TestState,
+            pair: &TradingPair,
+            user: Principal,
+            side: Side,
+            price: u64,
+            lot: u64,
+        ) {
+            let pending = PendingOrder {
+                side,
+                price: Price::new(price),
+                quantity: Quantity::from(lot),
+            };
+            let (token, amount) = match side {
+                Side::Buy => (
+                    pair.quote,
+                    pending
+                        .price
+                        .checked_mul_quantity(&pending.quantity)
+                        .unwrap(),
+                ),
+                Side::Sell => (pair.base, pending.quantity),
+            };
+            state.deposit(user, token, amount, StableMemoryOptions::Write);
+            let (id, order) = state
+                .validate_limit_order(user, pair.clone(), pending)
+                .unwrap();
+            state.record_limit_order(user, id.book_id(), order, StableMemoryOptions::Write);
+        }
+        place(&mut state, &pair_a, buyer_a, Side::Buy, price, lot);
+        place(&mut state, &pair_a, seller_a, Side::Sell, price, lot);
+        place(&mut state, &pair_b, buyer_b, Side::Buy, price, lot);
+        place(&mut state, &pair_b, seller_b, Side::Sell, price, lot);
+
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        // Both books settled: both buyers hold their base free, both
+        // sellers hold their quote free, no reserves left. If the second
+        // book's SettlingEvent were silently dropped, buyer_b would
+        // still have `price * lot` reserved and seller_b would still hold
+        // `lot` reserved.
+        assert_eq!(state.get_balance(&buyer_a, &pair_a.base), balance(lot, 0));
+        assert_eq!(
+            state.get_balance(&seller_a, &pair_a.quote),
+            balance(price * lot, 0),
+        );
+        assert_eq!(state.get_balance(&buyer_b, &pair_b.base), balance(lot, 0));
+        assert_eq!(
+            state.get_balance(&seller_b, &pair_b.quote),
+            balance(price * lot, 0),
+        );
+    }
+
     fn setup() -> TestState {
         let mut state = test_fixtures::state();
         let pair = icp_ckbtc_trading_pair();

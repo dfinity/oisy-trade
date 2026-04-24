@@ -22,7 +22,7 @@ use candid::{Nat, Principal};
 use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State<VMem, VMem>>> = RefCell::default();
@@ -77,11 +77,10 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Matching outputs awaiting to be settled.
-    /// Normally empty between messages because
-    /// matching and settling happen atomically inside
-    /// `process_pending_orders`.
-    pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
+    /// Stores on the heap settlements that are not yet recorded in stable memory.
+    /// Normally empty between messages — producers and their paired
+    /// settling happen atomically inside a single message processing.
+    pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -101,7 +100,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
-            pending_settlement: BTreeMap::default(),
+            pending_settling_events: VecDeque::default(),
         })
     }
 
@@ -243,28 +242,23 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     runtime,
                 );
             }
-
-            let settling_event = self.pending_settlement.get(&book_id).map(|output| {
-                event::EventType::Settling(event::SettlingEvent {
-                    book_id,
-                    balance_operations: compute_balance_operations(output),
-                    transitions: compute_order_status_transitions(output),
-                })
-            });
-            if let Some(event) = settling_event {
-                audit::process_event(self, event, runtime);
-            }
+        }
+        // Drain every `SettlingEvent` that `record_matching_event` queued
+        // across all books. Peek-then-dispatch: the dispatcher
+        // (`record_settling_event`) pops the front entry, which keeps
+        // replay symmetric — replay also pushes via `record_matching_event`
+        // and pops via `record_settling_event`, so both paths leave an
+        // empty queue.
+        while let Some(event) = self.pending_settling_events.front().cloned() {
+            audit::process_event(self, event::EventType::Settling(event), runtime);
         }
     }
 
-    /// Drive engine matching for the given book and park the resulting
-    /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
-    /// [`event::SettlingEvent`] to drain.
-    pub fn record_matching_event(
-        &mut self,
-        event: &event::MatchingEvent,
-        _persistence: StableMemoryOptions,
-    ) {
+    /// Drive engine matching for the given book and push the paired
+    /// [`event::SettlingEvent`] (if the round produced any ops) to
+    /// [`State::pending_settling_events`] for the subsequent settling
+    /// dispatch to drain.
+    pub fn record_matching_event(&mut self, event: &event::MatchingEvent) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("matching");
         let book = self
@@ -272,21 +266,28 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
         let output = book.process_pending_orders(&event.orders);
-        assert_eq!(
-            self.pending_settlement.insert(event.book_id, output),
-            None,
-            "BUG: previous round of settling was not completed"
-        );
+        let balance_operations = compute_balance_operations(&output);
+        let transitions = compute_order_status_transitions(&output);
+        if !balance_operations.is_empty() || !transitions.is_empty() {
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id: event.book_id,
+                    balance_operations,
+                    transitions,
+                });
+        }
     }
 
     /// Apply a declarative list of balance operations and order-status
-    /// transitions.
+    /// transitions, popping the paired entry queued by
+    /// [`Self::record_matching_event`] off the front of
+    /// [`State::pending_settling_events`].
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        self.pending_settlement.remove(&event.book_id);
+        self.pending_settling_events.pop_front();
 
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
@@ -570,7 +571,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
+            pending_settling_events,
         } = self;
         Self {
             mode: mode.clone(),
@@ -582,7 +583,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
-            pending_settlement: pending_settlement.clone(),
+            pending_settling_events: pending_settling_events.clone(),
         }
     }
 }
@@ -600,7 +601,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
+            pending_settling_events,
         } = self;
         let Self {
             mode: other_mode,
@@ -612,7 +613,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
-            pending_settlement: other_pending_settlement,
+            pending_settling_events: other_pending_settling_events,
         } = other;
         mode == other_mode
             && next_book_id == other_next_book_id
@@ -623,7 +624,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
-            && pending_settlement == other_pending_settlement
+            && pending_settling_events == other_pending_settling_events
     }
 }
 
