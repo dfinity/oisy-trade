@@ -223,16 +223,45 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         book.add_pending_order(order);
     }
 
+    pub fn cancel_limit_order(
+        &mut self,
+        user: &Principal,
+        order_id: OrderId,
+        runtime: &impl Runtime,
+    ) -> Result<OrderRecord, CancelLimitOrderError> {
+        self.validate_cancel_limit_order(user, &order_id)?;
+
+        audit::process_event(
+            self,
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            runtime,
+        );
+
+        while let Some(event) = self.take_next_pending_settling_event() {
+            audit::process_event(self, event::EventType::Settling(event), runtime);
+        }
+
+        let order = self
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
+        assert!(
+            matches!(order.status, OrderStatus::Canceled(_)),
+            "BUG: order {order_id} not canceled"
+        );
+        Ok(order)
+    }
+
     pub fn validate_cancel_limit_order(
         &self,
-        caller: Principal,
-        order_id: OrderId,
+        caller: &Principal,
+        order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(&order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if record.owner != caller {
+        if &record.owner != caller {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
@@ -320,12 +349,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
 
-            // `record_matching_event` pushed the paired SettlingEvent (if the
-            // round produced any ops) to `pending_settling_events`; take it
-            // and dispatch by value so the Vec<BalanceOperation> /
-            // Vec<OrderStatusTransition> payload moves into the dispatcher
-            // without cloning.
-            if let Some(event) = self.take_next_pending_settling_event() {
+            while let Some(event) = self.take_next_pending_settling_event() {
                 audit::process_event(self, event::EventType::Settling(event), runtime);
             }
         }
