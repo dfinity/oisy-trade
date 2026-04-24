@@ -256,29 +256,31 @@ impl OrderBook {
 
     /// Remove the order with the given sequence from the book.
     ///
-    /// Looks in the pending queue first, then the resting book. Returns the
-    /// removed order's side, price, and current remaining quantity so the
+    /// Looks in the resting book first (O(log(num_resting_orders))) and
+    /// then in the pending orders (O(num_pending_orders)).
+    ///
+    /// Returns the removed order's side, price, and current remaining quantity so the
     /// caller can refund the reserved balance. Returns `None` if the order
     /// is not in either location (e.g. fully filled or never placed).
     pub fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
-        if let Some(pos) = self.pending_orders.iter().position(|o| o.id() == seq) {
-            let order = self.pending_orders.remove(pos).expect("position is valid");
+        if let Some((side, price)) = self.resting_orders.remove(&seq) {
+            let remaining_quantity = match side {
+                Side::Buy => remove_from_level(self.bids.entry(Reverse(price)), seq),
+                Side::Sell => remove_from_level(self.asks.entry(price), seq),
+            }
+            .expect("BUG: resting_orders index inconsistent with bids/asks");
             return Some(RemovedOrder {
-                side: order.side(),
-                price: order.price(),
-                remaining_quantity: *order.remaining_quantity(),
+                side,
+                price,
+                remaining_quantity,
             });
         }
-        let (side, price) = self.resting_orders.remove(&seq)?;
-        let remaining_quantity = match side {
-            Side::Buy => remove_from_level(self.bids.entry(Reverse(price)), seq),
-            Side::Sell => remove_from_level(self.asks.entry(price), seq),
-        }
-        .expect("BUG: resting_orders index inconsistent with bids/asks");
+        let pos = self.pending_orders.iter().position(|o| o.id() == seq)?;
+        let order = self.pending_orders.remove(pos).expect("position is valid");
         Some(RemovedOrder {
-            side,
-            price,
-            remaining_quantity,
+            side: order.side(),
+            price: order.price(),
+            remaining_quantity: *order.remaining_quantity(),
         })
     }
 
