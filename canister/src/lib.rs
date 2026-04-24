@@ -22,6 +22,7 @@ pub mod balance;
 pub mod cbor;
 pub mod guard;
 pub mod lifecycle;
+pub mod metrics;
 pub mod order;
 pub mod runtime;
 pub mod state;
