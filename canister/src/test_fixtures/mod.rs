@@ -1,6 +1,6 @@
 pub mod event;
 
-use crate::balance::TokenBalance;
+use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderSeq, PendingOrder,
     Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
@@ -226,6 +226,17 @@ pub fn place_order<MH: Memory, MB: Memory>(
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
     state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
     order_id
+}
+
+pub fn balances_pair<MB: Memory>(
+    balances: &TokenBalance<MB>,
+    user: &Principal,
+    pair: &TradingPair,
+) -> (Balance, Balance) {
+    (
+        balances.get_balance(user, &pair.base).unwrap_or_default(),
+        balances.get_balance(user, &pair.quote).unwrap_or_default(),
+    )
 }
 
 /// Fund the given user with a large balance for both tokens of the default

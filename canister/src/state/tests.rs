@@ -201,8 +201,8 @@ mod cancel_limit_order {
     use crate::state::{CancelLimitOrderError, StableMemoryOptions, State};
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
-        place_order,
+        self, LOT_SIZE, TICK_SIZE, balances_pair, ckbtc_metadata, icp_ckbtc_trading_pair,
+        icp_metadata, place_order,
     };
     use candid::Principal;
     use dex_types_internal::{InitArg, Mode};
@@ -214,95 +214,96 @@ mod cancel_limit_order {
     #[test]
     fn should_refund_full_reserved_quote_for_pending_buy() {
         let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
-        let pair = icp_ckbtc_trading_pair();
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, lot);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, u64::from(LOT_SIZE));
 
-        state.validate_cancel_limit_order(OWNER, buy_id).unwrap();
-        state.record_cancel_order(OWNER, buy_id, StableMemoryOptions::Write);
-
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
-        assert_eq!(
-            state.get_balance(&OWNER, &pair.quote),
-            balance(price * lot, 0)
-        );
-        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(0, 0));
+        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
     }
 
     #[test]
     fn should_refund_base_for_pending_sell() {
         let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let pair = icp_ckbtc_trading_pair();
-        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, u64::from(LOT_SIZE));
 
-        state.record_cancel_order(OWNER, sell_id, StableMemoryOptions::Write);
-
-        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Canceled));
-        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
-        assert_eq!(state.get_balance(&OWNER, &pair.quote), balance(0, 0));
+        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
     }
 
     #[test]
     fn should_refund_resting_buy_after_matching_runs() {
         let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
-        let pair = icp_ckbtc_trading_pair();
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, lot);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, u64::from(LOT_SIZE));
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
-        state.record_cancel_order(OWNER, buy_id, StableMemoryOptions::Write);
-
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
-        assert_eq!(
-            state.get_balance(&OWNER, &pair.quote),
-            balance(price * lot, 0)
-        );
+        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
     }
 
     #[test]
     fn should_refund_resting_sell_after_matching_runs() {
         let mut state = setup();
-        let lot = u64::from(LOT_SIZE);
-        let pair = icp_ckbtc_trading_pair();
-        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, u64::from(LOT_SIZE));
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
-        state.record_cancel_order(OWNER, sell_id, StableMemoryOptions::Write);
-
-        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Canceled));
-        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
+        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
     }
 
     #[test]
     fn should_refund_residual_of_partially_filled_buy() {
         let mut state = setup();
         let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
-        let pair = icp_ckbtc_trading_pair();
         // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
-        place_order(&mut state, STRANGER, Side::Sell, price, lot);
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, price, 3 * lot);
+        place_order(&mut state, STRANGER, Side::Sell, 100, lot);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, 3 * lot);
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
-        // Sanity: 1 lot filled (bought), 2 lots still reserved at price 100.
-        assert_eq!(
-            state.get_balance(&OWNER, &pair.quote),
-            balance(0, 2 * price * lot)
+
+        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
+    }
+
+    /// Cancels `order_id` owned by `user` and asserts the canonical refund
+    /// invariant: every reserved unit (base and/or quote) moves into free,
+    /// reserved goes to zero on both tokens, and the order becomes Canceled.
+    /// Guards against vacuous passes when nothing was reserved pre-cancel.
+    fn assert_cancel_frees_reserved(
+        state: &mut State<VectorMemory, VectorMemory>,
+        user: Principal,
+        order_id: OrderId,
+    ) {
+        let pair = icp_ckbtc_trading_pair();
+        let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
+        assert!(
+            *base_before.reserved() != Quantity::ZERO || *quote_before.reserved() != Quantity::ZERO,
+            "no reserved funds before cancel; test is vacuous"
         );
 
-        state.record_cancel_order(OWNER, buy_id, StableMemoryOptions::Write);
+        state.validate_cancel_limit_order(user, order_id).unwrap();
+        state.record_cancel_order(user, order_id, StableMemoryOptions::Write);
 
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Canceled));
+        let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
         assert_eq!(
-            state.get_balance(&OWNER, &pair.quote),
-            balance(2 * price * lot, 0)
+            state.get_order_status(order_id),
+            Some(OrderStatus::Canceled)
         );
-        assert_eq!(state.get_balance(&OWNER, &pair.base), balance(lot, 0));
+        assert_eq!(
+            base_after,
+            Balance::new(
+                base_before
+                    .free()
+                    .checked_add(*base_before.reserved())
+                    .unwrap(),
+                Quantity::ZERO,
+            ),
+        );
+        assert_eq!(
+            quote_after,
+            Balance::new(
+                quote_before
+                    .free()
+                    .checked_add(*quote_before.reserved())
+                    .unwrap(),
+                Quantity::ZERO,
+            ),
+        );
     }
 
     #[test]
@@ -430,7 +431,7 @@ mod cancel_limit_order {
         state
     }
 
-    fn balance(free: u64, reserved: u64) -> Balance {
+    fn balance(free: impl Into<Quantity>, reserved: impl Into<Quantity>) -> Balance {
         Balance::new(free, reserved)
     }
 }
