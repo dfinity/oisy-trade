@@ -155,7 +155,11 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
 }
 
 /// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
-/// snapshot. Expected to be O(1): only the first entry of each side is read.
+/// snapshot. Only the first entry of each side is read, but the returned
+/// [`PriceLevel::quantity`] aggregates across every resting order at that
+/// price — so cost scales with the number of orders at the best bid and best
+/// ask, not with total depth. In this fixture each level holds a single order,
+/// so the benchmark measures the minimal constant-overhead path.
 #[bench(raw)]
 fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
     install_populated_state();
