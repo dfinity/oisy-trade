@@ -16,11 +16,11 @@ dex_types = { path = "../libs/types" }
 dex_types_internal = { path = "../libs/types-internal", features = ["log"] }
 ic-cdk = { workspace = true }
 ic-http-types = { workspace = true }
+ic-metrics-assert = { workspace = true }
 icrc-ledger-types = { workspace = true }
 pocket-ic = { workspace = true }
 scopeguard = { workspace = true }
 serde = { workspace = true }
-ic-metrics-assert = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
