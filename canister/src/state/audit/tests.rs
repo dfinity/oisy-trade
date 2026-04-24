@@ -6,8 +6,8 @@ use crate::order::{
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
-    AddLimitOrderEvent, BalanceOperation, DepositEvent, MatchingEvent, OrderStatusTransition,
-    SettlingEvent, WithdrawEvent,
+    AddLimitOrderEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent, MatchingEvent,
+    OrderStatusTransition, SettlingEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -174,6 +174,23 @@ impl Scenario {
             }),
         });
         (self, order_id)
+    }
+
+    /// Cancels `order_id` for `user` on the primary path and records the
+    /// matching `CancelLimitOrderEvent`. Panics if validation would reject
+    /// (the test is expected to set up a cancelable order first).
+    fn with_cancel(mut self, user: Principal, order_id: OrderId) -> Self {
+        self.state
+            .validate_cancel_limit_order(user, order_id)
+            .expect("test setup: order must be cancelable");
+        self.state
+            .record_cancel_order(user, order_id, StableMemoryOptions::Write);
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { user, order_id }),
+        });
+        self
     }
 
     /// Runs the matching timer on the primary path and records the
@@ -482,6 +499,111 @@ fn should_replay_matching_with_price_improvement() {
         .assert_balance(seller, TokenId::new(quote()), maker_price * quantity, 0u64)
         .assert_order_status(sell_id, OrderStatus::Filled)
         .assert_order_status(buy_id, OrderStatus::Filled)
+        .assert_replay_matches();
+}
+
+#[test]
+fn should_replay_cancel_pending_order() {
+    let price = 100u64;
+    let quantity = 1_000_000u64;
+    let reserved = price * quantity;
+
+    let (scenario, buy_id) = Scenario::new()
+        .with_trading_pair()
+        .with_deposit(user_1(), TokenId::new(quote()), Quantity::from(reserved))
+        .with_limit_order(
+            user_1(),
+            Side::Buy,
+            Price::new(price),
+            Quantity::from(quantity),
+        );
+
+    // Cancel before any matching round runs — the order is still pending and
+    // the full reserve returns to free.
+    scenario
+        .with_cancel(user_1(), buy_id)
+        .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
+        .assert_order_status(buy_id, OrderStatus::Canceled)
+        .assert_replay_matches();
+}
+
+#[test]
+fn should_replay_cancel_partially_filled_order() {
+    let buyer = user_1();
+    let seller = user_2();
+    let price = 100u64;
+    let quantity = 1_000_000u64; // one lot
+    let book_id = OrderBookId::ZERO;
+
+    // Seller rests 1 lot; buyer takes 3 lots — 1 lot fills, 2 lots rest as
+    // Open. Cancelling the buy must refund the 2-lot residual in quote.
+    let (scenario, sell_id) = Scenario::new()
+        .with_trading_pair()
+        .with_deposit(
+            buyer,
+            TokenId::new(quote()),
+            Quantity::from(price * 3 * quantity),
+        )
+        .with_deposit(seller, TokenId::new(base()), Quantity::from(quantity))
+        .with_limit_order(
+            seller,
+            Side::Sell,
+            Price::new(price),
+            Quantity::from(quantity),
+        );
+    let (scenario, buy_id) = scenario.with_limit_order(
+        buyer,
+        Side::Buy,
+        Price::new(price),
+        Quantity::from(3 * quantity),
+    );
+
+    // Same price on both sides → no price improvement, no Unreserve op.
+    // Sell fully fills; buy rests Open with 2 lots of quote still reserved.
+    let scenario = scenario.with_matching_round(
+        MatchingEvent {
+            book_id,
+            orders: vec![sell_id.seq(), buy_id.seq()],
+        },
+        SettlingEvent {
+            book_id,
+            balance_operations: vec![
+                BalanceOperation::Transfer {
+                    from_order: buy_id.seq(),
+                    to_order: sell_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(price * quantity),
+                },
+                BalanceOperation::Transfer {
+                    from_order: sell_id.seq(),
+                    to_order: buy_id.seq(),
+                    token: PairToken::Base,
+                    amount: Quantity::from(quantity),
+                },
+            ],
+            transitions: vec![
+                OrderStatusTransition {
+                    seq: sell_id.seq(),
+                    status: OrderStatus::Filled,
+                },
+                OrderStatusTransition {
+                    seq: buy_id.seq(),
+                    status: OrderStatus::Open,
+                },
+            ],
+        },
+    );
+
+    scenario
+        .with_cancel(buyer, buy_id)
+        // Buyer: 1 lot base from the fill, 2 lots × price quote refunded.
+        .assert_balance(buyer, TokenId::new(base()), quantity, 0u64)
+        .assert_balance(buyer, TokenId::new(quote()), price * 2 * quantity, 0u64)
+        // Seller: fully filled, 1 lot × price quote free.
+        .assert_balance(seller, TokenId::new(base()), 0u64, 0u64)
+        .assert_balance(seller, TokenId::new(quote()), price * quantity, 0u64)
+        .assert_order_status(sell_id, OrderStatus::Filled)
+        .assert_order_status(buy_id, OrderStatus::Canceled)
         .assert_replay_matches();
 }
 
