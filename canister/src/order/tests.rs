@@ -784,42 +784,28 @@ mod order_book {
 
         #[test]
         fn should_saturate_aggregated_quantity_on_overflow() {
-            use crate::order::{
-                OrderBook, OrderBookId, OrderBookSnapshot, PendingOrder, PriceLevel, RestingOrder,
-                Side,
+            use crate::order::{LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize};
+            use std::num::NonZeroU64;
+
+            // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
+            // wouldn't be multiples of the default LOT_SIZE).
+            let mut book = OrderBook::new(
+                OrderBookId::ZERO,
+                TickSize::new(NonZeroU64::new(1).unwrap()),
+                LotSize::new(NonZeroU64::new(1).unwrap()),
+            );
+            let max_buy = |seq: u64| {
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(1),
+                    quantity: Quantity::MAX,
+                }
+                .into_order(OrderSeq::new(seq))
             };
+            book.match_order(max_buy(0)).unwrap();
+            book.match_order(max_buy(1)).unwrap();
 
-            fn resting(seq: u64, quantity: Quantity) -> RestingOrder {
-                RestingOrder::from(
-                    PendingOrder {
-                        side: Side::Buy,
-                        price: Price::new(1),
-                        quantity,
-                    }
-                    .into_order(OrderSeq::new(seq)),
-                )
-            }
-
-            // Two resting orders at the same bid price whose quantities would
-            // overflow u256. `bid_levels` must report `Quantity::MAX` rather
-            // than trap on overflow.
-            let snapshot = OrderBookSnapshot {
-                id: OrderBookId::ZERO,
-                next_seq: OrderSeq::new(2),
-                tick_size: TICK_SIZE,
-                lot_size: LOT_SIZE,
-                pending_orders: vec![],
-                bids: vec![PriceLevel {
-                    price: Price::new(100),
-                    orders: vec![resting(0, Quantity::MAX), resting(1, Quantity::from(1u64))],
-                }],
-                asks: vec![],
-                filled_orders: vec![],
-            };
-            let book = OrderBook::from(snapshot);
-
-            let (price, quantity) = book.bid_levels(1).next().unwrap();
-            assert_eq!(price, Price::new(100));
+            let (_, quantity) = book.bid_levels(1).next().unwrap();
             assert_eq!(quantity, Quantity::MAX);
         }
     }
