@@ -192,7 +192,7 @@ mod add_limit_order {
 
 mod cancel_limit_order {
     use crate::balance::Balance;
-    use crate::order::{OrderBookId, OrderId, OrderStatus, Price, Quantity, Side};
+    use crate::order::{OrderBookId, OrderId, OrderStatus, PairToken, Price, Quantity, Side};
     use crate::state::audit::replay_events;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event,
@@ -214,37 +214,41 @@ mod cancel_limit_order {
     #[test]
     fn should_refund_full_reserved_quote_for_pending_buy() {
         let mut state = setup();
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, u64::from(LOT_SIZE));
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
 
-        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot);
     }
 
     #[test]
     fn should_refund_base_for_pending_sell() {
         let mut state = setup();
-        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, u64::from(LOT_SIZE));
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
 
-        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot);
     }
 
     #[test]
     fn should_refund_resting_buy_after_matching_runs() {
         let mut state = setup();
-        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, u64::from(LOT_SIZE));
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, Side::Buy, 100, lot);
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
-        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot);
     }
 
     #[test]
     fn should_refund_resting_sell_after_matching_runs() {
         let mut state = setup();
-        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, u64::from(LOT_SIZE));
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = place_order(&mut state, OWNER, Side::Sell, 100, lot);
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
-        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot);
     }
 
     #[test]
@@ -257,7 +261,7 @@ mod cancel_limit_order {
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
-        assert_cancel_frees_reserved(&mut state, OWNER, buy_id);
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 2 * 100 * lot);
     }
 
     #[test]
@@ -270,24 +274,22 @@ mod cancel_limit_order {
         state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
-        assert_cancel_frees_reserved(&mut state, OWNER, sell_id);
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, 2 * lot);
     }
 
-    /// Cancels `order_id` owned by `user` and asserts the canonical refund
-    /// invariant: every reserved unit (base and/or quote) moves into free,
-    /// reserved goes to zero on both tokens, and the order becomes Canceled.
-    /// Guards against vacuous passes when nothing was reserved pre-cancel.
-    fn assert_cancel_frees_reserved(
+    /// Cancels `order_id` owned by `user` and asserts that exactly
+    /// `expected_amount` units of `refund_token` move from reserved to free;
+    /// the other token's balance is unchanged and the order becomes Canceled.
+    fn assert_cancel_refunds(
         state: &mut State<VectorMemory, VectorMemory>,
         user: Principal,
         order_id: OrderId,
+        refund_token: PairToken,
+        expected_amount: impl Into<Quantity>,
     ) {
+        let expected_amount = expected_amount.into();
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
-        assert!(
-            *base_before.reserved() != Quantity::ZERO || *quote_before.reserved() != Quantity::ZERO,
-            "no reserved funds before cancel; test is vacuous"
-        );
 
         state.validate_cancel_limit_order(user, order_id).unwrap();
         state.record_cancel_order(user, order_id, StableMemoryOptions::Write);
@@ -297,25 +299,25 @@ mod cancel_limit_order {
             state.get_order_status(order_id),
             Some(OrderStatus::Canceled)
         );
+        let (refunded_before, refunded_after, untouched_before, untouched_after) =
+            match refund_token {
+                PairToken::Base => (base_before, base_after, quote_before, quote_after),
+                PairToken::Quote => (quote_before, quote_after, base_before, base_after),
+            };
         assert_eq!(
-            base_after,
+            refunded_after,
             Balance::new(
-                base_before
-                    .free()
-                    .checked_add(*base_before.reserved())
+                refunded_before.free().checked_add(expected_amount).unwrap(),
+                refunded_before
+                    .reserved()
+                    .checked_sub(&expected_amount)
                     .unwrap(),
-                Quantity::ZERO,
             ),
+            "refund on {refund_token:?} differed from expected {expected_amount:?}",
         );
         assert_eq!(
-            quote_after,
-            Balance::new(
-                quote_before
-                    .free()
-                    .checked_add(*quote_before.reserved())
-                    .unwrap(),
-                Quantity::ZERO,
-            ),
+            untouched_before, untouched_after,
+            "the non-refund token balance should not change",
         );
     }
 
