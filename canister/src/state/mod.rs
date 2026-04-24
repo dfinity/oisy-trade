@@ -22,7 +22,7 @@ use candid::{Nat, Principal};
 use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State<VMem, VMem>>> = RefCell::default();
@@ -77,18 +77,13 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Matching outputs awaiting to be settled.
-    /// Normally empty between messages because
-    /// matching and settling happen atomically inside
-    /// `process_pending_orders`.
-    pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
-    /// Cancel outcomes awaiting to be settled, keyed by the cancelled order.
-    /// Written by [`Self::apply_cancel_to_book`] (via the
-    /// `CancelLimitOrderEvent` dispatcher) and drained by
-    /// [`Self::record_settling_event`] when the paired `SettlingEvent` is
-    /// applied. Normally empty between messages — mirrors
-    /// [`State::pending_settlement`] for the cancel flow.
-    pending_cancellation_settlement: BTreeMap<OrderId, CancelSettlement>,
+    /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
+    /// steps (`record_matching_event` for matches, `apply_cancel_to_book`
+    /// for cancels) and drained by the paired `SettlingEvent` dispatch in
+    /// [`Self::record_settling_event`]. Normally empty between messages —
+    /// producers and their paired settling happen atomically in the same
+    /// message (see `process_pending_orders` and `cancel_limit_order`).
+    pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -108,8 +103,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
-            pending_settlement: BTreeMap::default(),
-            pending_cancellation_settlement: BTreeMap::default(),
+            pending_settling_events: VecDeque::default(),
         })
     }
 
@@ -249,9 +243,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Book-side step of a cancel: remove the order from pending / resting
-    /// and stash the resulting [`CancelSettlement`] in
-    /// [`State::pending_cancellation_settlement`] for the paired
-    /// [`event::SettlingEvent`] to drain — mirrors
+    /// and push the paired [`event::SettlingEvent`] (one `Unreserve` op and
+    /// one `Canceled` transition) to [`State::pending_settling_events`] for
+    /// the subsequent `SettlingEvent` dispatch to drain. Mirrors
     /// [`Self::record_matching_event`].
     pub fn apply_cancel_to_book(&mut self, order_id: OrderId) {
         let (book_id, seq) = order_id.into_parts();
@@ -286,31 +280,27 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let filled_quantity = original_quantity
             .checked_sub(&remaining_quantity)
             .expect("BUG: remaining > original quantity");
-        let settlement = CancelSettlement {
-            book_id,
-            seq,
-            refund_token,
-            refund_amount,
-            filled_quantity,
-        };
-        assert!(
-            self.pending_cancellation_settlement
-                .insert(order_id, settlement)
-                .is_none(),
-            "BUG: previous cancellation for {order_id:?} was not settled",
-        );
+        self.pending_settling_events
+            .push_back(event::SettlingEvent {
+                book_id,
+                balance_operations: vec![event::BalanceOperation::Unreserve {
+                    order: seq,
+                    token: refund_token,
+                    amount: refund_amount,
+                }],
+                transitions: vec![event::OrderStatusTransition {
+                    seq,
+                    status: OrderStatus::Canceled(CanceledOrderInfo { filled_quantity }),
+                }],
+            });
     }
 
-    /// Build the [`event::SettlingEvent`] corresponding to the cancel of
-    /// `order_id` whose outcome has been stashed by
-    /// [`Self::apply_cancel_to_book`]. Does not drain the stash — the
-    /// complementary [`Self::record_settling_event`] call does that when the
-    /// event is dispatched.
-    pub fn build_cancel_settling_event(&self, order_id: OrderId) -> event::SettlingEvent {
-        self.pending_cancellation_settlement
-            .get(&order_id)
-            .expect("BUG: no pending cancellation settlement for order_id")
-            .to_settling_event()
+    /// Peek at the [`event::SettlingEvent`] pushed by the most recent
+    /// producer step (matching round or cancel book removal). Does not
+    /// drain — the paired [`Self::record_settling_event`] call pops the
+    /// entry when the event is dispatched.
+    pub fn next_pending_settling_event(&self) -> Option<&event::SettlingEvent> {
+        self.pending_settling_events.front()
     }
 
     /// Convenience wrapper: apply the full live-path cancel in one call —
@@ -325,17 +315,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) -> (CanceledOrderInfo, event::SettlingEvent) {
         self.apply_cancel_to_book(order_id);
-        let settlement = self
-            .pending_cancellation_settlement
-            .get(&order_id)
-            .expect("BUG: apply_cancel_to_book did not stash settlement")
+        let settling_event = self
+            .next_pending_settling_event()
+            .expect("BUG: apply_cancel_to_book did not push a settling event")
             .clone();
-        let info = CanceledOrderInfo {
-            filled_quantity: settlement.filled_quantity,
+        let filled_quantity = match settling_event
+            .transitions
+            .first()
+            .expect("BUG: cancel SettlingEvent has no transition")
+            .status
+        {
+            OrderStatus::Canceled(info) => info.filled_quantity,
+            other => panic!("BUG: unexpected cancel transition status {other:?}"),
         };
-        let settling_event = settlement.to_settling_event();
         self.record_settling_event(&settling_event, persistence);
-        (info, settling_event)
+        (CanceledOrderInfo { filled_quantity }, settling_event)
     }
 
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
@@ -361,22 +355,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
 
-            let settling_event = self.pending_settlement.get(&book_id).map(|output| {
-                event::EventType::Settling(event::SettlingEvent {
-                    book_id,
-                    balance_operations: compute_balance_operations(output),
-                    transitions: compute_order_status_transitions(output),
-                })
-            });
+            // `record_matching_event` pushed the paired SettlingEvent (if the
+            // round produced any ops) to `pending_settling_events`; peek at
+            // the front and dispatch it — the dispatcher drains.
+            let settling_event = self.next_pending_settling_event().cloned();
             if let Some(event) = settling_event {
-                audit::process_event(self, event, runtime);
+                audit::process_event(self, event::EventType::Settling(event), runtime);
             }
         }
     }
 
-    /// Drive engine matching for the given book and park the resulting
-    /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
-    /// [`event::SettlingEvent`] to drain.
+    /// Drive engine matching for the given book and push the paired
+    /// [`event::SettlingEvent`] to [`State::pending_settling_events`] for
+    /// the follow-up settling dispatch to drain. If the round produced no
+    /// ops and no transitions, nothing is pushed.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -389,11 +381,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
         let output = book.process_pending_orders(&event.orders);
-        assert_eq!(
-            self.pending_settlement.insert(event.book_id, output),
-            None,
-            "BUG: previous round of settling was not completed"
-        );
+        let balance_operations = compute_balance_operations(&output);
+        let transitions = compute_order_status_transitions(&output);
+        if !balance_operations.is_empty() || !transitions.is_empty() {
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id: event.book_id,
+                    balance_operations,
+                    transitions,
+                });
+        }
     }
 
     /// Apply a declarative list of balance operations and order-status
@@ -403,16 +400,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        self.pending_settlement.remove(&event.book_id);
-        // Drain cancellation settlements for any Canceled transition in this
-        // event. For matching-driven settlements the status is Filled/Open,
-        // so nothing is drained — keeping the two stashes independent.
-        for transition in &event.transitions {
-            if matches!(transition.status, OrderStatus::Canceled(_)) {
-                self.pending_cancellation_settlement
-                    .remove(&OrderId::new(event.book_id, transition.seq));
-            }
-        }
+        // Drain the paired entry pushed by the producer step (matching round
+        // or cancel book removal). Pop unconditionally — the event being
+        // dispatched is the canonical payload to apply.
+        self.pending_settling_events.pop_front();
 
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
@@ -466,44 +457,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 let order_id = OrderId::new(event.book_id, transition.seq);
                 self.order_history.set_status(&order_id, transition.status);
             }
-        }
-    }
-}
-
-/// The outcome of removing an order from the book during a cancel. Stashed
-/// in [`State::pending_cancellation_settlement`] between dispatch of the
-/// [`event::CancelLimitOrderEvent`] (which writes it) and the paired
-/// [`event::SettlingEvent`] (which drains it) — mirrors [`MatchingOutput`]
-/// for the matching flow.
-#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct CancelSettlement {
-    #[n(0)]
-    pub book_id: OrderBookId,
-    #[n(1)]
-    pub seq: OrderSeq,
-    #[n(2)]
-    pub refund_token: PairToken,
-    #[n(3)]
-    pub refund_amount: Quantity,
-    #[n(4)]
-    pub filled_quantity: Quantity,
-}
-
-impl CancelSettlement {
-    fn to_settling_event(&self) -> event::SettlingEvent {
-        event::SettlingEvent {
-            book_id: self.book_id,
-            balance_operations: vec![event::BalanceOperation::Unreserve {
-                order: self.seq,
-                token: self.refund_token,
-                amount: self.refund_amount,
-            }],
-            transitions: vec![event::OrderStatusTransition {
-                seq: self.seq,
-                status: OrderStatus::Canceled(CanceledOrderInfo {
-                    filled_quantity: self.filled_quantity,
-                }),
-            }],
         }
     }
 }
@@ -734,8 +687,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
-            pending_cancellation_settlement,
+            pending_settling_events,
         } = self;
         Self {
             mode: mode.clone(),
@@ -747,8 +699,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
-            pending_settlement: pending_settlement.clone(),
-            pending_cancellation_settlement: pending_cancellation_settlement.clone(),
+            pending_settling_events: pending_settling_events.clone(),
         }
     }
 }
@@ -766,8 +717,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
-            pending_cancellation_settlement,
+            pending_settling_events,
         } = self;
         let Self {
             mode: other_mode,
@@ -779,8 +729,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
-            pending_settlement: other_pending_settlement,
-            pending_cancellation_settlement: other_pending_cancellation_settlement,
+            pending_settling_events: other_pending_settling_events,
         } = other;
         mode == other_mode
             && next_book_id == other_next_book_id
@@ -791,8 +740,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
-            && pending_settlement == other_pending_settlement
-            && pending_cancellation_settlement == other_pending_cancellation_settlement
+            && pending_settling_events == other_pending_settling_events
     }
 }
 
