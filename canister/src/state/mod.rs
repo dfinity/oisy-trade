@@ -305,34 +305,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.pending_settling_events.pop_front()
     }
 
-    /// Convenience wrapper: apply the full live-path cancel in one call —
-    /// book removal + settling — returning both the [`CanceledOrderInfo`]
-    /// (to surface in the endpoint response) and the constructed
-    /// [`event::SettlingEvent`] (to append to the audit log).
-    /// Equivalent to [`Self::record_cancel_limit_order`] followed by
-    /// [`Self::record_settling_event`].
-    pub fn cancel_order(
-        &mut self,
-        order_id: OrderId,
-        persistence: StableMemoryOptions,
-    ) -> (CanceledOrderInfo, event::SettlingEvent) {
-        self.record_cancel_limit_order(order_id);
-        let settling_event = self
-            .take_next_pending_settling_event()
-            .expect("BUG: record_cancel_limit_order did not push a settling event");
-        let filled_quantity = match settling_event
-            .transitions
-            .first()
-            .expect("BUG: cancel SettlingEvent has no transition")
-            .status
-        {
-            OrderStatus::Canceled(info) => info.filled_quantity,
-            other => panic!("BUG: unexpected cancel transition status {other:?}"),
-        };
-        self.record_settling_event(&settling_event, persistence);
-        (CanceledOrderInfo { filled_quantity }, settling_event)
-    }
-
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let book_ids: Vec<OrderBookId> = self

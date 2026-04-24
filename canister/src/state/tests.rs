@@ -298,13 +298,11 @@ mod cancel_limit_order {
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
 
         state.validate_cancel_limit_order(user, order_id).unwrap();
-        let (info, _settling_event) = state.cancel_order(order_id, StableMemoryOptions::Write);
-        assert_eq!(
-            info,
-            CanceledOrderInfo {
-                filled_quantity: expected_filled,
-            }
-        );
+        state.record_cancel_limit_order(order_id);
+        let settling_event = state
+            .take_next_pending_settling_event()
+            .expect("BUG: record_cancel_limit_order did not push a settling event");
+        state.record_settling_event(&settling_event, StableMemoryOptions::Write);
 
         let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
         assert_eq!(
