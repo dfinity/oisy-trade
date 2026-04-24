@@ -12,10 +12,10 @@
 use super::State;
 use crate::balance::TokenBalance;
 use crate::order::{
-    MatchingOutput, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId,
+    MatchingOutput, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, OrderId, TokenId,
     TokenMetadata, TradingPair,
 };
-use crate::state::TradingPairMap;
+use crate::state::{CancelSettlement, TradingPairMap};
 use candid::Nat;
 use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
@@ -44,6 +44,11 @@ pub struct StateSnapshot {
     /// between `MatchingEvent` and `SettlingEvent`) survives the upgrade.
     #[n(6)]
     pub pending_settlement: Vec<PendingSettlementEntry>,
+    /// Cancel outcomes awaiting settlement, keyed by order. Mirrors
+    /// `pending_settlement` for the cancel flow; snapshotted so a trap
+    /// between `CancelLimitOrderEvent` and `SettlingEvent` survives.
+    #[n(7)]
+    pub pending_cancellation_settlement: Vec<PendingCancellationSettlementEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -78,6 +83,14 @@ pub struct PendingSettlementEntry {
     pub output: MatchingOutput,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PendingCancellationSettlementEntry {
+    #[n(0)]
+    pub order_id: OrderId,
+    #[n(1)]
+    pub settlement: CancelSettlement,
+}
+
 impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
@@ -94,6 +107,7 @@ impl StateSnapshot {
             active_tasks: _,
             ledger_fee_cache,
             pending_settlement,
+            pending_cancellation_settlement,
         } = state;
         Self {
             mode: mode.clone(),
@@ -126,6 +140,15 @@ impl StateSnapshot {
                     book_id: *book_id,
                     output: output.clone(),
                 })
+                .collect(),
+            pending_cancellation_settlement: pending_cancellation_settlement
+                .iter()
+                .map(
+                    |(order_id, settlement)| PendingCancellationSettlementEntry {
+                        order_id: *order_id,
+                        settlement: settlement.clone(),
+                    },
+                )
                 .collect(),
         }
     }
@@ -184,6 +207,17 @@ impl StateSnapshot {
             );
         }
 
+        let mut pending_cancellation_settlement = BTreeMap::new();
+        for entry in self.pending_cancellation_settlement {
+            assert!(
+                pending_cancellation_settlement
+                    .insert(entry.order_id, entry.settlement)
+                    .is_none(),
+                "invalid snapshot: duplicate pending cancellation settlement entry for {:?}",
+                entry.order_id
+            );
+        }
+
         State {
             mode: self.mode,
             next_book_id: self.next_book_id,
@@ -195,6 +229,7 @@ impl StateSnapshot {
             active_tasks: Default::default(),
             ledger_fee_cache,
             pending_settlement,
+            pending_cancellation_settlement,
         }
     }
 }

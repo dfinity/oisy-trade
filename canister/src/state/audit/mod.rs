@@ -109,7 +109,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             // Book-only step. The complementary balance refund and Canceled
             // status transition arrive as the subsequent SettlingEvent that
             // the cancel endpoint emits alongside this event.
-            let _ = state.apply_cancel_to_book(*order_id);
+            state.apply_cancel_to_book(*order_id);
             let _ = persistence;
         }
         EventType::Matching(event) => {

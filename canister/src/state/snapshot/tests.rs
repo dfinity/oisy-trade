@@ -116,6 +116,7 @@ mod schema_stability {
                     filled_orders: BTreeSet::from([OrderSeq::new(5), OrderSeq::new(6)]),
                 },
             }],
+            pending_cancellation_settlement: vec![],
         }
     }
 
@@ -133,10 +134,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        87820080810882828141018261410882814102826142068182828141018141028107818881078103\
+        88820080810882828141018261410882814102826142068182828141018141028107818881078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
         186e818281021a0007a12081810481828141011a000186a081828107838186810582008081186481\
-        068118641a000f4240808281058106";
+        068118641a000f424080828105810680";
 
     #[test]
     fn should_match_golden_encoding() {

@@ -82,6 +82,13 @@ pub struct State<MH: Memory, MB: Memory> {
     /// matching and settling happen atomically inside
     /// `process_pending_orders`.
     pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
+    /// Cancel outcomes awaiting to be settled, keyed by the cancelled order.
+    /// Written by [`Self::apply_cancel_to_book`] (via the
+    /// `CancelLimitOrderEvent` dispatcher) and drained by
+    /// [`Self::record_settling_event`] when the paired `SettlingEvent` is
+    /// applied. Normally empty between messages — mirrors
+    /// [`State::pending_settlement`] for the cancel flow.
+    pending_cancellation_settlement: BTreeMap<OrderId, CancelSettlement>,
     active_tasks: BTreeSet<Task>,
 }
 
@@ -102,6 +109,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settlement: BTreeMap::default(),
+            pending_cancellation_settlement: BTreeMap::default(),
         })
     }
 
@@ -240,13 +248,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Book-side step of a cancel: remove the order from pending / resting.
-    /// The complementary balance refund and status transition are carried by
-    /// the follow-up [`event::SettlingEvent`] — this mirrors the split used
-    /// by the matching flow. Returns the data needed to construct that
-    /// settling event (the live path uses it; replay discards it and relies
-    /// on the separately-dispatched `SettlingEvent` to apply the refund).
-    pub fn apply_cancel_to_book(&mut self, order_id: OrderId) -> CancelSettlement {
+    /// Book-side step of a cancel: remove the order from pending / resting
+    /// and stash the resulting [`CancelSettlement`] in
+    /// [`State::pending_cancellation_settlement`] for the paired
+    /// [`event::SettlingEvent`] to drain — mirrors
+    /// [`Self::record_matching_event`].
+    pub fn apply_cancel_to_book(&mut self, order_id: OrderId) {
         let (book_id, seq) = order_id.into_parts();
         let order_record = self
             .order_history
@@ -279,13 +286,31 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let filled_quantity = original_quantity
             .checked_sub(&remaining_quantity)
             .expect("BUG: remaining > original quantity");
-        CancelSettlement {
+        let settlement = CancelSettlement {
             book_id,
             seq,
             refund_token,
             refund_amount,
             filled_quantity,
-        }
+        };
+        assert!(
+            self.pending_cancellation_settlement
+                .insert(order_id, settlement)
+                .is_none(),
+            "BUG: previous cancellation for {order_id:?} was not settled",
+        );
+    }
+
+    /// Build the [`event::SettlingEvent`] corresponding to the cancel of
+    /// `order_id` whose outcome has been stashed by
+    /// [`Self::apply_cancel_to_book`]. Does not drain the stash — the
+    /// complementary [`Self::record_settling_event`] call does that when the
+    /// event is dispatched.
+    pub fn build_cancel_settling_event(&self, order_id: OrderId) -> event::SettlingEvent {
+        self.pending_cancellation_settlement
+            .get(&order_id)
+            .expect("BUG: no pending cancellation settlement for order_id")
+            .to_settling_event()
     }
 
     /// Convenience wrapper: apply the full live-path cancel in one call —
@@ -299,11 +324,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_id: OrderId,
         persistence: StableMemoryOptions,
     ) -> (CanceledOrderInfo, event::SettlingEvent) {
-        let settlement = self.apply_cancel_to_book(order_id);
+        self.apply_cancel_to_book(order_id);
+        let settlement = self
+            .pending_cancellation_settlement
+            .get(&order_id)
+            .expect("BUG: apply_cancel_to_book did not stash settlement")
+            .clone();
         let info = CanceledOrderInfo {
             filled_quantity: settlement.filled_quantity,
         };
-        let settling_event = settlement.into_settling_event();
+        let settling_event = settlement.to_settling_event();
         self.record_settling_event(&settling_event, persistence);
         (info, settling_event)
     }
@@ -374,6 +404,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) {
         self.pending_settlement.remove(&event.book_id);
+        // Drain cancellation settlements for any Canceled transition in this
+        // event. For matching-driven settlements the status is Filled/Open,
+        // so nothing is drained — keeping the two stashes independent.
+        for transition in &event.transitions {
+            if matches!(transition.status, OrderStatus::Canceled(_)) {
+                self.pending_cancellation_settlement
+                    .remove(&OrderId::new(event.book_id, transition.seq));
+            }
+        }
 
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
@@ -431,20 +470,27 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 }
 
-/// The outcome of removing an order from the book during a cancel. Used by
-/// the live path to build the follow-up [`event::SettlingEvent`] that carries
-/// the refund and the `Canceled` status transition.
-#[derive(Clone, Debug)]
+/// The outcome of removing an order from the book during a cancel. Stashed
+/// in [`State::pending_cancellation_settlement`] between dispatch of the
+/// [`event::CancelLimitOrderEvent`] (which writes it) and the paired
+/// [`event::SettlingEvent`] (which drains it) — mirrors [`MatchingOutput`]
+/// for the matching flow.
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct CancelSettlement {
+    #[n(0)]
     pub book_id: OrderBookId,
+    #[n(1)]
     pub seq: OrderSeq,
+    #[n(2)]
     pub refund_token: PairToken,
+    #[n(3)]
     pub refund_amount: Quantity,
+    #[n(4)]
     pub filled_quantity: Quantity,
 }
 
 impl CancelSettlement {
-    fn into_settling_event(self) -> event::SettlingEvent {
+    fn to_settling_event(&self) -> event::SettlingEvent {
         event::SettlingEvent {
             book_id: self.book_id,
             balance_operations: vec![event::BalanceOperation::Unreserve {
@@ -689,6 +735,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             ledger_fee_cache,
             order_history,
             pending_settlement,
+            pending_cancellation_settlement,
         } = self;
         Self {
             mode: mode.clone(),
@@ -701,6 +748,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
             pending_settlement: pending_settlement.clone(),
+            pending_cancellation_settlement: pending_cancellation_settlement.clone(),
         }
     }
 }
@@ -719,6 +767,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             ledger_fee_cache,
             order_history,
             pending_settlement,
+            pending_cancellation_settlement,
         } = self;
         let Self {
             mode: other_mode,
@@ -731,6 +780,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
             pending_settlement: other_pending_settlement,
+            pending_cancellation_settlement: other_pending_cancellation_settlement,
         } = other;
         mode == other_mode
             && next_book_id == other_next_book_id
@@ -742,6 +792,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
             && pending_settlement == other_pending_settlement
+            && pending_cancellation_settlement == other_pending_cancellation_settlement
     }
 }
 

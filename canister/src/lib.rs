@@ -77,18 +77,32 @@ pub fn cancel_limit_order(
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
     state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
     let info = state::with_state_mut(|s| {
-        // Live-path: apply book removal + settling atomically, then append
-        // the two corresponding audit-log events so replay can reconstruct
-        // the same state by dispatching them independently.
-        let (info, settling_event) = s.cancel_order(id, state::StableMemoryOptions::Write);
-        state::audit::record_event(
+        // Mirrors process_pending_orders: dispatch CancelLimitOrderEvent
+        // (stashes the settlement in s.pending_cancellation_settlement),
+        // then build + dispatch the paired SettlingEvent which drains it.
+        state::audit::process_event(
+            s,
             state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {
                 order_id: id,
             }),
             runtime,
         );
-        state::audit::record_event(state::event::EventType::Settling(settling_event), runtime);
-        info
+        let settling_event = s.build_cancel_settling_event(id);
+        let filled_quantity = match settling_event
+            .transitions
+            .first()
+            .expect("BUG: cancel SettlingEvent has no transition")
+            .status
+        {
+            order::OrderStatus::Canceled(info) => info.filled_quantity,
+            other => panic!("BUG: unexpected cancel transition status {other:?}"),
+        };
+        state::audit::process_event(
+            s,
+            state::event::EventType::Settling(settling_event),
+            runtime,
+        );
+        order::CanceledOrderInfo { filled_quantity }
     });
     Ok(info.into())
 }
