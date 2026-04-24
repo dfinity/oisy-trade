@@ -185,7 +185,7 @@ impl Scenario {
         self.state
             .validate_cancel_limit_order(user, order_id)
             .expect("test setup: order must be cancelable");
-        let settling_event = self
+        let (_info, settling_event) = self
             .state
             .cancel_order(order_id, StableMemoryOptions::Write);
         let cancel_ts = self.timestamp();

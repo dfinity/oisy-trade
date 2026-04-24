@@ -289,19 +289,23 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Convenience wrapper: apply the full live-path cancel in one call —
-    /// book removal + settling — and return the constructed
-    /// [`event::SettlingEvent`] so the caller can forward it to the audit
-    /// log. Equivalent to [`Self::apply_cancel_to_book`] followed by
+    /// book removal + settling — returning both the [`CanceledOrderInfo`]
+    /// (to surface in the endpoint response) and the constructed
+    /// [`event::SettlingEvent`] (to append to the audit log).
+    /// Equivalent to [`Self::apply_cancel_to_book`] followed by
     /// [`Self::record_settling_event`].
     pub fn cancel_order(
         &mut self,
         order_id: OrderId,
         persistence: StableMemoryOptions,
-    ) -> event::SettlingEvent {
+    ) -> (CanceledOrderInfo, event::SettlingEvent) {
         let settlement = self.apply_cancel_to_book(order_id);
+        let info = CanceledOrderInfo {
+            filled_quantity: settlement.filled_quantity,
+        };
         let settling_event = settlement.into_settling_event();
         self.record_settling_event(&settling_event, persistence);
-        settling_event
+        (info, settling_event)
     }
 
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {

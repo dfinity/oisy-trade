@@ -402,7 +402,12 @@ mod cancel_limit_order {
         fund_user(owner);
         let runtime = mock_runtime_for(owner);
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
-        assert_eq!(cancel_limit_order(order_id.clone(), &runtime), Ok(()));
+        assert_eq!(
+            cancel_limit_order(order_id.clone(), &runtime),
+            Ok(dex_types::CanceledOrderInfo {
+                filled_quantity: candid::Nat::from(0u64),
+            })
+        );
 
         let result = cancel_limit_order(order_id, &runtime);
 
@@ -436,7 +441,12 @@ mod cancel_limit_order {
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
 
         let result = cancel_limit_order(order_id.clone(), &runtime);
-        assert_eq!(result, Ok(()));
+        assert_eq!(
+            result,
+            Ok(dex_types::CanceledOrderInfo {
+                filled_quantity: candid::Nat::from(0u64),
+            })
+        );
         assert_eq!(
             crate::get_order_status(order_id),
             dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {

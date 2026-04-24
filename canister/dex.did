@@ -378,7 +378,7 @@ service : (DexArg) -> {
 
     /// Cancel a limit order previously submitted by the caller. Any remaining
     /// reserved balance is credited back to the caller's free balance.
-    cancel_limit_order : (OrderId) -> (variant { Ok; Err : CancelLimitOrderError });
+    cancel_limit_order : (OrderId) -> (variant { Ok : CanceledOrderInfo; Err : CancelLimitOrderError });
 
     /// Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;

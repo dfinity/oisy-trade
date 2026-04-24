@@ -1,7 +1,7 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId, OrderStatus,
-    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    CanceledOrderInfo, DepositError, DepositRequest, DepositResponse, LimitOrderRequest, OrderId,
+    OrderStatus, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -69,18 +69,18 @@ pub fn add_limit_order(
 pub fn cancel_limit_order(
     order_id: OrderId,
     runtime: &impl Runtime,
-) -> Result<(), CancelLimitOrderError> {
+) -> Result<CanceledOrderInfo, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let id = order_id
         .parse::<order::OrderId>()
         .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
     state::with_state(|s| s.validate_cancel_limit_order(caller, id))?;
-    state::with_state_mut(|s| {
+    let info = state::with_state_mut(|s| {
         // Live-path: apply book removal + settling atomically, then append
         // the two corresponding audit-log events so replay can reconstruct
         // the same state by dispatching them independently.
-        let settling_event = s.cancel_order(id, state::StableMemoryOptions::Write);
+        let (info, settling_event) = s.cancel_order(id, state::StableMemoryOptions::Write);
         state::audit::record_event(
             state::event::EventType::CancelLimitOrder(state::event::CancelLimitOrderEvent {
                 order_id: id,
@@ -88,8 +88,9 @@ pub fn cancel_limit_order(
             runtime,
         );
         state::audit::record_event(state::event::EventType::Settling(settling_event), runtime);
+        info
     });
-    Ok(())
+    Ok(info.into())
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) {
