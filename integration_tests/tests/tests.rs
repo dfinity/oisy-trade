@@ -476,8 +476,6 @@ mod cancel_limit_order {
                 .await,
             Err(CancelLimitOrderError::OrderNotFound)
         );
-        // Sanity check the malformed id doesn't trap either — round-trip via raw candid.
-        let _ = Encode!(&"not-a-valid-id".to_string()).unwrap();
 
         setup.drop().await;
     }
