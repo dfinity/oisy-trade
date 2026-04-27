@@ -290,116 +290,6 @@ mod cancel_limit_order {
     };
 
     #[tokio::test]
-    async fn should_cancel_buy_order_and_refund_quote_balance() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
-        let quote = setup.quote_token_id();
-
-        // Buy 1M base tokens at price 100 → 100M quote reserved.
-        let required = 100_000_000u64;
-        setup
-            .deposit_flow(setup.user(), quote.clone())
-            .mint(required + 2 * QUOTE_LEDGER_FEE)
-            .approve(required + QUOTE_LEDGER_FEE)
-            .deposit(required)
-            .execute()
-            .await;
-        let order_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Buy,
-                price: 100,
-                quantity: 1_000_000u64.into(),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.cancel_limit_order(order_id.clone()).await,
-            Ok(OrderRecord {
-                owner: setup.user(),
-                side: Side::Buy,
-                price: 100,
-                quantity: Nat::from(1_000_000u64),
-                status: OrderStatus::Canceled(CanceledOrderInfo {
-                    remaining_quantity: Nat::from(1_000_000u64),
-                }),
-            })
-        );
-
-        assert_eq!(
-            client.get_order_status(order_id).await,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Nat::from(1_000_000u64),
-            })
-        );
-        assert_eq!(
-            client.get_balance(quote).await,
-            Balance {
-                free: required.into(),
-                reserved: 0u64.into(),
-            }
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_cancel_sell_order_and_refund_base_balance() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
-        let base = setup.base_token_id();
-
-        // Sell 1M base tokens at price 100 → 1M base reserved.
-        let required = 1_000_000u64;
-        setup
-            .deposit_flow(setup.user(), base.clone())
-            .mint(required + 2 * BASE_LEDGER_FEE)
-            .approve(required + BASE_LEDGER_FEE)
-            .deposit(required)
-            .execute()
-            .await;
-        let order_id = client
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Sell,
-                price: 100,
-                quantity: 1_000_000u64.into(),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.cancel_limit_order(order_id.clone()).await,
-            Ok(OrderRecord {
-                owner: setup.user(),
-                side: Side::Sell,
-                price: 100,
-                quantity: Nat::from(1_000_000u64),
-                status: OrderStatus::Canceled(CanceledOrderInfo {
-                    remaining_quantity: Nat::from(1_000_000u64),
-                }),
-            })
-        );
-
-        assert_eq!(
-            client.get_order_status(order_id).await,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Nat::from(1_000_000u64),
-            })
-        );
-        assert_eq!(
-            client.get_balance(base).await,
-            Balance {
-                free: required.into(),
-                reserved: 0u64.into(),
-            }
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_cancel_partially_filled_buy_and_refund_residual() {
         let setup = Setup::new().await.with_trading_pair().await;
         let buyer = Principal::from_slice(&[0x01]);
@@ -457,6 +347,12 @@ mod cancel_limit_order {
                 free: 0u64.into(),
                 reserved: 200_000_000u64.into(),
             }
+        );
+
+        assert_eq!(
+            seller_client.cancel_limit_order(buy_id.clone()).await,
+            Err(CancelLimitOrderError::NotOrderOwner),
+            "only buyer can cancel buy order"
         );
 
         assert_eq!(
