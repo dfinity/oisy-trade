@@ -271,27 +271,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Book-side step of a cancel: remove the order from pending / resting
-    /// and push the paired [`event::SettlingEvent`] (one `Unreserve` op and
-    /// one `Canceled` transition) to [`State::pending_settling_events`] for
-    /// the subsequent `SettlingEvent` dispatch to drain. Mirrors
-    /// [`Self::record_matching_event`].
     pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
         let (book_id, seq) = order_id.into_parts();
         let book = self
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing for canceled order");
-        // Unreachable: `validate_cancel_limit_order` rejects every status
-        // except `Pending` and `Open`, and the book invariant guarantees those
-        // statuses correspond to entries in `pending_orders` / `resting_orders`.
         let RemovedOrder {
             side,
             price,
             remaining_quantity,
-        } = book
-            .remove_order(seq)
-            .expect("BUG: canceled order not found in book");
+        } = book.remove_order(seq).expect(
+            "BUG: canceled order request was validated, but canceled order not found in book",
+        );
         let (refund_token, refund_amount) = match side {
             Side::Buy => (
                 PairToken::Quote,
