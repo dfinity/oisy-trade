@@ -156,7 +156,7 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
 
 /// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
 /// snapshot. Only the first entry of each side is read, but the returned
-/// [`PriceLevel::quantity`] aggregates across every resting order at that
+/// [`dex_types::PriceLevel::quantity`] aggregates across every resting order at that
 /// price — so cost scales with the number of orders at the best bid and best
 /// ask, not with total depth. In this fixture each level holds a single order,
 /// so the benchmark measures the minimal constant-overhead path.
@@ -186,7 +186,9 @@ fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
 
 /// Benchmark `get_order_book_depth` at the hard cap (1000 levels per side)
 /// against a fully populated Binance ICP/USDT snapshot. Upper bound on the
-/// instructions a single depth query can consume.
+/// instructions a depth query consumes for this fixture; per-level cost
+/// scales with resting orders at each price (see DEFI-2795), so denser
+/// books can exceed it.
 #[bench(raw)]
 fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     install_populated_state();
