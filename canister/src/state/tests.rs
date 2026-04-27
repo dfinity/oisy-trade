@@ -195,8 +195,8 @@ mod cancel_limit_order {
     use crate::order::{
         CanceledOrderInfo, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side,
     };
-    use crate::state::{StableMemoryOptions, State};
-    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::state::State;
+    use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
         self, LOT_SIZE, TICK_SIZE, balances_pair, ckbtc_metadata, icp_ckbtc_trading_pair,
         icp_metadata, place_order,
@@ -305,17 +305,17 @@ mod cancel_limit_order {
         expected_amount: impl Into<Quantity>,
         expected_remaining: impl Into<Quantity>,
     ) {
+        let mut runtime = MockRuntime::new();
+        runtime.expect_time().return_const(0u64);
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
 
-        state.validate_cancel_limit_order(&user, &order_id).unwrap();
-        state.record_cancel_limit_order(order_id);
-        let settling_event = state
-            .take_next_pending_settling_event()
-            .expect("BUG: record_cancel_limit_order did not push a settling event");
-        state.record_settling_event(&settling_event, StableMemoryOptions::Write);
+        let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
+        assert!(
+            matches!(order.status, OrderStatus::Canceled( info ) if info.remaining_quantity == expected_remaining )
+        );
 
         let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
         assert_eq!(

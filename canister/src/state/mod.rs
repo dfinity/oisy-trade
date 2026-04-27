@@ -252,7 +252,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         Ok(order)
     }
 
-    pub fn validate_cancel_limit_order(
+    fn validate_cancel_limit_order(
         &self,
         caller: &Principal,
         order_id: &OrderId,
