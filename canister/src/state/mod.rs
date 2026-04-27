@@ -335,100 +335,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }
         }
     }
-}
 
-/// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
-/// `ops`. Each `get` hits stable memory; callers can then look owners up in
-/// the returned `BTreeMap` in O(log n) heap-only time.
-fn resolve_op_owners<M: Memory>(
-    book_id: &OrderBookId,
-    ops: &[event::BalanceOperation],
-    history: &OrderHistory<M>,
-) -> BTreeMap<OrderSeq, Principal> {
-    let mut seqs = BTreeSet::new();
-    for op in ops {
-        match op {
-            event::BalanceOperation::Transfer {
-                from_order,
-                to_order,
-                ..
-            } => {
-                seqs.insert(*from_order);
-                seqs.insert(*to_order);
-            }
-            event::BalanceOperation::Unreserve { order, .. } => {
-                seqs.insert(*order);
-            }
-        }
-    }
-    seqs.into_iter()
-        .map(|seq| {
-            let owner = history
-                .get(&OrderId::new(*book_id, seq))
-                .expect("BUG: missing order_history entry for BalanceOperation")
-                .owner;
-            (seq, owner)
-        })
-        .collect()
-}
-
-fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOperation> {
-    let mut ops = Vec::with_capacity(output.fills.len() * 3);
-    for fill in &output.fills {
-        let (buyer_seq, seller_seq) = match fill.taker_side {
-            Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
-            Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
-        };
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: buyer_seq,
-            to_order: seller_seq,
-            token: order::PairToken::Quote,
-            amount: fill.quote_amount(),
-        });
-        if fill.taker_side == Side::Buy
-            && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
-            && !diff.is_zero()
-        {
-            let surplus = diff
-                .checked_mul_quantity(&fill.quantity)
-                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
-            ops.push(event::BalanceOperation::Unreserve {
-                order: fill.taker_order_seq,
-                token: order::PairToken::Quote,
-                amount: surplus,
-            });
-        }
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: seller_seq,
-            to_order: buyer_seq,
-            token: order::PairToken::Base,
-            amount: fill.quantity,
-        });
-    }
-    ops
-}
-
-fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
-    output
-        .resting_orders
-        .iter()
-        .map(|seq| event::OrderStatusTransition {
-            seq: *seq,
-            status: OrderStatus::Open,
-        })
-        .chain(
-            output
-                .filled_orders
-                .iter()
-                .map(|seq| event::OrderStatusTransition {
-                    seq: *seq,
-                    status: OrderStatus::Filled,
-                }),
-        )
-        .collect()
-}
-
-impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
         self.order_history.get(&order_id).map(|r| r.status)
     }
@@ -552,6 +459,97 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
         self.pending_settling_events.pop_front()
     }
+}
+
+/// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
+/// `ops`. Each `get` hits stable memory; callers can then look owners up in
+/// the returned `BTreeMap` in O(log n) heap-only time.
+fn resolve_op_owners<M: Memory>(
+    book_id: &OrderBookId,
+    ops: &[event::BalanceOperation],
+    history: &OrderHistory<M>,
+) -> BTreeMap<OrderSeq, Principal> {
+    let mut seqs = BTreeSet::new();
+    for op in ops {
+        match op {
+            event::BalanceOperation::Transfer {
+                from_order,
+                to_order,
+                ..
+            } => {
+                seqs.insert(*from_order);
+                seqs.insert(*to_order);
+            }
+            event::BalanceOperation::Unreserve { order, .. } => {
+                seqs.insert(*order);
+            }
+        }
+    }
+    seqs.into_iter()
+        .map(|seq| {
+            let owner = history
+                .get(&OrderId::new(*book_id, seq))
+                .expect("BUG: missing order_history entry for BalanceOperation")
+                .owner;
+            (seq, owner)
+        })
+        .collect()
+}
+
+fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOperation> {
+    let mut ops = Vec::with_capacity(output.fills.len() * 3);
+    for fill in &output.fills {
+        let (buyer_seq, seller_seq) = match fill.taker_side {
+            Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
+            Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
+        };
+        ops.push(event::BalanceOperation::Transfer {
+            from_order: buyer_seq,
+            to_order: seller_seq,
+            token: order::PairToken::Quote,
+            amount: fill.quote_amount(),
+        });
+        if fill.taker_side == Side::Buy
+            && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
+            && !diff.is_zero()
+        {
+            let surplus = diff
+                .checked_mul_quantity(&fill.quantity)
+                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
+            ops.push(event::BalanceOperation::Unreserve {
+                order: fill.taker_order_seq,
+                token: order::PairToken::Quote,
+                amount: surplus,
+            });
+        }
+        ops.push(event::BalanceOperation::Transfer {
+            from_order: seller_seq,
+            to_order: buyer_seq,
+            token: order::PairToken::Base,
+            amount: fill.quantity,
+        });
+    }
+    ops
+}
+
+fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
+    output
+        .resting_orders
+        .iter()
+        .map(|seq| event::OrderStatusTransition {
+            seq: *seq,
+            status: OrderStatus::Open,
+        })
+        .chain(
+            output
+                .filled_orders
+                .iter()
+                .map(|seq| event::OrderStatusTransition {
+                    seq: *seq,
+                    status: OrderStatus::Filled,
+                }),
+        )
+        .collect()
 }
 
 #[cfg(test)]
