@@ -1,7 +1,9 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DepositError, DepositRequest,
-    DepositResponse, LimitOrderRequest, OrderId, OrderStatus, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DEFAULT_DEPTH_LIMIT,
+    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, PriceLevel, TradingPair,
+    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -81,6 +83,54 @@ pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
             .map(Into::into)
             .unwrap_or(OrderStatus::NotFound),
         Err(e) => panic!("ERROR: invalid order id: {}", e),
+    }
+}
+
+pub fn get_order_book_ticker(
+    pair: TradingPair,
+) -> Result<OrderBookTicker, GetOrderBookTickerError> {
+    let internal_pair = order::TradingPair::from(pair);
+    state::with_state(|s| {
+        let book = s
+            .get_order_book(&internal_pair)
+            .ok_or(GetOrderBookTickerError::UnknownTradingPair)?;
+        Ok(OrderBookTicker {
+            bid: book.bid_levels(1).next().map(to_price_level),
+            ask: book.ask_levels(1).next().map(to_price_level),
+        })
+    })
+}
+
+pub fn get_order_book_depth(
+    request: GetOrderBookDepthRequest,
+) -> Result<OrderBookDepth, GetOrderBookDepthError> {
+    let limit = match request.limit {
+        None => DEFAULT_DEPTH_LIMIT,
+        Some(n) if n <= MAX_DEPTH_LIMIT => n,
+        Some(n) => {
+            return Err(GetOrderBookDepthError::LimitTooLarge {
+                requested: n,
+                max: MAX_DEPTH_LIMIT,
+            });
+        }
+    };
+    let internal_pair = order::TradingPair::from(request.trading_pair);
+    state::with_state(|s| {
+        let book = s
+            .get_order_book(&internal_pair)
+            .ok_or(GetOrderBookDepthError::UnknownTradingPair)?;
+        let limit = limit as usize;
+        Ok(OrderBookDepth {
+            bids: book.bid_levels(limit).map(to_price_level).collect(),
+            asks: book.ask_levels(limit).map(to_price_level).collect(),
+        })
+    })
+}
+
+fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLevel {
+    PriceLevel {
+        price: price.get(),
+        quantity: quantity.into(),
     }
 }
 
