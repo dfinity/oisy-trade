@@ -243,13 +243,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 );
             }
         }
-        // Drain every `SettlingEvent` that `record_matching_event` queued
-        // across all books. Peek-then-dispatch: the dispatcher
-        // (`record_settling_event`) pops the front entry, which keeps
-        // replay symmetric — replay also pushes via `record_matching_event`
-        // and pops via `record_settling_event`, so both paths leave an
-        // empty queue.
-        while let Some(event) = self.pending_settling_events.front().cloned() {
+        while let Some(event) = self.take_next_pending_settling_event() {
             audit::process_event(self, event::EventType::Settling(event), runtime);
         }
     }
@@ -287,8 +281,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        self.pending_settling_events.pop_front();
-
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
         }
@@ -555,6 +547,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.trading_pairs
             .get_book_id(trading_pair)
             .and_then(|book_id| self.order_books.get(book_id))
+    }
+
+    pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
+        self.pending_settling_events.pop_front()
     }
 }
 

@@ -8,6 +8,7 @@ use crate::state::event::{
 use crate::storage;
 use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
+use std::collections::VecDeque;
 
 #[cfg(test)]
 mod tests;
@@ -134,5 +135,9 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     for event in events_iter {
         apply_state_transition(&mut state, &event.payload, persistence);
     }
+    // Replaying events accumulate pending settling events
+    // that must have been already consumed when being written
+    // to stable memory to update user's balances or order history.
+    state.pending_settling_events = VecDeque::default();
     state
 }
