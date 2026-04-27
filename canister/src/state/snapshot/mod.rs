@@ -40,9 +40,7 @@ pub struct StateSnapshot {
     #[n(5)]
     pub ledger_fee_cache: Vec<LedgerFeeEntry>,
     /// `SettlingEvent`s awaiting dispatch. Typically empty between
-    /// messages (hence the `Option` — encoded as `null` when empty),
-    /// but snapshotted so a half-round state (e.g. a trap between
-    /// `MatchingEvent` and `SettlingEvent`) survives the upgrade.
+    /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
 }
