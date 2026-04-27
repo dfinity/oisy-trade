@@ -855,31 +855,16 @@ mod get_order_book_ticker {
     use crate::get_order_book_ticker;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, place_limit_order,
     };
     use candid::{Nat, Principal};
-    use dex_types::{
-        GetOrderBookTickerError, LimitOrderRequest, OrderBookTicker, PriceLevel, Side, TradingPair,
-    };
+    use dex_types::{GetOrderBookTickerError, OrderBookTicker, PriceLevel, Side, TradingPair};
 
     fn unknown_pair() -> TradingPair {
         TradingPair {
             base: Principal::from_slice(&[0xaa]),
             quote: Principal::from_slice(&[0xbb]),
         }
-    }
-
-    fn place(user: Principal, side: Side, price: u64, quantity: u64) {
-        crate::add_limit_order(
-            LimitOrderRequest {
-                pair: icp_ckbtc_trading_pair().into(),
-                side,
-                price,
-                quantity: Nat::from(quantity),
-            },
-            &mock_runtime_for(user),
-        )
-        .unwrap();
     }
 
     #[test]
@@ -915,10 +900,10 @@ mod get_order_book_ticker {
 
         let lot = u64::from(LOT_SIZE);
         // Two buys at 100, one at 90; one sell at 110. None cross.
-        place(u1, Side::Buy, 100, lot);
-        place(u2, Side::Buy, 100, 3 * lot);
-        place(u3, Side::Buy, 90, 2 * lot);
-        place(u1, Side::Sell, 110, 5 * lot);
+        place_limit_order(u1, Side::Buy, 100, lot);
+        place_limit_order(u2, Side::Buy, 100, 3 * lot);
+        place_limit_order(u3, Side::Buy, 90, 2 * lot);
+        place_limit_order(u1, Side::Sell, 110, 5 * lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(
@@ -941,12 +926,12 @@ mod get_order_book_depth {
     use crate::get_order_book_depth;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, place_limit_order,
     };
     use candid::{Nat, Principal};
     use dex_types::{
-        GetOrderBookDepthError, GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth,
-        PriceLevel, Side, TradingPair,
+        GetOrderBookDepthError, GetOrderBookDepthRequest, OrderBookDepth, PriceLevel, Side,
+        TradingPair,
     };
 
     fn unknown_pair() -> TradingPair {
@@ -968,19 +953,6 @@ mod get_order_book_depth {
             price,
             quantity: Nat::from(quantity),
         }
-    }
-
-    fn place(user: Principal, side: Side, price: u64, quantity: u64) {
-        crate::add_limit_order(
-            LimitOrderRequest {
-                pair: icp_ckbtc_trading_pair().into(),
-                side,
-                price,
-                quantity: Nat::from(quantity),
-            },
-            &mock_runtime_for(user),
-        )
-        .unwrap();
     }
 
     #[test]
@@ -1017,10 +989,10 @@ mod get_order_book_depth {
         fund_user(u4);
 
         let lot = u64::from(LOT_SIZE);
-        place(u1, Side::Buy, 100, lot);
-        place(u2, Side::Buy, 100, 3 * lot);
-        place(u3, Side::Buy, 90, 2 * lot);
-        place(u4, Side::Sell, 110, 5 * lot);
+        place_limit_order(u1, Side::Buy, 100, lot);
+        place_limit_order(u2, Side::Buy, 100, 3 * lot);
+        place_limit_order(u3, Side::Buy, 90, 2 * lot);
+        place_limit_order(u4, Side::Sell, 110, 5 * lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(
@@ -1040,9 +1012,9 @@ mod get_order_book_depth {
             fund_user(*u);
         }
         let lot = u64::from(LOT_SIZE);
-        place(users[0], Side::Buy, 100, lot);
-        place(users[1], Side::Buy, 90, lot);
-        place(users[2], Side::Buy, 80, lot);
+        place_limit_order(users[0], Side::Buy, 100, lot);
+        place_limit_order(users[1], Side::Buy, 90, lot);
+        place_limit_order(users[2], Side::Buy, 80, lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let depth =
@@ -1060,7 +1032,7 @@ mod get_order_book_depth {
         for i in 0..101u64 {
             let user = Principal::from_slice(&(i as u16).to_be_bytes());
             fund_user(user);
-            place(user, Side::Buy, (i + 1) * tick, lot);
+            place_limit_order(user, Side::Buy, (i + 1) * tick, lot);
         }
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
@@ -1086,7 +1058,7 @@ mod get_order_book_depth {
         init_state_with_order_book();
         let user = Principal::from_slice(&[0x01]);
         fund_user(user);
-        place(user, Side::Buy, 100, u64::from(LOT_SIZE));
+        place_limit_order(user, Side::Buy, 100, u64::from(LOT_SIZE));
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let depth =

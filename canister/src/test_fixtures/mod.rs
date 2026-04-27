@@ -207,6 +207,19 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, quantity: u64) {
+    crate::add_limit_order(
+        LimitOrderRequest {
+            pair: icp_ckbtc_trading_pair().into(),
+            side,
+            price,
+            quantity: candid::Nat::from(quantity),
+        },
+        &mocks::mock_runtime_for(user),
+    )
+    .unwrap();
+}
+
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default())
 }
