@@ -205,8 +205,6 @@ pub async fn deposit(
     Ok(deposit_response)
 }
 
-// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
-// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn withdraw(
     request: WithdrawRequest,
     runtime: &impl Runtime,
@@ -228,6 +226,9 @@ pub async fn withdraw(
     let caller = runtime.msg_caller();
     let amount = order::Quantity::try_from(request.amount.clone())
         .map_err(|_| WithdrawError::AmountExceedsMaximum)?;
+
+    let _guard = guard::UserOpGuard::new(caller, internal_token)
+        .ok_or(WithdrawError::OperationInProgress)?;
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {

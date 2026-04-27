@@ -634,6 +634,7 @@ mod withdraw {
     fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
         let mut runtime = MockRuntime::new();
         runtime.expect_msg_caller().return_const(USER);
+        runtime.expect_time().return_const(0u64);
 
         let mut seq = Sequence::new();
         for response in responses {
@@ -1020,6 +1021,119 @@ mod withdraw {
             })
         );
         assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    fn assert_no_in_flight() {
+        state::with_state(|s| {
+            assert!(
+                s.in_flight_user_ops().is_empty(),
+                "in_flight_user_ops should be empty after the call returns"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn should_return_operation_in_progress_when_withdraw_already_in_flight() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+        let _held = crate::guard::UserOpGuard::new(USER, TokenId::from(token_id()))
+            .expect("test setup: acquire guard");
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No ledger expectation: the guard short-circuits before any ledger call.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        // Balance untouched, no event recorded.
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    /// Holding a guard that simulates an in-flight deposit blocks a
+    /// concurrent withdraw on the same `(caller, token)`. Both endpoints
+    /// share `in_flight_user_ops`, so cross-endpoint blocking is exercised
+    /// here.
+    #[tokio::test]
+    async fn should_block_withdraw_when_concurrent_deposit_in_flight() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+        let _held = crate::guard::UserOpGuard::new(USER, TokenId::from(token_id()))
+            .expect("test setup: acquire guard simulating in-flight deposit");
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        assert_balance(deposit);
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_withdraw_success() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let runtime = mock_runtime_returning(vec![transfer_response(Ok(Nat::from(42u64)))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_no_in_flight();
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_withdraw_failure_with_rollback() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let runtime = mock_runtime_returning(vec![transfer_response(Err(
+            TransferError::TemporarilyUnavailable,
+        ))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::LedgerError(
+                LedgerTransferError::TemporarilyUnavailable
+            ))
+        );
+        // Rollback fully restored the free balance, the guard was released,
+        // and no event was emitted for the failed withdrawal.
+        assert_balance(deposit);
+        assert_no_in_flight();
         assert_no_withdraw_event();
     }
 }
