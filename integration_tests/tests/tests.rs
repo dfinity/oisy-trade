@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
-use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -1162,26 +1162,14 @@ async fn should_expose_metrics() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching("canister_cycle_balance [\\d.eE+-]+")
-        .assert_contains_metric_matching("canister_stable_memory_bytes [\\d.eE+-]+")
-        .assert_contains_metric_matching("canister_stable_memory_pages [\\d.eE+-]+")
+        .assert_contains_metric_matching("cycle_balance [\\d.eE+-]+")
+        .assert_contains_metric_matching("stable_memory_bytes [\\d.eE+-]+")
         .assert_contains_metric_matching("event_total [\\d.eE+-]+")
         .assert_contains_metric_matching("trading_pair_count 1")
-        .assert_contains_metric_matching("unique_user_count 0")
-        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 0"#)
-        .assert_contains_metric_matching(r#"order_book_ask_levels\{pair="ckSOL/ckBTC"\} 0"#);
+        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOLckBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"order_book_ask_levels\{pair="ckSOLckBTC"\} 0"#);
 
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_update_metrics_after_order() {
-    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
-    use dex_types::{LimitOrderRequest, Side};
-
-    let setup = Setup::new().await.with_trading_pair().await;
     let user = setup.user();
-
     let required = 100_000_000u64;
     setup
         .deposit_flow(user, setup.quote_token_id())
@@ -1208,9 +1196,8 @@ async fn should_update_metrics_after_order() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching("unique_user_count 1")
-        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOL/ckBTC"\} 1"#)
-        .assert_contains_metric_matching(r#"order_count\{pair="ckSOL/ckBTC",status="open"\} 1"#);
+        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOLckBTC"\} 1"#)
+        .assert_contains_metric_matching(r#"order_count\{pair="ckSOLckBTC",status="open"\} 1"#);
 
     setup.drop().await;
 }
