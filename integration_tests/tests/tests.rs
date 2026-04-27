@@ -1156,12 +1156,6 @@ async fn should_get_logs() {
 }
 
 mod order_book {
-    //! End-to-end smoke test for the order book queries. Dispatcher-level
-    //! coverage (unknown pair, empty book, limit default / cap / zero) lives
-    //! in `canister/src/tests.rs` where the setup is cheap — this test
-    //! exists only to validate the full pipeline over pocket-ic: WASM build,
-    //! candid encoding/decoding, and the matching timer firing.
-
     use candid::{Nat, Principal};
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
@@ -1169,55 +1163,6 @@ mod order_book {
         GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
         Side,
     };
-
-    fn level(price: u64, quantity: u64) -> PriceLevel {
-        PriceLevel {
-            price,
-            quantity: Nat::from(quantity),
-        }
-    }
-
-    async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
-        let required = price * quantity;
-        setup
-            .deposit_flow(user, setup.quote_token_id())
-            .mint(required + 2 * QUOTE_LEDGER_FEE)
-            .approve(required + QUOTE_LEDGER_FEE)
-            .deposit(required)
-            .execute()
-            .await;
-        setup
-            .dex_client_with_caller(user)
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Buy,
-                price,
-                quantity: Nat::from(quantity),
-            })
-            .await
-            .unwrap();
-    }
-
-    async fn fund_and_place_sell(setup: &Setup, user: Principal, price: u64, quantity: u64) {
-        let required = quantity;
-        setup
-            .deposit_flow(user, setup.base_token_id())
-            .mint(required + 2 * BASE_LEDGER_FEE)
-            .approve(required + BASE_LEDGER_FEE)
-            .deposit(required)
-            .execute()
-            .await;
-        setup
-            .dex_client_with_caller(user)
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Sell,
-                price,
-                quantity: Nat::from(quantity),
-            })
-            .await
-            .unwrap();
-    }
 
     #[tokio::test]
     async fn should_expose_top_of_book_and_aggregated_depth() {
@@ -1266,5 +1211,54 @@ mod order_book {
         );
 
         setup.drop().await;
+    }
+
+    async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = price * quantity;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn fund_and_place_sell(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = quantity;
+        setup
+            .deposit_flow(user, setup.base_token_id())
+            .mint(required + 2 * BASE_LEDGER_FEE)
+            .approve(required + BASE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    fn level(price: u64, quantity: u64) -> PriceLevel {
+        PriceLevel {
+            price,
+            quantity: Nat::from(quantity),
+        }
     }
 }
