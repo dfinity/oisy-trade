@@ -165,8 +165,6 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     })
 }
 
-// TODO(DEFI-2789): acquire a per-(caller, token) guard so concurrent
-// deposits/withdrawals can't race and trigger a Balance::deposit overflow.
 pub async fn deposit(
     request: DepositRequest,
     runtime: &impl Runtime,
@@ -180,6 +178,9 @@ pub async fn deposit(
     let amount = order::Quantity::try_from(request.amount.clone())
         .map_err(|_| DepositError::AmountExceedsMaximum)?;
     let caller = runtime.msg_caller();
+
+    let _guard =
+        guard::UserOpGuard::new(caller, internal_token).ok_or(DepositError::OperationInProgress)?;
 
     let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
     if existing
