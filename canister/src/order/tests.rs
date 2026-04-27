@@ -1010,3 +1010,28 @@ mod book_snapshot {
         }
     }
 }
+
+mod levels_consistency {
+    use crate::order::{OrderBook, OrderSeq};
+    use crate::test_fixtures::{
+        LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_non_matching_orders,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn top_of_depth_matches_ticker(orders in arb_non_matching_orders()) {
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            for (i, pending) in orders.into_iter().enumerate() {
+                book.match_order(pending.into_order(OrderSeq::new(i as u64))).unwrap();
+            }
+            let ticker_bid = book.bid_levels(1).next();
+            let ticker_ask = book.ask_levels(1).next();
+            let depth_bids: Vec<_> = book.bid_levels(usize::MAX).collect();
+            let depth_asks: Vec<_> = book.ask_levels(usize::MAX).collect();
+
+            prop_assert_eq!(ticker_bid, depth_bids.first().copied());
+            prop_assert_eq!(ticker_ask, depth_asks.first().copied());
+        }
+    }
+}

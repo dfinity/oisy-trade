@@ -860,18 +860,15 @@ mod get_order_book_ticker {
     use candid::{Nat, Principal};
     use dex_types::{GetOrderBookTickerError, OrderBookTicker, PriceLevel, Side, TradingPair};
 
-    fn unknown_pair() -> TradingPair {
-        TradingPair {
-            base: Principal::from_slice(&[0xaa]),
-            quote: Principal::from_slice(&[0xbb]),
-        }
-    }
-
     #[test]
     fn should_return_unknown_trading_pair_for_unregistered() {
+        let unknown_pair = TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        };
         init_state_with_order_book();
         assert_eq!(
-            get_order_book_ticker(unknown_pair()),
+            get_order_book_ticker(unknown_pair),
             Err(GetOrderBookTickerError::UnknownTradingPair),
         );
     }
@@ -934,13 +931,6 @@ mod get_order_book_depth {
         TradingPair,
     };
 
-    fn unknown_pair() -> TradingPair {
-        TradingPair {
-            base: Principal::from_slice(&[0xaa]),
-            quote: Principal::from_slice(&[0xbb]),
-        }
-    }
-
     fn request(pair: TradingPair, limit: Option<u32>) -> GetOrderBookDepthRequest {
         GetOrderBookDepthRequest {
             trading_pair: pair,
@@ -957,9 +947,13 @@ mod get_order_book_depth {
 
     #[test]
     fn should_return_unknown_trading_pair_for_unregistered() {
+        let unknown_pair = TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        };
         init_state_with_order_book();
         assert_eq!(
-            get_order_book_depth(request(unknown_pair(), None)),
+            get_order_book_depth(request(unknown_pair, None)),
             Err(GetOrderBookDepthError::UnknownTradingPair),
         );
     }

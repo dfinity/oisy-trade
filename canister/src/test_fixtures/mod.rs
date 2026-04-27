@@ -265,6 +265,33 @@ pub mod arbitrary {
             })
     }
 
+    pub fn arb_non_matching_orders() -> impl Strategy<Value = Vec<PendingOrder>> {
+        let tick = u64::from(TICK_SIZE);
+        let lot = u64::from(LOT_SIZE);
+        (2u64..500u64).prop_flat_map(move |mid_ticks| {
+            let bid = (1u64..mid_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+                side: Side::Buy,
+                price: Price::new(p * tick),
+                quantity: Quantity::from(q * lot),
+            });
+            let ask =
+                ((mid_ticks + 1)..1000u64, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(p * tick),
+                    quantity: Quantity::from(q * lot),
+                });
+            (
+                prop::collection::vec(bid, 0..15),
+                prop::collection::vec(ask, 0..15),
+            )
+                .prop_map(|(bids, asks)| {
+                    let mut all = bids;
+                    all.extend(asks);
+                    all
+                })
+        })
+    }
+
     /// Strategy for a valid [`Fill`] with unique order sequences.
     ///
     /// `index` must be unique per fill in a test case — it determines the order
