@@ -207,6 +207,7 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+#[cfg(test)]
 pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, quantity: u64) {
     crate::add_limit_order(
         LimitOrderRequest {

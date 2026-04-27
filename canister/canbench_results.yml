@@ -2,7 +2,7 @@ benches:
   bench_get_order_book_depth_default:
     total:
       calls: 1
-      instructions: 595957
+      instructions: 597157
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -19,7 +19,7 @@ benches:
   bench_get_order_book_depth_max:
     total:
       calls: 1
-      instructions: 4918295
+      instructions: 4928477
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -36,7 +36,7 @@ benches:
   bench_get_order_book_ticker:
     total:
       calls: 1
-      instructions: 8844
+      instructions: 8856
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -430,13 +430,13 @@ benches:
   bench_write_events:
     total:
       calls: 1
-      instructions: 17232098
+      instructions: 17250116
       heap_increase: 7
       stable_memory_increase: 0
     scopes:
       AddLimitOrder:
         calls: 1
-        instructions: 11293
+        instructions: 11299
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
@@ -446,7 +446,7 @@ benches:
         stable_memory_increase: 0
       Deposit:
         calls: 1
-        instructions: 9298
+        instructions: 9304
         heap_increase: 0
         stable_memory_increase: 0
       Init:
@@ -461,7 +461,7 @@ benches:
         stable_memory_increase: 0
       Settling:
         calls: 1
-        instructions: 16527151
+        instructions: 16545151
         heap_increase: 6
         stable_memory_increase: 0
       Upgrade:
@@ -471,7 +471,7 @@ benches:
         stable_memory_increase: 0
       Withdraw:
         calls: 1
-        instructions: 10149
+        instructions: 10155
         heap_increase: 0
         stable_memory_increase: 0
 version: 0.4.1
