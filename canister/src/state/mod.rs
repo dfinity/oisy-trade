@@ -273,9 +273,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Apply a declarative list of balance operations and order-status
-    /// transitions, popping the paired entry queued by
-    /// [`Self::record_matching_event`] off the front of
-    /// [`State::pending_settling_events`].
+    /// transitions.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
