@@ -5,9 +5,10 @@
 //! and survive upgrades on their own — they are *not* copied into the
 //! snapshot. Everything else [`State`] carries — `mode`, `next_book_id`,
 //! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache` — is
-//! serialized here at `pre_upgrade` and restored at `post_upgrade`. The
-//! `active_tasks` set is intentionally excluded: it tracks in-flight timer
-//! work and is reset to empty after every upgrade.
+//! serialized here at `pre_upgrade` and restored at `post_upgrade`. Two sets
+//! are intentionally excluded because they track in-flight async work and
+//! are always reset to empty after an upgrade: `active_tasks` (timer tasks)
+//! and `in_flight_user_ops` (per-`(caller, token)` deposit/withdraw guard).
 
 use super::State;
 use crate::balance::TokenBalance;
@@ -94,6 +95,8 @@ impl StateSnapshot {
             active_tasks: _,
             ledger_fee_cache,
             pending_settlement,
+            // ignored: per-request guard set, reset upon upgrades
+            in_flight_user_ops: _,
         } = state;
         Self {
             mode: mode.clone(),
@@ -195,6 +198,7 @@ impl StateSnapshot {
             active_tasks: Default::default(),
             ledger_fee_cache,
             pending_settlement,
+            in_flight_user_ops: Default::default(),
         }
     }
 }

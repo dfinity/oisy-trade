@@ -245,3 +245,31 @@ fn should_roundtrip_state_through_snapshot() {
 
     assert_eq!(state, restored);
 }
+
+/// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are
+/// intentionally excluded from the snapshot and reset to empty on restore.
+#[test]
+fn should_drop_transient_guard_sets_on_roundtrip() {
+    let mut state = fresh_state();
+    let user = Principal::from_slice(&[0x01]);
+    let token = crate::order::TokenId::new(Principal::from_slice(&[0xAA]));
+
+    state
+        .active_tasks_mut()
+        .insert(crate::Task::ProcessPendingOrders);
+    state.in_flight_user_ops_mut().insert((user, token));
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+
+    assert!(
+        restored.in_flight_user_ops().is_empty(),
+        "in_flight_user_ops must be empty after restore"
+    );
+    // `active_tasks` is also dropped, so the populated original cannot equal
+    // the restored state.
+    assert_ne!(state, restored);
+}
