@@ -258,10 +258,6 @@ impl OrderBook {
     ///
     /// Looks in the resting book first (O(log(num_resting_orders))) and
     /// then in the pending orders (O(num_pending_orders)).
-    ///
-    /// Returns the removed order's side, price, and current remaining quantity so the
-    /// caller can refund the reserved balance. Returns `None` if the order
-    /// is not in either location (e.g. fully filled or never placed).
     pub fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
         if let Some((side, price)) = self.resting_orders.remove(&seq) {
             let remaining_quantity = match side {

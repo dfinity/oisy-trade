@@ -779,15 +779,6 @@ mod remove_order {
     use proptest::collection::vec;
     use proptest::prelude::*;
 
-    /// Flatten resting-side price levels into an in-priority seq list
-    /// (price-prioritized across levels, FIFO within each level).
-    fn resting_seqs(levels: &[PriceLevel]) -> Vec<OrderSeq> {
-        levels
-            .iter()
-            .flat_map(|level| level.orders.iter().map(|o| o.id()))
-            .collect()
-    }
-
     #[test]
     fn should_return_none_when_order_is_absent() {
         let mut book = order_book();
@@ -943,6 +934,15 @@ mod remove_order {
         // Both orders are fully filled; removing either must be a no-op.
         assert_eq!(book.remove_order(OrderSeq::ZERO), None);
         assert_eq!(book.remove_order(OrderSeq::ONE), None);
+    }
+
+    /// Flatten resting-side price levels into an in-priority seq list
+    /// (price-prioritized across levels, FIFO within each level).
+    fn resting_seqs(levels: &[PriceLevel]) -> Vec<OrderSeq> {
+        levels
+            .iter()
+            .flat_map(|level| level.orders.iter().map(|o| o.id()))
+            .collect()
     }
 }
 

@@ -74,7 +74,7 @@ pub enum OrderStatus {
 /// Fill information captured when an order transitions to `Canceled`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct CanceledOrderInfo {
-    /// Quantity that was still open on the book at the moment of cancel.
+    /// Quantity that was still open on the book at the moment of cancel and will never be filled.
     #[n(0)]
     pub remaining_quantity: Quantity,
 }
