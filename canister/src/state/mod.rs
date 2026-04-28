@@ -555,9 +555,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &mut self.active_tasks
     }
 
-    /// Set of in-flight `(caller, token)` deposit/withdraw operations,
-    /// used by [`crate::guard::UserOpGuard`] to serialize concurrent calls
-    /// for the same pair.
+    pub fn active_tasks(&self) -> &BTreeSet<Task> {
+        &self.active_tasks
+    }
+
     pub fn in_flight_user_ops_mut(&mut self) -> &mut BTreeSet<(Principal, TokenId)> {
         &mut self.in_flight_user_ops
     }

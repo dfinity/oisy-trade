@@ -5,10 +5,7 @@
 //! and survive upgrades on their own — they are *not* copied into the
 //! snapshot. Everything else [`State`] carries — `mode`, `next_book_id`,
 //! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache` — is
-//! serialized here at `pre_upgrade` and restored at `post_upgrade`. Two sets
-//! are intentionally excluded because they track in-flight async work and
-//! are always reset to empty after an upgrade: `active_tasks` (timer tasks)
-//! and `in_flight_user_ops` (per-`(caller, token)` deposit/withdraw guard).
+//! serialized here at `pre_upgrade` and restored at `post_upgrade`.
 
 use super::State;
 use crate::balance::TokenBalance;

@@ -1,6 +1,6 @@
 use super::StateSnapshot;
 use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
-use crate::state::StableMemoryOptions;
+use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, state as fresh_state,
@@ -266,10 +266,21 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
 
     assert!(
+        restored.active_tasks().is_empty(),
+        "active_tasks must be empty after restore"
+    );
+    assert!(
         restored.in_flight_user_ops().is_empty(),
         "in_flight_user_ops must be empty after restore"
     );
-    // `active_tasks` is also dropped, so the populated original cannot equal
-    // the restored state.
-    assert_ne!(state, restored);
+
+    assert_eq!(
+        state,
+        State {
+            active_tasks: state.active_tasks().clone(),
+            in_flight_user_ops: state.in_flight_user_ops().clone(),
+            ..restored
+        },
+        "Excepted for transient guard sets, restored state must be equal to original"
+    );
 }

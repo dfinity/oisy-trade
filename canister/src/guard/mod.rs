@@ -30,9 +30,8 @@ impl Drop for TimerGuard {
     }
 }
 
-/// RAII guard that serializes async deposit/withdraw operations per
-/// `(caller, token)`. While a guard is alive, [`UserOpGuard::new`] returns
-/// `None` for the same key; on `Drop` the entry is released.
+/// RAII guard to prevent concurrent deposit/withdraw operations per
+/// `(caller, token)`.
 #[derive(Eq, PartialEq, Debug)]
 pub struct UserOpGuard {
     key: (Principal, TokenId),
