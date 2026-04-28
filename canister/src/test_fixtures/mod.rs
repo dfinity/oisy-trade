@@ -229,6 +229,35 @@ pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }
 
+/// Construct a [`ic_cdk::call::Response`] from Candid-encoded bytes.
+///
+/// `Response` has a private field, but is a newtype over `Vec<u8>` with
+/// identical layout. This is test-only code; the transmute is sound because
+/// the struct contains a single `Vec<u8>` field.
+pub fn mock_response(bytes: Vec<u8>) -> ic_cdk::call::Response {
+    use ic_cdk::call::Response;
+    assert_eq!(
+        std::mem::size_of::<Response>(),
+        std::mem::size_of::<Vec<u8>>(),
+        "Response layout changed — update this helper"
+    );
+    unsafe { std::mem::transmute::<Vec<u8>, Response>(bytes) }
+}
+
+/// Build a Candid-encoded ledger reply for `icrc1_transfer`.
+pub fn transfer_response(
+    result: Result<candid::Nat, icrc_ledger_types::icrc1::transfer::TransferError>,
+) -> ic_cdk::call::Response {
+    mock_response(candid::encode_args((result,)).unwrap())
+}
+
+/// Build a Candid-encoded ledger reply for `icrc2_transfer_from`.
+pub fn transfer_from_response(
+    result: Result<candid::Nat, icrc_ledger_types::icrc2::transfer_from::TransferFromError>,
+) -> ic_cdk::call::Response {
+    mock_response(candid::encode_args((result,)).unwrap())
+}
+
 #[cfg(test)]
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};

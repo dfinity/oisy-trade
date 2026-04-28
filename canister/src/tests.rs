@@ -403,86 +403,98 @@ mod get_order_status {
 mod deposit {
     use crate::deposit;
     use crate::guard::UserOpGuard;
-    use crate::order::{Quantity, TokenId, TokenMetadata};
+    use crate::order::{Quantity, TokenId};
     use crate::state;
-    use crate::test_fixtures::mocks::{mock_runtime_for, MockRuntime};
-    use candid::{Nat, Principal, encode_args};
+    use crate::test_fixtures::mocks::CapturingRuntime;
+    use crate::test_fixtures::{
+        ckbtc_token_id, icp_token_id, init_state_with_order_book, transfer_from_response,
+    };
+    use candid::{Nat, Principal};
     use dex_types::{DepositError, DepositRequest, LedgerTransferFromError};
-    use ic_cdk::call::Response;
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const OTHER_USER: Principal = Principal::from_slice(&[0x43]);
-    const TOKEN_LEDGER: Principal = Principal::from_slice(&[0xAA]);
-    const OTHER_TOKEN_LEDGER: Principal = Principal::from_slice(&[0xBB]);
 
-    fn token_id() -> dex_types::TokenId {
-        dex_types::TokenId {
-            ledger_id: TOKEN_LEDGER,
-        }
+    #[tokio::test]
+    async fn should_return_operation_in_progress_when_deposit_already_in_flight() {
+        init_state_with_order_book();
+        let _held = UserOpGuard::new(USER, icp_token_id()).expect("test setup: acquire guard");
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(result, Err(DepositError::OperationInProgress));
+        assert!(runtime.captured_calls().is_empty());
     }
 
-    fn other_token_id() -> dex_types::TokenId {
-        dex_types::TokenId {
-            ledger_id: OTHER_TOKEN_LEDGER,
-        }
+    #[tokio::test]
+    async fn should_not_block_deposit_for_distinct_token() {
+        init_state_with_order_book();
+        let _held = UserOpGuard::new(USER, ckbtc_token_id()).expect("test setup: acquire guard");
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
     }
 
-    fn init_state_with_two_tokens() {
-        state::init_state(crate::test_fixtures::state_vmem());
-        state::with_state_mut(|s| {
-            s.record_token(
-                TokenId::from(token_id()),
-                TokenMetadata {
-                    symbol: "A".to_string(),
-                    decimals: 8,
-                },
-            );
-            s.record_token(
-                TokenId::from(other_token_id()),
-                TokenMetadata {
-                    symbol: "B".to_string(),
-                    decimals: 8,
-                },
-            );
+    #[tokio::test]
+    async fn should_not_block_deposit_for_distinct_caller() {
+        init_state_with_order_book();
+        let _held =
+            UserOpGuard::new(OTHER_USER, icp_token_id()).expect("test setup: acquire guard");
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_deposit_success() {
+        init_state_with_order_book();
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_in_flight_empty();
+        state::with_state(|s| {
+            let balance = s.get_balance(&USER, &icp_token_id());
+            assert_eq!(balance.free(), &Quantity::from(1_000_000u64));
         });
     }
 
-    fn deposit_request() -> DepositRequest {
+    #[tokio::test]
+    async fn should_release_guard_after_deposit_failure() {
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![Ok(transfer_from_response(Err(
+                TransferFromError::TemporarilyUnavailable,
+            )))],
+        );
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(
+            result,
+            Err(DepositError::LedgerError(
+                LedgerTransferFromError::TemporarilyUnavailable
+            ))
+        );
+        assert_in_flight_empty();
+    }
+
+    fn deposit_request(token: TokenId) -> DepositRequest {
         DepositRequest {
-            token_id: token_id(),
+            token_id: token.into(),
             amount: Nat::from(1_000_000u64),
         }
-    }
-
-    fn mock_response(bytes: Vec<u8>) -> Response {
-        assert_eq!(
-            std::mem::size_of::<Response>(),
-            std::mem::size_of::<Vec<u8>>(),
-            "Response layout changed — update this helper"
-        );
-        unsafe { std::mem::transmute::<Vec<u8>, Response>(bytes) }
-    }
-
-    fn transfer_from_response(result: Result<Nat, TransferFromError>) -> Response {
-        mock_response(encode_args((result,)).unwrap())
-    }
-
-    fn mock_runtime_with_response(caller: Principal, response: Response) -> MockRuntime {
-        let mut runtime = MockRuntime::new();
-        runtime.expect_msg_caller().return_const(caller);
-        runtime
-            .expect_canister_self()
-            .return_const(Principal::anonymous());
-        runtime.expect_time().return_const(0u64);
-        runtime
-            .expect_call_unbounded_wait()
-            .times(1)
-            .withf(|canister_id, method, _args| {
-                canister_id == &TOKEN_LEDGER && method == "icrc2_transfer_from"
-            })
-            .return_once(move |_, _, _| Ok(response));
-        runtime
     }
 
     fn assert_in_flight_empty() {
@@ -493,77 +505,6 @@ mod deposit {
             );
         });
     }
-
-    #[tokio::test]
-    async fn should_return_operation_in_progress_when_deposit_already_in_flight() {
-        init_state_with_two_tokens();
-        let _held =
-            UserOpGuard::new(USER, TokenId::from(token_id())).expect("test setup: acquire guard");
-        let runtime = mock_runtime_for(USER);
-
-        let result = deposit(deposit_request(), &runtime).await;
-
-        assert_eq!(result, Err(DepositError::OperationInProgress));
-    }
-
-    #[tokio::test]
-    async fn should_not_block_deposit_for_distinct_token() {
-        init_state_with_two_tokens();
-        let _held = UserOpGuard::new(USER, TokenId::from(other_token_id()))
-            .expect("test setup: acquire guard");
-        let runtime = mock_runtime_with_response(USER, transfer_from_response(Ok(Nat::from(7u64))));
-
-        let result = deposit(deposit_request(), &runtime).await;
-
-        assert!(result.is_ok(), "got {result:?}");
-    }
-
-    #[tokio::test]
-    async fn should_not_block_deposit_for_distinct_caller() {
-        init_state_with_two_tokens();
-        let _held = UserOpGuard::new(OTHER_USER, TokenId::from(token_id()))
-            .expect("test setup: acquire guard");
-        let runtime = mock_runtime_with_response(USER, transfer_from_response(Ok(Nat::from(7u64))));
-
-        let result = deposit(deposit_request(), &runtime).await;
-
-        assert!(result.is_ok(), "got {result:?}");
-    }
-
-    #[tokio::test]
-    async fn should_release_guard_after_deposit_success() {
-        init_state_with_two_tokens();
-        let runtime = mock_runtime_with_response(USER, transfer_from_response(Ok(Nat::from(7u64))));
-
-        let result = deposit(deposit_request(), &runtime).await;
-
-        assert!(result.is_ok(), "got {result:?}");
-        assert_in_flight_empty();
-        // Free balance should now reflect the credited amount.
-        state::with_state(|s| {
-            let balance = s.get_balance(&USER, &TokenId::from(token_id()));
-            assert_eq!(balance.free(), &Quantity::from(1_000_000u64));
-        });
-    }
-
-    #[tokio::test]
-    async fn should_release_guard_after_deposit_failure() {
-        init_state_with_two_tokens();
-        let runtime = mock_runtime_with_response(
-            USER,
-            transfer_from_response(Err(TransferFromError::TemporarilyUnavailable)),
-        );
-
-        let result = deposit(deposit_request(), &runtime).await;
-
-        assert_eq!(
-            result,
-            Err(DepositError::LedgerError(
-                LedgerTransferFromError::TemporarilyUnavailable
-            ))
-        );
-        assert_in_flight_empty();
-    }
 }
 
 mod withdraw {
@@ -571,8 +512,9 @@ mod withdraw {
     use crate::state::event::{Event, EventType, WithdrawEvent};
     use crate::storage;
     use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
+    use crate::test_fixtures::transfer_response;
     use crate::{state, withdraw};
-    use candid::{Nat, Principal, encode_args};
+    use candid::{Nat, Principal};
     use dex_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
     use ic_cdk::call::Response;
     use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
@@ -604,24 +546,6 @@ mod withdraw {
                 state::StableMemoryOptions::Write,
             );
         });
-    }
-
-    /// Construct a [`Response`] from Candid-encoded bytes.
-    ///
-    /// `Response` has a private field, but is a newtype over `Vec<u8>` with
-    /// identical layout. This is test-only code; the transmute is sound because
-    /// the struct contains a single `Vec<u8>` field.
-    fn mock_response(bytes: Vec<u8>) -> Response {
-        assert_eq!(
-            std::mem::size_of::<Response>(),
-            std::mem::size_of::<Vec<u8>>(),
-            "Response layout changed — update this helper"
-        );
-        unsafe { std::mem::transmute::<Vec<u8>, Response>(bytes) }
-    }
-
-    fn transfer_response(result: Result<Nat, TransferError>) -> Response {
-        mock_response(encode_args((result,)).unwrap())
     }
 
     fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
