@@ -405,7 +405,7 @@ mod deposit {
     use crate::guard::UserOpGuard;
     use crate::order::{Quantity, TokenId, TokenMetadata};
     use crate::state;
-    use crate::test_fixtures::mocks::MockRuntime;
+    use crate::test_fixtures::mocks::{mock_runtime_for, MockRuntime};
     use candid::{Nat, Principal, encode_args};
     use dex_types::{DepositError, DepositRequest, LedgerTransferFromError};
     use ic_cdk::call::Response;
@@ -485,14 +485,7 @@ mod deposit {
         runtime
     }
 
-    fn mock_runtime_rejecting_calls(caller: Principal) -> MockRuntime {
-        let mut runtime = MockRuntime::new();
-        runtime.expect_msg_caller().return_const(caller);
-        // No `expect_call_unbounded_wait`: any ledger call would panic.
-        runtime
-    }
-
-    fn assert_no_in_flight() {
+    fn assert_in_flight_empty() {
         state::with_state(|s| {
             assert!(
                 s.in_flight_user_ops().is_empty(),
@@ -506,7 +499,7 @@ mod deposit {
         init_state_with_two_tokens();
         let _held =
             UserOpGuard::new(USER, TokenId::from(token_id())).expect("test setup: acquire guard");
-        let runtime = mock_runtime_rejecting_calls(USER);
+        let runtime = mock_runtime_for(USER);
 
         let result = deposit(deposit_request(), &runtime).await;
 
@@ -545,7 +538,7 @@ mod deposit {
         let result = deposit(deposit_request(), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
-        assert_no_in_flight();
+        assert_in_flight_empty();
         // Free balance should now reflect the credited amount.
         state::with_state(|s| {
             let balance = s.get_balance(&USER, &TokenId::from(token_id()));
@@ -569,7 +562,7 @@ mod deposit {
                 LedgerTransferFromError::TemporarilyUnavailable
             ))
         );
-        assert_no_in_flight();
+        assert_in_flight_empty();
     }
 }
 
