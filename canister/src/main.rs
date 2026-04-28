@@ -317,6 +317,21 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                 .with_body_and_content_length(log.serialize_logs(MAX_BODY_SIZE))
                 .build()
         }
+        "/dashboard" => {
+            use askama::Template;
+            let canister_id = ic_cdk::api::canister_self();
+            let total_events = dex_canister::storage::total_event_count();
+            let dashboard = dex_canister::state::with_state(|s| {
+                dex_canister::dashboard::DashboardTemplate::from_state(s, canister_id, total_events)
+            });
+            match dashboard.render() {
+                Ok(body) => HttpResponseBuilder::ok()
+                    .header("Content-Type", "text/html; charset=utf-8")
+                    .with_body_and_content_length(body)
+                    .build(),
+                Err(e) => HttpResponseBuilder::server_error(format!("template error: {e}")).build(),
+            }
+        }
         _ => HttpResponseBuilder::not_found().build(),
     }
 }

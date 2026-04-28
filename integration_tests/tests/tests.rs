@@ -1155,6 +1155,29 @@ async fn should_get_logs() {
     setup.drop().await;
 }
 
+#[tokio::test]
+async fn should_get_dashboard() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    let body = setup.fetch_dashboard().await;
+
+    assert!(body.contains("DEX Dashboard"), "missing title in: {body}");
+    assert!(
+        body.contains(&setup.dex_id().to_string()),
+        "missing canister id in: {body}",
+    );
+    assert!(
+        body.contains("ckSOL"),
+        "missing base token symbol in: {body}"
+    );
+    assert!(
+        body.contains("ckBTC"),
+        "missing quote token symbol in: {body}",
+    );
+
+    setup.drop().await;
+}
+
 mod order_book {
     use candid::{Nat, Principal};
     use dex_int_tests::Setup;
