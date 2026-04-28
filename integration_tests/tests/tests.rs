@@ -1274,8 +1274,8 @@ async fn should_expose_metrics() {
         .assert_contains_metric_matching("stable_memory_bytes [\\d.eE+-]+")
         .assert_contains_metric_matching("event_total [\\d.eE+-]+")
         .assert_contains_metric_matching("trading_pair_count 1")
-        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOLckBTC"\} 0"#)
-        .assert_contains_metric_matching(r#"order_book_ask_levels\{pair="ckSOLckBTC"\} 0"#);
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 0"#);
 
     let user = setup.user();
     let required = 100_000_000u64;
@@ -1286,13 +1286,29 @@ async fn should_expose_metrics() {
         .deposit(required)
         .execute()
         .await;
-
     setup
         .dex_client()
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
             price: 100,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+    setup
+        .deposit_flow(user, setup.base_token_id())
+        .mint(required + 2 * BASE_LEDGER_FEE)
+        .approve(required + BASE_LEDGER_FEE)
+        .deposit(1_000_000u64)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 200,
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1304,8 +1320,10 @@ async fn should_expose_metrics() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching(r#"order_book_bid_levels\{pair="ckSOLckBTC"\} 1"#)
-        .assert_contains_metric_matching(r#"order_count\{pair="ckSOLckBTC",status="open"\} 1"#);
+        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 200"#)
+        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 100"#)
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
 
     setup.drop().await;
 }
