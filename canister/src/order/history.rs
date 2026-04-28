@@ -93,8 +93,8 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.insert(*id, record);
     }
 
-    /// Returns an iterator over all order records.
-    pub fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))

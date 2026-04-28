@@ -554,14 +554,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.trading_pairs.len()
     }
 
-    pub fn unique_user_count(&self) -> usize {
-        self.balances.unique_user_count()
-    }
-
-    pub fn order_history(&self) -> &OrderHistory<MH> {
-        &self.order_history
-    }
-
     pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
         self.trading_pairs
             .get_book_id(trading_pair)

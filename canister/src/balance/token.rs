@@ -149,15 +149,6 @@ impl<M: Memory> TokenBalance<M> {
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
     }
-
-    /// Number of distinct principals with at least one balance entry.
-    pub fn unique_user_count(&self) -> usize {
-        let mut seen = std::collections::BTreeSet::new();
-        for entry in self.balances.iter() {
-            seen.insert(*entry.key().owner());
-        }
-        seen.len()
-    }
 }
 
 // Tests that compare full `State` values clone the ledger and assert
