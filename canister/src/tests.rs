@@ -941,7 +941,7 @@ mod withdraw {
         assert_no_withdraw_event();
     }
 
-    fn assert_no_in_flight() {
+    fn assert_in_flight_empty() {
         state::with_state(|s| {
             assert!(
                 s.in_flight_user_ops().is_empty(),
@@ -976,10 +976,6 @@ mod withdraw {
         assert_no_withdraw_event();
     }
 
-    /// Holding a guard that simulates an in-flight deposit blocks a
-    /// concurrent withdraw on the same `(caller, token)`. Both endpoints
-    /// share `in_flight_user_ops`, so cross-endpoint blocking is exercised
-    /// here.
     #[tokio::test]
     async fn should_block_withdraw_when_concurrent_deposit_in_flight() {
         let deposit = 1_000_000u64;
@@ -1020,7 +1016,7 @@ mod withdraw {
         .await;
 
         assert!(result.is_ok(), "got {result:?}");
-        assert_no_in_flight();
+        assert_in_flight_empty();
     }
 
     #[tokio::test]
@@ -1050,7 +1046,7 @@ mod withdraw {
         // Rollback fully restored the free balance, the guard was released,
         // and no event was emitted for the failed withdrawal.
         assert_balance(deposit);
-        assert_no_in_flight();
+        assert_in_flight_empty();
         assert_no_withdraw_event();
     }
 }
