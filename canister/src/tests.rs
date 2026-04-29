@@ -348,6 +348,128 @@ mod add_limit_order {
     }
 }
 
+mod cancel_limit_order {
+    use crate::order::OrderId;
+    use crate::state::with_state_mut;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, init_state_with_order_book, limit_order_request,
+    };
+    use crate::{add_limit_order, cancel_limit_order};
+    use candid::Principal;
+    use dex_types::CancelLimitOrderError;
+    use dex_types_internal::Mode;
+
+    #[test]
+    #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
+    fn should_fail_when_caller_not_allowed() {
+        let authorized = Principal::from_slice(&[0x42]);
+        let unauthorized = Principal::from_slice(&[0xFF]);
+        init_state_with_order_book();
+        with_state_mut(|s| s.set_mode(Mode::restricted_to(vec![authorized])));
+        let mut runtime = mock_runtime_for(unauthorized);
+        runtime.expect_is_controller().return_const(false);
+
+        let _panic = cancel_limit_order("0x00".to_string(), &runtime);
+    }
+
+    #[test]
+    fn should_reject_cancel_of_unknown_order() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
+
+        for unknown_order_id in [OrderId::ZERO.to_string(), "not-a-valid-id".to_string()] {
+            let result = cancel_limit_order(unknown_order_id, &runtime);
+            assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+        }
+    }
+
+    #[test]
+    fn should_reject_cancel_by_non_owner() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        let stranger = Principal::from_slice(&[0x02]);
+        fund_user(owner);
+
+        let order_id = add_limit_order(limit_order_request(), &mock_runtime_for(owner)).unwrap();
+
+        let result = cancel_limit_order(order_id, &mock_runtime_for(stranger));
+        assert_eq!(result, Err(CancelLimitOrderError::NotOrderOwner));
+    }
+
+    #[test]
+    fn should_reject_second_cancel() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        fund_user(owner);
+        let runtime = mock_runtime_for(owner);
+        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+        assert_eq!(
+            cancel_limit_order(order_id.clone(), &runtime),
+            Ok(dex_types::OrderRecord {
+                owner,
+                side: dex_types::Side::Buy,
+                price: 100,
+                quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                }),
+            })
+        );
+
+        let result = cancel_limit_order(order_id, &runtime);
+
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyCanceled));
+    }
+
+    #[test]
+    fn should_reject_cancel_of_filled_order() {
+        init_state_with_order_book();
+        let buyer = Principal::from_slice(&[0x01]);
+        let seller = Principal::from_slice(&[0x02]);
+        fund_user(buyer);
+        fund_user(seller);
+
+        let buy_id = add_limit_order(limit_order_request(), &mock_runtime_for(buyer)).unwrap();
+        let mut sell_request = limit_order_request();
+        sell_request.side = dex_types::Side::Sell;
+        add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
+        crate::process_pending_orders(&mock_runtime_for(buyer));
+
+        let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+    }
+
+    #[test]
+    fn should_succeed_for_owner() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        fund_user(owner);
+        let runtime = mock_runtime_for(owner);
+        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+
+        let result = cancel_limit_order(order_id.clone(), &runtime);
+        assert_eq!(
+            result,
+            Ok(dex_types::OrderRecord {
+                owner,
+                side: dex_types::Side::Buy,
+                price: 100,
+                quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                }),
+            })
+        );
+        assert_eq!(
+            crate::get_order_status(order_id),
+            dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+            })
+        );
+    }
+}
+
 mod get_order_status {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};

@@ -38,6 +38,8 @@ pub enum EventType {
     Matching(#[n(0)] MatchingEvent),
     #[n(7)]
     Withdraw(#[n(0)] WithdrawEvent),
+    #[n(8)]
+    CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -110,7 +112,7 @@ pub struct MatchingEvent {
 /// Outcome of the matching engine:
 /// * balance transitions between maker/taker
 /// * order transitions
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
@@ -125,7 +127,7 @@ pub struct SettlingEvent {
 /// resolved to a concrete `TokenId` via the enclosing `SettlingEvent`'s
 /// `book_id`. This keeps each op compact on the wire while still reconstructing
 /// enough context at apply time.
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub enum BalanceOperation {
     #[n(0)]
     Transfer {
@@ -138,9 +140,10 @@ pub enum BalanceOperation {
         #[n(3)]
         amount: Quantity,
     },
-    /// Today's only producer is the buy-taker price-improvement refund
-    /// (always quote). The `token` field stays explicit so a future cancel
-    /// flow can unreserve base as well.
+    /// Producers: the buy-taker price-improvement refund (always quote) and
+    /// the cancel-limit-order flow (quote for Buy, base for Sell). The
+    /// `token` field is explicit because the cancel side can unreserve
+    /// either token.
     #[n(1)]
     Unreserve {
         #[n(0)]
@@ -152,12 +155,18 @@ pub enum BalanceOperation {
     },
 }
 
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct OrderStatusTransition {
     #[n(0)]
     pub seq: OrderSeq,
     #[n(1)]
     pub status: OrderStatus,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct CancelLimitOrderEvent {
+    #[n(0)]
+    pub order_id: OrderId,
 }
 
 impl Storable for Event {

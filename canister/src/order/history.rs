@@ -26,6 +26,18 @@ pub struct OrderRecord {
     pub status: OrderStatus,
 }
 
+impl From<OrderRecord> for dex_types::OrderRecord {
+    fn from(record: OrderRecord) -> Self {
+        dex_types::OrderRecord {
+            owner: record.owner,
+            side: record.side.into(),
+            price: record.price.into(),
+            quantity: record.quantity.into(),
+            status: record.status.into(),
+        }
+    }
+}
+
 impl Storable for OrderRecord {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
@@ -94,7 +106,7 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     #[cfg(test)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))

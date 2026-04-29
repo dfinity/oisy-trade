@@ -1,8 +1,8 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, DEFAULT_DEPTH_LIMIT,
-    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
+    DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, PriceLevel, TradingPair,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, TradingPair,
     TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
@@ -22,8 +22,10 @@ macro_rules! bench_scopes {
 
 pub mod balance;
 pub mod cbor;
+pub mod dashboard;
 pub mod guard;
 pub mod lifecycle;
+pub mod metrics;
 pub mod order;
 pub mod runtime;
 pub mod state;
@@ -66,6 +68,19 @@ pub fn add_limit_order(
         state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
     });
     Ok(order_id.to_string())
+}
+
+pub fn cancel_limit_order(
+    order_id: OrderId,
+    runtime: &impl Runtime,
+) -> Result<OrderRecord, CancelLimitOrderError> {
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let caller = runtime.msg_caller();
+    let id = order_id
+        .parse::<order::OrderId>()
+        .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
+    let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
+    Ok(record.into())
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) {

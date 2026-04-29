@@ -75,6 +75,19 @@ pub enum AddLimitOrderError {
     },
 }
 
+/// Error returned when canceling a limit order fails.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum CancelLimitOrderError {
+    /// No order with the given ID exists.
+    OrderNotFound,
+    /// The caller does not own the order.
+    NotOrderOwner,
+    /// The order has already been fully filled and cannot be canceled.
+    OrderAlreadyFilled,
+    /// The order has already been canceled.
+    OrderAlreadyCanceled,
+}
+
 /// Information about a listed trading pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct TradingPairInfo {
@@ -168,7 +181,40 @@ pub enum OrderStatus {
     /// The order has been fully filled.
     Filled,
     /// The order has been canceled.
-    Canceled,
+    Canceled(CanceledOrderInfo),
+}
+
+/// Details about a canceled order.
+///
+/// Refund token and amount are derivable from the order's placement
+/// details + `remaining_quantity`, so they are not duplicated here —
+/// only the non-derivable piece is stored. Using `remaining_quantity`
+/// rather than `filled_quantity` lets the state-layer produce this
+/// value from `OrderBook::remove_order` alone, without a follow-up
+/// lookup in stable-memory order history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct CanceledOrderInfo {
+    /// Quantity that was still open on the book at the moment of cancel.
+    /// Equals the original placed quantity for a never-matched order, and
+    /// `original − filled` for a partially-filled one.
+    pub remaining_quantity: Nat,
+}
+
+/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
+/// saving the caller a follow-up status/metadata query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct OrderRecord {
+    /// Principal that placed the order.
+    pub owner: Principal,
+    /// Whether the order is a buy or a sell.
+    pub side: Side,
+    /// Limit price in quote units per base unit, as originally placed.
+    pub price: u64,
+    /// Quantity originally placed, in base token units.
+    pub quantity: Nat,
+    /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
+    pub status: OrderStatus,
 }
 
 /// A token identified by its ledger canister ID.

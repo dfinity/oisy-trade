@@ -5,6 +5,7 @@ mod tests;
 
 pub use book::{
     Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
+    RemovedOrder,
 };
 pub use history::OrderHistory;
 
@@ -67,7 +68,15 @@ pub enum OrderStatus {
     #[n(2)]
     Filled,
     #[n(3)]
-    Canceled,
+    Canceled(#[n(0)] CanceledOrderInfo),
+}
+
+/// Fill information captured when an order transitions to `Canceled`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub struct CanceledOrderInfo {
+    /// Quantity that was still open on the book at the moment of cancel and will never be filled.
+    #[n(0)]
+    pub remaining_quantity: Quantity,
 }
 
 impl From<OrderStatus> for dex_types::OrderStatus {
@@ -76,7 +85,15 @@ impl From<OrderStatus> for dex_types::OrderStatus {
             OrderStatus::Pending => dex_types::OrderStatus::Pending,
             OrderStatus::Open => dex_types::OrderStatus::Open,
             OrderStatus::Filled => dex_types::OrderStatus::Filled,
-            OrderStatus::Canceled => dex_types::OrderStatus::Canceled,
+            OrderStatus::Canceled(info) => dex_types::OrderStatus::Canceled(info.into()),
+        }
+    }
+}
+
+impl From<CanceledOrderInfo> for dex_types::CanceledOrderInfo {
+    fn from(info: CanceledOrderInfo) -> Self {
+        dex_types::CanceledOrderInfo {
+            remaining_quantity: info.remaining_quantity.into(),
         }
     }
 }
@@ -160,6 +177,11 @@ pub struct OrderId {
 }
 
 impl OrderId {
+    pub const ZERO: Self = Self {
+        book_id: OrderBookId::ZERO,
+        seq: OrderSeq::ZERO,
+    };
+
     pub fn new(book_id: OrderBookId, seq: OrderSeq) -> Self {
         Self { book_id, seq }
     }

@@ -13,16 +13,16 @@ use crate::Runtime;
 use crate::Task;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId, OrderHistory,
-    OrderId, OrderRecord, OrderSeq, OrderStatus, PendingOrder, Quantity, Side, TickSize, TokenId,
-    TokenMetadata, TradingPair,
+    self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
 use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 thread_local! {
     static STATE: RefCell<Option<State<VMem, VMem>>> = RefCell::default();
@@ -77,11 +77,13 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Matching outputs awaiting to be settled.
-    /// Normally empty between messages because
-    /// matching and settling happen atomically inside
-    /// `process_pending_orders`.
-    pending_settlement: BTreeMap<OrderBookId, MatchingOutput>,
+    /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
+    /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
+    /// for cancels) and drained by the paired `SettlingEvent` dispatch in
+    /// [`Self::record_settling_event`]. Normally empty between messages —
+    /// producers and their paired settling happen atomically in the same
+    /// message (see `process_pending_orders` and `cancel_limit_order`).
+    pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
     /// operations. Entries live only for the duration of a single async
@@ -105,7 +107,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             order_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
-            pending_settlement: BTreeMap::default(),
+            pending_settling_events: VecDeque::default(),
             in_flight_user_ops: BTreeSet::default(),
         })
     }
@@ -226,6 +228,91 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         book.add_pending_order(order);
     }
 
+    pub fn cancel_limit_order(
+        &mut self,
+        user: &Principal,
+        order_id: OrderId,
+        runtime: &impl Runtime,
+    ) -> Result<OrderRecord, CancelLimitOrderError> {
+        self.validate_cancel_limit_order(user, &order_id)?;
+
+        audit::process_event(
+            self,
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            runtime,
+        );
+
+        while let Some(event) = self.take_next_pending_settling_event() {
+            audit::process_event(self, event::EventType::Settling(event), runtime);
+        }
+
+        let order = self
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
+        assert!(
+            matches!(order.status, OrderStatus::Canceled(_)),
+            "BUG: order {order_id} not canceled"
+        );
+        Ok(order)
+    }
+
+    fn validate_cancel_limit_order(
+        &self,
+        caller: &Principal,
+        order_id: &OrderId,
+    ) -> Result<(), CancelLimitOrderError> {
+        let record = self
+            .order_history
+            .get(order_id)
+            .ok_or(CancelLimitOrderError::OrderNotFound)?;
+        if &record.owner != caller {
+            return Err(CancelLimitOrderError::NotOrderOwner);
+        }
+        match record.status {
+            OrderStatus::Pending | OrderStatus::Open => Ok(()),
+            OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
+            OrderStatus::Canceled(_) => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+        }
+    }
+
+    pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
+        let (book_id, seq) = order_id.into_parts();
+        let book = self
+            .order_books
+            .get_mut(&book_id)
+            .expect("BUG: order book missing for canceled order");
+        let RemovedOrder {
+            side,
+            price,
+            remaining_quantity,
+        } = book.remove_order(seq).expect(
+            "BUG: canceled order request was validated, but canceled order not found in book",
+        );
+        let (refund_token, refund_amount) = match side {
+            Side::Buy => (
+                PairToken::Quote,
+                price
+                    .checked_mul_quantity(&remaining_quantity)
+                    .expect("BUG: price * remaining overflow — validated at placement"),
+            ),
+            Side::Sell => (PairToken::Base, remaining_quantity),
+        };
+        self.pending_settling_events
+            .push_back(event::SettlingEvent {
+                book_id,
+                balance_operations: vec![event::BalanceOperation::Unreserve {
+                    order: seq,
+                    token: refund_token,
+                    amount: refund_amount,
+                }],
+                transitions: vec![event::OrderStatusTransition {
+                    seq,
+                    status: OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
+                }],
+            });
+    }
+
     pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let book_ids: Vec<OrderBookId> = self
@@ -248,28 +335,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     runtime,
                 );
             }
-
-            let settling_event = self.pending_settlement.get(&book_id).map(|output| {
-                event::EventType::Settling(event::SettlingEvent {
-                    book_id,
-                    balance_operations: compute_balance_operations(output),
-                    transitions: compute_order_status_transitions(output),
-                })
-            });
-            if let Some(event) = settling_event {
-                audit::process_event(self, event, runtime);
-            }
+        }
+        while let Some(event) = self.take_next_pending_settling_event() {
+            audit::process_event(self, event::EventType::Settling(event), runtime);
         }
     }
 
-    /// Drive engine matching for the given book and park the resulting
-    /// [`MatchingOutput`] in [`State::pending_settlement`] for the paired
-    /// [`event::SettlingEvent`] to drain.
-    pub fn record_matching_event(
-        &mut self,
-        event: &event::MatchingEvent,
-        _persistence: StableMemoryOptions,
-    ) {
+    /// Drive engine matching for the given book and push the paired
+    /// [`event::SettlingEvent`] (if the round produced any ops) to
+    /// [`State::pending_settling_events`] for the subsequent settling
+    /// dispatch to drain.
+    pub fn record_matching_event(&mut self, event: &event::MatchingEvent) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("matching");
         let book = self
@@ -277,11 +353,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
         let output = book.process_pending_orders(&event.orders);
-        assert_eq!(
-            self.pending_settlement.insert(event.book_id, output),
-            None,
-            "BUG: previous round of settling was not completed"
-        );
+        let balance_operations = compute_balance_operations(&output);
+        let transitions = compute_order_status_transitions(&output);
+        if !balance_operations.is_empty() || !transitions.is_empty() {
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id: event.book_id,
+                    balance_operations,
+                    transitions,
+                });
+        }
     }
 
     /// Apply a declarative list of balance operations and order-status
@@ -291,8 +372,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         event: &event::SettlingEvent,
         persistence: StableMemoryOptions,
     ) {
-        self.pending_settlement.remove(&event.book_id);
-
         if matches!(persistence, StableMemoryOptions::Skip) {
             return;
         }
@@ -346,6 +425,154 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 self.order_history.set_status(&order_id, transition.status);
             }
         }
+    }
+
+    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
+        self.order_history.get(&order_id).map(|r| r.status)
+    }
+
+    pub fn next_book_id(&self) -> OrderBookId {
+        self.next_book_id
+    }
+
+    pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
+        self.trading_pairs.contains(pair)
+    }
+
+    pub fn record_trading_pair(
+        &mut self,
+        book_id: OrderBookId,
+        pair: TradingPair,
+        base_metadata: TokenMetadata,
+        quote_metadata: TokenMetadata,
+        tick_size: TickSize,
+        lot_size: LotSize,
+    ) {
+        self.record_token(pair.base, base_metadata);
+        self.record_token(pair.quote, quote_metadata);
+        assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
+        let book = OrderBook::new(book_id, tick_size, lot_size);
+        self.trading_pairs.insert(pair, book_id);
+        assert_eq!(self.order_books.insert(book_id, book), None);
+        self.next_book_id.increment();
+    }
+
+    pub fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
+        self.tokens
+            .entry(token_id)
+            .and_modify(|existing| assert_eq!(existing, &metadata))
+            .or_insert(metadata);
+    }
+
+    pub fn check_token_metadata_consistency(
+        &self,
+        token_id: TokenId,
+        submitted: &TokenMetadata,
+    ) -> Result<(), dex_types::AddTradingPairError> {
+        if let Some(existing) = self.tokens.get(&token_id)
+            && existing != submitted
+        {
+            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
+                token: token_id.into(),
+                expected: existing.clone().into(),
+                submitted: submitted.clone().into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub fn tokens(&self) -> &BTreeMap<TokenId, TokenMetadata> {
+        &self.tokens
+    }
+
+    pub fn trading_pairs(&self) -> &TradingPairMap {
+        &self.trading_pairs
+    }
+
+    pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
+        self.order_books.get(id)
+    }
+
+    pub fn is_known_token(&self, token_id: &TokenId) -> bool {
+        self.tokens.contains_key(token_id)
+    }
+
+    pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
+        self.tokens.get(token_id)
+    }
+
+    pub fn withdraw(
+        &mut self,
+        user: Principal,
+        token_id: TokenId,
+        amount: Quantity,
+    ) -> Result<(), crate::balance::InsufficientBalanceError> {
+        self.balances.withdraw(&user, &token_id, amount)
+    }
+
+    /// Credits `amount` to the user's free balance.
+    pub fn deposit(
+        &mut self,
+        user: Principal,
+        token_id: TokenId,
+        amount: Quantity,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.balances.deposit(user, token_id, amount);
+        }
+    }
+
+    pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
+        self.ledger_fee_cache
+            .get(token_id)
+            .cloned()
+            .unwrap_or(Nat::from(0u64))
+    }
+
+    pub fn set_cached_ledger_fee(&mut self, token_id: TokenId, fee: Nat) {
+        self.ledger_fee_cache.insert(token_id, fee);
+    }
+
+    pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
+        self.balances
+            .get_balance(user, token_id)
+            .unwrap_or_default()
+    }
+
+    /// Set of currently active tasks to avoid parallel execution.
+    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
+        &mut self.active_tasks
+    }
+
+    pub fn active_tasks(&self) -> &BTreeSet<Task> {
+        &self.active_tasks
+    }
+
+    pub fn in_flight_user_ops_mut(&mut self) -> &mut BTreeSet<(Principal, TokenId)> {
+        &mut self.in_flight_user_ops
+    }
+
+    pub fn in_flight_user_ops(&self) -> &BTreeSet<(Principal, TokenId)> {
+        &self.in_flight_user_ops
+    }
+
+    pub fn trading_pair_count(&self) -> usize {
+        self.trading_pairs.len()
+    }
+
+    pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
+        self.trading_pairs
+            .get_book_id(trading_pair)
+            .and_then(|book_id| self.order_books.get(book_id))
+    }
+
+    pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
+        self.pending_settling_events.pop_front()
     }
 }
 
@@ -440,140 +667,6 @@ fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::Order
         .collect()
 }
 
-impl<MH: Memory, MB: Memory> State<MH, MB> {
-    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
-        self.order_history.get(&order_id).map(|r| r.status)
-    }
-
-    pub fn next_book_id(&self) -> OrderBookId {
-        self.next_book_id
-    }
-
-    pub fn has_trading_pair(&self, pair: &TradingPair) -> bool {
-        self.trading_pairs.contains(pair)
-    }
-
-    pub fn record_trading_pair(
-        &mut self,
-        book_id: OrderBookId,
-        pair: TradingPair,
-        base_metadata: TokenMetadata,
-        quote_metadata: TokenMetadata,
-        tick_size: TickSize,
-        lot_size: LotSize,
-    ) {
-        self.record_token(pair.base, base_metadata);
-        self.record_token(pair.quote, quote_metadata);
-        assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
-        let book = OrderBook::new(book_id, tick_size, lot_size);
-        self.trading_pairs.insert(pair, book_id);
-        assert_eq!(self.order_books.insert(book_id, book), None);
-        self.next_book_id.increment();
-    }
-
-    pub fn record_token(&mut self, token_id: TokenId, metadata: TokenMetadata) {
-        self.tokens
-            .entry(token_id)
-            .and_modify(|existing| assert_eq!(existing, &metadata))
-            .or_insert(metadata);
-    }
-
-    pub fn check_token_metadata_consistency(
-        &self,
-        token_id: TokenId,
-        submitted: &TokenMetadata,
-    ) -> Result<(), dex_types::AddTradingPairError> {
-        if let Some(existing) = self.tokens.get(&token_id)
-            && existing != submitted
-        {
-            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: token_id.into(),
-                expected: existing.clone().into(),
-                submitted: submitted.clone().into(),
-            });
-        }
-        Ok(())
-    }
-
-    pub fn trading_pairs(&self) -> &TradingPairMap {
-        &self.trading_pairs
-    }
-
-    pub fn order_book(&self, id: &OrderBookId) -> Option<&OrderBook> {
-        self.order_books.get(id)
-    }
-
-    pub fn is_known_token(&self, token_id: &TokenId) -> bool {
-        self.tokens.contains_key(token_id)
-    }
-
-    pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
-        self.tokens.get(token_id)
-    }
-
-    pub fn withdraw(
-        &mut self,
-        user: Principal,
-        token_id: TokenId,
-        amount: Quantity,
-    ) -> Result<(), crate::balance::InsufficientBalanceError> {
-        self.balances.withdraw(&user, &token_id, amount)
-    }
-
-    /// Credits `amount` to the user's free balance.
-    pub fn deposit(
-        &mut self,
-        user: Principal,
-        token_id: TokenId,
-        amount: Quantity,
-        persistence: StableMemoryOptions,
-    ) {
-        if matches!(persistence, StableMemoryOptions::Write) {
-            self.balances.deposit(user, token_id, amount);
-        }
-    }
-
-    pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
-        self.ledger_fee_cache
-            .get(token_id)
-            .cloned()
-            .unwrap_or(Nat::from(0u64))
-    }
-
-    pub fn set_cached_ledger_fee(&mut self, token_id: TokenId, fee: Nat) {
-        self.ledger_fee_cache.insert(token_id, fee);
-    }
-
-    pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
-        self.balances
-            .get_balance(user, token_id)
-            .unwrap_or_default()
-    }
-
-    /// Set of currently active tasks to avoid parallel execution.
-    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
-        &mut self.active_tasks
-    }
-
-    pub fn active_tasks(&self) -> &BTreeSet<Task> {
-        &self.active_tasks
-    }
-
-    pub fn in_flight_user_ops_mut(&mut self) -> &mut BTreeSet<(Principal, TokenId)> {
-        &mut self.in_flight_user_ops
-    }
-
-    pub fn in_flight_user_ops(&self) -> &BTreeSet<(Principal, TokenId)> {
-        &self.in_flight_user_ops
-    }
-
-    pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
-        self.trading_pairs
-            .get_book_id(trading_pair)
-            .and_then(|book_id| self.order_books.get(book_id))
-    }
-}
-
 #[cfg(test)]
 impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
@@ -587,7 +680,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
+            pending_settling_events,
             in_flight_user_ops,
         } = self;
         Self {
@@ -600,7 +693,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
-            pending_settlement: pending_settlement.clone(),
+            pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
         }
     }
@@ -619,7 +712,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
-            pending_settlement,
+            pending_settling_events,
             in_flight_user_ops,
         } = self;
         let Self {
@@ -632,7 +725,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
-            pending_settlement: other_pending_settlement,
+            pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
         } = other;
         mode == other_mode
@@ -644,7 +737,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
-            && pending_settlement == other_pending_settlement
+            && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
     }
 }
@@ -662,6 +755,29 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CancelLimitOrderError {
+    OrderNotFound,
+    NotOrderOwner,
+    OrderAlreadyFilled,
+    OrderAlreadyCanceled,
+}
+
+impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+    fn from(err: CancelLimitOrderError) -> Self {
+        match err {
+            CancelLimitOrderError::OrderNotFound => dex_types::CancelLimitOrderError::OrderNotFound,
+            CancelLimitOrderError::NotOrderOwner => dex_types::CancelLimitOrderError::NotOrderOwner,
+            CancelLimitOrderError::OrderAlreadyFilled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+            }
+            CancelLimitOrderError::OrderAlreadyCanceled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+            }
+        }
+    }
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {

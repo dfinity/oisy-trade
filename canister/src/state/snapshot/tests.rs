@@ -8,17 +8,15 @@ use crate::test_fixtures::{
 use candid::Principal;
 
 mod schema_stability {
-    use super::super::{
-        LedgerFeeEntry, PendingSettlementEntry, StateSnapshot, TokenEntry, TradingPairEntry,
-    };
+    use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        Fill, LotSize, MatchingOutput, OrderBookId, OrderBookSnapshot, OrderSeq, PendingOrder,
+        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, OrderStatus, PairToken, PendingOrder,
         Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
         TradingPair,
     };
+    use crate::state::event::{BalanceOperation, OrderStatusTransition, SettlingEvent};
     use candid::{Nat, Principal};
     use dex_types_internal::Mode;
-    use std::collections::BTreeSet;
     use std::num::NonZeroU64;
 
     /// Fixture exercising every `#[n(N)]` field reachable from `StateSnapshot`:
@@ -101,21 +99,33 @@ mod schema_stability {
                 token: token_a,
                 fee: Nat::from(100_000u64),
             }],
-            pending_settlement: vec![PendingSettlementEntry {
+            pending_settling_events: Some(vec![SettlingEvent {
                 book_id,
-                output: MatchingOutput {
-                    fills: vec![Fill {
-                        taker_order_seq: OrderSeq::new(5),
-                        taker_side: Side::Buy,
-                        taker_price: Price::new(100),
-                        maker_order_seq: OrderSeq::new(6),
-                        maker_price: Price::new(100),
-                        quantity: Quantity::from(1_000_000u64),
-                    }],
-                    resting_orders: BTreeSet::new(),
-                    filled_orders: BTreeSet::from([OrderSeq::new(5), OrderSeq::new(6)]),
-                },
-            }],
+                balance_operations: vec![
+                    BalanceOperation::Transfer {
+                        from_order: OrderSeq::new(5),
+                        to_order: OrderSeq::new(6),
+                        token: PairToken::Quote,
+                        amount: Quantity::from(100_000_000u64),
+                    },
+                    BalanceOperation::Transfer {
+                        from_order: OrderSeq::new(6),
+                        to_order: OrderSeq::new(5),
+                        token: PairToken::Base,
+                        amount: Quantity::from(1_000_000u64),
+                    },
+                ],
+                transitions: vec![
+                    OrderStatusTransition {
+                        seq: OrderSeq::new(5),
+                        status: OrderStatus::Filled,
+                    },
+                    OrderStatusTransition {
+                        seq: OrderSeq::new(6),
+                        status: OrderStatus::Filled,
+                    },
+                ],
+            }]),
         }
     }
 
@@ -135,8 +145,8 @@ mod schema_stability {
     const GOLDEN_HEX: &str = "\
         87820080810882828141018261410882814102826142068182828141018141028107818881078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810481828141011a000186a081828107838186810582008081186481\
-        068118641a000f4240808281058106";
+        186e818281021a0007a12081810481828141011a000186a08183810782820084810581068201801a\
+        05f5e100820084810681058200801a000f424082828105820280828106820280";
 
     #[test]
     fn should_match_golden_encoding() {

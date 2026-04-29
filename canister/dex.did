@@ -52,6 +52,18 @@ type AddLimitOrderError = variant {
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
+/// Error returned when canceling a limit order fails.
+type CancelLimitOrderError = variant {
+    /// No order with the given ID exists.
+    OrderNotFound;
+    /// The caller does not own the order.
+    NotOrderOwner;
+    /// The order has already been fully filled and cannot be canceled.
+    OrderAlreadyFilled;
+    /// The order has already been canceled.
+    OrderAlreadyCanceled;
+};
+
 // Information about a listed trading pair.
 type TradingPairInfo = record {
     // The base token.
@@ -127,8 +139,33 @@ type OrderStatus = variant {
     Open;
     // The order has been fully filled.
     Filled;
-    // The order has been canceled.
-    Canceled;
+    /// The order has been canceled.
+    Canceled : CanceledOrderInfo;
+};
+
+/// Details about a canceled order. The refund (token + amount) is derivable
+/// from the order's placement details + `remaining_quantity`, so it is not
+/// duplicated here.
+type CanceledOrderInfo = record {
+    /// Quantity that was still open on the book at the moment of cancel.
+    /// Equals the original placed quantity for a never-matched order, and
+    /// `original − filled` for a partially-filled one.
+    remaining_quantity : nat;
+};
+
+/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// have the whole record already loaded (e.g. `cancel_limit_order`).
+type OrderRecord = record {
+    /// Principal that placed the order.
+    owner : principal;
+    /// Whether the order is a buy or a sell.
+    side : Side;
+    /// Limit price in quote units per base unit, as originally placed.
+    price : nat64;
+    /// Quantity originally placed, in base token units.
+    quantity : nat;
+    /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
+    status : OrderStatus;
 };
 
 // A token identified by its ledger canister ID.
@@ -344,6 +381,11 @@ type WithdrawEvent = record {
     amount : nat;
 };
 
+/// Event payload for canceling a limit order.
+type CancelLimitOrderEvent = record {
+    order_id : EventOrderId;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -391,6 +433,7 @@ type EventType = variant {
     AddTradingPair : AddTradingPairEvent;
     Deposit : DepositEvent;
     AddLimitOrder : AddLimitOrderEvent;
+    CancelLimitOrder : CancelLimitOrderEvent;
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
@@ -421,6 +464,10 @@ service : (DexArg) -> {
     // queue, not that it filled — poll `get_order_status` to observe the
     // actual lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
+
+    /// Cancel a limit order previously submitted by the caller. Any remaining
+    /// reserved balance is credited back to the caller's free balance.
+    cancel_limit_order : (OrderId) -> (variant { Ok : OrderRecord; Err : CancelLimitOrderError });
 
     // Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;

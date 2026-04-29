@@ -16,6 +16,7 @@ pub enum EventType {
     AddTradingPair(AddTradingPairEvent),
     Deposit(DepositEvent),
     AddLimitOrder(AddLimitOrderEvent),
+    CancelLimitOrder(CancelLimitOrderEvent),
     Settling(SettlingEvent),
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
@@ -54,6 +55,11 @@ pub struct AddLimitOrderEvent {
     pub side: dex_types::Side,
     pub price: u64,
     pub quantity: Nat,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct CancelLimitOrderEvent {
+    pub order_id: OrderId,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

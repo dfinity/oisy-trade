@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
-use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -274,6 +274,142 @@ mod add_limit_order {
                 free: required_quote_amount.into(),
                 reserved: 0u64.into()
             },
+        );
+
+        setup.drop().await;
+    }
+}
+
+mod cancel_limit_order {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
+        OrderStatus, Side,
+    };
+
+    #[tokio::test]
+    async fn should_cancel_partially_filled_buy_and_refund_residual() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.dex_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.dex_client_with_caller(seller);
+
+        // Buyer wants 3M base @ 100 → reserves 300M quote.
+        // Seller supplies only 1M base @ 100 → fills 1M, 2M residual on buy.
+        let buyer_deposit = 300_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(buyer_deposit + 2 * QUOTE_LEDGER_FEE)
+            .approve(buyer_deposit + QUOTE_LEDGER_FEE)
+            .deposit(buyer_deposit)
+            .execute()
+            .await;
+        let seller_deposit = 1_000_000u64;
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
+            .approve(seller_deposit + BASE_LEDGER_FEE)
+            .deposit(seller_deposit)
+            .execute()
+            .await;
+
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: 100,
+                quantity: 3_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+        seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: 100,
+                quantity: 1_000_000u64.into(),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        // Buyer: 1M base filled, 200M quote still reserved for the 2M residual.
+        assert_eq!(
+            buyer_client.get_order_status(buy_id.clone()).await,
+            OrderStatus::Open
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 0u64.into(),
+                reserved: 200_000_000u64.into(),
+            }
+        );
+
+        assert_eq!(
+            seller_client.cancel_limit_order(buy_id.clone()).await,
+            Err(CancelLimitOrderError::NotOrderOwner),
+            "only buyer can cancel buy order"
+        );
+
+        assert_eq!(
+            buyer_client.cancel_limit_order(buy_id.clone()).await,
+            Ok(OrderRecord {
+                owner: buyer,
+                side: Side::Buy,
+                price: 100,
+                quantity: Nat::from(3_000_000u64),
+                status: OrderStatus::Canceled(CanceledOrderInfo {
+                    remaining_quantity: Nat::from(2_000_000u64),
+                }),
+            })
+        );
+
+        assert_eq!(
+            buyer_client.get_order_status(buy_id).await,
+            OrderStatus::Canceled(CanceledOrderInfo {
+                remaining_quantity: Nat::from(2_000_000u64),
+            })
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.quote_token_id()).await,
+            Balance {
+                free: 200_000_000u64.into(),
+                reserved: 0u64.into(),
+            }
+        );
+        assert_eq!(
+            buyer_client.get_balance(setup.base_token_id()).await,
+            Balance {
+                free: 1_000_000u64.into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_cancel_of_unknown_order() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+
+        // Valid hex format but refers to a non-existent book/seq.
+        assert_eq!(
+            client
+                .cancel_limit_order("ffffffffffffffffffffffffffffffff".to_string())
+                .await,
+            Err(CancelLimitOrderError::OrderNotFound)
+        );
+        // Malformed id is also rejected cleanly.
+        assert_eq!(
+            client
+                .cancel_limit_order("not-a-valid-id".to_string())
+                .await,
+            Err(CancelLimitOrderError::OrderNotFound)
         );
 
         setup.drop().await;
@@ -1155,6 +1291,29 @@ async fn should_get_logs() {
     setup.drop().await;
 }
 
+#[tokio::test]
+async fn should_get_dashboard() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    let body = setup.fetch_dashboard().await;
+
+    assert!(body.contains("DEX Dashboard"), "missing title in: {body}");
+    assert!(
+        body.contains(&setup.dex_id().to_string()),
+        "missing canister id in: {body}",
+    );
+    assert!(
+        body.contains("ckSOL"),
+        "missing base token symbol in: {body}"
+    );
+    assert!(
+        body.contains("ckBTC"),
+        "missing quote token symbol in: {body}",
+    );
+
+    setup.drop().await;
+}
+
 mod order_book {
     use candid::{Nat, Principal};
     use dex_int_tests::Setup;
@@ -1261,4 +1420,69 @@ mod order_book {
             quantity: Nat::from(quantity),
         }
     }
+}
+
+#[tokio::test]
+async fn should_expose_metrics() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching("cycle_balance [\\d.eE+-]+")
+        .assert_contains_metric_matching("stable_memory_bytes [\\d.eE+-]+")
+        .assert_contains_metric_matching("event_total [\\d.eE+-]+")
+        .assert_contains_metric_matching("trading_pair_count 1")
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 0"#);
+
+    let user = setup.user();
+    let required = 100_000_000u64;
+    setup
+        .deposit_flow(user, setup.quote_token_id())
+        .mint(required + 2 * QUOTE_LEDGER_FEE)
+        .approve(required + QUOTE_LEDGER_FEE)
+        .deposit(required)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+    setup
+        .deposit_flow(user, setup.base_token_id())
+        .mint(required + 2 * BASE_LEDGER_FEE)
+        .approve(required + BASE_LEDGER_FEE)
+        .deposit(1_000_000u64)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 200,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+
+    // Tick to let the matching timer fire and move the order from pending to open.
+    setup.env().tick().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 200"#)
+        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 100"#)
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
+
+    setup.drop().await;
 }

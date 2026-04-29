@@ -10,15 +10,15 @@
 use super::State;
 use crate::balance::TokenBalance;
 use crate::order::{
-    MatchingOutput, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId,
-    TokenMetadata, TradingPair,
+    OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::TradingPairMap;
+use crate::state::event::SettlingEvent;
 use candid::Nat;
 use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 #[cfg(test)]
 mod tests;
@@ -37,11 +37,10 @@ pub struct StateSnapshot {
     pub order_books: Vec<OrderBookSnapshot>,
     #[n(5)]
     pub ledger_fee_cache: Vec<LedgerFeeEntry>,
-    /// Matching outputs awaiting settlement, keyed by book. Typically empty
-    /// between messages, but snapshotted so a half-round state (e.g. a trap
-    /// between `MatchingEvent` and `SettlingEvent`) survives the upgrade.
+    /// `SettlingEvent`s awaiting dispatch. Typically empty between
+    /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
-    pub pending_settlement: Vec<PendingSettlementEntry>,
+    pub pending_settling_events: Option<Vec<SettlingEvent>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -68,14 +67,6 @@ pub struct LedgerFeeEntry {
     pub fee: Nat,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
-pub struct PendingSettlementEntry {
-    #[n(0)]
-    pub book_id: OrderBookId,
-    #[n(1)]
-    pub output: MatchingOutput,
-}
-
 impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
@@ -91,7 +82,7 @@ impl StateSnapshot {
             // ignored: timers are reset upon upgrades
             active_tasks: _,
             ledger_fee_cache,
-            pending_settlement,
+            pending_settling_events,
             // ignored: per-request guard set, reset upon upgrades
             in_flight_user_ops: _,
         } = state;
@@ -120,13 +111,11 @@ impl StateSnapshot {
                     fee: fee.clone(),
                 })
                 .collect(),
-            pending_settlement: pending_settlement
-                .iter()
-                .map(|(book_id, output)| PendingSettlementEntry {
-                    book_id: *book_id,
-                    output: output.clone(),
-                })
-                .collect(),
+            pending_settling_events: if pending_settling_events.is_empty() {
+                None
+            } else {
+                Some(pending_settling_events.iter().cloned().collect())
+            },
         }
     }
 
@@ -173,16 +162,11 @@ impl StateSnapshot {
             );
         }
 
-        let mut pending_settlement = BTreeMap::new();
-        for entry in self.pending_settlement {
-            assert!(
-                pending_settlement
-                    .insert(entry.book_id, entry.output)
-                    .is_none(),
-                "invalid snapshot: duplicate pending settlement entry for {:?}",
-                entry.book_id
-            );
-        }
+        let pending_settling_events: VecDeque<SettlingEvent> = self
+            .pending_settling_events
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
 
         State {
             mode: self.mode,
@@ -194,7 +178,7 @@ impl StateSnapshot {
             order_history,
             active_tasks: Default::default(),
             ledger_fee_cache,
-            pending_settlement,
+            pending_settling_events,
             in_flight_user_ops: Default::default(),
         }
     }

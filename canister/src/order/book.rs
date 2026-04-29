@@ -254,6 +254,32 @@ impl OrderBook {
         }
     }
 
+    /// Remove the order with the given sequence from the book.
+    ///
+    /// Looks in the resting book first (O(log(num_resting_orders))) and
+    /// then in the pending orders (O(num_pending_orders)).
+    pub fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
+        if let Some((side, price)) = self.resting_orders.remove(&seq) {
+            let remaining_quantity = match side {
+                Side::Buy => remove_from_level(self.bids.entry(Reverse(price)), seq),
+                Side::Sell => remove_from_level(self.asks.entry(price), seq),
+            }
+            .expect("BUG: resting_orders index inconsistent with bids/asks");
+            return Some(RemovedOrder {
+                side,
+                price,
+                remaining_quantity,
+            });
+        }
+        let pos = self.pending_orders.iter().position(|o| o.id() == seq)?;
+        let order = self.pending_orders.remove(pos).expect("position is valid");
+        Some(RemovedOrder {
+            side: order.side(),
+            price: order.price(),
+            remaining_quantity: *order.remaining_quantity(),
+        })
+    }
+
     pub fn pending_orders_len(&self) -> usize {
         self.pending_orders.len()
     }
@@ -343,6 +369,35 @@ fn fill_against_queue<K: Ord>(
     if resting_orders.is_empty() {
         entry.remove();
     }
+}
+
+/// An order removed from the book via [`OrderBook::remove_order`].
+///
+/// Carries enough information for the caller to refund the reserved balance:
+/// `side` determines the token (quote for Buy, base for Sell) and
+/// `price × remaining_quantity` (or just `remaining_quantity` for Sell) is
+/// the amount to unreserve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedOrder {
+    pub side: Side,
+    pub price: Price,
+    pub remaining_quantity: Quantity,
+}
+
+fn remove_from_level<K: Ord>(
+    entry: btree_map::Entry<'_, K, VecDeque<RestingOrder>>,
+    seq: OrderSeq,
+) -> Option<Quantity> {
+    let btree_map::Entry::Occupied(mut occupied) = entry else {
+        return None;
+    };
+    let queue = occupied.get_mut();
+    let pos = queue.iter().position(|o| o.id() == seq)?;
+    let removed = queue.remove(pos).expect("position is valid");
+    if queue.is_empty() {
+        occupied.remove();
+    }
+    Some(*removed.remaining_quantity())
 }
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,

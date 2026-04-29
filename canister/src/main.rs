@@ -1,9 +1,10 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
+    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LedgerTransferError,
+    LedgerTransferFromError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -23,6 +24,21 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
     });
     Ok(order_id)
+}
+
+#[ic_cdk::update]
+fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrderError> {
+    let result = dex_canister::cancel_limit_order(order_id.clone(), &dex_canister::IC_RUNTIME);
+    match &result {
+        Ok(record) => canlog::log!(
+            Priority::Info,
+            "[cancel_limit_order]: canceled order_id={order_id}: {record:?}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
 }
 
 #[ic_cdk::query]
@@ -208,6 +224,14 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::CancelLimitOrder(e) => {
+                    event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                        order_id: event::OrderId {
+                            book_id: e.order_id.book_id().get(),
+                            seq: e.order_id.seq().get(),
+                        },
+                    })
+                }
                 EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
                     book_id: e.book_id.get(),
                     orders: e.orders.into_iter().map(|s| s.get()).collect(),
@@ -318,6 +342,33 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                 .header("Content-Type", "application/json; charset=utf-8")
                 .with_body_and_content_length(log.serialize_logs(MAX_BODY_SIZE))
                 .build()
+        }
+        "/dashboard" => {
+            use askama::Template;
+            let canister_id = ic_cdk::api::canister_self();
+            let total_events = dex_canister::storage::total_event_count();
+            let dashboard = dex_canister::state::with_state(|s| {
+                dex_canister::dashboard::DashboardTemplate::from_state(s, canister_id, total_events)
+            });
+            match dashboard.render() {
+                Ok(body) => HttpResponseBuilder::ok()
+                    .header("Content-Type", "text/html; charset=utf-8")
+                    .with_body_and_content_length(body)
+                    .build(),
+                Err(e) => HttpResponseBuilder::server_error(format!("template error: {e}")).build(),
+            }
+        }
+        "/metrics" => {
+            use ic_metrics_encoder::MetricsEncoder;
+
+            let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
+            match dex_canister::metrics::encode_metrics(&mut writer) {
+                Ok(()) => HttpResponseBuilder::ok()
+                    .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                    .with_body_and_content_length(writer.into_inner())
+                    .build(),
+                Err(err) => HttpResponseBuilder::server_error(format!("{err}")).build(),
+            }
         }
         _ => HttpResponseBuilder::not_found().build(),
     }
