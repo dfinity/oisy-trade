@@ -75,16 +75,16 @@ pub enum AddLimitOrderError {
     },
 }
 
-/// Error returned when cancelling a limit order fails.
+/// Error returned when canceling a limit order fails.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum CancelLimitOrderError {
     /// No order with the given ID exists.
     OrderNotFound,
     /// The caller does not own the order.
     NotOrderOwner,
-    /// The order has already been fully filled and cannot be cancelled.
+    /// The order has already been fully filled and cannot be canceled.
     OrderAlreadyFilled,
-    /// The order has already been cancelled.
+    /// The order has already been canceled.
     OrderAlreadyCanceled,
 }
 
