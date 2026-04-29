@@ -77,12 +77,9 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
-    /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
-    /// for cancels) and drained by the paired `SettlingEvent` dispatch in
-    /// [`Self::record_settling_event`]. Normally empty between messages —
-    /// producers and their paired settling happen atomically in the same
-    /// message (see `process_pending_orders` and `cancel_limit_order`).
+    /// Stores on the heap settlements that are not yet recorded in stable memory.
+    /// Normally empty between messages — producers and their paired
+    /// settling happen atomically inside a single message processing.
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
 }
@@ -336,6 +333,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
+    /// Drive engine matching for the given book and push the paired
     /// [`event::SettlingEvent`] (if the round produced any ops) to
     /// [`State::pending_settling_events`] for the subsequent settling
     /// dispatch to drain.
