@@ -291,6 +291,6 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
             in_flight_user_ops: state.in_flight_user_ops().clone(),
             ..restored
         },
-        "Excepted for transient guard sets, restored state must be equal to original"
+        "Except for transient guard sets, restored state must be equal to original"
     );
 }
