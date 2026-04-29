@@ -898,6 +898,182 @@ mod process_pending_orders {
     }
 }
 
+mod remove_order {
+    use crate::order::{
+        OrderBookSnapshot, OrderSeq, Price, PriceLevel, Quantity, RemovedOrder, Side,
+    };
+    use crate::test_fixtures::arbitrary::{arb_non_matching_pending_order, arb_pending_order};
+    use crate::test_fixtures::{LOT_SIZE, buy, order_book, sell};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+
+    #[test]
+    fn should_return_none_when_order_is_absent() {
+        let mut book = order_book();
+        assert_eq!(book.remove_order(OrderSeq::new(42)), None);
+    }
+
+    proptest! {
+        #[test]
+        fn should_remove_any_pending_order_and_preserve_fifo(
+            pendings in vec(arb_pending_order(), 1..100),
+            cancel_index in any::<prop::sample::Index>(),
+        ) {
+            let total = pendings.len();
+            let idx = cancel_index.index(total);
+            let expected = RemovedOrder {
+                side: pendings[idx].side,
+                price: pendings[idx].price,
+                remaining_quantity: pendings[idx].quantity,
+            };
+
+            let mut book = order_book();
+            for (i, p) in pendings.into_iter().enumerate() {
+                book.add_pending_order(p.into_order(OrderSeq::new(i as u64)));
+            }
+
+            let removed = book.remove_order(OrderSeq::new(idx as u64)).unwrap();
+            prop_assert_eq!(removed, expected);
+            prop_assert_eq!(book.pending_orders_len(), total - 1);
+            prop_assert_eq!(book.resting_orders_len(), 0);
+
+            let expected_remaining: Vec<_> = (0..total)
+                .filter(|&i| i != idx)
+                .map(|i| OrderSeq::new(i as u64))
+                .collect();
+            let actual_remaining: Vec<_> = book.pending_order_seqs().collect();
+            prop_assert_eq!(actual_remaining, expected_remaining);
+        }
+
+        /// For any non-matching book of arbitrary resting orders, cancelling
+        /// any single order returns the exact resting payload, preserves the
+        /// priority-then-FIFO order on the cancelled side, and leaves the
+        /// opposite side untouched.
+        #[test]
+        fn should_remove_any_resting_order_and_preserve_fifo_on_same_side(
+            orders in vec(arb_non_matching_pending_order(), 1..100),
+            cancel_index in any::<prop::sample::Index>(),
+        ) {
+            let total = orders.len();
+            let idx = cancel_index.index(total);
+            let cancelled_side = orders[idx].side;
+            let expected = RemovedOrder {
+                side: cancelled_side,
+                price: orders[idx].price,
+                remaining_quantity: orders[idx].quantity,
+            };
+            let cancel_seq = OrderSeq::new(idx as u64);
+
+            let mut book = order_book();
+            for (i, p) in orders.into_iter().enumerate() {
+                book.match_order(p.into_order(OrderSeq::new(i as u64))).unwrap();
+            }
+            let before = OrderBookSnapshot::from(&book);
+
+            let removed = book.remove_order(cancel_seq).unwrap();
+            prop_assert_eq!(removed, expected);
+            prop_assert_eq!(book.resting_orders_len(), total - 1);
+
+            let after = OrderBookSnapshot::from(&book);
+            let (cancelled_before, cancelled_after, untouched_before, untouched_after) =
+                match cancelled_side {
+                    Side::Buy => (&before.bids, &after.bids, &before.asks, &after.asks),
+                    Side::Sell => (&before.asks, &after.asks, &before.bids, &after.bids),
+                };
+
+            prop_assert_eq!(
+                untouched_before, untouched_after,
+                "opposite side must be unchanged",
+            );
+
+            let expected_seqs: Vec<_> = resting_seqs(cancelled_before)
+                .into_iter()
+                .filter(|s| *s != cancel_seq)
+                .collect();
+            prop_assert_eq!(resting_seqs(cancelled_after), expected_seqs);
+        }
+    }
+
+    #[test]
+    fn should_delete_empty_price_level_when_last_resting_removed() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.match_order(sell(0u64, 100u64, lot)).unwrap();
+        book.match_order(sell(1u64, 110u64, 2 * lot)).unwrap();
+        book.match_order(buy(2u64, 90u64, lot)).unwrap();
+        book.match_order(buy(3u64, 80u64, 3 * lot)).unwrap();
+
+        assert_eq!(
+            book.remove_order(OrderSeq::ZERO).unwrap(),
+            RemovedOrder {
+                side: Side::Sell,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(lot),
+            }
+        );
+        assert_eq!(book.asks_len(), 1);
+        assert_eq!(book.resting_orders_len(), 3);
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(90));
+
+        assert_eq!(
+            book.remove_order(OrderSeq::new(2)).unwrap(),
+            RemovedOrder {
+                side: Side::Buy,
+                price: Price::new(90),
+                remaining_quantity: Quantity::from(lot),
+            }
+        );
+        assert_eq!(book.bids_len(), 1);
+        assert_eq!(book.resting_orders_len(), 2);
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(80));
+    }
+
+    #[test]
+    fn should_report_residual_for_partially_filled_resting_order() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        // Rest a 3-lot sell; cross with a 1-lot buy to partially fill.
+        book.match_order(sell(0u64, 100u64, 3 * lot)).unwrap();
+        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+
+        let removed = book.remove_order(OrderSeq::ZERO).unwrap();
+
+        assert_eq!(
+            removed,
+            RemovedOrder {
+                side: Side::Sell,
+                price: Price::new(100),
+                remaining_quantity: Quantity::from(2 * lot),
+            }
+        );
+        assert_eq!(book.resting_orders_len(), 0);
+        assert!(book.is_empty());
+    }
+
+    #[test]
+    fn should_return_none_for_fully_filled_order() {
+        let mut book = order_book();
+        let lot = u64::from(LOT_SIZE);
+        book.match_order(sell(0u64, 100u64, lot)).unwrap();
+        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+
+        // Both orders are fully filled; removing either must be a no-op.
+        assert_eq!(book.remove_order(OrderSeq::ZERO), None);
+        assert_eq!(book.remove_order(OrderSeq::ONE), None);
+    }
+
+    /// Flatten resting-side price levels into an in-priority seq list
+    /// (price-prioritized across levels, FIFO within each level).
+    fn resting_seqs(levels: &[PriceLevel]) -> Vec<OrderSeq> {
+        levels
+            .iter()
+            .flat_map(|level| level.orders.iter().map(|o| o.id()))
+            .collect()
+    }
+}
+
 mod history {
     use crate::order::{
         OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,

@@ -190,6 +190,176 @@ mod add_limit_order {
     }
 }
 
+mod cancel_limit_order {
+    use crate::balance::Balance;
+    use crate::order::{
+        CanceledOrderInfo, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side,
+    };
+    use crate::state::State;
+    use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
+    use crate::test_fixtures::{
+        self, LOT_SIZE, TICK_SIZE, balances_pair, ckbtc_metadata, icp_ckbtc_trading_pair,
+        icp_metadata, place_order,
+    };
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+
+    #[test]
+    fn should_refund_full_reserved_quote_for_pending_buy() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn should_refund_base_for_pending_sell() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
+    }
+
+    #[test]
+    fn should_refund_resting_buy_after_matching_runs() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn should_refund_resting_sell_after_matching_runs() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+
+        assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
+    }
+
+    #[test]
+    fn should_refund_residual_of_partially_filled_buy() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
+        place_order(&mut state, STRANGER, &pair, Side::Sell, 100, lot);
+        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, 3 * lot);
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            buy_id,
+            PairToken::Quote,
+            2 * 100 * lot,
+            2 * lot,
+        );
+    }
+
+    #[test]
+    fn should_refund_residual_of_partially_filled_sell() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        // Maker buys 1 lot; taker sells 3 lots — taker partially fills and rests with 2 lots.
+        place_order(&mut state, STRANGER, &pair, Side::Buy, 100, lot);
+        let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100, 3 * lot);
+        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            sell_id,
+            PairToken::Base,
+            2 * lot,
+            2 * lot,
+        );
+    }
+
+    /// Cancels `order_id` owned by `user` and asserts that exactly
+    /// `expected_amount` units of `refund_token` move from reserved to free;
+    /// the other token's balance is unchanged and the order status becomes
+    /// `Canceled(CanceledOrderInfo { remaining_quantity: expected_remaining })`.
+    fn assert_cancel_refunds(
+        state: &mut State<VectorMemory, VectorMemory>,
+        user: Principal,
+        order_id: OrderId,
+        refund_token: PairToken,
+        expected_amount: impl Into<Quantity>,
+        expected_remaining: impl Into<Quantity>,
+    ) {
+        let mut runtime = MockRuntime::new();
+        runtime.expect_time().return_const(0u64);
+        let expected_amount = expected_amount.into();
+        let expected_remaining = expected_remaining.into();
+        let pair = icp_ckbtc_trading_pair();
+        let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
+
+        let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
+        assert!(
+            matches!(order.status, OrderStatus::Canceled( info ) if info.remaining_quantity == expected_remaining )
+        );
+
+        let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
+        assert_eq!(
+            state.get_order_status(order_id),
+            Some(OrderStatus::Canceled(CanceledOrderInfo {
+                remaining_quantity: expected_remaining,
+            })),
+        );
+        let (refunded_before, refunded_after, untouched_before, untouched_after) =
+            match refund_token {
+                PairToken::Base => (base_before, base_after, quote_before, quote_after),
+                PairToken::Quote => (quote_before, quote_after, base_before, base_after),
+            };
+        assert_eq!(
+            refunded_after,
+            Balance::new(
+                refunded_before.free().checked_add(expected_amount).unwrap(),
+                refunded_before
+                    .reserved()
+                    .checked_sub(&expected_amount)
+                    .unwrap(),
+            ),
+            "refund on {refund_token:?} differed from expected {expected_amount:?}",
+        );
+        assert_eq!(
+            untouched_before, untouched_after,
+            "the non-refund token balance should not change",
+        );
+    }
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+        state
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
     use crate::state::AddLimitOrderError;
