@@ -316,51 +316,40 @@ pub mod arbitrary {
                 quantity: Quantity::from(qty_lots * lot),
             })
     }
+    /// Strategy for a single pending order whose price falls strictly on one
+    /// side of `mid_ticks`: buys in `[1, mid_ticks)`, sells in
+    /// `(mid_ticks, max_ticks)`, both in tick units. The buy book and sell
+    /// book never cross.
+    fn arb_pending_order_around_mid(
+        mid_ticks: u64,
+        max_ticks: u64,
+    ) -> impl Strategy<Value = PendingOrder> {
+        let tick = u64::from(TICK_SIZE);
+        let lot = u64::from(LOT_SIZE);
+        let bid = (1u64..mid_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+            side: Side::Buy,
+            price: Price::new(p * tick),
+            quantity: Quantity::from(q * lot),
+        });
+        let ask = ((mid_ticks + 1)..max_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+            side: Side::Sell,
+            price: Price::new(p * tick),
+            quantity: Quantity::from(q * lot),
+        });
+        prop_oneof![bid, ask]
+    }
+
     /// Strategy for a pending order whose price lives on one side of a fixed
     /// spread: buys land in `[1, 99] * tick_size`, sells in `[101, 199] *
     /// tick_size`. That guarantees the full buy book and the full sell book
     /// never cross, so every generated order rests on the book.
     pub fn arb_non_matching_pending_order() -> impl Strategy<Value = PendingOrder> {
-        let tick = TICK_SIZE.get();
-        let lot = u64::from(LOT_SIZE);
-        (any::<bool>(), 1..100u64, 1..100u64).prop_map(move |(is_buy, price_offset, qty_lots)| {
-            let (side, price_ticks) = if is_buy {
-                (Side::Buy, price_offset)
-            } else {
-                (Side::Sell, price_offset + 100)
-            };
-            PendingOrder {
-                side,
-                price: Price::new(price_ticks * tick),
-                quantity: Quantity::from(qty_lots * lot),
-            }
-        })
+        arb_pending_order_around_mid(100, 200)
     }
 
     pub fn arb_non_matching_orders() -> impl Strategy<Value = Vec<PendingOrder>> {
-        let tick = u64::from(TICK_SIZE);
-        let lot = u64::from(LOT_SIZE);
-        (2u64..500u64).prop_flat_map(move |mid_ticks| {
-            let bid = (1u64..mid_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
-                side: Side::Buy,
-                price: Price::new(p * tick),
-                quantity: Quantity::from(q * lot),
-            });
-            let ask =
-                ((mid_ticks + 1)..1000u64, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
-                    side: Side::Sell,
-                    price: Price::new(p * tick),
-                    quantity: Quantity::from(q * lot),
-                });
-            (
-                prop::collection::vec(bid, 0..15),
-                prop::collection::vec(ask, 0..15),
-            )
-                .prop_map(|(bids, asks)| {
-                    let mut all = bids;
-                    all.extend(asks);
-                    all
-                })
+        (2u64..500u64).prop_flat_map(|mid_ticks| {
+            prop::collection::vec(arb_pending_order_around_mid(mid_ticks, 1000), 0..30)
         })
     }
 
