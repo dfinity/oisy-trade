@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
-use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -1284,4 +1284,69 @@ mod order_book {
             quantity: Nat::from(quantity),
         }
     }
+}
+
+#[tokio::test]
+async fn should_expose_metrics() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching("cycle_balance [\\d.eE+-]+")
+        .assert_contains_metric_matching("stable_memory_bytes [\\d.eE+-]+")
+        .assert_contains_metric_matching("event_total [\\d.eE+-]+")
+        .assert_contains_metric_matching("trading_pair_count 1")
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 0"#);
+
+    let user = setup.user();
+    let required = 100_000_000u64;
+    setup
+        .deposit_flow(user, setup.quote_token_id())
+        .mint(required + 2 * QUOTE_LEDGER_FEE)
+        .approve(required + QUOTE_LEDGER_FEE)
+        .deposit(required)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+    setup
+        .deposit_flow(user, setup.base_token_id())
+        .mint(required + 2 * BASE_LEDGER_FEE)
+        .approve(required + BASE_LEDGER_FEE)
+        .deposit(1_000_000u64)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 200,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+
+    // Tick to let the matching timer fire and move the order from pending to open.
+    setup.env().tick().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 200"#)
+        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 100"#)
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
+
+    setup.drop().await;
 }

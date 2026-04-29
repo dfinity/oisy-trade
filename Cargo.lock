@@ -601,6 +601,7 @@ dependencies = [
  "ic-cdk 0.20.1",
  "ic-cdk-timers",
  "ic-http-types",
+ "ic-metrics-encoder",
  "ic-stable-structures",
  "icrc-cbor",
  "icrc-ledger-types",
@@ -638,6 +639,7 @@ dependencies = [
  "dex_types_internal",
  "ic-cdk 0.20.1",
  "ic-http-types",
+ "ic-metrics-assert",
  "icrc-ledger-types",
  "pocket-ic",
  "scopeguard",
@@ -1229,6 +1231,24 @@ dependencies = [
  "serde",
  "serde_bytes",
 ]
+
+[[package]]
+name = "ic-metrics-assert"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44a54a56b268fae5165b4ad0ca95324400b9ed20c8c42b541496bda1618736a1"
+dependencies = [
+ "async-trait",
+ "candid",
+ "ic-http-types",
+ "regex",
+]
+
+[[package]]
+name = "ic-metrics-encoder"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36e10842d8cc059a437567811d966cd8fab06e79d3382e4535db2a501cadb192"
 
 [[package]]
 name = "ic-stable-structures"

@@ -332,6 +332,18 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                 Err(e) => HttpResponseBuilder::server_error(format!("template error: {e}")).build(),
             }
         }
+        "/metrics" => {
+            use ic_metrics_encoder::MetricsEncoder;
+
+            let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
+            match dex_canister::metrics::encode_metrics(&mut writer) {
+                Ok(()) => HttpResponseBuilder::ok()
+                    .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                    .with_body_and_content_length(writer.into_inner())
+                    .build(),
+                Err(err) => HttpResponseBuilder::server_error(format!("{err}")).build(),
+            }
+        }
         _ => HttpResponseBuilder::not_found().build(),
     }
 }

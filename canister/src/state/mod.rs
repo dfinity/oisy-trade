@@ -558,6 +558,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &mut self.active_tasks
     }
 
+    pub fn trading_pair_count(&self) -> usize {
+        self.trading_pairs.len()
+    }
+
     pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {
         self.trading_pairs
             .get_book_id(trading_pair)

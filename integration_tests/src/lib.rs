@@ -15,8 +15,11 @@ use dex_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPai
 use dex_types_internal::{DexArg, InitArg, Mode, UpgradeArg, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
+pub use ic_metrics_assert::{AsyncCanisterHttpQuery, MetricsAssert};
 use icrc_ledger_types::icrc1::account::Account;
-use pocket_ic::{CanisterId, CanisterSettings, PocketIcBuilder, nonblocking::PocketIc};
+use pocket_ic::{
+    CanisterId, CanisterSettings, PocketIcBuilder, RejectResponse, nonblocking::PocketIc,
+};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 
@@ -270,6 +273,10 @@ impl Setup {
         String::from_utf8(response.body.into_vec()).expect("dashboard body should be UTF-8")
     }
 
+    pub async fn assert_metrics(&self) -> MetricsAssert<&Self> {
+        MetricsAssert::from_async_http_query(self).await
+    }
+
     pub async fn retrieve_logs(&self, priority: &Priority) -> Vec<LogEntry<Priority>> {
         let request = HttpRequest {
             method: "GET".to_string(),
@@ -401,6 +408,15 @@ pub fn ledger_wasm() -> Vec<u8> {
             e
         )
     })
+}
+
+#[async_trait]
+impl AsyncCanisterHttpQuery<RejectResponse> for &Setup {
+    async fn http_query(&self, request: Vec<u8>) -> Result<Vec<u8>, RejectResponse> {
+        self.env()
+            .query_call(self.dex_id, Principal::anonymous(), "http_request", request)
+            .await
+    }
 }
 
 #[derive(Clone)]
