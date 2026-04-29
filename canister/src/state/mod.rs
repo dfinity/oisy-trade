@@ -475,6 +475,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         Ok(())
     }
 
+    pub fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub fn tokens(&self) -> &BTreeMap<TokenId, TokenMetadata> {
+        &self.tokens
+    }
+
     pub fn trading_pairs(&self) -> &TradingPairMap {
         &self.trading_pairs
     }
@@ -533,6 +541,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Set of currently active tasks to avoid parallel execution.
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
         &mut self.active_tasks
+    }
+
+    pub fn trading_pair_count(&self) -> usize {
+        self.trading_pairs.len()
     }
 
     pub fn get_order_book(&self, trading_pair: &TradingPair) -> Option<&OrderBook> {

@@ -300,6 +300,35 @@ impl OrderBook {
     pub fn resting_orders_len(&self) -> usize {
         self.resting_orders.len()
     }
+
+    /// Iterate over bid price levels (highest price first), up to `limit` levels.
+    /// Each level aggregates the remaining quantities of all resting orders at that price.
+    pub fn bid_levels(&self, limit: usize) -> impl Iterator<Item = (Price, Quantity)> + '_ {
+        self.bids
+            .iter()
+            .take(limit)
+            .map(|(Reverse(price), queue)| (*price, sum_remaining(queue)))
+    }
+
+    /// Iterate over ask price levels (lowest price first), up to `limit` levels.
+    /// Each level aggregates the remaining quantities of all resting orders at that price.
+    pub fn ask_levels(&self, limit: usize) -> impl Iterator<Item = (Price, Quantity)> + '_ {
+        self.asks
+            .iter()
+            .take(limit)
+            .map(|(price, queue)| (*price, sum_remaining(queue)))
+    }
+}
+
+/// Sum the remaining quantities of every resting order at a price level.
+/// Saturates to [`Quantity::MAX`] on overflow so a query can never trap.
+/// Overflow is practically unreachable — it would require aggregating
+/// resting orders whose combined size exceeds 2^256 - 1.
+fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
+    queue.iter().fold(Quantity::ZERO, |acc, order| {
+        acc.checked_add(*order.remaining_quantity())
+            .unwrap_or(Quantity::MAX)
+    })
 }
 
 fn fill_against_queue<K: Ord>(

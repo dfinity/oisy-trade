@@ -12,6 +12,7 @@
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Deployment](#deployment)
+- [Usage](#usage)
 - [Development](#development)
 
 <a id="key-features"></a>
@@ -37,6 +38,24 @@ See the [design document](docs/design.md) for the full architecture.
 |---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
 | 🧪 Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
 
+<a id="usage"></a>
+## 📘 Usage
+
+Walk through the main DEX flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the DEX as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
+
+See [`examples/getting_started.md`](examples/getting_started.md).
+
+
+### 🤖Agents
+
+Talk to your agent to interact with the DEX 😎.
+
+> Buy 0.01 SOL at a limit price of 0.037 ETH per SOL
+
+![Agent placing an order](examples/agent_place_order.png?raw=true "Agent placing an order")
+
+See [`examples/agents.md`](examples/agents.md).
+
 <a id="development"></a>
 ## 🛠️ Development
 
@@ -60,8 +79,10 @@ List all available recipes with `just`.
 ### Deploy to staging
 
 Requires the [icp CLI](https://cli.internetcomputer.org/) with an identity that has deployment permissions.
-By default the `hsm` identity is used; override with `just deploy <identity>`.
+By default the `hsm` identity is used; override with `just deploy <identity>`. Pass an optional second argument to read the identity's unlock secret (HSM PIN or encrypted-PEM password) from a file and run non-interactively:
 
 ```bash
-just deploy
+just deploy                                   # default: hsm, interactive unlock
+just deploy dev                               # non-hsm identity, interactive unlock
+just deploy hsm ~/.config/icp/hsm.pin         # non-interactive with PIN file
 ```
