@@ -1198,7 +1198,6 @@ async fn should_render_dashboard_with_depth_chart() {
     let buyer = Principal::from_slice(&[0x11]);
     let seller = Principal::from_slice(&[0x12]);
 
-    // Non-crossing pair: buy at 100, sell at 110, both 1 lot — both rest.
     let lot = LOT_SIZE;
     let buy_price = 100u64;
     let sell_price = 110u64;
@@ -1240,7 +1239,6 @@ async fn should_render_dashboard_with_depth_chart() {
         .await
         .unwrap();
 
-    // Drain the eagerly-armed matching timer so both orders rest in the book.
     setup.env().tick().await;
 
     let body = setup.fetch_dashboard().await;
@@ -1249,8 +1247,6 @@ async fn should_render_dashboard_with_depth_chart() {
         body.contains("ckSOL/ckBTC"),
         "missing pair label in: {body}",
     );
-    // Each depth bar renders <td class="price">{price}</td>, so the surrounded
-    // form pinpoints the depth-chart cells without colliding with quantities.
     assert!(
         body.contains(&format!(">{buy_price}<")),
         "missing bid price {buy_price} cell in body",
@@ -1259,7 +1255,6 @@ async fn should_render_dashboard_with_depth_chart() {
         body.contains(&format!(">{sell_price}<")),
         "missing ask price {sell_price} cell in body",
     );
-    // Equal quantities on both sides → both normalize to 100% bar width.
     assert!(
         body.contains("width: 100%"),
         "expected at least one bar at 100% width in: {body}",

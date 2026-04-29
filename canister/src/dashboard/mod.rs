@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::order::{OrderBook, Price, Quantity};
 use crate::state::State;
 use askama::Template;
@@ -5,7 +8,6 @@ use candid::Principal;
 use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 
-/// Number of price levels per side rendered in the depth chart.
 const DEPTH_LEVELS: usize = 20;
 
 #[derive(Template)]
@@ -177,8 +179,6 @@ fn level((price, quantity): (Price, Quantity)) -> DashboardLevel {
     }
 }
 
-/// Project a `Quantity` onto `u128` for proportional bar-width math, saturating
-/// at `u128::MAX`. Dashboard-only; not safe for settlement.
 fn saturating_to_u128(q: &Quantity) -> u128 {
     let bytes = q.to_be_bytes();
     let high = u128::from_be_bytes(bytes[..16].try_into().unwrap());
@@ -203,30 +203,5 @@ fn format_mode(mode: &Mode) -> String {
                 .join(", ");
             format!("RestrictedTo: {list}")
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::saturating_to_u128;
-    use crate::order::Quantity;
-
-    #[test]
-    fn should_saturate_quantity_to_u128() {
-        assert_eq!(saturating_to_u128(&Quantity::ZERO), 0);
-        assert_eq!(saturating_to_u128(&Quantity::from(1u64)), 1);
-        assert_eq!(
-            saturating_to_u128(&Quantity::from(u64::MAX)),
-            u128::from(u64::MAX)
-        );
-        assert_eq!(
-            saturating_to_u128(&Quantity::from_u128(u128::MAX)),
-            u128::MAX
-        );
-        // high == 1, low == 0 -> exceeds u128, saturates.
-        let beyond_u128 = Quantity::new(1, 0);
-        assert_eq!(saturating_to_u128(&beyond_u128), u128::MAX);
-        // The MAX of Quantity (256-bit MAX) saturates.
-        assert_eq!(saturating_to_u128(&Quantity::MAX), u128::MAX);
     }
 }
