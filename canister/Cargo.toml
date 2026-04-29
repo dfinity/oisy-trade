@@ -42,6 +42,6 @@ assert_matches = { workspace = true }
 candid_parser = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
-scraper = "0.26"
+scraper = { workspace = true }
 strum = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
