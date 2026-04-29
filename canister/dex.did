@@ -52,15 +52,15 @@ type AddLimitOrderError = variant {
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
-/// Error returned when cancelling a limit order fails.
+/// Error returned when canceling a limit order fails.
 type CancelLimitOrderError = variant {
     /// No order with the given ID exists.
     OrderNotFound;
     /// The caller does not own the order.
     NotOrderOwner;
-    /// The order has already been fully filled and cannot be cancelled.
+    /// The order has already been fully filled and cannot be canceled.
     OrderAlreadyFilled;
-    /// The order has already been cancelled.
+    /// The order has already been canceled.
     OrderAlreadyCanceled;
 };
 
@@ -375,7 +375,7 @@ type WithdrawEvent = record {
     amount : nat;
 };
 
-/// Event payload for cancelling a limit order.
+/// Event payload for canceling a limit order.
 type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
 };
