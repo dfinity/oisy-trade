@@ -1174,6 +1174,96 @@ async fn should_get_dashboard() {
         body.contains("ckBTC"),
         "missing quote token symbol in: {body}",
     );
+    assert!(
+        body.contains("Trading pairs"),
+        "missing Trading pairs section in: {body}",
+    );
+    assert!(
+        body.contains("ckSOL/ckBTC"),
+        "missing pair label in: {body}",
+    );
+    assert!(
+        body.contains("Order book is empty."),
+        "missing empty-book message for empty pair in: {body}",
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_render_dashboard_with_depth_chart() {
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+
+    let setup = Setup::new().await.with_trading_pair().await;
+    let buyer = Principal::from_slice(&[0x11]);
+    let seller = Principal::from_slice(&[0x12]);
+
+    // Non-crossing pair: buy at 100, sell at 110, both 1 lot — both rest.
+    let lot = LOT_SIZE;
+    let buy_price = 100u64;
+    let sell_price = 110u64;
+    let buy_required = buy_price * lot;
+
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(buy_required + 2 * QUOTE_LEDGER_FEE)
+        .approve(buy_required + QUOTE_LEDGER_FEE)
+        .deposit(buy_required)
+        .execute()
+        .await;
+    setup
+        .deposit_flow(seller, setup.base_token_id())
+        .mint(lot + 2 * BASE_LEDGER_FEE)
+        .approve(lot + BASE_LEDGER_FEE)
+        .deposit(lot)
+        .execute()
+        .await;
+
+    setup
+        .dex_client_with_caller(buyer)
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: buy_price,
+            quantity: Nat::from(lot),
+        })
+        .await
+        .unwrap();
+    setup
+        .dex_client_with_caller(seller)
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: sell_price,
+            quantity: Nat::from(lot),
+        })
+        .await
+        .unwrap();
+
+    // Drain the eagerly-armed matching timer so both orders rest in the book.
+    setup.env().tick().await;
+
+    let body = setup.fetch_dashboard().await;
+
+    assert!(
+        body.contains("ckSOL/ckBTC"),
+        "missing pair label in: {body}",
+    );
+    // Each depth bar renders <td class="price">{price}</td>, so the surrounded
+    // form pinpoints the depth-chart cells without colliding with quantities.
+    assert!(
+        body.contains(&format!(">{buy_price}<")),
+        "missing bid price {buy_price} cell in body",
+    );
+    assert!(
+        body.contains(&format!(">{sell_price}<")),
+        "missing ask price {sell_price} cell in body",
+    );
+    // Equal quantities on both sides → both normalize to 100% bar width.
+    assert!(
+        body.contains("width: 100%"),
+        "expected at least one bar at 100% width in: {body}",
+    );
 
     setup.drop().await;
 }
