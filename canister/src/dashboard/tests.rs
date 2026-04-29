@@ -1,4 +1,4 @@
-use super::{DashboardTemplate, saturating_to_u128};
+use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
 use crate::order::{OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
@@ -143,6 +143,20 @@ fn should_normalize_depth_bar_widths_against_max_quantity() {
         vec!["width: 25%", "width: 50%", "width: 100%"],
         "bid 1 lot → 25%, bid 2 lots → 50%, ask 4 lots → 100%"
     );
+}
+
+#[test]
+fn should_compute_bar_width_percent_without_overflow() {
+    assert_eq!(bar_width_percent(0, 0), 0);
+    assert_eq!(bar_width_percent(50, 0), 0);
+    assert_eq!(bar_width_percent(0, 100), 0);
+    assert_eq!(bar_width_percent(50, 100), 50);
+    assert_eq!(bar_width_percent(100, 100), 100);
+    assert_eq!(bar_width_percent(150, 100), 100);
+
+    assert_eq!(bar_width_percent(u128::MAX, u128::MAX), 100);
+    let half = bar_width_percent(u128::MAX / 2, u128::MAX);
+    assert!((49..=50).contains(&half), "expected ~50%, got {half}");
 }
 
 #[test]

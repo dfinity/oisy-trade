@@ -115,9 +115,11 @@ fn build_pair(
     quote_symbol: String,
     book: &OrderBook,
 ) -> DashboardPair {
-    let best_bid = book.bid_levels(1).next().map(level);
-    let best_ask = book.ask_levels(1).next().map(level);
-    let spread = match (book.bid_levels(1).next(), book.ask_levels(1).next()) {
+    let best_bid_level = book.bid_levels(1).next();
+    let best_ask_level = book.ask_levels(1).next();
+    let best_bid = best_bid_level.map(level);
+    let best_ask = best_ask_level.map(level);
+    let spread = match (best_bid_level, best_ask_level) {
         (Some((bid, _)), Some((ask, _))) => ask.checked_sub(bid).map(Price::get),
         _ => None,
     };
@@ -156,20 +158,23 @@ fn build_depth(book: &OrderBook) -> DashboardDepth {
 fn depth_levels(levels: &[(Price, Quantity)], max: u128) -> Vec<DashboardDepthLevel> {
     levels
         .iter()
-        .map(|(price, qty)| {
-            let qty_u128 = saturating_to_u128(qty);
-            let bar_width_percent = if max == 0 {
-                0
-            } else {
-                (qty_u128.saturating_mul(100) / max).min(100) as u8
-            };
-            DashboardDepthLevel {
-                price: price.get(),
-                quantity: qty.to_nat().to_string(),
-                bar_width_percent,
-            }
+        .map(|(price, qty)| DashboardDepthLevel {
+            price: price.get(),
+            quantity: qty.to_nat().to_string(),
+            bar_width_percent: bar_width_percent(saturating_to_u128(qty), max),
         })
         .collect()
+}
+
+fn bar_width_percent(qty: u128, max: u128) -> u8 {
+    if max == 0 {
+        return 0;
+    }
+    let percent = match qty.checked_mul(100) {
+        Some(scaled) => scaled / max,
+        None => qty / (max / 100),
+    };
+    percent.min(100) as u8
 }
 
 fn level((price, quantity): (Price, Quantity)) -> DashboardLevel {

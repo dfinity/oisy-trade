@@ -639,7 +639,6 @@ async fn should_fail_add_trading_pair() {
 
 #[tokio::test]
 async fn should_replay_events_on_upgrade() {
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types_internal::event::EventType;
 
     /// Asserts that the values produced by each `$observe` expression are unchanged after
