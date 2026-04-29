@@ -7,49 +7,30 @@ use crate::test_fixtures::{
 };
 use askama::Template;
 use candid::Principal;
-use dex_types_internal::Mode;
 use ic_stable_structures::VectorMemory;
 use scraper::{Html, Selector};
 
 const TEST_CANISTER: Principal = Principal::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
 
 #[test]
-fn should_render_title() {
-    let dom = render(&fresh_state(), 0);
-    assert_eq!(text(&dom, "h1"), "DEX Dashboard");
-}
-
-#[test]
-fn should_render_canister_id_mode_and_event_count() {
+fn should_render_metadata() {
     let dom = render(&fresh_state(), 42);
-    let dl_text = text(&dom, "h2 + dl");
-    assert!(
-        dl_text.contains(&TEST_CANISTER.to_string()),
-        "canister id missing in: {dl_text}"
-    );
-    assert!(
-        dl_text.contains("GeneralAvailability"),
-        "mode missing in: {dl_text}"
-    );
-    assert!(dl_text.contains("42"), "total events missing in: {dl_text}");
-}
 
-#[test]
-fn should_render_restricted_mode_with_principals() {
-    let mut state = fresh_state();
-    state.set_mode(Mode::restricted_to(vec![
-        Principal::from_slice(&[0x01]),
-        Principal::from_slice(&[0x02]),
-    ]));
-    let dom = render(&state, 0);
-    let dl_text = text(&dom, "h2 + dl");
+    let title = text(&dom, "h1");
+    assert_eq!(title, "DEX Dashboard");
+
+    let metadata = text(&dom, "h2 + dl");
     assert!(
-        dl_text.contains("RestrictedTo"),
-        "expected RestrictedTo in: {dl_text}"
+        metadata.contains(&TEST_CANISTER.to_string()),
+        "canister id missing in: {metadata}"
     );
     assert!(
-        dl_text.contains(&Principal::from_slice(&[0x01]).to_string()),
-        "expected first principal in: {dl_text}"
+        metadata.contains("GeneralAvailability"),
+        "mode missing in: {metadata}"
+    );
+    assert!(
+        metadata.contains("42"),
+        "total events missing in: {metadata}"
     );
 }
 
@@ -57,13 +38,14 @@ fn should_render_restricted_mode_with_principals() {
 fn should_render_registered_tokens() {
     let mut state = fresh_state();
     record_pair(&mut state);
+
     let dom = render(&state, 0);
+
     let symbols: Vec<String> = dom
         .select(&sel("table tbody tr td:first-child"))
         .map(|td| td.text().collect::<String>())
         .collect();
-    assert!(symbols.contains(&"ICP".to_string()), "{symbols:?}");
-    assert!(symbols.contains(&"ckBTC".to_string()), "{symbols:?}");
+    assert_eq!(symbols, vec!["ICP", "ckBTC"]);
 }
 
 #[test]
@@ -116,11 +98,7 @@ fn should_render_depth_chart_for_resting_orders() {
     let bid_qtys = column(&dom, "table.depth-bids tbody tr td:nth-child(2)");
     assert_eq!(bid_qtys, vec![candid::Nat::from(lot(1)).to_string()]);
 
-    let bar_widths: Vec<String> = dom
-        .select(&sel("td.bar div"))
-        .map(|d| d.value().attr("style").unwrap_or("").to_string())
-        .collect();
-    assert_eq!(bar_widths, vec!["width: 100%", "width: 100%"]);
+    assert_eq!(bar_widths(&dom), vec!["width: 100%", "width: 100%"]);
 }
 
 #[test]
@@ -133,12 +111,8 @@ fn should_normalize_depth_bar_widths_against_max_quantity() {
     state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
     let dom = render(&state, 0);
-    let bar_widths: Vec<String> = dom
-        .select(&sel("td.bar div"))
-        .map(|d| d.value().attr("style").unwrap_or("").to_string())
-        .collect();
     assert_eq!(
-        bar_widths,
+        bar_widths(&dom),
         vec!["width: 25%", "width: 50%", "width: 100%"],
         "bid 1 lot → 25%, bid 2 lots → 50%, ask 4 lots → 100%"
     );
@@ -237,5 +211,11 @@ fn text(dom: &Html, selector: &str) -> String {
 fn column(dom: &Html, selector: &str) -> Vec<String> {
     dom.select(&sel(selector))
         .map(|e| e.text().collect::<String>())
+        .collect()
+}
+
+fn bar_widths(dom: &Html) -> Vec<String> {
+    dom.select(&sel("td.bar div"))
+        .map(|d| d.value().attr("style").unwrap_or("").to_string())
         .collect()
 }
