@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
-use dex_int_tests::icrc_ledger::BASE_LEDGER_FEE;
+use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -1287,6 +1287,202 @@ async fn should_get_logs() {
 
     assert_eq!(logs.len(), 1);
     assert!(logs[0].message.contains("[init]"));
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_get_dashboard() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    let body = setup.fetch_dashboard().await;
+
+    assert!(body.contains("DEX Dashboard"), "missing title in: {body}");
+    assert!(
+        body.contains(&setup.dex_id().to_string()),
+        "missing canister id in: {body}",
+    );
+    assert!(
+        body.contains("ckSOL"),
+        "missing base token symbol in: {body}"
+    );
+    assert!(
+        body.contains("ckBTC"),
+        "missing quote token symbol in: {body}",
+    );
+
+    setup.drop().await;
+}
+
+mod order_book {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
+        Side,
+    };
+
+    #[tokio::test]
+    async fn should_expose_top_of_book_and_aggregated_depth() {
+        let setup = Setup::new().await.with_trading_pair().await;
+
+        // Two buyers at price 100, one buyer at price 90; two sellers at 110, one at 120.
+        // The best-bid level aggregates across the two buyers at 100.
+        let u1 = Principal::from_slice(&[0x01]);
+        let u2 = Principal::from_slice(&[0x02]);
+        let u3 = Principal::from_slice(&[0x03]);
+        let u4 = Principal::from_slice(&[0x04]);
+        let u5 = Principal::from_slice(&[0x05]);
+        let u6 = Principal::from_slice(&[0x06]);
+
+        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
+        fund_and_place_buy(&setup, u2, 100, 3_000_000).await;
+        fund_and_place_buy(&setup, u3, 90, 2_000_000).await;
+        fund_and_place_sell(&setup, u4, 110, 2_000_000).await;
+        fund_and_place_sell(&setup, u5, 110, 5_000_000).await;
+        fund_and_place_sell(&setup, u6, 120, 4_000_000).await;
+
+        // Let all matching timers drain.
+        setup.env().tick().await;
+
+        let pair = setup.trading_pair();
+        let client = setup.dex_client();
+
+        assert_eq!(
+            client.get_order_book_ticker(pair).await,
+            Ok(OrderBookTicker {
+                bid: Some(level(100, 4_000_000)),
+                ask: Some(level(110, 7_000_000)),
+            })
+        );
+        assert_eq!(
+            client
+                .get_order_book_depth(GetOrderBookDepthRequest {
+                    trading_pair: pair,
+                    limit: None,
+                })
+                .await,
+            Ok(OrderBookDepth {
+                bids: vec![level(100, 4_000_000), level(90, 2_000_000)],
+                asks: vec![level(110, 7_000_000), level(120, 4_000_000)],
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = price * quantity;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn fund_and_place_sell(setup: &Setup, user: Principal, price: u64, quantity: u64) {
+        let required = quantity;
+        setup
+            .deposit_flow(user, setup.base_token_id())
+            .mint(required + 2 * BASE_LEDGER_FEE)
+            .approve(required + BASE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        setup
+            .dex_client_with_caller(user)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+    }
+
+    fn level(price: u64, quantity: u64) -> PriceLevel {
+        PriceLevel {
+            price,
+            quantity: Nat::from(quantity),
+        }
+    }
+}
+
+#[tokio::test]
+async fn should_expose_metrics() {
+    let setup = Setup::new().await.with_trading_pair().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching("cycle_balance [\\d.eE+-]+")
+        .assert_contains_metric_matching("stable_memory_bytes [\\d.eE+-]+")
+        .assert_contains_metric_matching("event_total [\\d.eE+-]+")
+        .assert_contains_metric_matching("trading_pair_count 1")
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 0"#);
+
+    let user = setup.user();
+    let required = 100_000_000u64;
+    setup
+        .deposit_flow(user, setup.quote_token_id())
+        .mint(required + 2 * QUOTE_LEDGER_FEE)
+        .approve(required + QUOTE_LEDGER_FEE)
+        .deposit(required)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: 100,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+    setup
+        .deposit_flow(user, setup.base_token_id())
+        .mint(required + 2 * BASE_LEDGER_FEE)
+        .approve(required + BASE_LEDGER_FEE)
+        .deposit(1_000_000u64)
+        .execute()
+        .await;
+    setup
+        .dex_client()
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: 200,
+            quantity: 1_000_000u64.into(),
+        })
+        .await
+        .unwrap();
+
+    // Tick to let the matching timer fire and move the order from pending to open.
+    setup.env().tick().await;
+
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 200"#)
+        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 100"#)
+        .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
+        .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
 
     setup.drop().await;
 }
