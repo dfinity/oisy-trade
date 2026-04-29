@@ -61,7 +61,7 @@ impl DashboardDepth {
 pub struct DashboardDepthLevel {
     pub price: u64,
     pub quantity: String,
-    pub bar_width_pct: u8,
+    pub bar_width_percent: u8,
 }
 
 impl DashboardTemplate {
@@ -158,7 +158,7 @@ fn depth_levels(levels: &[(Price, Quantity)], max: u128) -> Vec<DashboardDepthLe
         .iter()
         .map(|(price, qty)| {
             let qty_u128 = saturating_to_u128(qty);
-            let bar_width_pct = if max == 0 {
+            let bar_width_percent = if max == 0 {
                 0
             } else {
                 (qty_u128.saturating_mul(100) / max).min(100) as u8
@@ -166,7 +166,7 @@ fn depth_levels(levels: &[(Price, Quantity)], max: u128) -> Vec<DashboardDepthLe
             DashboardDepthLevel {
                 price: price.get(),
                 quantity: qty.to_nat().to_string(),
-                bar_width_pct,
+                bar_width_percent,
             }
         })
         .collect()
@@ -205,4 +205,3 @@ fn format_mode(mode: &Mode) -> String {
         }
     }
 }
-
