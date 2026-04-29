@@ -204,6 +204,9 @@ type DepositError = variant {
     AmountExceedsMaximum;
     // The token is not part of any trading pair on the DEX.
     UnsupportedToken : record { token_id : TokenId };
+    // Another deposit or withdrawal is already in flight for this
+    // (caller, token). Retry once the previous operation completes.
+    OperationInProgress;
     // The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
     // The icrc2_transfer_from call to the token ledger returned an error.
@@ -265,6 +268,9 @@ type WithdrawError = variant {
     // The requested amount is below the ledger's transfer fee.
     // `min_amount` is the ledger's `icrc1_fee`.
     AmountTooSmall : record { min_amount : nat };
+    // Another deposit or withdrawal is already in flight for this
+    // (caller, token). Retry once the previous operation completes.
+    OperationInProgress;
     // The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
     // The icrc1_transfer call to the token ledger returned an error.

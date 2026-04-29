@@ -351,18 +351,18 @@ benches:
   bench_upgrade_1000_no_fills:
     total:
       calls: 1
-      instructions: 3447367
+      instructions: 3447449
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 2181269
+        instructions: 2181302
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
         calls: 1
-        instructions: 1153433
+        instructions: 1153452
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::load_snapshot:
@@ -377,7 +377,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 1153342
+        instructions: 1153356
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:
@@ -393,18 +393,18 @@ benches:
   bench_upgrade_full_depth:
     total:
       calls: 1
-      instructions: 49795909
+      instructions: 49795991
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 29168195
+        instructions: 29168228
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
         calls: 1
-        instructions: 15923956
+        instructions: 15923975
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::load_snapshot:
@@ -419,7 +419,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 17215295
+        instructions: 17215309
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:

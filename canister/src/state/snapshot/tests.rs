@@ -1,6 +1,6 @@
 use super::StateSnapshot;
 use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
-use crate::state::StableMemoryOptions;
+use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, state as fresh_state,
@@ -254,4 +254,43 @@ fn should_roundtrip_state_through_snapshot() {
     let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
 
     assert_eq!(state, restored);
+}
+
+/// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are
+/// intentionally excluded from the snapshot and reset to empty on restore.
+#[test]
+fn should_drop_transient_guard_sets_on_roundtrip() {
+    let mut state = fresh_state();
+    let user = Principal::from_slice(&[0x01]);
+    let token = crate::order::TokenId::new(Principal::from_slice(&[0xAA]));
+
+    state
+        .active_tasks_mut()
+        .insert(crate::Task::ProcessPendingOrders);
+    state.in_flight_user_ops_mut().insert((user, token));
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+
+    assert!(
+        restored.active_tasks().is_empty(),
+        "active_tasks must be empty after restore"
+    );
+    assert!(
+        restored.in_flight_user_ops().is_empty(),
+        "in_flight_user_ops must be empty after restore"
+    );
+
+    assert_eq!(
+        state,
+        State {
+            active_tasks: state.active_tasks().clone(),
+            in_flight_user_ops: state.in_flight_user_ops().clone(),
+            ..restored
+        },
+        "Except for transient guard sets, restored state must be equal to original"
+    );
 }

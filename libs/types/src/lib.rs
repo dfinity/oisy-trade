@@ -263,6 +263,9 @@ pub enum DepositError {
         /// The unsupported token.
         token_id: TokenId,
     },
+    /// Another deposit or withdrawal is already in flight for this
+    /// `(caller, token)`. Retry once the previous operation completes.
+    OperationInProgress,
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.
@@ -362,6 +365,9 @@ pub enum WithdrawError {
         /// The minimum withdrawal amount (ledger fee + 1).
         min_amount: Nat,
     },
+    /// Another deposit or withdrawal is already in flight for this
+    /// `(caller, token)`. Retry once the previous operation completes.
+    OperationInProgress,
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.

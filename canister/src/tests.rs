@@ -522,13 +522,121 @@ mod get_order_status {
     }
 }
 
+mod deposit {
+    use crate::deposit;
+    use crate::guard::UserOpGuard;
+    use crate::order::{Quantity, TokenId};
+    use crate::state;
+    use crate::test_fixtures::mocks::CapturingRuntime;
+    use crate::test_fixtures::{
+        ckbtc_token_id, icp_token_id, init_state_with_order_book, transfer_from_response,
+    };
+    use candid::{Nat, Principal};
+    use dex_types::{DepositError, DepositRequest, LedgerTransferFromError};
+    use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
+
+    const USER: Principal = Principal::from_slice(&[0x42]);
+    const OTHER_USER: Principal = Principal::from_slice(&[0x43]);
+
+    #[tokio::test]
+    async fn should_return_operation_in_progress_when_deposit_already_in_flight() {
+        init_state_with_order_book();
+        let _held = UserOpGuard::new(USER, icp_token_id()).expect("test setup: acquire guard");
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(result, Err(DepositError::OperationInProgress));
+        assert!(runtime.captured_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn should_not_block_deposit_for_distinct_token() {
+        init_state_with_order_book();
+        let _held = UserOpGuard::new(USER, ckbtc_token_id()).expect("test setup: acquire guard");
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+    }
+
+    #[tokio::test]
+    async fn should_not_block_deposit_for_distinct_caller() {
+        init_state_with_order_book();
+        let _held =
+            UserOpGuard::new(OTHER_USER, icp_token_id()).expect("test setup: acquire guard");
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_deposit_success() {
+        init_state_with_order_book();
+        let runtime =
+            CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_in_flight_empty();
+        state::with_state(|s| {
+            let balance = s.get_balance(&USER, &icp_token_id());
+            assert_eq!(balance.free(), &Quantity::from(1_000_000u64));
+        });
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_deposit_failure() {
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(
+            USER,
+            vec![Ok(transfer_from_response(Err(
+                TransferFromError::TemporarilyUnavailable,
+            )))],
+        );
+
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(
+            result,
+            Err(DepositError::LedgerError(
+                LedgerTransferFromError::TemporarilyUnavailable
+            ))
+        );
+        assert_in_flight_empty();
+    }
+
+    fn deposit_request(token: TokenId) -> DepositRequest {
+        DepositRequest {
+            token_id: token.into(),
+            amount: Nat::from(1_000_000u64),
+        }
+    }
+
+    fn assert_in_flight_empty() {
+        state::with_state(|s| {
+            assert!(
+                s.in_flight_user_ops().is_empty(),
+                "in_flight_user_ops should be empty after the call returns"
+            );
+        });
+    }
+}
+
 mod withdraw {
     use crate::order::{Quantity, TokenId};
     use crate::state::event::{Event, EventType, WithdrawEvent};
     use crate::storage;
     use crate::test_fixtures::mocks::{CapturingRuntime, MockRuntime};
+    use crate::test_fixtures::transfer_response;
     use crate::{state, withdraw};
-    use candid::{Nat, Principal, encode_args};
+    use candid::{Nat, Principal};
     use dex_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
     use ic_cdk::call::Response;
     use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
@@ -562,27 +670,10 @@ mod withdraw {
         });
     }
 
-    /// Construct a [`Response`] from Candid-encoded bytes.
-    ///
-    /// `Response` has a private field, but is a newtype over `Vec<u8>` with
-    /// identical layout. This is test-only code; the transmute is sound because
-    /// the struct contains a single `Vec<u8>` field.
-    fn mock_response(bytes: Vec<u8>) -> Response {
-        assert_eq!(
-            std::mem::size_of::<Response>(),
-            std::mem::size_of::<Vec<u8>>(),
-            "Response layout changed — update this helper"
-        );
-        unsafe { std::mem::transmute::<Vec<u8>, Response>(bytes) }
-    }
-
-    fn transfer_response(result: Result<Nat, TransferError>) -> Response {
-        mock_response(encode_args((result,)).unwrap())
-    }
-
     fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
         let mut runtime = MockRuntime::new();
         runtime.expect_msg_caller().return_const(USER);
+        runtime.expect_time().return_const(0u64);
 
         let mut seq = Sequence::new();
         for response in responses {
@@ -969,6 +1060,115 @@ mod withdraw {
             })
         );
         assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    fn assert_in_flight_empty() {
+        state::with_state(|s| {
+            assert!(
+                s.in_flight_user_ops().is_empty(),
+                "in_flight_user_ops should be empty after the call returns"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn should_return_operation_in_progress_when_withdraw_already_in_flight() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+        let _held = crate::guard::UserOpGuard::new(USER, TokenId::from(token_id()))
+            .expect("test setup: acquire guard");
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        // No ledger expectation: the guard short-circuits before any ledger call.
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        // Balance untouched, no event recorded.
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_block_withdraw_when_concurrent_deposit_in_flight() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+        let _held = crate::guard::UserOpGuard::new(USER, TokenId::from(token_id()))
+            .expect("test setup: acquire guard simulating in-flight deposit");
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        assert_balance(deposit);
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_withdraw_success() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let runtime = mock_runtime_returning(vec![transfer_response(Ok(Nat::from(42u64)))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_in_flight_empty();
+    }
+
+    #[tokio::test]
+    async fn should_release_guard_after_withdraw_failure_with_rollback() {
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let runtime = mock_runtime_returning(vec![transfer_response(Err(
+            TransferError::TemporarilyUnavailable,
+        ))]);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(deposit),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err(WithdrawError::LedgerError(
+                LedgerTransferError::TemporarilyUnavailable
+            ))
+        );
+        // Rollback fully restored the free balance, the guard was released,
+        // and no event was emitted for the failed withdrawal.
+        assert_balance(deposit);
+        assert_in_flight_empty();
         assert_no_withdraw_event();
     }
 }

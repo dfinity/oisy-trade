@@ -85,6 +85,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             }
             DepositError::AmountExceedsMaximum
             | DepositError::UnsupportedToken { .. }
+            | DepositError::OperationInProgress
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
                 ..
@@ -120,7 +121,8 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             WithdrawError::AmountExceedsMaximum
             | WithdrawError::UnsupportedToken { .. }
             | WithdrawError::InsufficientBalance { .. }
-            | WithdrawError::AmountTooSmall { .. } => {
+            | WithdrawError::AmountTooSmall { .. }
+            | WithdrawError::OperationInProgress => {
                 // do not log errors due to user actions
             }
         },

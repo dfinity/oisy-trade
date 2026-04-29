@@ -85,6 +85,10 @@ pub struct State<MH: Memory, MB: Memory> {
     /// message (see `process_pending_orders` and `cancel_limit_order`).
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
+    /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
+    /// operations. Entries live only for the duration of a single async
+    /// request and are reset on upgrade.
+    in_flight_user_ops: BTreeSet<(Principal, TokenId)>,
 }
 
 impl<MH: Memory, MB: Memory> State<MH, MB> {
@@ -104,6 +108,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
+            in_flight_user_ops: BTreeSet::default(),
         })
     }
 
@@ -544,6 +549,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &mut self.active_tasks
     }
 
+    pub fn active_tasks(&self) -> &BTreeSet<Task> {
+        &self.active_tasks
+    }
+
+    pub fn in_flight_user_ops_mut(&mut self) -> &mut BTreeSet<(Principal, TokenId)> {
+        &mut self.in_flight_user_ops
+    }
+
+    pub fn in_flight_user_ops(&self) -> &BTreeSet<(Principal, TokenId)> {
+        &self.in_flight_user_ops
+    }
+
     pub fn trading_pair_count(&self) -> usize {
         self.trading_pairs.len()
     }
@@ -664,6 +681,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             ledger_fee_cache,
             order_history,
             pending_settling_events,
+            in_flight_user_ops,
         } = self;
         Self {
             mode: mode.clone(),
@@ -676,6 +694,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
+            in_flight_user_ops: in_flight_user_ops.clone(),
         }
     }
 }
@@ -694,6 +713,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             ledger_fee_cache,
             order_history,
             pending_settling_events,
+            in_flight_user_ops,
         } = self;
         let Self {
             mode: other_mode,
@@ -706,6 +726,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
             pending_settling_events: other_pending_settling_events,
+            in_flight_user_ops: other_in_flight_user_ops,
         } = other;
         mode == other_mode
             && next_book_id == other_next_book_id
@@ -717,6 +738,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
             && pending_settling_events == other_pending_settling_events
+            && in_flight_user_ops == other_in_flight_user_ops
     }
 }
 
