@@ -77,9 +77,12 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
-    /// Stores on the heap settlements that are not yet recorded in stable memory.
-    /// Normally empty between messages — producers and their paired
-    /// settling happen atomically inside a single message processing.
+    /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
+    /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
+    /// for cancels) and drained by the paired `SettlingEvent` dispatch in
+    /// [`Self::record_settling_event`]. Normally empty between messages —
+    /// producers and their paired settling happen atomically in the same
+    /// message (see `process_pending_orders` and `cancel_limit_order`).
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
 }
@@ -738,6 +741,21 @@ pub enum CancelLimitOrderError {
     NotOrderOwner,
     OrderAlreadyFilled,
     OrderAlreadyCanceled,
+}
+
+impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+    fn from(err: CancelLimitOrderError) -> Self {
+        match err {
+            CancelLimitOrderError::OrderNotFound => dex_types::CancelLimitOrderError::OrderNotFound,
+            CancelLimitOrderError::NotOrderOwner => dex_types::CancelLimitOrderError::NotOrderOwner,
+            CancelLimitOrderError::OrderAlreadyFilled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+            }
+            CancelLimitOrderError::OrderAlreadyCanceled => {
+                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+            }
+        }
+    }
 }
 
 impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {

@@ -85,12 +85,15 @@ impl From<OrderStatus> for dex_types::OrderStatus {
             OrderStatus::Pending => dex_types::OrderStatus::Pending,
             OrderStatus::Open => dex_types::OrderStatus::Open,
             OrderStatus::Filled => dex_types::OrderStatus::Filled,
-            // The internal `CanceledOrderInfo` payload (remaining_quantity)
-            // is intentionally dropped here: the public `OrderStatus` type
-            // is still a unit `Canceled` variant, and cancel isn't yet
-            // exposed through any endpoint. The follow-up PR enriches
-            // the candid type and plumbs the payload through.
-            OrderStatus::Canceled(_) => dex_types::OrderStatus::Canceled,
+            OrderStatus::Canceled(info) => dex_types::OrderStatus::Canceled(info.into()),
+        }
+    }
+}
+
+impl From<CanceledOrderInfo> for dex_types::CanceledOrderInfo {
+    fn from(info: CanceledOrderInfo) -> Self {
+        dex_types::CanceledOrderInfo {
+            remaining_quantity: info.remaining_quantity.into(),
         }
     }
 }

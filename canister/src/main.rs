@@ -1,9 +1,10 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, DepositError,
-    DepositRequest, DepositResponse, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderStatus, TokenId, TradingPair, TradingPairInfo,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
+    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LedgerTransferError,
+    LedgerTransferFromError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -23,6 +24,21 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
     });
     Ok(order_id)
+}
+
+#[ic_cdk::update]
+fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrderError> {
+    let result = dex_canister::cancel_limit_order(order_id.clone(), &dex_canister::IC_RUNTIME);
+    match &result {
+        Ok(record) => canlog::log!(
+            Priority::Info,
+            "[cancel_limit_order]: canceled order_id={order_id}: {record:?}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
 }
 
 #[ic_cdk::query]
@@ -206,6 +222,14 @@ fn get_events(
                         quantity: e.quantity.into(),
                     })
                 }
+                EventType::CancelLimitOrder(e) => {
+                    event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                        order_id: event::OrderId {
+                            book_id: e.order_id.book_id().get(),
+                            seq: e.order_id.seq().get(),
+                        },
+                    })
+                }
                 EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
                     book_id: e.book_id.get(),
                     orders: e.orders.into_iter().map(|s| s.get()).collect(),
@@ -226,12 +250,6 @@ fn get_events(
                         })
                         .collect(),
                 }),
-                // No public-event-log representation yet. The cancel
-                // endpoint isn't exposed in this PR, so no canceled orders
-                // can have been recorded on the live canister.
-                EventType::CancelLimitOrder(_) => {
-                    panic!("BUG: CancelLimitOrder event before the cancel endpoint is wired")
-                }
             },
         }
     }

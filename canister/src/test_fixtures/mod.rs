@@ -316,6 +316,7 @@ pub mod arbitrary {
                 quantity: Quantity::from(qty_lots * lot),
             })
     }
+
     /// Strategy for a single pending order whose price falls strictly on one
     /// side of `mid_ticks`: buys in `[1, mid_ticks)`, sells in
     /// `(mid_ticks, max_ticks)`, both in tick units. The buy book and sell
