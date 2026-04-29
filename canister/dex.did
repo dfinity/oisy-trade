@@ -1,100 +1,159 @@
-/// Unique identifier for an order, assigned by the canister upon submission.
-/// Opaque identifier, not meant to be interpreted by clients.
-/// Encoded as a 32-character hex string.
+// Unique identifier for an order, assigned by the canister upon submission.
+// Opaque identifier, not meant to be interpreted by clients.
+// Encoded as a 32-character hex string.
 type OrderId = text;
 
-/// Side of an order.
+// Side of an order.
 type Side = variant {
-    /// Buy order (bid).
+    // Buy order (bid). On submission reserves `price × quantity` of the
+    // *quote* token from the caller's on-DEX free balance.
     Buy;
-    /// Sell order (ask).
+    // Sell order (ask). On submission reserves `quantity` of the *base*
+    // token from the caller's on-DEX free balance.
     Sell;
 };
 
-/// A trading pair identified by the base and quote token ledger principals.
+// A trading pair identified by the base and quote token ledger principals.
 type TradingPair = record {
-    /// The base token ledger canister principal.
+    // The base token ledger canister principal.
     base : principal;
-    /// The quote token ledger canister principal.
+    // The quote token ledger canister principal.
     quote : principal;
 };
 
-/// Request to place a new limit order.
+// Request to place a new limit order.
 type LimitOrderRequest = record {
-    /// The trading pair to place the order on.
+    // The trading pair to place the order on.
     pair : TradingPair;
-    /// Whether this is a buy or sell order.
+    // Whether this is a buy or sell order.
     side : Side;
-    /// Limit price in quote token units per base token unit.
+    // Limit price in quote token units per base token unit.
+    // Must be a positive multiple of the pair's `tick_size`.
     price : nat64;
-    /// Order quantity in base token units.
+    // Order quantity in base token units.
+    // Must be a positive multiple of the pair's `lot_size`.
     quantity : nat;
 };
 
 
-/// Error returned when placing a limit order fails.
+// Error returned when placing a limit order fails.
 type AddLimitOrderError = variant {
-    /// The amount exceeds the maximum supported value.
+    // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    /// The requested trading pair is not registered.
+    // The requested trading pair is not registered.
     UnknownTradingPair;
-    /// The price is not a positive multiple of the tick size.
+    // The price is not a positive multiple of the tick size.
     InvalidPrice : record { price : nat64; tick_size : nat64 };
-    /// The quantity is not a positive multiple of the lot size.
+    // The quantity is not a positive multiple of the lot size.
     InvalidQuantity : record { quantity : nat; lot_size : nat64 };
-    /// The user does not have enough balance to place the order.
+    // The caller's on-DEX free balance in `token` is below `required`.
+    // For a `Sell`, `token` is the base and `required` is `quantity`.
+    // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
 };
 
-/// Information about a listed trading pair.
+// Information about a listed trading pair.
 type TradingPairInfo = record {
-    /// The base token.
+    // The base token.
     base : Token;
-    /// The quote token.
+    // The quote token.
     quote : Token;
-    /// Minimum price increment. All order prices must be a positive multiple of this value.
+    // Minimum price increment. All order prices must be a positive multiple of this value.
     tick_size : nat64;
-    /// Minimum order quantity. All order quantities must be a positive multiple of this value.
+    // Minimum order quantity. All order quantities must be a positive multiple of this value.
     lot_size : nat64;
 };
 
-/// Status of an order.
+// A single price level in an order book, aggregated across all resting orders at that price.
+type PriceLevel = record {
+    // Price in quote token units per base token unit.
+    price : nat64;
+    // Total quantity in base token units across all resting orders at this price.
+    quantity : nat;
+};
+
+// Top-of-book view of an order book for a trading pair.
+type OrderBookTicker = record {
+    // Best bid (highest-priced buy level), or `null` if the bid side is empty.
+    bid : opt PriceLevel;
+    // Best ask (lowest-priced sell level), or `null` if the ask side is empty.
+    ask : opt PriceLevel;
+};
+
+// Price-aggregated depth view of an order book for a trading pair.
+type OrderBookDepth = record {
+    // Bid levels sorted by price descending (best bid first).
+    bids : vec PriceLevel;
+    // Ask levels sorted by price ascending (best ask first).
+    asks : vec PriceLevel;
+};
+
+// Error returned by the `get_order_book_ticker` query.
+type GetOrderBookTickerError = variant {
+    // The requested trading pair is not registered on the DEX.
+    UnknownTradingPair;
+};
+
+type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBookTickerError };
+
+// Request for the `get_order_book_depth` query.
+type GetOrderBookDepthRequest = record {
+    // The trading pair whose depth should be returned.
+    trading_pair : TradingPair;
+    // Maximum number of price levels returned per side. When absent, the DEX
+    // returns 100 levels per side. The maximum accepted value is 1000; above
+    // that the query returns `LimitTooLarge`. `opt 0` is accepted and returns
+    // empty `bids`/`asks` vectors.
+    limit : opt nat32;
+};
+
+// Error returned by the `get_order_book_depth` query.
+type GetOrderBookDepthError = variant {
+    // The requested trading pair is not registered on the DEX.
+    UnknownTradingPair;
+    // The requested depth limit exceeds the maximum supported value (1000).
+    LimitTooLarge : record { requested : nat32; max : nat32 };
+};
+
+type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBookDepthError };
+
+// Status of an order.
 type OrderStatus = variant {
-    /// The order was not found.
+    // The order was not found.
     NotFound;
-    /// The order is pending processing.
+    // The order is pending processing.
     Pending;
-    /// The order is open and resting in the order book.
+    // The order is open and resting in the order book.
     Open;
-    /// The order has been fully filled.
+    // The order has been fully filled.
     Filled;
-    /// The order has been canceled.
+    // The order has been canceled.
     Canceled;
 };
 
-/// A token identified by its ledger canister ID.
+// A token identified by its ledger canister ID.
 type TokenId = record {
-    /// The canister ID of the token's ledger.
+    // The canister ID of the token's ledger.
     ledger_id : principal;
 };
 
-/// Metadata associated with a token.
+// Metadata associated with a token.
 type TokenMetadata = record {
-    /// The token's ticker symbol (e.g. "ckBTC").
+    // The token's ticker symbol (e.g. "ckBTC").
     symbol : text;
-    /// The number of decimal places used by the token.
+    // The number of decimal places used by the token.
     decimals : nat8;
 };
 
-/// A token with its identity and metadata.
+// A token with its identity and metadata.
 type Token = record {
-    /// The token's unique identifier.
+    // The token's unique identifier.
     id : TokenId;
-    /// The token's metadata.
+    // The token's metadata.
     metadata : TokenMetadata;
 };
 
-/// Errors that can be returned by icrc2_transfer_from.
+// Errors that can be returned by icrc2_transfer_from.
 type LedgerTransferFromError = variant {
     InsufficientFunds : record { balance : nat };
     InsufficientAllowance : record { allowance : nat };
@@ -102,137 +161,143 @@ type LedgerTransferFromError = variant {
     InternalError : text;
 };
 
-/// Error returned by the deposit endpoint.
+// Error returned by the deposit endpoint.
 type DepositError = variant {
-    /// The amount exceeds the maximum supported value.
+    // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    /// The token is not part of any trading pair on the DEX.
+    // The token is not part of any trading pair on the DEX.
     UnsupportedToken : record { token_id : TokenId };
-    /// The inter-canister call to the token ledger failed.
+    // The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
-    /// The icrc2_transfer_from call to the token ledger returned an error.
+    // The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError : LedgerTransferFromError;
 };
 
-/// Request to deposit tokens into the DEX.
+// Request to deposit tokens into the DEX.
 type DepositRequest = record {
-    /// The token to deposit.
+    // The token to deposit.
     token_id : TokenId;
-    /// The amount to deposit.
+    // The amount to deposit, in the token's base units.
+    // The caller's ICRC-2 allowance to the DEX on the token ledger must cover
+    // `amount + ledger_fee` (the `icrc2_transfer_from` fee is charged against
+    // the allowance on top of the transferred amount).
     amount : nat;
 };
 
-/// Response after a successful deposit.
+// Response after a successful deposit.
 type DepositResponse = record {
-    /// The block index of the transfer on the token ledger.
+    // The block index of the transfer on the token ledger.
     block_index : nat;
 };
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
-/// Request to withdraw tokens from the DEX.
+// Request to withdraw tokens from the DEX.
 type WithdrawRequest = record {
-    /// The token to withdraw.
+    // The token to withdraw.
     token_id : TokenId;
-    /// The amount to withdraw from the caller's free balance.
-    /// The ledger transfer fee is deducted from this amount,
-    /// so the caller receives amount minus fee on the ledger.
+    // The amount to withdraw from the caller's on-DEX free balance, in the
+    // token's base units. The ledger transfer fee is deducted from this
+    // amount, so the caller receives `amount - ledger_fee` on the ledger;
+    // `amount` must therefore be ≥ `ledger_fee` (otherwise the call rejects
+    // with `AmountTooSmall`).
     amount : nat;
 };
 
-/// Response after a successful withdrawal.
+// Response after a successful withdrawal.
 type WithdrawResponse = record {
-    /// The block index of the transfer on the token ledger.
+    // The block index of the transfer on the token ledger.
     block_index : nat;
 };
 
-/// Errors that can be returned by icrc1_transfer.
+// Errors that can be returned by icrc1_transfer.
 type LedgerTransferError = variant {
     InsufficientFunds : record { balance : nat };
     TemporarilyUnavailable;
     InternalError : text;
 };
 
-/// Error returned by the withdraw endpoint.
+// Error returned by the withdraw endpoint.
 type WithdrawError = variant {
-    /// The amount exceeds the maximum supported value.
+    // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    /// The token is not part of any trading pair on the DEX.
+    // The token is not part of any trading pair on the DEX.
     UnsupportedToken : record { token_id : TokenId };
-    /// The caller does not have enough free balance.
+    // The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
-    /// The requested amount is too small to cover the ledger transfer fee.
+    // The requested amount is below the ledger's transfer fee.
+    // `min_amount` is the ledger's `icrc1_fee`.
     AmountTooSmall : record { min_amount : nat };
-    /// The inter-canister call to the token ledger failed.
+    // The inter-canister call to the token ledger failed.
     CallFailed : record { ledger : principal; method : text; reason : text };
-    /// The icrc1_transfer call to the token ledger returned an error.
+    // The icrc1_transfer call to the token ledger returned an error.
     LedgerError : LedgerTransferError;
 };
 
 type WithdrawResult = variant { Ok : WithdrawResponse; Err : WithdrawError };
 
-/// A user's balance for a given token.
+// A user's balance for a given token.
 type Balance = record {
-    /// Funds available for new orders or withdrawal.
+    // Funds available for new orders or withdrawal.
     free : nat;
-    /// Funds locked by open orders.
+    // Funds locked by open orders.
     reserved : nat;
 };
 
-/// Request to add a new trading pair to the DEX.
+// Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
-    /// The base token of the pair.
+    // The base token of the pair.
     base : Token;
-    /// The quote token of the pair.
+    // The quote token of the pair.
     quote : Token;
-    /// Minimum price increment. Must be greater than zero.
+    // Minimum price increment. Must be greater than zero.
     tick_size : nat64;
-    /// Minimum order quantity. Must be greater than zero.
+    // Minimum order quantity. Must be greater than zero.
     lot_size : nat64;
 };
 
-/// Error returned by the add_trading_pair endpoint.
+// Error returned by the add_trading_pair endpoint.
 type AddTradingPairError = variant {
-    /// The caller is not a controller of the canister.
+    // The caller is not a controller of the canister.
     NotController;
-    /// The base and quote tokens are the same.
+    // The base and quote tokens are the same.
     BaseEqualsQuote;
-    /// The tick size must be greater than zero.
+    // The tick size must be greater than zero.
     InvalidTickSize;
-    /// The lot size must be greater than zero.
+    // The lot size must be greater than zero.
     InvalidLotSize;
-    /// A trading pair with the same base and quote tokens already exists.
+    // A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists;
-    /// The submitted token metadata does not match the previously registered metadata.
+    // The submitted token metadata does not match the previously registered metadata.
     InconsistentTokenMetadata : record { token : TokenId; expected : TokenMetadata; submitted : TokenMetadata };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
-/// Controls who may call update endpoints on the DEX canister.
+// Controls who may call update endpoints on the DEX canister.
 type Mode = variant {
-    /// Anyone may call update endpoints.
+    // Anyone may call update endpoints.
     GeneralAvailability;
-    /// Only the listed principals may call update endpoints.
+    // Only the listed principals may call update endpoints.
     RestrictedTo : vec principal;
 };
 
-/// Argument for canister initialization.
+// Argument for canister initialization.
 type InitArg = record {
-    /// Controls who may call update endpoints.
+    // Controls who may call update endpoints.
     mode : Mode;
 };
 
-/// Argument for canister upgrade.
+// Argument for canister upgrade.
 type UpgradeArg = record {
-    /// If set, changes who may call update endpoints.
+    // If set, changes who may call update endpoints.
     mode : opt Mode;
 };
 
-/// Argument passed to the DEX canister on init or upgrade.
+// Argument passed to the DEX canister on init or upgrade.
 type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
-/// Event payload for adding a trading pair.
+// Event payload for adding a trading pair.
 type AddTradingPairEvent = record {
     book_id : nat64;
     base : TokenId;
@@ -243,13 +308,13 @@ type AddTradingPairEvent = record {
     quote_metadata : TokenMetadata;
 };
 
-/// Structured order identifier used in events.
+// Structured order identifier used in events.
 type EventOrderId = record {
     book_id : nat64;
     seq : nat64;
 };
 
-/// Event payload for adding a limit order.
+// Event payload for adding a limit order.
 type AddLimitOrderEvent = record {
     user : principal;
     order_id : EventOrderId;
@@ -258,14 +323,14 @@ type AddLimitOrderEvent = record {
     quantity : nat;
 };
 
-/// Event payload for a deposit.
+// Event payload for a deposit.
 type DepositEvent = record {
     user : principal;
     token : TokenId;
     amount : nat;
 };
 
-/// Event payload for a successful withdrawal.
+// Event payload for a successful withdrawal.
 type WithdrawEvent = record {
     block_index : nat64;
     user : principal;
@@ -273,25 +338,25 @@ type WithdrawEvent = record {
     amount : nat;
 };
 
-/// Engine drove a matching round on `book_id`, processing these orders in
-/// FIFO order. Drives replay of the matching engine.
+// Engine drove a matching round on `book_id`, processing these orders in
+// FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
     book_id : nat64;
     orders : vec nat64;
 };
 
-/// Declarative record of the balance operations and order-status transitions
-/// produced by a matching round.
+// Declarative record of the balance operations and order-status transitions
+// produced by a matching round.
 type SettlingEvent = record {
     book_id : nat64;
     balance_operations : vec BalanceOperation;
     transitions : vec OrderStatusTransition;
 };
 
-/// Balance movement recorded during settlement. `from_order` / `to_order` /
-/// `order` are order sequence numbers (`OrderSeq`) that the canister resolves
-/// to principals via its order history at apply time — they are not user
-/// principals.
+// Balance movement recorded during settlement. `from_order` / `to_order` /
+// `order` are order sequence numbers (`OrderSeq`) that the canister resolves
+// to principals via its order history at apply time — they are not user
+// principals.
 type BalanceOperation = variant {
     Transfer : record {
         from_order : nat64;
@@ -313,7 +378,7 @@ type OrderStatusTransition = record {
     status : OrderStatus;
 };
 
-/// Type of a canister event.
+// Type of a canister event.
 type EventType = variant {
     Init : InitArg;
     Upgrade : UpgradeArg;
@@ -325,55 +390,78 @@ type EventType = variant {
     Withdraw : WithdrawEvent;
 };
 
-/// A canister event with a timestamp.
+// A canister event with a timestamp.
 type Event = record {
     timestamp : nat64;
     payload : EventType;
 };
 
-/// Arguments for the get_events query.
+// Arguments for the get_events query.
 type GetEventsArgs = record {
     start : nat64;
     length : nat64;
 };
 
-/// Result of the get_events query.
+// Result of the get_events query.
 type GetEventsResult = record {
     events : vec Event;
     total_event_count : nat64;
 };
 
 service : (DexArg) -> {
-    /// Submit a new limit order. The order is queued for *asynchronous* processing
-    /// and an order ID is immediately returned.
+    // Submit a new limit order. The order is queued for *asynchronous*
+    // processing by the matching engine; an `OrderId` is returned
+    // immediately. An `Ok` response means the order was accepted into the
+    // queue, not that it filled — poll `get_order_status` to observe the
+    // actual lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
-    /// Query the status of an order by its ID.
+    // Query the status of an order by its ID.
     get_order_status : (OrderId) -> (OrderStatus) query;
 
-    /// Query all listed trading pairs.
+    // Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
 
-    /// Deposit tokens into the DEX. Calls icrc2_transfer_from on the token ledger
-    /// to transfer the specified amount from the caller to the DEX canister,
-    /// then credits the caller's internal balance. The caller shall have previously
-    /// approved the DEX canister to spend the specified amount on their behalf by
-    /// calling icrc2_approve on the token ledger.
+    // Query the top-of-book (best bid and best ask, each aggregated across all
+    // resting orders at that price) for a trading pair. Returns
+    // `UnknownTradingPair` if the pair is not registered. Either side of the
+    // returned `OrderBookTicker` may be `null` independently when that side of
+    // the book is empty.
+    get_order_book_ticker : (TradingPair) -> (GetOrderBookTickerResult) query;
+
+    // Query price-aggregated depth for a trading pair. See
+    // `GetOrderBookDepthRequest` for the semantics of the `limit` field.
+    // Returns `UnknownTradingPair` if the pair is not registered.
+    get_order_book_depth : (GetOrderBookDepthRequest) -> (GetOrderBookDepthResult) query;
+
+    // Deposit tokens into the DEX. Calls `icrc2_transfer_from` on the token
+    // ledger to pull `amount` from the caller to the DEX canister, then
+    // credits the caller's on-DEX free balance.
+    //
+    // The caller must have previously called `icrc2_approve` authorizing the
+    // DEX as spender. The ledger charges its fee on both `icrc2_approve` and
+    // `icrc2_transfer_from`, so:
+    // - the allowance must cover `amount + ledger_fee`;
+    // - the caller's on-ledger balance must cover `amount + 2 × ledger_fee`.
     deposit : (DepositRequest) -> (DepositResult);
 
-    /// Withdraw tokens from the DEX. Debits the caller's free balance and
-    /// transfers (amount - ledger fee) to the caller via icrc1_transfer on the
-    /// token ledger. Amounts locked in open orders cannot be withdrawn.
+    // Withdraw tokens from the DEX. Debits `amount` from the caller's on-DEX
+    // free balance and transfers `amount - ledger_fee` to the caller via
+    // `icrc1_transfer` on the token ledger.
+    //
+    // `amount` must be ≥ the token ledger's fee (otherwise `AmountTooSmall`).
+    // Only free balance is eligible — funds reserved by open orders are not
+    // withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
 
-    /// Query the caller's balance for a given token.
+    // Query the caller's balance for a given token.
     get_balance : (TokenId) -> (Balance) query;
 
-    /// Add a new trading pair to the DEX. Only callable by a controller.
+    // Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
-    /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
-    /// Returns events from the event log starting at the given index.
-    /// The response contains at most 2000 events.
+    // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
+    // Returns events from the event log starting at the given index.
+    // The response contains at most 2000 events.
     get_events : (GetEventsArgs) -> (GetEventsResult) query;
 }

@@ -246,6 +246,20 @@ where
     order_id
 }
 
+#[cfg(test)]
+pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, quantity: u64) {
+    crate::add_limit_order(
+        LimitOrderRequest {
+            pair: icp_ckbtc_trading_pair().into(),
+            side,
+            price,
+            quantity: candid::Nat::from(quantity),
+        },
+        &mocks::mock_runtime_for(user),
+    )
+    .unwrap();
+}
+
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default())
 }
@@ -289,6 +303,33 @@ pub mod arbitrary {
                 price: Price::new(price_ticks * tick),
                 quantity: Quantity::from(qty_lots * lot),
             })
+    }
+
+    pub fn arb_non_matching_orders() -> impl Strategy<Value = Vec<PendingOrder>> {
+        let tick = u64::from(TICK_SIZE);
+        let lot = u64::from(LOT_SIZE);
+        (2u64..500u64).prop_flat_map(move |mid_ticks| {
+            let bid = (1u64..mid_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+                side: Side::Buy,
+                price: Price::new(p * tick),
+                quantity: Quantity::from(q * lot),
+            });
+            let ask =
+                ((mid_ticks + 1)..1000u64, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(p * tick),
+                    quantity: Quantity::from(q * lot),
+                });
+            (
+                prop::collection::vec(bid, 0..15),
+                prop::collection::vec(ask, 0..15),
+            )
+                .prop_map(|(bids, asks)| {
+                    let mut all = bids;
+                    all.extend(asks);
+                    all
+                })
+        })
     }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.

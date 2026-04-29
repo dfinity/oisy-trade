@@ -94,7 +94,7 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     #[cfg(test)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))

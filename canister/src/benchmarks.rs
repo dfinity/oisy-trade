@@ -154,6 +154,65 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
     })
 }
 
+/// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
+/// snapshot. Only the first entry of each side is read, but the returned
+/// [`dex_types::PriceLevel::quantity`] aggregates across every resting order at that
+/// price — so cost scales with the number of orders at the best bid and best
+/// ask, not with total depth. In this fixture each level holds a single order,
+/// so the benchmark measures the minimal constant-overhead path.
+#[bench(raw)]
+fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let pair = dex_types::TradingPair::from(trading_pair());
+    canbench_rs::bench_fn(|| {
+        let _ticker = crate::get_order_book_ticker(pair);
+    })
+}
+
+/// Benchmark `get_order_book_depth` with the default limit (100 levels per side)
+/// against a fully populated Binance ICP/USDT snapshot. Represents the common
+/// case where a caller wants a reasonable L2 snapshot.
+#[bench(raw)]
+fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let request = dex_types::GetOrderBookDepthRequest {
+        trading_pair: dex_types::TradingPair::from(trading_pair()),
+        limit: None,
+    };
+    canbench_rs::bench_fn(|| {
+        let _depth = crate::get_order_book_depth(request.clone());
+    })
+}
+
+/// Benchmark `get_order_book_depth` at the hard cap (1000 levels per side)
+/// against a fully populated Binance ICP/USDT snapshot. Upper bound on the
+/// instructions a depth query consumes for this fixture; per-level cost
+/// scales with resting orders at each price (see DEFI-2795), so denser
+/// books can exceed it.
+#[bench(raw)]
+fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
+    install_populated_state();
+    let request = dex_types::GetOrderBookDepthRequest {
+        trading_pair: dex_types::TradingPair::from(trading_pair()),
+        limit: Some(crate::MAX_DEPTH_LIMIT),
+    };
+    canbench_rs::bench_fn(|| {
+        let _depth = crate::get_order_book_depth(request.clone());
+    })
+}
+
+/// Build a freshly populated state from the Binance snapshot and install it
+/// as the canister's thread-local state, so library dispatchers that read via
+/// `state::with_state` observe it. canbench's `init` populated the
+/// thread-local with an empty state, so we reset first.
+fn install_populated_state() {
+    let depth = load_depth();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+    crate::state::reset_state();
+    crate::state::init_state(state);
+}
+
 #[derive(Deserialize)]
 struct DepthSnapshot {
     /// Bid levels as `(price, quantity)` decimal strings, sorted by price descending.

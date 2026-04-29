@@ -681,6 +681,134 @@ mod order_book {
             assert_eq!(best.price(), Price::new(110));
         }
     }
+
+    mod levels {
+        use super::*;
+
+        fn lot(n: u64) -> u64 {
+            n * u64::from(LOT_SIZE)
+        }
+
+        #[test]
+        fn should_return_empty_iterators_on_empty_book() {
+            let book = order_book();
+            assert_eq!(book.bid_levels(10).count(), 0);
+            assert_eq!(book.ask_levels(10).count(), 0);
+        }
+
+        #[test]
+        fn should_aggregate_single_order_per_level() {
+            let mut book = order_book();
+            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
+            book.match_order(buy(2u64, 90u64, lot(2))).unwrap();
+            book.match_order(sell(3u64, 110u64, lot(3))).unwrap();
+            book.match_order(sell(4u64, 120u64, lot(4))).unwrap();
+
+            let bids: Vec<_> = book.bid_levels(10).collect();
+            assert_eq!(
+                bids,
+                vec![
+                    (Price::new(100), Quantity::from(lot(1))),
+                    (Price::new(90), Quantity::from(lot(2))),
+                ]
+            );
+            let asks: Vec<_> = book.ask_levels(10).collect();
+            assert_eq!(
+                asks,
+                vec![
+                    (Price::new(110), Quantity::from(lot(3))),
+                    (Price::new(120), Quantity::from(lot(4))),
+                ]
+            );
+        }
+
+        #[test]
+        fn should_sum_quantities_across_orders_at_the_same_price() {
+            let mut book = order_book();
+            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
+            book.match_order(buy(2u64, 100u64, lot(3))).unwrap();
+            book.match_order(sell(3u64, 110u64, lot(2))).unwrap();
+            book.match_order(sell(4u64, 110u64, lot(5))).unwrap();
+
+            let bids: Vec<_> = book.bid_levels(10).collect();
+            assert_eq!(bids, vec![(Price::new(100), Quantity::from(lot(4)))]);
+            let asks: Vec<_> = book.ask_levels(10).collect();
+            assert_eq!(asks, vec![(Price::new(110), Quantity::from(lot(7)))]);
+        }
+
+        #[test]
+        fn should_truncate_to_limit() {
+            let mut book = order_book();
+            for (seq, price) in [(1u64, 100u64), (2u64, 90u64), (3u64, 80u64)] {
+                book.match_order(buy(seq, price, lot(1))).unwrap();
+            }
+            for (seq, price) in [(4u64, 110u64), (5u64, 120u64), (6u64, 130u64)] {
+                book.match_order(sell(seq, price, lot(1))).unwrap();
+            }
+
+            let bid_prices: Vec<_> = book.bid_levels(2).map(|(p, _)| p.get()).collect();
+            assert_eq!(bid_prices, vec![100, 90]);
+            let ask_prices: Vec<_> = book.ask_levels(2).map(|(p, _)| p.get()).collect();
+            assert_eq!(ask_prices, vec![110, 120]);
+        }
+
+        #[test]
+        fn should_return_all_levels_when_limit_exceeds_depth() {
+            let mut book = order_book();
+            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
+            book.match_order(sell(2u64, 110u64, lot(1))).unwrap();
+
+            assert_eq!(book.bid_levels(usize::MAX).count(), 1);
+            assert_eq!(book.ask_levels(usize::MAX).count(), 1);
+        }
+
+        #[test]
+        fn should_return_empty_iterators_when_limit_is_zero() {
+            let mut book = order_book();
+            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
+            book.match_order(sell(2u64, 110u64, lot(1))).unwrap();
+
+            assert_eq!(book.bid_levels(0).count(), 0);
+            assert_eq!(book.ask_levels(0).count(), 0);
+        }
+
+        #[test]
+        fn should_exclude_pending_orders() {
+            let mut book = order_book();
+            book.add_pending_order(buy(0u64, 100u64, lot(1)));
+            book.add_pending_order(sell(1u64, 110u64, lot(1)));
+
+            assert_eq!(book.bid_levels(10).count(), 0);
+            assert_eq!(book.ask_levels(10).count(), 0);
+        }
+
+        #[test]
+        fn should_saturate_aggregated_quantity_on_overflow() {
+            use crate::order::{LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize};
+            use std::num::NonZeroU64;
+
+            // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
+            // wouldn't be multiples of the default LOT_SIZE).
+            let mut book = OrderBook::new(
+                OrderBookId::ZERO,
+                TickSize::new(NonZeroU64::new(1).unwrap()),
+                LotSize::new(NonZeroU64::new(1).unwrap()),
+            );
+            let max_buy = |seq: u64| {
+                PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(1),
+                    quantity: Quantity::MAX,
+                }
+                .into_order(OrderSeq::new(seq))
+            };
+            book.match_order(max_buy(0)).unwrap();
+            book.match_order(max_buy(1)).unwrap();
+
+            let (_, quantity) = book.bid_levels(1).next().unwrap();
+            assert_eq!(quantity, Quantity::MAX);
+        }
+    }
 }
 
 mod process_pending_orders {
@@ -879,6 +1007,31 @@ mod book_snapshot {
             let restored = OrderBook::from(snapshot);
 
             prop_assert_eq!(book, restored);
+        }
+    }
+}
+
+mod levels_consistency {
+    use crate::order::{OrderBook, OrderSeq};
+    use crate::test_fixtures::{
+        LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_non_matching_orders,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn top_of_depth_matches_ticker(orders in arb_non_matching_orders()) {
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            for (i, pending) in orders.into_iter().enumerate() {
+                book.match_order(pending.into_order(OrderSeq::new(i as u64))).unwrap();
+            }
+            let ticker_bid = book.bid_levels(1).next();
+            let ticker_ask = book.ask_levels(1).next();
+            let depth_bids: Vec<_> = book.bid_levels(usize::MAX).collect();
+            let depth_asks: Vec<_> = book.ask_levels(usize::MAX).collect();
+
+            prop_assert_eq!(ticker_bid, depth_bids.first().copied());
+            prop_assert_eq!(ticker_ask, depth_asks.first().copied());
         }
     }
 }
