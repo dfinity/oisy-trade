@@ -207,6 +207,45 @@ pub fn fund_user(user: Principal) {
     });
 }
 
+/// Deposit just enough of the appropriate token to cover `side`'s reservation,
+/// validate the resulting limit order, and record it. Returns the assigned
+/// `OrderId`. Each call funds the user from zero, so distinct users get
+/// distinct, isolated balances.
+pub fn place_order<MH, MB>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u64,
+    quantity: impl Into<Quantity>,
+) -> order::OrderId
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    let pending = PendingOrder {
+        side,
+        price: Price::new(price),
+        quantity: quantity.into(),
+    };
+    let (token, amount) = match side {
+        Side::Buy => (
+            pair.quote,
+            pending
+                .price
+                .checked_mul_quantity(&pending.quantity)
+                .expect("place_order: price × quantity overflow"),
+        ),
+        Side::Sell => (pair.base, pending.quantity),
+    };
+    state.deposit(user, token, amount, StableMemoryOptions::Write);
+    let (order_id, order) = state
+        .validate_limit_order(user, pair.clone(), pending)
+        .expect("place_order: validate_limit_order failed");
+    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    order_id
+}
+
 #[cfg(test)]
 pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, quantity: u64) {
     crate::add_limit_order(

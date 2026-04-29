@@ -10,7 +10,7 @@ fn empty_snapshot() -> StateSnapshot {
         trading_pairs: vec![],
         order_books: vec![],
         ledger_fee_cache: vec![],
-        pending_settlement: vec![],
+        pending_settling_events: None,
     }
 }
 

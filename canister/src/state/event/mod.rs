@@ -110,7 +110,7 @@ pub struct MatchingEvent {
 /// Outcome of the matching engine:
 /// * balance transitions between maker/taker
 /// * order transitions
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
@@ -125,7 +125,7 @@ pub struct SettlingEvent {
 /// resolved to a concrete `TokenId` via the enclosing `SettlingEvent`'s
 /// `book_id`. This keeps each op compact on the wire while still reconstructing
 /// enough context at apply time.
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub enum BalanceOperation {
     #[n(0)]
     Transfer {
@@ -152,7 +152,7 @@ pub enum BalanceOperation {
     },
 }
 
-#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct OrderStatusTransition {
     #[n(0)]
     pub seq: OrderSeq,
