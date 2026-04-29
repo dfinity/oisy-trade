@@ -246,6 +246,33 @@ impl Setup {
         }
     }
 
+    pub async fn fetch_dashboard(&self) -> String {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            url: "/dashboard".to_string(),
+            headers: vec![],
+            body: Default::default(),
+        };
+        let response: HttpResponse = self
+            .env()
+            .query_call(
+                self.dex_id,
+                Principal::anonymous(),
+                "http_request",
+                Encode!(&request).unwrap(),
+            )
+            .await
+            .map(|bytes| Decode!(&bytes, HttpResponse).unwrap())
+            .expect("Failed to query http_request");
+        assert_eq!(
+            response.status_code,
+            200,
+            "dashboard request failed with body: {}",
+            String::from_utf8_lossy(&response.body),
+        );
+        String::from_utf8(response.body.into_vec()).expect("dashboard body should be UTF-8")
+    }
+
     pub async fn assert_metrics(&self) -> MetricsAssert<&Self> {
         MetricsAssert::from_async_http_query(self).await
     }

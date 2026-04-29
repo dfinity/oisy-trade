@@ -22,6 +22,7 @@ macro_rules! bench_scopes {
 
 pub mod balance;
 pub mod cbor;
+pub mod dashboard;
 pub mod guard;
 pub mod lifecycle;
 pub mod metrics;

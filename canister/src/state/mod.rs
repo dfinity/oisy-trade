@@ -490,6 +490,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         Ok(())
     }
 
+    pub fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub fn tokens(&self) -> &BTreeMap<TokenId, TokenMetadata> {
+        &self.tokens
+    }
+
     pub fn trading_pairs(&self) -> &TradingPairMap {
         &self.trading_pairs
     }
