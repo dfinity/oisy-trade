@@ -3,7 +3,8 @@ use crate::order::{OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, Tr
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
+    icp_metadata, icp_token_id,
 };
 use askama::Template;
 use candid::Principal;
@@ -46,6 +47,32 @@ fn should_render_registered_tokens() {
         .map(|td| td.text().collect::<String>())
         .collect();
     assert_eq!(symbols, vec!["ICP", "ckBTC"]);
+}
+
+#[test]
+fn should_link_canister_id_to_icp_dashboard() {
+    let dom = render(&fresh_state(), 0);
+
+    assert_eq!(
+        hrefs(&dom, "h2 + dl a"),
+        vec![icp_dashboard_url(&TEST_CANISTER)]
+    );
+}
+
+#[test]
+fn should_link_token_ledgers_to_icp_dashboard() {
+    let mut state = fresh_state();
+    record_pair(&mut state);
+
+    let dom = render(&state, 0);
+
+    assert_eq!(
+        hrefs(&dom, "table tbody td a"),
+        vec![
+            icp_dashboard_url(icp_token_id().as_principal()),
+            icp_dashboard_url(ckbtc_token_id().as_principal()),
+        ]
+    );
 }
 
 #[test]
@@ -218,4 +245,14 @@ fn bar_widths(dom: &Html) -> Vec<String> {
     dom.select(&sel("td.bar div"))
         .map(|d| d.value().attr("style").unwrap_or("").to_string())
         .collect()
+}
+
+fn hrefs(dom: &Html, selector: &str) -> Vec<String> {
+    dom.select(&sel(selector))
+        .filter_map(|a| a.value().attr("href").map(str::to_string))
+        .collect()
+}
+
+fn icp_dashboard_url(principal: &Principal) -> String {
+    format!("https://dashboard.internetcomputer.org/canister/{principal}")
 }

@@ -33,7 +33,7 @@ section.pair { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid #eee
 
 <h2>Canister</h2>
 <dl>
-<dt>Canister ID</dt><dd>{{ canister_id }}</dd>
+<dt>Canister ID</dt><dd><a href="https://dashboard.internetcomputer.org/canister/{{ canister_id }}">{{ canister_id }}</a></dd>
 <dt>Mode</dt><dd>{{ mode }}</dd>
 <dt>Total events</dt><dd>{{ total_events }}</dd>
 </dl>
@@ -49,7 +49,7 @@ section.pair { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid #eee
 <tr>
 <td>{{ token.symbol }}</td>
 <td>{{ token.decimals }}</td>
-<td>{{ token.ledger_id }}</td>
+<td><a href="https://dashboard.internetcomputer.org/canister/{{ token.ledger_id }}">{{ token.ledger_id }}</a></td>
 </tr>
 {% endfor %}
 </tbody>
