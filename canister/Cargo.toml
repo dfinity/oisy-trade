@@ -16,7 +16,7 @@ path = "src/main.rs"
 canbench-rs = ["dep:canbench-rs", "dep:serde_json", "dep:serde", "dep:strum"]
 
 [dependencies]
-askama = "0.14"
+askama = "0.16"
 async-trait = { workspace = true }
 bimap = { version = "0.6.3", default-features = false }
 canbench-rs = { workspace = true, optional = true }
