@@ -775,7 +775,6 @@ async fn should_fail_add_trading_pair() {
 
 #[tokio::test]
 async fn should_replay_events_on_upgrade() {
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types_internal::event::EventType;
 
     /// Asserts that the values produced by each `$observe` expression are unchanged after
@@ -1309,6 +1308,18 @@ async fn should_get_dashboard() {
     assert!(
         body.contains("ckBTC"),
         "missing quote token symbol in: {body}",
+    );
+    assert!(
+        body.contains("Trading pairs"),
+        "missing Trading pairs section in: {body}",
+    );
+    assert!(
+        body.contains("ckSOL/ckBTC"),
+        "missing pair label in: {body}",
+    );
+    assert!(
+        body.contains("Order book is empty."),
+        "missing empty-book message for empty pair in: {body}",
     );
 
     setup.drop().await;
