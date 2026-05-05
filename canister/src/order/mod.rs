@@ -445,6 +445,14 @@ impl Quantity {
         }
     }
 
+    pub(crate) fn high(&self) -> u128 {
+        self.high
+    }
+
+    pub(crate) fn low(&self) -> u128 {
+        self.low
+    }
+
     pub const fn is_zero(&self) -> bool {
         self.high == 0 && self.low == 0
     }

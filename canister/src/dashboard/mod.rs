@@ -115,8 +115,10 @@ fn build_pair(
     quote_symbol: String,
     book: &OrderBook,
 ) -> DashboardPair {
-    let best_bid_level = book.bid_levels(1).next();
-    let best_ask_level = book.ask_levels(1).next();
+    let bids: Vec<(Price, Quantity)> = book.bid_levels(DEPTH_LEVELS).collect();
+    let asks: Vec<(Price, Quantity)> = book.ask_levels(DEPTH_LEVELS).collect();
+    let best_bid_level = bids.first().copied();
+    let best_ask_level = asks.first().copied();
     let best_bid = best_bid_level.map(level);
     let best_ask = best_ask_level.map(level);
     let spread = match (best_bid_level, best_ask_level) {
@@ -136,13 +138,11 @@ fn build_pair(
         best_bid,
         best_ask,
         spread,
-        depth: build_depth(book),
+        depth: build_depth(&bids, &asks),
     }
 }
 
-fn build_depth(book: &OrderBook) -> DashboardDepth {
-    let bids: Vec<(Price, Quantity)> = book.bid_levels(DEPTH_LEVELS).collect();
-    let asks: Vec<(Price, Quantity)> = book.ask_levels(DEPTH_LEVELS).collect();
+fn build_depth(bids: &[(Price, Quantity)], asks: &[(Price, Quantity)]) -> DashboardDepth {
     let max = bids
         .iter()
         .chain(asks.iter())
@@ -150,8 +150,8 @@ fn build_depth(book: &OrderBook) -> DashboardDepth {
         .max()
         .unwrap_or(0);
     DashboardDepth {
-        bids: depth_levels(&bids, max),
-        asks: depth_levels(&asks, max),
+        bids: depth_levels(bids, max),
+        asks: depth_levels(asks, max),
     }
 }
 
@@ -185,13 +185,7 @@ fn level((price, quantity): (Price, Quantity)) -> DashboardLevel {
 }
 
 fn saturating_to_u128(q: &Quantity) -> u128 {
-    let bytes = q.to_be_bytes();
-    let high = u128::from_be_bytes(bytes[..16].try_into().unwrap());
-    if high != 0 {
-        u128::MAX
-    } else {
-        u128::from_be_bytes(bytes[16..].try_into().unwrap())
-    }
+    if q.high() != 0 { u128::MAX } else { q.low() }
 }
 
 fn format_mode(mode: &Mode) -> String {
