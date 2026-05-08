@@ -122,7 +122,8 @@ jobs:
       - name: 'Check canister endpoints'
         run: |
           ic-wasm "$GITHUB_WORKSPACE/dex_canister.wasm.gz" check-endpoints \
-            --hidden ./canister/hidden_endpoints.conf
+            --hidden ./canister/hidden_endpoints.conf \
+            --candid ./canister/dex.did
 
   benchmark:
     if: github.event_name == 'pull_request'
