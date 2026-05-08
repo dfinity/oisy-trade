@@ -102,6 +102,28 @@ jobs:
       - name: Cargo test
         run: just integration-tests
 
+  check-canister-wasm-endpoints:
+    needs: reproducible-build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: 'Download WASM'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dex_canister.wasm.gz
+
+      - name: 'Install `ic-wasm`'
+        uses: taiki-e/install-action@cca35edeb1d01366c2843b68fc3ca441446d73d3 # v2.77.1
+        with:
+          tool: ic-wasm@0.9.10
+
+      - name: 'Check canister endpoints'
+        run: |
+          ic-wasm "$GITHUB_WORKSPACE/dex_canister.wasm.gz" check-endpoints \
+            --hidden ./canister/hidden_endpoints.conf
+
   benchmark:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -159,6 +181,7 @@ jobs:
       - reproducible-build
       - unit-tests
       - integration-tests
+      - check-canister-wasm-endpoints
       - benchmark
       - conventional-pr-title
     runs-on: ubuntu-latest
