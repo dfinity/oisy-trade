@@ -41,7 +41,7 @@ scraper = "0.26"
 serde = "1.0.228"
 serde_json = "1"
 strum = { version = "0.28.0", features = ["derive"] }
-tokio = "1.52.1"
+tokio = "1.52.2"
 
 [profile.release]
 debug = false
