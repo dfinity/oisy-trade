@@ -270,21 +270,21 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "canbench-rs"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d959bc8d6e4738bcfed6682d46ef105db17e5fe81d4c30e8b49b03b9badd2c8"
+checksum = "e576c38b15af6ff612e1cff2361a8989035c6bcd135baae76619b51edd4df5a5"
 dependencies = [
  "canbench-rs-macros",
  "candid",
- "ic-cdk 0.19.0",
+ "ic-cdk",
  "serde",
 ]
 
 [[package]]
 name = "canbench-rs-macros"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3198f118892181c4f4d30cfb423511a11b9d7e8d7efb94aa58777db78da27bd8"
+checksum = "4a8494cc1c374975166cba496868eeb5a5bd88a86beaa75fd866a89d956c702c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -653,7 +653,7 @@ dependencies = [
  "canlog",
  "dex_types",
  "dex_types_internal",
- "ic-cdk 0.20.1",
+ "ic-cdk",
  "ic-cdk-timers",
  "ic-http-types",
  "ic-metrics-encoder",
@@ -678,7 +678,7 @@ dependencies = [
  "async-trait",
  "candid",
  "dex_types",
- "ic-cdk 0.20.1",
+ "ic-cdk",
  "serde",
 ]
 
@@ -693,7 +693,7 @@ dependencies = [
  "dex_client",
  "dex_types",
  "dex_types_internal",
- "ic-cdk 0.20.1",
+ "ic-cdk",
  "ic-http-types",
  "ic-metrics-assert",
  "icrc-ledger-types",
@@ -1208,32 +1208,13 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "818d6d5416a8f0212e1b132703b0da51e36c55f2b96677e96f2bbe7702e1bd85"
-dependencies = [
- "candid",
- "ic-cdk-executor",
- "ic-cdk-macros 0.19.0",
- "ic-error-types",
- "ic-management-canister-types",
- "ic0",
- "pin-project-lite",
- "serde",
- "serde_bytes",
- "slotmap",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ic-cdk"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a64dfa64757e7bfdd3bd6048c35e1edd74b69325deeed6bcaafedbc864c645fc"
 dependencies = [
  "candid",
  "ic-cdk-executor",
- "ic-cdk-macros 0.20.1",
+ "ic-cdk-macros",
  "ic-error-types",
  "ic0",
  "pin-project-lite",
@@ -1250,19 +1231,6 @@ dependencies = [
  "ic0",
  "slotmap",
  "smallvec",
-]
-
-[[package]]
-name = "ic-cdk-macros"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66dad91a214945cb3605bc9ef6901b87e2ac41e3624284c2cabba49d43aa4f43"
-dependencies = [
- "candid",
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
