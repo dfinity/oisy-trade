@@ -1336,9 +1336,9 @@ dependencies = [
 
 [[package]]
 name = "ic-metrics-assert"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44a54a56b268fae5165b4ad0ca95324400b9ed20c8c42b541496bda1618736a1"
+checksum = "525a4d3109e6f8112005dba666abf287ba1ba8a9c58dd2ff9e4f7cef05e0655b"
 dependencies = [
  "async-trait",
  "candid",
