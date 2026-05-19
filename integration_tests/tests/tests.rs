@@ -1413,6 +1413,83 @@ mod order_book {
     }
 }
 
+mod chunked_matching {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use dex_types::{
+        GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, PriceLevel, Side,
+    };
+
+    /// Submits more pending orders in a single PocketIC round than fit in one
+    /// chunk so the canister must self-reschedule the matching timer to drain
+    /// the backlog. With `MAX_ORDERS_PER_CHUNK = 200`, posting 210 orders
+    /// without ticking forces at least two chunks.
+    #[tokio::test]
+    async fn should_drain_pending_orders_across_chunks() {
+        const N_ORDERS: u64 = 210;
+        const PRICE: u64 = 100;
+        const QUANTITY: u64 = 1_000_000;
+
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = Principal::from_slice(&[0x42]);
+        let pair = setup.trading_pair();
+
+        let per_order_cost = PRICE * QUANTITY;
+        let total_cost = N_ORDERS * per_order_cost;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(total_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(total_cost + QUOTE_LEDGER_FEE)
+            .deposit(total_cost)
+            .execute()
+            .await;
+
+        let client = setup.dex_client_with_caller(user);
+        for _ in 0..N_ORDERS {
+            client
+                .add_limit_order(LimitOrderRequest {
+                    pair,
+                    side: Side::Buy,
+                    price: PRICE,
+                    quantity: Nat::from(QUANTITY),
+                })
+                .await
+                .unwrap();
+        }
+
+        // Each tick advances PocketIC by one round, firing one chunk's worth
+        // of rescheduled matching. Five rounds is generous for 210 orders at
+        // the production chunk size.
+        for _ in 0..5 {
+            setup.env().tick().await;
+        }
+
+        let depth = setup
+            .dex_client()
+            .get_order_book_depth(GetOrderBookDepthRequest {
+                trading_pair: pair,
+                limit: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            depth,
+            OrderBookDepth {
+                bids: vec![PriceLevel {
+                    price: PRICE,
+                    quantity: Nat::from(N_ORDERS * QUANTITY),
+                }],
+                asks: vec![],
+            },
+            "all {N_ORDERS} pending orders should be resting after chunked matching drains",
+        );
+
+        setup.drop().await;
+    }
+}
+
 #[tokio::test]
 async fn should_expose_metrics() {
     let setup = Setup::new().await.with_trading_pair().await;
