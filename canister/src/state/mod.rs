@@ -597,6 +597,33 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.pending_settling_events.pop_front()
     }
 
+    /// Order-book IDs that currently have at least one pending order, in
+    /// ascending book-ID order.
+    pub fn book_ids_with_pending_orders(&self) -> Vec<OrderBookId> {
+        self.order_books
+            .iter()
+            .filter(|(_, book)| book.pending_orders_len() > 0)
+            .map(|(book_id, _)| *book_id)
+            .collect()
+    }
+
+    /// Up to `limit` pending-order sequence numbers from the given book, in
+    /// FIFO order. The orders themselves remain in the book's pending queue;
+    /// removal happens when the seqs are fed back through matching.
+    pub fn peek_pending_seqs(&self, book_id: &OrderBookId, limit: usize) -> Vec<OrderSeq> {
+        let book = self
+            .order_books
+            .get(book_id)
+            .expect("BUG: peek_pending_seqs on unknown book");
+        book.pending_order_seqs().take(limit).collect()
+    }
+
+    pub fn has_pending_orders(&self) -> bool {
+        self.order_books
+            .values()
+            .any(|book| book.pending_orders_len() > 0)
+    }
+
     pub fn has_pending_settling_events(&self) -> bool {
         !self.pending_settling_events.is_empty()
     }
