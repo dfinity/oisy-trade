@@ -238,7 +238,10 @@ fn should_roundtrip_state_through_snapshot() {
         sell_order,
         StableMemoryOptions::Write,
     );
-    state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+    crate::test_fixtures::process_pending_orders(
+        &mut state,
+        &mock_runtime_for(Principal::anonymous()),
+    );
 
     // Round-trip via CBOR.
     let snapshot = StateSnapshot::from_state(&state);

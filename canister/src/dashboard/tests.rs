@@ -94,7 +94,10 @@ fn should_render_per_pair_metadata() {
     record_pair(&mut state);
     place(&mut state, principal(0x01), Side::Buy, 100, lot(1));
     place(&mut state, principal(0x02), Side::Sell, 110, lot(1));
-    state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+    crate::test_fixtures::process_pending_orders(
+        &mut state,
+        &mock_runtime_for(Principal::anonymous()),
+    );
 
     let dom = render(&state, 0);
     let dl_text = text(&dom, "section.pair dl");
@@ -114,7 +117,10 @@ fn should_render_depth_chart_for_resting_orders() {
     record_pair(&mut state);
     place(&mut state, principal(0x01), Side::Buy, 100, lot(1));
     place(&mut state, principal(0x02), Side::Sell, 110, lot(1));
-    state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+    crate::test_fixtures::process_pending_orders(
+        &mut state,
+        &mock_runtime_for(Principal::anonymous()),
+    );
 
     let dom = render(&state, 0);
 
@@ -135,7 +141,10 @@ fn should_normalize_depth_bar_widths_against_max_quantity() {
     place(&mut state, principal(0x01), Side::Buy, 90, lot(1));
     place(&mut state, principal(0x02), Side::Buy, 80, lot(2));
     place(&mut state, principal(0x03), Side::Sell, 110, lot(4));
-    state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+    crate::test_fixtures::process_pending_orders(
+        &mut state,
+        &mock_runtime_for(Principal::anonymous()),
+    );
 
     let dom = render(&state, 0);
     assert_eq!(

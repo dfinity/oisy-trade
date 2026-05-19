@@ -237,7 +237,10 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u64::from(LOT_SIZE);
         let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
@@ -249,7 +252,10 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u64::from(LOT_SIZE);
         let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
@@ -263,7 +269,10 @@ mod cancel_limit_order {
         // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
         place_order(&mut state, STRANGER, &pair, Side::Sell, 100, lot);
         let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, 3 * lot);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
         assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(
@@ -284,7 +293,10 @@ mod cancel_limit_order {
         // Maker buys 1 lot; taker sells 3 lots — taker partially fills and rests with 2 lots.
         place_order(&mut state, STRANGER, &pair, Side::Buy, 100, lot);
         let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100, 3 * lot);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
         assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(
@@ -508,7 +520,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -533,7 +548,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90, lot);
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -559,7 +577,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110, lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -585,7 +606,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, 3 * lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -612,7 +636,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, 2 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -635,7 +662,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90, lot);
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, 3 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -662,7 +692,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, 3 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -690,7 +723,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110, lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, 2 * lot);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
@@ -720,7 +756,10 @@ mod settle_fills {
 
         let base_before = state.get_balance(&user, &pair.base);
         let quote_before = state.get_balance(&user, &pair.quote);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
         let base_after = state.get_balance(&user, &pair.base);
         let quote_after = state.get_balance(&user, &pair.quote);
 
@@ -769,7 +808,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, 2 * lot);
         let participants = [BUYER, seller_a, seller_b];
         let totals_before = snapshot_balances(&state, &participants);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
         assert_eq!(state.get_balance(&BUYER, &pair.base), balance(2 * lot, 0));
@@ -805,7 +847,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, quantity);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         let quote_total = Price::new(price).checked_mul_quantity(&quantity).unwrap();
 
@@ -876,7 +921,10 @@ mod settle_fills {
         test_fixtures::place_order(&mut state, buyer_b, &pair_b, Side::Buy, price, lot);
         test_fixtures::place_order(&mut state, seller_b, &pair_b, Side::Sell, price, lot);
 
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         // Both books settled: both buyers hold their base free, both
         // sellers hold their quote free, no reserves left. If the second
@@ -929,7 +977,10 @@ mod settle_fills {
             let lot = u64::from(LOT_SIZE);
             let pair = icp_ckbtc_trading_pair();
             let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
 
             assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
         }
@@ -942,7 +993,10 @@ mod settle_fills {
             let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
             let sell_id =
                 test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
 
             assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
@@ -957,7 +1011,10 @@ mod settle_fills {
             let sell_id =
                 test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, 3 * lot);
             let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
 
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
             assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
@@ -973,7 +1030,10 @@ mod settle_fills {
                 test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
             let buy_id =
                 test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, 3 * lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
 
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
             assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
@@ -987,16 +1047,25 @@ mod settle_fills {
             // Sell rests with 2 lots; two successive buys deplete it
             let sell_id =
                 test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, 2 * lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
 
             let buy1_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
             assert_eq!(state.get_order_status(buy1_id), Some(OrderStatus::Filled));
 
             let buy2_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-            state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+            test_fixtures::process_pending_orders(
+                &mut state,
+                &mock_runtime_for(Principal::anonymous()),
+            );
             assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
             assert_eq!(state.get_order_status(buy2_id), Some(OrderStatus::Filled));
         }
@@ -1200,7 +1269,10 @@ mod pending_order_accessors {
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
         assert!(!state.book_ids_with_pending_orders().is_empty());
 
-        state.process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        test_fixtures::process_pending_orders(
+            &mut state,
+            &mock_runtime_for(Principal::anonymous()),
+        );
 
         assert!(state.book_ids_with_pending_orders().is_empty());
         assert!(!state.has_pending_orders());

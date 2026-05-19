@@ -84,13 +84,28 @@ pub fn cancel_limit_order(
     Ok(record.into())
 }
 
-pub fn process_pending_orders(runtime: &impl Runtime) {
+pub fn process_pending_orders(runtime: &impl Runtime) -> execute::Outcome {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
-        None => return,
+        None => return execute::Outcome::Complete,
     };
 
-    state::with_state_mut(|s| s.process_pending_orders(runtime));
+    state::with_state_mut(|s| execute::EXECUTOR.run_once(s, runtime))
+}
+
+/// Run one chunk of matching/settling and, if more work remains, schedule a
+/// zero-delay timer to continue. Intended for IC entry points (the periodic
+/// matching timer and the post-`add_limit_order` kickoff) — tests should call
+/// [`process_pending_orders`] directly, which is synchronous and timer-free.
+pub fn drive_matching() {
+    if matches!(
+        process_pending_orders(&IC_RUNTIME),
+        execute::Outcome::MoreWork,
+    ) {
+        ic_cdk_timers::set_timer(Duration::ZERO, async {
+            drive_matching();
+        });
+    }
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {

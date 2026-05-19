@@ -21,7 +21,7 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
     );
     // Trigger matching immediately, no need to wait for the periodic timer.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
+        dex_canister::drive_matching();
     });
     Ok(order_id)
 }
