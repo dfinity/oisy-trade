@@ -42,6 +42,16 @@ pub enum Outcome {
     MoreWork,
 }
 
+impl Outcome {
+    pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
+        if state.has_pending_orders() || state.has_pending_settling_events() {
+            Outcome::MoreWork
+        } else {
+            Outcome::Complete
+        }
+    }
+}
+
 impl Executor {
     /// Drive a single chunk of matching + settling against `state`.
     ///
@@ -58,17 +68,16 @@ impl Executor {
     ) -> Outcome {
         let mut order_budget = self.max_orders_per_chunk;
         for book_id in books_by_pending_count_desc(state) {
-            if order_budget == 0 {
-                break;
-            }
-            if runtime.instruction_counter() >= self.instruction_budget {
-                break;
+            if order_budget == 0 || runtime.instruction_counter() >= self.instruction_budget {
+                return Outcome::from_state(state);
             }
             let chunk = peek_pending_seqs(state, &book_id, order_budget);
             if chunk.is_empty() {
                 continue;
             }
-            order_budget -= chunk.len();
+            order_budget = order_budget
+                .checked_sub(chunk.len())
+                .expect("BUG: peek_pending_seqs returns at most order_budget pending orders");
             audit::process_event(
                 state,
                 EventType::Matching(MatchingEvent {
@@ -86,11 +95,7 @@ impl Executor {
             audit::process_event(state, EventType::Settling(event), runtime);
         }
 
-        if state.has_pending_orders() || state.has_pending_settling_events() {
-            Outcome::MoreWork
-        } else {
-            Outcome::Complete
-        }
+        Outcome::from_state(state)
     }
 }
 
