@@ -17,11 +17,12 @@ use ic_stable_structures::Memory;
 #[cfg(test)]
 mod tests;
 
-pub const DEFAULT_MAX_ORDERS_PER_CHUNK: usize = 200;
+pub const DEFAULT_MAX_ORDERS_PER_CHUNK: usize = 1_000;
 
-/// ~60% of the IC's 20B per-message instruction cap, leaving headroom for
-/// event serialization, settling, and stable-memory writes.
-pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 12_000_000_000;
+/// 1B instructions per chunk — ~5% of the IC's 20B per-message cap,
+/// leaving generous headroom for event serialization, settling, and
+/// stable-memory writes.
+pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
 pub const EXECUTOR: Executor = Executor {
     max_orders_per_chunk: DEFAULT_MAX_ORDERS_PER_CHUNK,

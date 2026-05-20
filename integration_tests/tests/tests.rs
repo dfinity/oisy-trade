@@ -1423,11 +1423,11 @@ mod chunked_matching {
 
     /// Submits more pending orders in a single PocketIC round than fit in one
     /// chunk so the canister must self-reschedule the matching timer to drain
-    /// the backlog. With `MAX_ORDERS_PER_CHUNK = 200`, posting 210 orders
+    /// the backlog. With `MAX_ORDERS_PER_CHUNK = 1_000`, posting 1_010 orders
     /// without ticking forces at least two chunks.
     #[tokio::test]
     async fn should_drain_pending_orders_across_chunks() {
-        const N_ORDERS: u64 = 210;
+        const N_ORDERS: u64 = 1_010;
         const PRICE: u64 = 100;
         const QUANTITY: u64 = 1_000_000;
 
