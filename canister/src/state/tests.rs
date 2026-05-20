@@ -1138,8 +1138,8 @@ mod execution_policy {
     }
 }
 
-mod pending_order_accessors {
-    use crate::order::{OrderBookId, OrderSeq, Side, TokenId, TokenMetadata, TradingPair};
+mod pending_state_predicates {
+    use crate::order::{OrderBookId, Side};
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
@@ -1153,96 +1153,24 @@ mod pending_order_accessors {
     #[test]
     fn should_report_no_pending_state_on_fresh_state() {
         let state = setup_one_book();
-        assert!(state.book_ids_with_pending_orders().is_empty());
         assert!(!state.has_pending_orders());
         assert!(!state.has_pending_settling_events());
-        assert!(state.peek_pending_seqs(&OrderBookId::ZERO, 10).is_empty());
     }
 
     #[test]
-    fn should_list_only_books_with_pending_orders() {
-        let mut state = setup_two_books();
-        let pair_a = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
-
-        test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
-
-        assert_eq!(
-            state.book_ids_with_pending_orders(),
-            vec![OrderBookId::ZERO],
-        );
-        assert!(state.has_pending_orders());
-    }
-
-    #[test]
-    fn should_list_both_books_when_both_have_pending_orders() {
-        let mut state = setup_two_books();
-        let pair_a = icp_ckbtc_trading_pair();
-        let pair_b = pair_b();
-        let lot = u64::from(LOT_SIZE);
-
-        test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
-        test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
-
-        assert_eq!(
-            state.book_ids_with_pending_orders(),
-            vec![OrderBookId::ZERO, OrderBookId::ONE],
-        );
-    }
-
-    #[test]
-    fn should_drop_book_from_list_after_matching_drains_it() {
+    fn should_clear_pending_predicates_after_matching_drains() {
         let mut state = setup_one_book();
         let pair = icp_ckbtc_trading_pair();
         let lot = u64::from(LOT_SIZE);
 
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
-        assert!(!state.book_ids_with_pending_orders().is_empty());
+        assert!(state.has_pending_orders());
 
         crate::EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-        assert!(state.book_ids_with_pending_orders().is_empty());
         assert!(!state.has_pending_orders());
         assert!(!state.has_pending_settling_events());
-    }
-
-    #[test]
-    fn should_peek_seqs_in_fifo_order_and_not_remove_them() {
-        let mut state = setup_one_book();
-        let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
-
-        let id1 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-        let id2 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110, lot);
-        let id3 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 120, lot);
-
-        let first_peek = state.peek_pending_seqs(&OrderBookId::ZERO, 10);
-        assert_eq!(first_peek, vec![id1.seq(), id2.seq(), id3.seq()]);
-
-        // Peeking again returns the same seqs — the queue is untouched.
-        let second_peek = state.peek_pending_seqs(&OrderBookId::ZERO, 10);
-        assert_eq!(second_peek, first_peek);
-    }
-
-    #[test]
-    fn should_respect_limit_when_peeking() {
-        let mut state = setup_one_book();
-        let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
-
-        let id1 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-        let _id2 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110, lot);
-        let _id3 = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 120, lot);
-
-        assert_eq!(
-            state.peek_pending_seqs(&OrderBookId::ZERO, 1),
-            vec![id1.seq()],
-        );
-        assert_eq!(
-            state.peek_pending_seqs(&OrderBookId::ZERO, 0),
-            Vec::<OrderSeq>::new()
-        );
     }
 
     #[test]
@@ -1256,9 +1184,10 @@ mod pending_order_accessors {
 
         // Apply only the matching event; do not drain settling. The matching
         // produces a SettlingEvent on the queue that must be observable.
+        let book = state.order_book(&OrderBookId::ZERO).unwrap();
         let matching_event = crate::state::event::MatchingEvent {
             book_id: OrderBookId::ZERO,
-            orders: state.peek_pending_seqs(&OrderBookId::ZERO, usize::MAX),
+            orders: book.pending_order_seqs().collect(),
         };
         state.record_matching_event(&matching_event, crate::state::StableMemoryOptions::Write);
 
@@ -1278,33 +1207,5 @@ mod pending_order_accessors {
             LOT_SIZE,
         );
         state
-    }
-
-    fn setup_two_books()
-    -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
-    {
-        let mut state = setup_one_book();
-        state.record_trading_pair(
-            OrderBookId::ONE,
-            pair_b(),
-            TokenMetadata {
-                symbol: "B".to_string(),
-                decimals: 8,
-            },
-            TokenMetadata {
-                symbol: "Q".to_string(),
-                decimals: 8,
-            },
-            TICK_SIZE,
-            LOT_SIZE,
-        );
-        state
-    }
-
-    fn pair_b() -> TradingPair {
-        TradingPair {
-            base: TokenId::new(Principal::from_slice(&[0xB1])),
-            quote: TokenId::new(Principal::from_slice(&[0xB2])),
-        }
     }
 }

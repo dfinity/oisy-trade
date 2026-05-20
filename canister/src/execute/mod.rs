@@ -9,6 +9,7 @@
 //! caller can reschedule.
 
 use crate::Runtime;
+use crate::order::{OrderBookId, OrderSeq};
 use crate::state::State;
 use crate::state::audit;
 use crate::state::event::{EventType, MatchingEvent};
@@ -45,24 +46,25 @@ impl Executor {
     /// Drive a single chunk of matching + settling against `state`.
     ///
     /// Matching pulls up to `max_orders_per_chunk` pending orders, distributed
-    /// across active books in book-ID order. Each book whose share of the
-    /// chunk is non-empty becomes one [`MatchingEvent`]. Settling events
-    /// queued by the matching pass are drained in the same call, bounded by
-    /// the same instruction budget.
+    /// across active books in decreasing pending-order count (ties broken by
+    /// ascending book-ID). Each book whose share of the chunk is non-empty
+    /// becomes one [`MatchingEvent`]. Settling events queued by the matching
+    /// pass are drained in the same call, bounded by the same instruction
+    /// budget.
     pub fn run_once<MH: Memory, MB: Memory>(
         &self,
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) -> Outcome {
         let mut order_budget = self.max_orders_per_chunk;
-        for book_id in state.book_ids_with_pending_orders() {
+        for book_id in books_by_pending_count_desc(state) {
             if order_budget == 0 {
                 break;
             }
             if runtime.instruction_counter() >= self.instruction_budget {
                 break;
             }
-            let chunk = state.peek_pending_seqs(&book_id, order_budget);
+            let chunk = peek_pending_seqs(state, &book_id, order_budget);
             if chunk.is_empty() {
                 continue;
             }
@@ -90,4 +92,30 @@ impl Executor {
             Outcome::Complete
         }
     }
+}
+
+/// Order-book IDs ranked by decreasing pending-order count; ties broken by
+/// ascending book id. Books with no pending orders are excluded.
+fn books_by_pending_count_desc<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Vec<OrderBookId> {
+    let mut counts: Vec<(OrderBookId, usize)> = state
+        .order_books()
+        .map(|(id, book)| (*id, book.pending_orders_len()))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    counts.sort_by(|(a_id, a_n), (b_id, b_n)| b_n.cmp(a_n).then_with(|| a_id.cmp(b_id)));
+    counts.into_iter().map(|(id, _)| id).collect()
+}
+
+/// FIFO pending-order seqs of `book_id`, capped at `limit`.
+fn peek_pending_seqs<MH: Memory, MB: Memory>(
+    state: &State<MH, MB>,
+    book_id: &OrderBookId,
+    limit: usize,
+) -> Vec<OrderSeq> {
+    state
+        .order_book(book_id)
+        .expect("BUG: ranked book_id missing from state")
+        .pending_order_seqs()
+        .take(limit)
+        .collect()
 }

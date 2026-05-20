@@ -167,7 +167,7 @@ fn should_produce_state_equivalent_to_single_shot_run() {
 }
 
 #[test]
-fn should_process_first_book_before_advancing_when_budget_is_tight() {
+fn should_process_book_with_more_pending_first_under_tight_chunk_budget() {
     let mut state = setup_two_books();
     let pair_a = icp_ckbtc_trading_pair();
     let pair_b = pair_b();
@@ -187,13 +187,65 @@ fn should_process_first_book_before_advancing_when_budget_is_tight() {
     let outcome = executor.run_once(&mut state, &runtime());
 
     assert_eq!(outcome, Outcome::MoreWork);
-    // Book A still has 1 unmatched; book B is untouched (still has 1 pending).
+    // Book A (most pending) was processed first and now has 1 left; book B is untouched.
     assert_eq!(
-        state.book_ids_with_pending_orders(),
-        vec![OrderBookId::ZERO, OrderBookId::ONE],
+        state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_orders_len(),
+        1,
     );
-    assert_eq!(state.peek_pending_seqs(&OrderBookId::ZERO, 10).len(), 1);
-    assert_eq!(state.peek_pending_seqs(&OrderBookId::ONE, 10).len(), 1);
+    assert_eq!(
+        state
+            .order_book(&OrderBookId::ONE)
+            .unwrap()
+            .pending_orders_len(),
+        1,
+    );
+}
+
+/// Ranking by pending count must beat ascending book-ID order: with book 0
+/// holding 2 pending and book 1 holding 5, a `max_orders_per_chunk = 5` run
+/// must fully drain book 1 (the larger one) and leave book 0 untouched.
+#[test]
+fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
+    let mut state = setup_two_books();
+    let pair_a = icp_ckbtc_trading_pair();
+    let pair_b = pair_b();
+    let lot = u64::from(LOT_SIZE);
+
+    // Book 0: 2 pending.
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 110, lot);
+    // Book 1: 5 pending.
+    for price in [100, 110, 120, 130, 140] {
+        test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, price, lot);
+    }
+
+    let executor = Executor {
+        max_orders_per_chunk: 5,
+        instruction_budget: u64::MAX,
+    };
+
+    let outcome = executor.run_once(&mut state, &runtime());
+
+    assert_eq!(outcome, Outcome::MoreWork);
+    assert_eq!(
+        state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_orders_len(),
+        2,
+        "lower-id book with fewer pending must be skipped this chunk",
+    );
+    assert_eq!(
+        state
+            .order_book(&OrderBookId::ONE)
+            .unwrap()
+            .pending_orders_len(),
+        0,
+        "higher-id book with more pending must be fully drained first",
+    );
 }
 
 #[test]
