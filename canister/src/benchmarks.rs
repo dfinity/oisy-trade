@@ -46,7 +46,9 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     assert_eq!(book.bids_len(), depth.bids.len());
 
     let res = canbench_rs::bench_fn(|| {
-        crate::test_fixtures::process_pending_orders(&mut state, &crate::IC_RUNTIME);
+        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
+            == crate::execute::Outcome::MoreWork
+        {}
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -89,50 +91,15 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), trades.len());
 
     let res = canbench_rs::bench_fn(|| {
-        crate::test_fixtures::process_pending_orders(&mut state, &crate::IC_RUNTIME);
+        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
+            == crate::execute::Outcome::MoreWork
+        {}
     });
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
 
     res
-}
-
-/// Benchmark a single Executor chunk against the same 1000-pending workload
-/// as [`bench_process_pending_orders_1000`]. With production constants this
-/// matches `MAX_ORDERS_PER_CHUNK` orders plus whatever paired settling fits
-/// inside `INSTRUCTION_BUDGET` — i.e. the cost of one rescheduled message.
-#[bench(raw)]
-fn bench_executor_one_chunk_1000_pending() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let trades = load_trades();
-    let mut state = new_state();
-    populate_state(&mut state, &depth);
-
-    let taker_id_offset = depth.bids.len() + depth.asks.len();
-    for (i, trade) in trades.iter().enumerate() {
-        let principal = user((taker_id_offset + i) as u64);
-        fund_user(&mut state, principal);
-        place_order(
-            &mut state,
-            principal,
-            PendingOrder {
-                side: if trade.m { Side::Sell } else { Side::Buy },
-                price: Price::new(parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
-            },
-        );
-    }
-
-    let pair = trading_pair();
-    assert_eq!(
-        state.get_order_book(&pair).unwrap().pending_orders_len(),
-        trades.len(),
-    );
-
-    canbench_rs::bench_fn(|| {
-        crate::execute::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
-    })
 }
 
 /// Benchmark processing 1000 orders that all rest without matching.
@@ -149,7 +116,9 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), 1_000);
 
     let res = canbench_rs::bench_fn(|| {
-        crate::test_fixtures::process_pending_orders(&mut state, &crate::IC_RUNTIME);
+        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
+            == crate::execute::Outcome::MoreWork
+        {}
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -175,7 +144,9 @@ fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
 fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     place_1000_non_crossing_orders(&mut state);
-    crate::test_fixtures::process_pending_orders(&mut state, &crate::IC_RUNTIME);
+    while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
+        == crate::execute::Outcome::MoreWork
+    {}
     bench_upgrade_roundtrip(state)
 }
 
@@ -376,7 +347,8 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
         depth.bids.len() + depth.asks.len()
     );
 
-    crate::test_fixtures::process_pending_orders(state, &crate::IC_RUNTIME);
+    while crate::EXECUTOR.run_once(state, &crate::IC_RUNTIME) == crate::execute::Outcome::MoreWork {
+    }
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);

@@ -7,6 +7,7 @@ use dex_types::{
 };
 use std::{num::NonZeroU64, time::Duration};
 
+pub use execute::EXECUTOR;
 pub use runtime::{IC_RUNTIME, Runtime};
 
 /// Open a pair of canbench scopes: an aggregate scope and a specific scope.

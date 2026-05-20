@@ -277,20 +277,6 @@ pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, qua
     .unwrap();
 }
 
-/// Drive the production [`crate::execute::EXECUTOR`] against `state` until it
-/// reports no more work. Equivalent to the pre-DEFI-2743 behavior of
-/// `State::process_pending_orders` — preserved as a test helper so existing
-/// matching tests don't need to think about chunk boundaries.
-pub fn process_pending_orders<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    runtime: &impl crate::Runtime,
-) where
-    MH: Memory,
-    MB: Memory,
-{
-    while crate::execute::EXECUTOR.run_once(state, runtime) == crate::execute::Outcome::MoreWork {}
-}
-
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default())
 }

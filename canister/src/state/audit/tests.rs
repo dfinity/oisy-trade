@@ -229,7 +229,7 @@ impl Scenario {
     /// replay payload.
     fn with_matching_round(mut self, matching: MatchingEvent, settling: SettlingEvent) -> Self {
         let runtime = crate::test_fixtures::mocks::mock_runtime_for(Principal::anonymous());
-        crate::test_fixtures::process_pending_orders(&mut self.state, &runtime);
+        crate::EXECUTOR.run_once(&mut self.state, &runtime);
         let matching_ts = self.timestamp();
         let settling_ts = self.timestamp();
         self.events.push(Event {
