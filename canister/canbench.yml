@@ -3,5 +3,5 @@ build_cmd:
 wasm_path:
   ../target/wasm32-unknown-unknown/release/dex_canister.wasm
 init_args:
-  # DexArg::Init(InitArg { mode: GeneralAvailability })
-  hex: 4449444c076b02fcb88b840301b0ced18403066e026c01e3a683c304036e046b0296bab03c058390999e057f6d686c01e3a683c3040401000101
+  # DexArg::Init(InitArg { mode: GeneralAvailability, max_orders_per_chunk: 1_000, instruction_budget: 1_000_000_000 })
+  hex: 4449444c086b02fcb88b840301b0ced18403076e026c03acb380c20203e3a683c30404d6d6fdb705036e786e056b0296bab03c068390999e057f6d686c03acb380c20278e3a683c30405d6d6fdb70578010001e8030000000000000100ca9a3b00000000

@@ -12,10 +12,11 @@ use crate::balance::TokenBalance;
 use crate::order::{
     OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
+use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use candid::Nat;
-use dex_types_internal::{ExecutionPolicy, Mode};
+use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
 use std::collections::{BTreeMap, VecDeque};
@@ -43,7 +44,7 @@ pub struct StateSnapshot {
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
     /// Chunked-matching policy. `Option` so snapshots written before
     /// this field existed continue to decode (back-filled with
-    /// [`ExecutionPolicy::PRODUCTION_DEFAULT`] in [`Self::into_state`]).
+    /// [`ExecutionPolicy::default`] in [`Self::into_state`]).
     #[n(7)]
     pub execution_policy: Option<ExecutionPolicy>,
 }
@@ -122,7 +123,7 @@ impl StateSnapshot {
             } else {
                 Some(pending_settling_events.iter().cloned().collect())
             },
-            execution_policy: Some(*execution_policy),
+            execution_policy: Some(execution_policy.clone()),
         }
     }
 
@@ -177,9 +178,7 @@ impl StateSnapshot {
 
         State {
             mode: self.mode,
-            execution_policy: self
-                .execution_policy
-                .unwrap_or(ExecutionPolicy::PRODUCTION_DEFAULT),
+            execution_policy: self.execution_policy.unwrap_or_default(),
             next_book_id: self.next_book_id,
             tokens,
             trading_pairs,

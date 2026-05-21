@@ -1,8 +1,10 @@
 pub mod audit;
 pub mod event;
+pub mod execution_policy;
 mod map;
 pub mod snapshot;
 
+pub use execution_policy::ExecutionPolicy;
 pub use map::TradingPairMap;
 pub use snapshot::StateSnapshot;
 
@@ -19,7 +21,7 @@ use crate::order::{
 };
 use crate::storage::VMem;
 use candid::{Nat, Principal};
-use dex_types_internal::{ExecutionPolicy, InitArg, Mode};
+use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -67,9 +69,6 @@ pub enum StableMemoryOptions {
 #[derive(Debug)]
 pub struct State<MH: Memory, MB: Memory> {
     mode: Mode,
-    /// Chunked-matching bounds. Resolved at init from
-    /// [`InitArg::execution_policy`] (falling back to
-    /// [`ExecutionPolicy::PRODUCTION_DEFAULT`]); rewritable on upgrade.
     execution_policy: ExecutionPolicy,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
@@ -103,9 +102,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<Self, String> {
         Ok(Self {
             mode: init_arg.mode,
-            execution_policy: init_arg
-                .execution_policy
-                .unwrap_or(ExecutionPolicy::PRODUCTION_DEFAULT),
+            execution_policy: ExecutionPolicy::new(
+                init_arg.max_orders_per_chunk,
+                init_arg.instruction_budget,
+            ),
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
@@ -701,7 +701,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
         } = self;
         Self {
             mode: mode.clone(),
-            execution_policy: *execution_policy,
+            execution_policy: execution_policy.clone(),
             next_book_id: *next_book_id,
             tokens: tokens.clone(),
             trading_pairs: trading_pairs.clone(),

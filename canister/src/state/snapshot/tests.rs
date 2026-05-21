@@ -14,9 +14,10 @@ mod schema_stability {
         Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
         TradingPair,
     };
+    use crate::state::ExecutionPolicy;
     use crate::state::event::{BalanceOperation, OrderStatusTransition, SettlingEvent};
     use candid::{Nat, Principal};
-    use dex_types_internal::{ExecutionPolicy, Mode};
+    use dex_types_internal::Mode;
     use std::num::NonZeroU64;
 
     /// Fixture exercising every `#[n(N)]` field reachable from `StateSnapshot`:
@@ -126,11 +127,8 @@ mod schema_stability {
                     },
                 ],
             }]),
-            // Visibly non-default values so the field is encoded.
-            execution_policy: Some(ExecutionPolicy {
-                max_orders_per_chunk: 200,
-                instruction_budget: 5_000_000_000,
-            }),
+            // Non-default policy.
+            execution_policy: Some(ExecutionPolicy::new(200, 5_000_000_000)),
         }
     }
 
@@ -187,10 +185,7 @@ fn should_roundtrip_state_through_snapshot() {
     // Non-default policy so the round-trip exercises the new
     // `execution_policy` field rather than silently relying on the
     // `into_state` fallback.
-    state.set_execution_policy(dex_types_internal::ExecutionPolicy {
-        max_orders_per_chunk: 42,
-        instruction_budget: 12_345,
-    });
+    state.set_execution_policy(crate::state::ExecutionPolicy::new(42, 12_345));
     let pair = icp_ckbtc_trading_pair();
     state.record_trading_pair(
         OrderBookId::ZERO,

@@ -16,20 +16,23 @@ pub fn init_event(mode: Mode) -> Event {
         timestamp: 0,
         payload: EventType::Init(InitArg {
             mode,
-            execution_policy: None,
+            max_orders_per_chunk: 1_000,
+            instruction_budget: 1_000_000_000,
         }),
     }
 }
 
 pub fn upgrade_event(
     mode: Option<Mode>,
-    execution_policy: Option<dex_types_internal::ExecutionPolicy>,
+    max_orders_per_chunk: Option<u64>,
+    instruction_budget: Option<u64>,
 ) -> Event {
     Event {
         timestamp: 1,
         payload: EventType::Upgrade(UpgradeArg {
             mode,
-            execution_policy,
+            max_orders_per_chunk,
+            instruction_budget,
         }),
     }
 }
@@ -109,8 +112,8 @@ impl WorstCaseEvent {
 
     pub fn expected_memory_size(&self) -> usize {
         match self {
-            Self::Init => 328,
-            Self::Upgrade => 328,
+            Self::Init => 346,
+            Self::Upgrade => 346,
             Self::AddTradingPair => 136,
             Self::Deposit => 95,
             Self::Withdraw => 104,
@@ -136,14 +139,16 @@ fn restricted_principals() -> std::collections::BTreeSet<Principal> {
 fn init_restricted() -> EventType {
     EventType::Init(InitArg {
         mode: Mode::RestrictedTo(restricted_principals()),
-        execution_policy: None,
+        max_orders_per_chunk: u64::MAX,
+        instruction_budget: u64::MAX,
     })
 }
 
 fn upgrade_restricted() -> EventType {
     EventType::Upgrade(UpgradeArg {
         mode: Some(Mode::RestrictedTo(restricted_principals())),
-        execution_policy: None,
+        max_orders_per_chunk: Some(u64::MAX),
+        instruction_budget: Some(u64::MAX),
     })
 }
 

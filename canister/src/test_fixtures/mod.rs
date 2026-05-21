@@ -56,7 +56,8 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
     state::State::new(
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
-            execution_policy: None,
+            max_orders_per_chunk: 1_000,
+            instruction_budget: 1_000_000_000,
         },
         order_history(),
         balances(),
@@ -70,7 +71,8 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
     state::State::new(
         dex_types_internal::InitArg {
             mode: dex_types_internal::Mode::GeneralAvailability,
-            execution_policy: None,
+            max_orders_per_chunk: 1_000,
+            instruction_budget: 1_000_000_000,
         },
         order::OrderHistory::new(crate::storage::order_history_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
@@ -179,7 +181,8 @@ pub fn init_state_with_order_book() {
         state::State::new(
             dex_types_internal::InitArg {
                 mode: dex_types_internal::Mode::GeneralAvailability,
-                execution_policy: None,
+                max_orders_per_chunk: 1_000,
+                instruction_budget: 1_000_000_000,
             },
             order_history,
             balances,
@@ -325,7 +328,7 @@ pub mod arbitrary {
         WithdrawEvent,
     };
     use candid::Principal;
-    use dex_types_internal::{ExecutionPolicy, InitArg, Mode, UpgradeArg};
+    use dex_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::btree_set;
     use proptest::prelude::*;
     use std::num::NonZeroU64;
@@ -512,20 +515,13 @@ pub mod arbitrary {
         ]
     }
 
-    pub fn arb_execution_policy() -> impl Strategy<Value = ExecutionPolicy> {
-        (any::<u64>(), any::<u64>()).prop_map(|(max_orders_per_chunk, instruction_budget)| {
-            ExecutionPolicy {
+    pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
+        // Stay within ExecutionPolicy's validation bounds so `State::new` won't panic.
+        (arb_mode(), 1..=10_000u64, 1..=40_000_000_000u64).prop_map(
+            |(mode, max_orders_per_chunk, instruction_budget)| InitArg {
+                mode,
                 max_orders_per_chunk,
                 instruction_budget,
-            }
-        })
-    }
-
-    pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
-        (arb_mode(), prop::option::of(arb_execution_policy())).prop_map(
-            |(mode, execution_policy)| InitArg {
-                mode,
-                execution_policy,
             },
         )
     }
@@ -533,12 +529,16 @@ pub mod arbitrary {
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
         (
             prop::option::of(arb_mode()),
-            prop::option::of(arb_execution_policy()),
+            prop::option::of(1..=10_000u64),
+            prop::option::of(1..=40_000_000_000u64),
         )
-            .prop_map(|(mode, execution_policy)| UpgradeArg {
-                mode,
-                execution_policy,
-            })
+            .prop_map(
+                |(mode, max_orders_per_chunk, instruction_budget)| UpgradeArg {
+                    mode,
+                    max_orders_per_chunk,
+                    instruction_budget,
+                },
+            )
     }
 
     pub fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {

@@ -30,10 +30,12 @@ pub struct InitArg {
     /// Controls who may call update endpoints.
     #[cfg_attr(feature = "event", n(0))]
     pub mode: Mode,
-    /// Bounds the chunked matching pipeline's per-message work. `None`
-    /// resolves to [`ExecutionPolicy::PRODUCTION_DEFAULT`].
+    /// Maximum pending orders matched per chunked-execution chunk.
     #[cfg_attr(feature = "event", n(1))]
-    pub execution_policy: Option<ExecutionPolicy>,
+    pub max_orders_per_chunk: u64,
+    /// Maximum instructions consumed before a chunk yields.
+    #[cfg_attr(feature = "event", n(2))]
+    pub instruction_budget: u64,
 }
 
 /// Argument for canister upgrade.
@@ -43,34 +45,12 @@ pub struct UpgradeArg {
     /// If set, changes who may call update endpoints.
     #[cfg_attr(feature = "event", n(0))]
     pub mode: Option<Mode>,
-    /// If set, replaces the chunked-matching execution policy. Persists
-    /// across subsequent upgrades unless overridden again.
+    /// If set, overrides the current `max_orders_per_chunk`.
     #[cfg_attr(feature = "event", n(1))]
-    pub execution_policy: Option<ExecutionPolicy>,
-}
-
-/// Bounds for a single matching chunk. Both fields are consulted by the
-/// canister's chunked execution loop to decide when to yield and
-/// self-reschedule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-#[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
-pub struct ExecutionPolicy {
-    /// Maximum number of pending orders matched per chunk.
-    #[cfg_attr(feature = "event", n(0))]
-    pub max_orders_per_chunk: u64,
-    /// Maximum instructions consumed before the chunk yields. ~5% of the
-    /// IC's 20B per-message cap is a comfortable production setting.
-    #[cfg_attr(feature = "event", n(1))]
-    pub instruction_budget: u64,
-}
-
-impl ExecutionPolicy {
-    /// Conservative production policy: 1 000 orders per chunk, 1B
-    /// instructions per chunk.
-    pub const PRODUCTION_DEFAULT: Self = Self {
-        max_orders_per_chunk: 1_000,
-        instruction_budget: 1_000_000_000,
-    };
+    pub max_orders_per_chunk: Option<u64>,
+    /// If set, overrides the current `instruction_budget`.
+    #[cfg_attr(feature = "event", n(2))]
+    pub instruction_budget: Option<u64>,
 }
 
 /// Controls who may call update endpoints on the DEX canister.

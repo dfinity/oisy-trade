@@ -46,13 +46,18 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::Upgrade(UpgradeArg {
             mode: new_mode,
-            execution_policy: new_policy,
+            max_orders_per_chunk,
+            instruction_budget,
         }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
             }
-            if let Some(new_policy) = new_policy {
-                state.set_execution_policy(*new_policy);
+            if max_orders_per_chunk.is_some() || instruction_budget.is_some() {
+                let current = state.execution_policy();
+                state.set_execution_policy(crate::state::ExecutionPolicy::new(
+                    max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
+                    instruction_budget.unwrap_or_else(|| current.instruction_budget()),
+                ));
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {

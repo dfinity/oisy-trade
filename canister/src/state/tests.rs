@@ -54,7 +54,8 @@ mod assert_caller_is_allowed {
         State::new(
             dex_types_internal::InitArg {
                 mode,
-                execution_policy: None,
+                max_orders_per_chunk: 1_000,
+                instruction_budget: 1_000_000_000,
             },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
@@ -1073,44 +1074,23 @@ mod settle_fills {
 mod execution_policy {
     use crate::balance::TokenBalance;
     use crate::order::OrderHistory;
-    use crate::state::State;
-    use dex_types_internal::{ExecutionPolicy, InitArg, Mode};
+    use crate::state::{ExecutionPolicy, State};
+    use dex_types_internal::{InitArg, Mode};
     use ic_stable_structures::VectorMemory;
 
     #[test]
-    fn should_default_to_production_policy_when_init_omits_it() {
+    fn should_thread_init_arg_fields_through_to_execution_policy() {
         let state = State::new(
             InitArg {
                 mode: Mode::GeneralAvailability,
-                execution_policy: None,
+                max_orders_per_chunk: 17,
+                instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();
 
-        assert_eq!(
-            state.execution_policy(),
-            &ExecutionPolicy::PRODUCTION_DEFAULT
-        );
-    }
-
-    #[test]
-    fn should_use_init_arg_policy_when_provided() {
-        let custom = ExecutionPolicy {
-            max_orders_per_chunk: 17,
-            instruction_budget: 12_345,
-        };
-        let state = State::new(
-            InitArg {
-                mode: Mode::GeneralAvailability,
-                execution_policy: Some(custom),
-            },
-            OrderHistory::new(VectorMemory::default()),
-            TokenBalance::new(VectorMemory::default()),
-        )
-        .unwrap();
-
-        assert_eq!(state.execution_policy(), &custom);
+        assert_eq!(state.execution_policy(), &ExecutionPolicy::new(17, 12_345));
     }
 }

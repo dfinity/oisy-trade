@@ -60,7 +60,8 @@ impl Setup {
             dex_wasm(),
             Encode!(&DexArg::Init(InitArg {
                 mode: Mode::GeneralAvailability,
-                execution_policy: None,
+                max_orders_per_chunk: 1_000,
+                instruction_budget: 1_000_000_000,
             }))
             .unwrap(),
             Some(controller),
