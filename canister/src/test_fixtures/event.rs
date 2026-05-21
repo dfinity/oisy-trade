@@ -21,12 +21,15 @@ pub fn init_event(mode: Mode) -> Event {
     }
 }
 
-pub fn upgrade_event(mode: Option<Mode>) -> Event {
+pub fn upgrade_event(
+    mode: Option<Mode>,
+    execution_policy: Option<dex_types_internal::ExecutionPolicy>,
+) -> Event {
     Event {
         timestamp: 1,
         payload: EventType::Upgrade(UpgradeArg {
             mode,
-            execution_policy: None,
+            execution_policy,
         }),
     }
 }

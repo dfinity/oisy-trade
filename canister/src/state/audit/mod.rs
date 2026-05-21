@@ -46,10 +46,13 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::Upgrade(UpgradeArg {
             mode: new_mode,
-            execution_policy: _,
+            execution_policy: new_policy,
         }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
+            }
+            if let Some(new_policy) = new_policy {
+                state.set_execution_policy(*new_policy);
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {
