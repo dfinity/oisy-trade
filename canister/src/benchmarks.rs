@@ -46,9 +46,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     assert_eq!(book.bids_len(), depth.bids.len());
 
     let res = canbench_rs::bench_fn(|| {
-        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
-            == crate::execute::Outcome::MoreWork
-        {}
+        drive_matching_to_completion(&mut state);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -91,9 +89,7 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), trades.len());
 
     let res = canbench_rs::bench_fn(|| {
-        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
-            == crate::execute::Outcome::MoreWork
-        {}
+        drive_matching_to_completion(&mut state);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -116,9 +112,7 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), 1_000);
 
     let res = canbench_rs::bench_fn(|| {
-        while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
-            == crate::execute::Outcome::MoreWork
-        {}
+        drive_matching_to_completion(&mut state);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -144,9 +138,7 @@ fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
 fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     place_1000_non_crossing_orders(&mut state);
-    while crate::EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME)
-        == crate::execute::Outcome::MoreWork
-    {}
+    drive_matching_to_completion(&mut state);
     bench_upgrade_roundtrip(state)
 }
 
@@ -347,8 +339,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
         depth.bids.len() + depth.asks.len()
     );
 
-    while crate::EXECUTOR.run_once(state, &crate::IC_RUNTIME) == crate::execute::Outcome::MoreWork {
-    }
+    drive_matching_to_completion(state);
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
@@ -387,6 +378,23 @@ fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem
             },
         );
     }
+}
+
+/// Drive matching+settling to completion regardless of chunk policy.
+///
+/// Benchmarks run inside a single canbench iteration where
+/// `instruction_counter` is monotonic across calls, so the production
+/// `EXECUTOR`'s `INSTRUCTION_BUDGET` would trip once exceeded and a
+/// `while … == MoreWork` loop on it would spin forever (the next `run_once`
+/// can't make progress when the counter is already past the budget). The
+/// unlimited executor here bypasses both bounds so the bench measures a
+/// full matching round in a single `run_once` call.
+fn drive_matching_to_completion(state: &mut State<storage::VMem, storage::VMem>) {
+    crate::execute::Executor {
+        max_orders_per_chunk: usize::MAX,
+        instruction_budget: u64::MAX,
+    }
+    .run_once(state, &crate::IC_RUNTIME);
 }
 
 /// Generate a unique principal from a sequential counter.
