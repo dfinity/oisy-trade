@@ -589,6 +589,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
         self.pending_settling_events.pop_front()
     }
+
+    pub fn has_pending_settling_events(&self) -> bool {
+        !self.pending_settling_events.is_empty()
+    }
 }
 
 /// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
