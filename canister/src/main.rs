@@ -243,14 +243,6 @@ fn get_events(
                         .into_iter()
                         .map(map_balance_operation)
                         .collect(),
-                    transitions: e
-                        .transitions
-                        .into_iter()
-                        .map(|t| event::OrderStatusTransition {
-                            seq: t.seq.get(),
-                            status: dex_types::OrderStatus::from(t.status),
-                        })
-                        .collect(),
                 }),
             },
         }

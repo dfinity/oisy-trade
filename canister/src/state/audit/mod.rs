@@ -118,10 +118,10 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_limit_order(*user, book_id, order, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
-            state.record_cancel_limit_order(*order_id);
+            state.record_cancel_limit_order(*order_id, persistence);
         }
         EventType::Matching(event) => {
-            state.record_matching_event(event);
+            state.record_matching_event(event, persistence);
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);

@@ -72,7 +72,6 @@ pub struct MatchingEvent {
 pub struct SettlingEvent {
     pub book_id: u64,
     pub balance_operations: Vec<BalanceOperation>,
-    pub transitions: Vec<OrderStatusTransition>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -99,12 +98,6 @@ pub enum BalanceOperation {
 pub enum PairToken {
     Base,
     Quote,
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub struct OrderStatusTransition {
-    pub seq: u64,
-    pub status: dex_types::OrderStatus,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

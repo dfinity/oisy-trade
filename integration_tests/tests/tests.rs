@@ -858,11 +858,11 @@ async fn should_replay_events_on_upgrade() {
         setup.dex_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
-        // Init + AddTradingPair + Deposit + AddLimitOrder + Matching + Settling.
-        // The resting sell has no cross: Matching enumerates the pending seq,
-        // Settling carries no balance operations but records the Pending->Open
-        // transition.
-        assert_eq!(events.len(), 6);
+        // Init + AddTradingPair + Deposit + AddLimitOrder + Matching.
+        // The resting sell has no cross: `Matching` enumerates the pending
+        // seq and applies the Pending->Open status transition synchronously
+        // (no balance ops, so no `Settling` event is emitted).
+        assert_eq!(events.len(), 5);
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
             assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
                 user: setup.user(),
@@ -876,16 +876,6 @@ async fn should_replay_events_on_upgrade() {
             assert_eq!(*e, dex_types_internal::event::MatchingEvent {
                 book_id: 0,
                 orders: vec![0],
-            });
-        });
-        assert_matches!(&events[5], EventType::Settling(e) => {
-            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
-                book_id: 0,
-                balance_operations: vec![],
-                transitions: vec![dex_types_internal::event::OrderStatusTransition {
-                    seq: 0,
-                    status: dex_types::OrderStatus::Open,
-                }],
             });
         });
     });
@@ -931,17 +921,17 @@ async fn should_replay_events_on_upgrade() {
             .get_balance(setup.quote_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
-        // Step 4 produced 6 events; step 5 adds Deposit (buyer) + AddLimitOrder
+        // Step 4 produced 5 events; step 5 adds Deposit (buyer) + AddLimitOrder
         // + Matching + Settling.
-        assert_eq!(events.len(), 10);
-        assert_matches!(&events[6], EventType::Deposit(e) => {
+        assert_eq!(events.len(), 9);
+        assert_matches!(&events[5], EventType::Deposit(e) => {
             assert_eq!(*e, dex_types_internal::event::DepositEvent {
                 user: buyer,
                 token: setup.quote_token_id(),
                 amount: Nat::from(quote_reserved),
             });
         });
-        assert_matches!(&events[7], EventType::AddLimitOrder(e) => {
+        assert_matches!(&events[6], EventType::AddLimitOrder(e) => {
             assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
                 user: buyer,
                 order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 1 },
@@ -950,13 +940,13 @@ async fn should_replay_events_on_upgrade() {
                 quantity: Nat::from(deposit_amount),
             });
         });
-        assert_matches!(&events[8], EventType::Matching(e) => {
+        assert_matches!(&events[7], EventType::Matching(e) => {
             assert_eq!(*e, dex_types_internal::event::MatchingEvent {
                 book_id: 0,
                 orders: vec![1],
             });
         });
-        assert_matches!(&events[9], EventType::Settling(e) => {
+        assert_matches!(&events[8], EventType::Settling(e) => {
             assert_eq!(*e, dex_types_internal::event::SettlingEvent {
                 book_id: 0,
                 balance_operations: vec![
@@ -971,16 +961,6 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                    },
-                ],
-                transitions: vec![
-                    dex_types_internal::event::OrderStatusTransition {
-                        seq: 0,
-                        status: dex_types::OrderStatus::Filled,
-                    },
-                    dex_types_internal::event::OrderStatusTransition {
-                        seq: 1,
-                        status: dex_types::OrderStatus::Filled,
                     },
                 ],
             });

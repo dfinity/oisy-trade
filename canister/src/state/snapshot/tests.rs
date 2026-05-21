@@ -10,11 +10,10 @@ use candid::Principal;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, OrderStatus, PairToken, PendingOrder,
-        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
-        TradingPair,
+        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder, Price,
+        PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
     };
-    use crate::state::event::{BalanceOperation, OrderStatusTransition, SettlingEvent};
+    use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
     use dex_types_internal::Mode;
     use std::num::NonZeroU64;
@@ -115,16 +114,6 @@ mod schema_stability {
                         amount: Quantity::from(1_000_000u64),
                     },
                 ],
-                transitions: vec![
-                    OrderStatusTransition {
-                        seq: OrderSeq::new(5),
-                        status: OrderStatus::Filled,
-                    },
-                    OrderStatusTransition {
-                        seq: OrderSeq::new(6),
-                        status: OrderStatus::Filled,
-                    },
-                ],
             }]),
             // Non-default policy.
             max_orders_per_chunk: Some(200),
@@ -148,8 +137,8 @@ mod schema_stability {
     const GOLDEN_HEX: &str = "\
         89820080810882828141018261410882814102826142068182828141018141028107818881078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810481828141011a000186a08183810782820084810581068201801a\
-        05f5e100820084810681058200801a000f424082828105820280828106820280\
+        186e818281021a0007a12081810481828141011a000186a08182810782820084810581068201801a\
+        05f5e100820084810681058200801a000f4240\
         18c81b000000012a05f200";
 
     #[test]

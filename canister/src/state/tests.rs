@@ -329,10 +329,13 @@ mod cancel_limit_order {
             .unwrap()
             .pending_order_seqs()
             .collect();
-        state.record_matching_event(&crate::state::event::MatchingEvent {
-            book_id: OrderBookId::ZERO,
-            orders,
-        });
+        state.record_matching_event(
+            &crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders,
+            },
+            crate::state::StableMemoryOptions::Write,
+        );
         assert!(state.has_pending_settling_events());
 
         let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));

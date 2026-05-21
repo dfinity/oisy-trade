@@ -401,12 +401,12 @@ type MatchingEvent = record {
     orders : vec nat64;
 };
 
-// Declarative record of the balance operations and order-status transitions
-// produced by a matching round.
+// Declarative record of the balance operations produced by a matching round
+// or a cancellation. Order-status transitions are applied synchronously by
+// the producing path, so they are no longer carried on this event.
 type SettlingEvent = record {
     book_id : nat64;
     balance_operations : vec BalanceOperation;
-    transitions : vec OrderStatusTransition;
 };
 
 // Balance movement recorded during settlement. `from_order` / `to_order` /
@@ -428,11 +428,6 @@ type BalanceOperation = variant {
 };
 
 type PairToken = variant { Base; Quote };
-
-type OrderStatusTransition = record {
-    seq : nat64;
-    status : OrderStatus;
-};
 
 // Type of a canister event.
 type EventType = variant {
