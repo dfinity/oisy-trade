@@ -14,14 +14,20 @@ use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
 pub fn init_event(mode: Mode) -> Event {
     Event {
         timestamp: 0,
-        payload: EventType::Init(InitArg { mode }),
+        payload: EventType::Init(InitArg {
+            mode,
+            execution_policy: None,
+        }),
     }
 }
 
 pub fn upgrade_event(mode: Option<Mode>) -> Event {
     Event {
         timestamp: 1,
-        payload: EventType::Upgrade(UpgradeArg { mode }),
+        payload: EventType::Upgrade(UpgradeArg {
+            mode,
+            execution_policy: None,
+        }),
     }
 }
 
@@ -127,12 +133,14 @@ fn restricted_principals() -> std::collections::BTreeSet<Principal> {
 fn init_restricted() -> EventType {
     EventType::Init(InitArg {
         mode: Mode::RestrictedTo(restricted_principals()),
+        execution_policy: None,
     })
 }
 
 fn upgrade_restricted() -> EventType {
     EventType::Upgrade(UpgradeArg {
         mode: Some(Mode::RestrictedTo(restricted_principals())),
+        execution_policy: None,
     })
 }
 

@@ -44,7 +44,10 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Init(_) => {
             panic!("BUG: state re-initialization is not allowed");
         }
-        EventType::Upgrade(UpgradeArg { mode: new_mode }) => {
+        EventType::Upgrade(UpgradeArg {
+            mode: new_mode,
+            execution_policy: _,
+        }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
             }

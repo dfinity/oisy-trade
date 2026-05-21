@@ -52,7 +52,10 @@ mod assert_caller_is_allowed {
         mode: Mode,
     ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
         State::new(
-            dex_types_internal::InitArg { mode },
+            dex_types_internal::InitArg {
+                mode,
+                execution_policy: None,
+            },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )

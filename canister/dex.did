@@ -325,16 +325,28 @@ type Mode = variant {
     RestrictedTo : vec principal;
 };
 
+// Bounds for a single matching chunk consulted by the chunked execution loop.
+type ExecutionPolicy = record {
+    // Maximum number of pending orders matched per chunk.
+    max_orders_per_chunk : nat64;
+    // Maximum instructions consumed before the chunk yields.
+    instruction_budget : nat64;
+};
+
 // Argument for canister initialization.
 type InitArg = record {
     // Controls who may call update endpoints.
     mode : Mode;
+    // If set, overrides the production-default chunked-matching policy.
+    execution_policy : opt ExecutionPolicy;
 };
 
 // Argument for canister upgrade.
 type UpgradeArg = record {
     // If set, changes who may call update endpoints.
     mode : opt Mode;
+    // If set, replaces the chunked-matching execution policy.
+    execution_policy : opt ExecutionPolicy;
 };
 
 // Argument passed to the DEX canister on init or upgrade.

@@ -59,7 +59,8 @@ impl Setup {
             canister_id,
             dex_wasm(),
             Encode!(&DexArg::Init(InitArg {
-                mode: Mode::GeneralAvailability
+                mode: Mode::GeneralAvailability,
+                execution_policy: None,
             }))
             .unwrap(),
             Some(controller),

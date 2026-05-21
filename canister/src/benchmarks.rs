@@ -272,6 +272,7 @@ fn new_state() -> State<storage::VMem, storage::VMem> {
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
+            execution_policy: None,
         },
         OrderHistory::new(storage::order_history_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),
