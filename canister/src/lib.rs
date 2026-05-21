@@ -101,6 +101,9 @@ pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatu
 pub fn drive_matching() {
     match process_pending_orders(&IC_RUNTIME) {
         execute::ExecutionStatus::MoreWork => {
+            // TODO DEFI-2823: coalesce zero-delay matching timers so a
+            // burst of `add_limit_order` kickoffs plus this self-reschedule
+            // chain doesn't queue O(N) redundant timers per burst.
             ic_cdk_timers::set_timer(Duration::ZERO, async {
                 drive_matching();
             });
