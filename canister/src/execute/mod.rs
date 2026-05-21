@@ -1,12 +1,13 @@
 //! Chunked driver for the pending-order matching pipeline.
 //!
 //! [`Executor::run_once`] processes a bounded slice of pending matching +
-//! settling work. It emits at most `max_orders_per_chunk` orders' worth of
-//! `MatchingEvent`s across the active books, then drains paired
-//! `SettlingEvent`s. Total work per call is additionally capped by
-//! `instruction_budget` (compared against [`Runtime::instruction_counter`]).
-//! If anything is left over the call reports [`Outcome::MoreWork`] so the
-//! caller can reschedule.
+//! settling work. It first drains any settling events left over from a prior
+//! chunk, then emits at most `max_orders_per_chunk` orders' worth of
+//! `MatchingEvent`s across the active books — settling each book's
+//! `MatchingEvent` inline before moving on to the next book. Total work per
+//! call is additionally capped by `instruction_budget` (compared against
+//! [`Runtime::instruction_counter`]). If anything is left over the call
+//! reports [`Outcome::MoreWork`] so the caller can reschedule.
 
 use crate::Runtime;
 use crate::order::{OrderBookId, OrderSeq};
@@ -55,17 +56,22 @@ impl Outcome {
 impl Executor {
     /// Drive a single chunk of matching + settling against `state`.
     ///
-    /// Matching pulls up to `max_orders_per_chunk` pending orders, distributed
-    /// across active books in decreasing pending-order count (ties broken by
+    /// Pre-drains any settling events left over from a prior chunk, then
+    /// pulls up to `max_orders_per_chunk` pending orders distributed across
+    /// active books in decreasing pending-order count (ties broken by
     /// ascending book-ID). Each book whose share of the chunk is non-empty
-    /// becomes one [`MatchingEvent`]. Settling events queued by the matching
-    /// pass are drained in the same call, bounded by the same instruction
-    /// budget.
+    /// becomes one [`MatchingEvent`] whose paired settling is drained
+    /// inline before the next book is visited. The total per-call work is
+    /// bounded by `instruction_budget`.
     pub fn run_once<MH: Memory, MB: Memory>(
         &self,
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) -> Outcome {
+        // Clear any settling events left over from a prior chunk whose
+        // inline drain was interrupted by the instruction budget.
+        self.drain_settling(state, runtime);
+
         let mut order_budget = self.max_orders_per_chunk;
         for book_id in books_by_pending_count_desc(state) {
             if order_budget == 0 || runtime.instruction_counter() >= self.instruction_budget {
@@ -86,16 +92,24 @@ impl Executor {
                 }),
                 runtime,
             );
+            // Settle this book's matches before advancing to the next book.
+            self.drain_settling(state, runtime);
         }
 
+        Outcome::from_state(state)
+    }
+
+    fn drain_settling<MH: Memory, MB: Memory>(
+        &self,
+        state: &mut State<MH, MB>,
+        runtime: &impl Runtime,
+    ) {
         while runtime.instruction_counter() < self.instruction_budget {
             let Some(event) = state.take_next_pending_settling_event() else {
                 break;
             };
             audit::process_event(state, EventType::Settling(event), runtime);
         }
-
-        Outcome::from_state(state)
     }
 }
 

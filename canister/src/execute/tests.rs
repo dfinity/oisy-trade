@@ -248,6 +248,68 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
     );
 }
 
+/// `run_once` must drain settling events that another path (e.g. a prior
+/// chunk whose inline drain was budget-interrupted, or a cancel) left on
+/// the queue, even when there is no new matching work to do.
+#[test]
+fn should_drain_leftover_settling_events_before_running_matching() {
+    let mut state = setup_one_book();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+
+    // Stage a settling event without draining it by calling
+    // record_matching_event directly — that's the producer side of the
+    // pending_settling_events queue.
+    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+    let pending: Vec<_> = state
+        .order_book(&OrderBookId::ZERO)
+        .unwrap()
+        .pending_order_seqs()
+        .collect();
+    state.record_matching_event(
+        &crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: pending,
+        },
+        crate::state::StableMemoryOptions::Write,
+    );
+    assert!(state.has_pending_settling_events());
+    assert!(!state.has_pending_orders());
+
+    let outcome = unlimited_executor().run_once(&mut state, &runtime());
+
+    assert_eq!(outcome, Outcome::Complete);
+    assert!(!state.has_pending_settling_events());
+}
+
+/// Each book's settling must complete before the next book is matched, so
+/// the settling queue is empty between books and the post-`run_once`
+/// invariant `!has_pending_settling_events()` holds whenever the budget
+/// covered every book.
+#[test]
+fn should_settle_each_book_before_advancing_to_the_next() {
+    let mut state = setup_two_books();
+    let pair_a = icp_ckbtc_trading_pair();
+    let pair_b = pair_b();
+    let lot = u64::from(LOT_SIZE);
+
+    // Both books have a crossing pair that will produce a SettlingEvent.
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair_a, Side::Sell, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
+
+    let outcome = unlimited_executor().run_once(&mut state, &runtime());
+
+    assert_eq!(outcome, Outcome::Complete);
+    assert!(!state.has_pending_orders());
+    assert!(!state.has_pending_settling_events());
+    // Balances on both books reflect the fills — proves both settlements ran.
+    assert_eq!(state.get_balance(&BUYER, &pair_a.base).free(), &lot.into(),);
+    assert_eq!(state.get_balance(&BUYER, &pair_b.base).free(), &lot.into(),);
+}
+
 #[test]
 fn should_exit_early_when_instruction_budget_already_exceeded() {
     let mut state = setup_one_book();
