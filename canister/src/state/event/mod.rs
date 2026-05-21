@@ -109,10 +109,8 @@ pub struct MatchingEvent {
     pub orders: Vec<OrderSeq>,
 }
 
-/// Balance-side outcome of a matching round or cancellation. Order-status
-/// transitions are applied synchronously by the producing path
-/// (`record_matching_event` / `record_cancel_limit_order`), so a settling
-/// event arriving late never leaves `order_history` lagging the book.
+/// Outcome of the matching engine:
+/// * balance transitions between maker/taker
 #[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]

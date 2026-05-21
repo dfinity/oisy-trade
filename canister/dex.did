@@ -402,8 +402,7 @@ type MatchingEvent = record {
 };
 
 // Declarative record of the balance operations produced by a matching round
-// or a cancellation. Order-status transitions are applied synchronously by
-// the producing path, so they are no longer carried on this event.
+// or a cancellation.
 type SettlingEvent = record {
     book_id : nat64;
     balance_operations : vec BalanceOperation;

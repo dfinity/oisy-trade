@@ -305,9 +305,6 @@ mod cancel_limit_order {
     /// arriving in that gap must return `OrderAlreadyFilled` instead of
     /// trapping on the `book.remove_order(seq).expect(...)` call in
     /// `record_cancel_limit_order`.
-    ///
-    /// Red today: the cancel currently panics. Fixing the race must make
-    /// this test pass.
     #[test]
     fn should_not_panic_canceling_order_matched_but_not_yet_settled() {
         use crate::state::CancelLimitOrderError;

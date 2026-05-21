@@ -265,6 +265,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_history
             .get(&order_id)
             .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
+        assert!(
+            matches!(order.status, OrderStatus::Canceled(_)),
+            "BUG: order {order_id} not canceled"
+        );
         Ok(order)
     }
 
@@ -313,9 +317,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             ),
             Side::Sell => (PairToken::Base, remaining_quantity),
         };
-        // Flip the order's status synchronously with the book removal so the
-        // book and `order_history` stay in lock-step. The balance refund is
-        // still deferred to the paired settling event.
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.set_status(
                 &order_id,
@@ -397,10 +398,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply a declarative list of balance operations. Order-status
-    /// transitions are applied synchronously by `record_matching_event` /
-    /// `record_cancel_limit_order`, so a settling event arriving late never
-    /// leaves `order_history` lagging the book.
+    /// Apply a declarative list of balance operations.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
