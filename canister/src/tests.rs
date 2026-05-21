@@ -1429,3 +1429,26 @@ mod get_trading_pairs {
         );
     }
 }
+
+mod process_pending_orders {
+    use crate::execute::ExecutionStatus;
+    use crate::test_fixtures::init_state_with_order_book;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use candid::Principal;
+
+    #[test]
+    fn should_return_already_running_when_guard_is_held() {
+        init_state_with_order_book();
+        // Simulate a concurrent matching task holding the guard.
+        crate::state::with_state_mut(|s| {
+            assert!(
+                s.active_tasks_mut()
+                    .insert(crate::Task::ProcessPendingOrders)
+            );
+        });
+
+        let status = crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        assert_eq!(status, ExecutionStatus::AlreadyRunning);
+    }
+}

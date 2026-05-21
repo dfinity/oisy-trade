@@ -7,7 +7,7 @@
 //! `MatchingEvent` inline before moving on to the next book. Total work per
 //! call is additionally capped by `instruction_budget` (compared against
 //! [`Runtime::instruction_counter`]). If anything is left over the call
-//! reports [`Outcome::MoreWork`] so the caller can reschedule.
+//! reports [`ExecutionStatus::MoreWork`] so the caller can reschedule.
 
 use crate::Runtime;
 use crate::order::OrderBookId;
@@ -38,17 +38,21 @@ pub struct Executor {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Outcome {
+pub enum ExecutionStatus {
     Complete,
     MoreWork,
+    /// The caller couldn't acquire the matching guard because another task
+    /// is already running. The holder is responsible for rescheduling if it
+    /// leaves work unfinished.
+    AlreadyRunning,
 }
 
-impl Outcome {
+impl ExecutionStatus {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         if state.has_pending_orders() || state.has_pending_settling_events() {
-            Outcome::MoreWork
+            ExecutionStatus::MoreWork
         } else {
-            Outcome::Complete
+            ExecutionStatus::Complete
         }
     }
 }
@@ -67,7 +71,7 @@ impl Executor {
         &self,
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
-    ) -> Outcome {
+    ) -> ExecutionStatus {
         // Clear any settling events left over from a prior chunk whose
         // inline drain was interrupted by the instruction budget.
         self.drain_settling(state, runtime);
@@ -75,7 +79,7 @@ impl Executor {
         let mut order_budget = self.max_orders_per_chunk;
         for book_id in books_by_pending_order_count_desc(state) {
             if order_budget == 0 || runtime.instruction_counter() >= self.instruction_budget {
-                return Outcome::from_state(state);
+                return ExecutionStatus::from_state(state);
             }
             let chunk: Vec<_> = state
                 .order_book(&book_id)
@@ -101,7 +105,7 @@ impl Executor {
             self.drain_settling(state, runtime);
         }
 
-        Outcome::from_state(state)
+        ExecutionStatus::from_state(state)
     }
 
     fn drain_settling<MH: Memory, MB: Memory>(

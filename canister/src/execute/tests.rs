@@ -1,4 +1,4 @@
-use crate::execute::{Executor, Outcome};
+use crate::execute::{ExecutionStatus, Executor};
 use crate::order::{OrderBookId, OrderId, OrderStatus, Side, TokenId, TokenMetadata, TradingPair};
 use crate::state::State;
 use crate::test_fixtures;
@@ -72,9 +72,9 @@ fn should_return_complete_on_idle_state() {
     let mut state = setup_one_book();
     let runtime = runtime();
 
-    let outcome = unlimited_executor().run_once(&mut state, &runtime);
+    let status = unlimited_executor().run_once(&mut state, &runtime);
 
-    assert_eq!(outcome, Outcome::Complete);
+    assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_orders());
     assert!(!state.has_pending_settling_events());
 }
@@ -88,9 +88,9 @@ fn should_complete_in_one_run_when_budget_covers_all() {
     let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
     let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
 
-    let outcome = unlimited_executor().run_once(&mut state, &runtime);
+    let status = unlimited_executor().run_once(&mut state, &runtime);
 
-    assert_eq!(outcome, Outcome::Complete);
+    assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
     assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
 }
@@ -114,20 +114,20 @@ fn should_signal_more_work_until_all_orders_are_drained() {
         instruction_budget: u64::MAX,
     };
 
-    let mut outcomes = Vec::new();
+    let mut statuses = Vec::new();
     while state.has_pending_orders() || state.has_pending_settling_events() {
-        outcomes.push(executor.run_once(&mut state, &runtime));
+        statuses.push(executor.run_once(&mut state, &runtime));
         // Bound the loop in case of a bug.
-        assert!(outcomes.len() <= 10, "executor failed to make progress");
+        assert!(statuses.len() <= 10, "executor failed to make progress");
     }
 
     assert!(matches!(
-        outcomes.as_slice(),
+        statuses.as_slice(),
         [
-            Outcome::MoreWork,
-            Outcome::MoreWork,
-            Outcome::MoreWork,
-            Outcome::Complete
+            ExecutionStatus::MoreWork,
+            ExecutionStatus::MoreWork,
+            ExecutionStatus::MoreWork,
+            ExecutionStatus::Complete
         ]
     ));
     for id in ids {
@@ -184,9 +184,9 @@ fn should_process_book_with_more_pending_first_under_tight_chunk_budget() {
         instruction_budget: u64::MAX,
     };
 
-    let outcome = executor.run_once(&mut state, &runtime());
+    let status = executor.run_once(&mut state, &runtime());
 
-    assert_eq!(outcome, Outcome::MoreWork);
+    assert_eq!(status, ExecutionStatus::MoreWork);
     // Book A (most pending) was processed first and now has 1 left; book B is untouched.
     assert_eq!(
         state
@@ -227,9 +227,9 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
         instruction_budget: u64::MAX,
     };
 
-    let outcome = executor.run_once(&mut state, &runtime());
+    let status = executor.run_once(&mut state, &runtime());
 
-    assert_eq!(outcome, Outcome::MoreWork);
+    assert_eq!(status, ExecutionStatus::MoreWork);
     assert_eq!(
         state
             .order_book(&OrderBookId::ZERO)
@@ -277,9 +277,9 @@ fn should_drain_leftover_settling_events_before_running_matching() {
     assert!(state.has_pending_settling_events());
     assert!(!state.has_pending_orders());
 
-    let outcome = unlimited_executor().run_once(&mut state, &runtime());
+    let status = unlimited_executor().run_once(&mut state, &runtime());
 
-    assert_eq!(outcome, Outcome::Complete);
+    assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_settling_events());
 }
 
@@ -300,9 +300,9 @@ fn should_settle_each_book_before_advancing_to_the_next() {
     test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
     test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
 
-    let outcome = unlimited_executor().run_once(&mut state, &runtime());
+    let status = unlimited_executor().run_once(&mut state, &runtime());
 
-    assert_eq!(outcome, Outcome::Complete);
+    assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_orders());
     assert!(!state.has_pending_settling_events());
     // Balances on both books reflect the fills — proves both settlements ran.
@@ -322,9 +322,9 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
         instruction_budget: 0,
     };
 
-    let outcome = executor.run_once(&mut state, &runtime());
+    let status = executor.run_once(&mut state, &runtime());
 
-    assert_eq!(outcome, Outcome::MoreWork);
+    assert_eq!(status, ExecutionStatus::MoreWork);
     assert!(state.has_pending_orders());
     // No matching event was emitted, so no settling was queued either.
     assert!(!state.has_pending_settling_events());

@@ -85,10 +85,10 @@ pub fn cancel_limit_order(
     Ok(record.into())
 }
 
-pub fn process_pending_orders(runtime: &impl Runtime) -> execute::Outcome {
+pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatus {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
-        None => return execute::Outcome::Complete,
+        None => return execute::ExecutionStatus::AlreadyRunning,
     };
 
     state::with_state_mut(|s| execute::EXECUTOR.run_once(s, runtime))
@@ -99,13 +99,16 @@ pub fn process_pending_orders(runtime: &impl Runtime) -> execute::Outcome {
 /// matching timer and the post-`add_limit_order` kickoff) — tests should call
 /// [`process_pending_orders`] directly, which is synchronous and timer-free.
 pub fn drive_matching() {
-    if matches!(
-        process_pending_orders(&IC_RUNTIME),
-        execute::Outcome::MoreWork,
-    ) {
-        ic_cdk_timers::set_timer(Duration::ZERO, async {
-            drive_matching();
-        });
+    match process_pending_orders(&IC_RUNTIME) {
+        execute::ExecutionStatus::MoreWork => {
+            ic_cdk_timers::set_timer(Duration::ZERO, async {
+                drive_matching();
+            });
+        }
+        // Complete: nothing left to do. AlreadyRunning: the holder will
+        // reschedule itself if its run left work unfinished, so we don't
+        // pile on another timer.
+        execute::ExecutionStatus::Complete | execute::ExecutionStatus::AlreadyRunning => {}
     }
 }
 
