@@ -1417,21 +1417,31 @@ mod chunked_matching {
     use candid::{Nat, Principal};
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
-    use dex_types::{
-        GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, PriceLevel, Side,
-    };
+    use dex_types::{GetOrderBookDepthRequest, LimitOrderRequest, Side};
+    use dex_types_internal::{InitArg, Mode};
 
-    /// Submits more pending orders in a single PocketIC round than fit in one
-    /// chunk so the canister must self-reschedule the matching timer to drain
-    /// the backlog. With the production default chunk size of 1_000 orders,
-    /// posting 1_010 orders without ticking forces at least two chunks.
+    /// Installs the canister with a tiny `ExecutionPolicy` (5 orders per
+    /// chunk), submits 6 non-crossing orders in a single PocketIC round,
+    /// and verifies that the chunked-matching pipeline drains the backlog
+    /// and produces at least two `MatchingEvent`s (one per chunk) —
+    /// proving the work actually splits rather than being absorbed by a
+    /// single oversized chunk.
     #[tokio::test]
     async fn should_drain_pending_orders_across_chunks() {
-        const N_ORDERS: u64 = 1_010;
+        const MAX_ORDERS_PER_CHUNK: u64 = 5;
+        const N_ORDERS: u64 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
         const PRICE: u64 = 100;
         const QUANTITY: u64 = 1_000_000;
 
-        let setup = Setup::new().await.with_trading_pair().await;
+        let setup = Setup::new_with_init_arg(InitArg {
+            mode: Mode::GeneralAvailability,
+            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+            instruction_budget: 1_000_000_000,
+        })
+        .await
+        .with_trading_pair()
+        .await;
+
         let user = Principal::from_slice(&[0x42]);
         let pair = setup.trading_pair();
 
@@ -1458,32 +1468,51 @@ mod chunked_matching {
                 .unwrap();
         }
 
-        // Each tick advances PocketIC by one round, firing one chunk's worth
-        // of rescheduled matching. Five rounds is generous for 1_010 orders
-        // at the production chunk size.
-        for _ in 0..5 {
+        // Tick until the depth shows all orders resting; bound the loop
+        // so a chunking bug can't hang the suite.
+        const MAX_TICKS: u32 = 20;
+        let expected_resting = Nat::from(N_ORDERS * QUANTITY);
+        let mut ticks = 0;
+        loop {
             setup.env().tick().await;
+            ticks += 1;
+            let resting = setup
+                .dex_client()
+                .get_order_book_depth(GetOrderBookDepthRequest {
+                    trading_pair: pair,
+                    limit: None,
+                })
+                .await
+                .unwrap()
+                .bids
+                .first()
+                .map(|level| level.quantity.clone())
+                .unwrap_or_else(|| Nat::from(0u64));
+            if resting == expected_resting {
+                break;
+            }
+            assert!(
+                ticks < MAX_TICKS,
+                "chunked matching failed to drain {N_ORDERS} orders after {ticks} ticks (last seen {resting} resting)",
+            );
         }
 
-        let depth = setup
-            .dex_client()
-            .get_order_book_depth(GetOrderBookDepthRequest {
-                trading_pair: pair,
-                limit: None,
-            })
+        // The chunk size forces at least two MatchingEvents — one would
+        // mean the executor processed the whole batch in a single pass.
+        let matching_events = setup
+            .get_all_events()
             .await
-            .unwrap();
-
-        assert_eq!(
-            depth,
-            OrderBookDepth {
-                bids: vec![PriceLevel {
-                    price: PRICE,
-                    quantity: Nat::from(N_ORDERS * QUANTITY),
-                }],
-                asks: vec![],
-            },
-            "all {N_ORDERS} pending orders should be resting after chunked matching drains",
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    event.payload,
+                    dex_types_internal::event::EventType::Matching(_),
+                )
+            })
+            .count();
+        assert!(
+            matching_events >= 2,
+            "expected ≥ 2 MatchingEvents (chunk size {MAX_ORDERS_PER_CHUNK}, workload {N_ORDERS} orders), got {matching_events}",
         );
 
         setup.drop().await;

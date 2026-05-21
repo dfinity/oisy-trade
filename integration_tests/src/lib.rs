@@ -37,6 +37,15 @@ pub struct Setup {
 
 impl Setup {
     pub async fn new() -> Self {
+        Self::new_with_init_arg(InitArg {
+            mode: Mode::GeneralAvailability,
+            max_orders_per_chunk: 1_000,
+            instruction_budget: 1_000_000_000,
+        })
+        .await
+    }
+
+    pub async fn new_with_init_arg(init_arg: InitArg) -> Self {
         const DEFAULT_CALLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
         const DEFAULT_CONTROLLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
@@ -58,12 +67,7 @@ impl Setup {
         env.install_canister(
             canister_id,
             dex_wasm(),
-            Encode!(&DexArg::Init(InitArg {
-                mode: Mode::GeneralAvailability,
-                max_orders_per_chunk: 1_000,
-                instruction_budget: 1_000_000_000,
-            }))
-            .unwrap(),
+            Encode!(&DexArg::Init(init_arg)).unwrap(),
             Some(controller),
         )
         .await;
