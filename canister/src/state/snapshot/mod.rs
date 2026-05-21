@@ -71,6 +71,8 @@ impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
             mode,
+            // round-tripped in commit 3 of DEFI-2743 (Option<…> for backward compat).
+            execution_policy: _,
             next_book_id,
             tokens,
             trading_pairs,
@@ -170,6 +172,9 @@ impl StateSnapshot {
 
         State {
             mode: self.mode,
+            // Snapshotted-and-restored in commit 3 of DEFI-2743; until then,
+            // fall back to the production default.
+            execution_policy: dex_types_internal::ExecutionPolicy::PRODUCTION_DEFAULT,
             next_book_id: self.next_book_id,
             tokens,
             trading_pairs,
