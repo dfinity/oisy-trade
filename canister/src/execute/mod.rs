@@ -73,11 +73,16 @@ impl Executor {
         self.drain_settling(state, runtime);
 
         let mut order_budget = self.max_orders_per_chunk;
-        for book_id in books_by_pending_count_desc(state) {
+        for book_id in books_by_pending_order_count_desc(state) {
             if order_budget == 0 || runtime.instruction_counter() >= self.instruction_budget {
                 return Outcome::from_state(state);
             }
-            let chunk = peek_pending_seqs(state, &book_id, order_budget);
+            let chunk: Vec<_> = state
+                .order_book(&book_id)
+                .expect("BUG: book_id missing from state")
+                .pending_order_seqs()
+                .take(order_budget)
+                .collect();
             if chunk.is_empty() {
                 continue;
             }
@@ -115,26 +120,20 @@ impl Executor {
 
 /// Order-book IDs ranked by decreasing pending-order count; ties broken by
 /// ascending book id. Books with no pending orders are excluded.
-fn books_by_pending_count_desc<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Vec<OrderBookId> {
+fn books_by_pending_order_count_desc<MH: Memory, MB: Memory>(
+    state: &State<MH, MB>,
+) -> Vec<OrderBookId> {
     let mut counts: Vec<(OrderBookId, usize)> = state
         .order_books()
         .map(|(id, book)| (*id, book.pending_orders_len()))
         .filter(|(_, n)| *n > 0)
         .collect();
-    counts.sort_by(|(a_id, a_n), (b_id, b_n)| b_n.cmp(a_n).then_with(|| a_id.cmp(b_id)));
+    counts.sort_by(
+        |(a_id, a_num_pending_orders), (b_id, b_num_pending_orders)| {
+            b_num_pending_orders
+                .cmp(a_num_pending_orders)
+                .then_with(|| a_id.cmp(b_id))
+        },
+    );
     counts.into_iter().map(|(id, _)| id).collect()
-}
-
-/// FIFO pending-order seqs of `book_id`, capped at `limit`.
-fn peek_pending_seqs<MH: Memory, MB: Memory>(
-    state: &State<MH, MB>,
-    book_id: &OrderBookId,
-    limit: usize,
-) -> Vec<OrderSeq> {
-    state
-        .order_book(book_id)
-        .expect("BUG: ranked book_id missing from state")
-        .pending_order_seqs()
-        .take(limit)
-        .collect()
 }
