@@ -15,7 +15,7 @@ use crate::order::{
 use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use candid::Nat;
-use dex_types_internal::Mode;
+use dex_types_internal::{ExecutionPolicy, Mode};
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
 use std::collections::{BTreeMap, VecDeque};
@@ -41,6 +41,11 @@ pub struct StateSnapshot {
     /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
+    /// Chunked-matching policy. `Option` so snapshots written before
+    /// this field existed continue to decode (back-filled with
+    /// [`ExecutionPolicy::PRODUCTION_DEFAULT`] in [`Self::into_state`]).
+    #[n(7)]
+    pub execution_policy: Option<ExecutionPolicy>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -71,8 +76,7 @@ impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
             mode,
-            // round-tripped in commit 3 of DEFI-2743 (Option<…> for backward compat).
-            execution_policy: _,
+            execution_policy,
             next_book_id,
             tokens,
             trading_pairs,
@@ -118,6 +122,7 @@ impl StateSnapshot {
             } else {
                 Some(pending_settling_events.iter().cloned().collect())
             },
+            execution_policy: Some(*execution_policy),
         }
     }
 
@@ -172,9 +177,9 @@ impl StateSnapshot {
 
         State {
             mode: self.mode,
-            // Snapshotted-and-restored in commit 3 of DEFI-2743; until then,
-            // fall back to the production default.
-            execution_policy: dex_types_internal::ExecutionPolicy::PRODUCTION_DEFAULT,
+            execution_policy: self
+                .execution_policy
+                .unwrap_or(ExecutionPolicy::PRODUCTION_DEFAULT),
             next_book_id: self.next_book_id,
             tokens,
             trading_pairs,
