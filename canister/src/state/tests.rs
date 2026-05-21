@@ -1069,3 +1069,48 @@ mod settle_fills {
         assert_eq!(quote_before, quote_after, "quote token total changed");
     }
 }
+
+mod execution_policy {
+    use crate::balance::TokenBalance;
+    use crate::order::OrderHistory;
+    use crate::state::State;
+    use dex_types_internal::{ExecutionPolicy, InitArg, Mode};
+    use ic_stable_structures::VectorMemory;
+
+    #[test]
+    fn should_default_to_production_policy_when_init_omits_it() {
+        let state = State::new(
+            InitArg {
+                mode: Mode::GeneralAvailability,
+                execution_policy: None,
+            },
+            OrderHistory::new(VectorMemory::default()),
+            TokenBalance::new(VectorMemory::default()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.execution_policy(),
+            &ExecutionPolicy::PRODUCTION_DEFAULT
+        );
+    }
+
+    #[test]
+    fn should_use_init_arg_policy_when_provided() {
+        let custom = ExecutionPolicy {
+            max_orders_per_chunk: 17,
+            instruction_budget: 12_345,
+        };
+        let state = State::new(
+            InitArg {
+                mode: Mode::GeneralAvailability,
+                execution_policy: Some(custom),
+            },
+            OrderHistory::new(VectorMemory::default()),
+            TokenBalance::new(VectorMemory::default()),
+        )
+        .unwrap();
+
+        assert_eq!(state.execution_policy(), &custom);
+    }
+}
