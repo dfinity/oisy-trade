@@ -1,4 +1,4 @@
-use minicbor::{Decode, Encode};
+use std::num::NonZeroU64;
 
 #[cfg(test)]
 mod tests;
@@ -8,12 +8,10 @@ mod tests;
 /// notices the typo before deploying.
 const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
 
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionPolicy {
-    #[n(0)]
-    max_orders_per_chunk: u64,
-    #[n(1)]
-    instruction_budget: u64,
+    max_orders_per_chunk: NonZeroU64,
+    instruction_budget: NonZeroU64,
 }
 
 impl ExecutionPolicy {
@@ -21,17 +19,15 @@ impl ExecutionPolicy {
     /// or `instruction_budget` is zero, or if `instruction_budget` exceeds
     /// the IC system-subnet per-message cap.
     pub fn new(max_orders_per_chunk: u64, instruction_budget: u64) -> Self {
+        let max_orders_per_chunk =
+            NonZeroU64::new(max_orders_per_chunk).expect("max_orders_per_chunk must be non-zero");
+        let instruction_budget =
+            NonZeroU64::new(instruction_budget).expect("instruction_budget must be non-zero");
         assert!(
-            max_orders_per_chunk > 0,
-            "max_orders_per_chunk must be non-zero",
-        );
-        assert!(
-            instruction_budget > 0,
-            "instruction_budget must be non-zero",
-        );
-        assert!(
-            instruction_budget <= MAX_INSTRUCTION_BUDGET,
-            "instruction_budget {instruction_budget} exceeds IC per-message cap ({MAX_INSTRUCTION_BUDGET})",
+            instruction_budget.get() <= MAX_INSTRUCTION_BUDGET,
+            "instruction_budget {} exceeds IC per-message cap ({})",
+            instruction_budget.get(),
+            MAX_INSTRUCTION_BUDGET,
         );
         Self {
             max_orders_per_chunk,
@@ -40,11 +36,11 @@ impl ExecutionPolicy {
     }
 
     pub fn max_orders_per_chunk(&self) -> u64 {
-        self.max_orders_per_chunk
+        self.max_orders_per_chunk.get()
     }
 
     pub fn instruction_budget(&self) -> u64 {
-        self.instruction_budget
+        self.instruction_budget.get()
     }
 }
 

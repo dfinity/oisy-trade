@@ -42,11 +42,16 @@ pub struct StateSnapshot {
     /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
-    /// Chunked-matching policy. `Option` so snapshots written before
-    /// this field existed continue to decode (back-filled with
-    /// [`ExecutionPolicy::default`] in [`Self::into_state`]).
+    /// Chunked-matching policy, flattened on the wire so the
+    /// canister-internal `ExecutionPolicy` type doesn't need a CBOR derive.
+    /// Both fields are `Option` so snapshots written before they existed
+    /// continue to decode (back-filled with [`ExecutionPolicy::default`]
+    /// in [`Self::into_state`]); production snapshots always write both as
+    /// `Some`.
     #[n(7)]
-    pub execution_policy: Option<ExecutionPolicy>,
+    pub max_orders_per_chunk: Option<u64>,
+    #[n(8)]
+    pub instruction_budget: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -123,7 +128,8 @@ impl StateSnapshot {
             } else {
                 Some(pending_settling_events.iter().cloned().collect())
             },
-            execution_policy: Some(execution_policy.clone()),
+            max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
+            instruction_budget: Some(execution_policy.instruction_budget()),
         }
     }
 
@@ -176,9 +182,17 @@ impl StateSnapshot {
             .into_iter()
             .collect();
 
+        let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
+            (Some(max), Some(budget)) => ExecutionPolicy::new(max, budget),
+            // A snapshot written before this PR (both fields absent) falls
+            // back to the production default. Partial states shouldn't occur
+            // in practice; treat them the same way to keep the API total.
+            _ => ExecutionPolicy::default(),
+        };
+
         State {
             mode: self.mode,
-            execution_policy: self.execution_policy.unwrap_or_default(),
+            execution_policy,
             next_book_id: self.next_book_id,
             tokens,
             trading_pairs,
