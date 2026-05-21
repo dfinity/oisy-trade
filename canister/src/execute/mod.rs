@@ -10,7 +10,7 @@
 //! reports [`Outcome::MoreWork`] so the caller can reschedule.
 
 use crate::Runtime;
-use crate::order::{OrderBookId, OrderSeq};
+use crate::order::OrderBookId;
 use crate::state::State;
 use crate::state::audit;
 use crate::state::event::{EventType, MatchingEvent};
