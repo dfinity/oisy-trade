@@ -42,12 +42,7 @@ pub struct StateSnapshot {
     /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
-    /// Chunked-matching policy, flattened on the wire so the
-    /// canister-internal `ExecutionPolicy` type doesn't need a CBOR derive.
-    /// Both fields are `Option` so snapshots written before they existed
-    /// continue to decode (back-filled with [`ExecutionPolicy::default`]
-    /// in [`Self::into_state`]); production snapshots always write both as
-    /// `Some`.
+    /// Chunked-matching policy, flattened on the wire in 2 fields.
     #[n(7)]
     pub max_orders_per_chunk: Option<u64>,
     #[n(8)]

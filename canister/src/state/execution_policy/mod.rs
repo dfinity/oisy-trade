@@ -3,9 +3,11 @@ use std::num::NonZeroU64;
 #[cfg(test)]
 mod tests;
 
-/// IC system-subnet per-message instruction cap. Anything beyond this is
-/// unreachable in practice — refuse it at construction so an operator
-/// notices the typo before deploying.
+/// Highest instruction budget the validator accepts. Rejects obvious
+/// typos (e.g. `u64::MAX`) without constraining the production policy —
+/// see [`Default`] for the value the canister actually ships with.
+///
+/// Spec: <https://docs.internetcomputer.org/references/resource-limits/#instruction-limits>
 const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +48,7 @@ impl ExecutionPolicy {
 
 impl Default for ExecutionPolicy {
     /// Conservative production policy: 1 000 orders per chunk, 1B
-    /// instructions (~5% of the IC's 20B app-subnet cap).
+    /// instructions per chunk.
     fn default() -> Self {
         Self::new(1_000, 1_000_000_000)
     }
