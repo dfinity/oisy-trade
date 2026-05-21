@@ -88,7 +88,7 @@ impl Executor {
             }
             order_budget = order_budget
                 .checked_sub(chunk.len())
-                .expect("BUG: peek_pending_seqs returns at most order_budget pending orders");
+                .expect("BUG: pending_order_seqs().take(order_budget) cannot exceed order_budget");
             audit::process_event(
                 state,
                 EventType::Matching(MatchingEvent {
