@@ -58,7 +58,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                     max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
                     instruction_budget.unwrap_or_else(|| current.instruction_budget()),
                 )
-                .expect("BUG: invalid ExecutionPolicy");
+                .unwrap_or_else(|e| panic!("BUG: invalid ExecutionPolicy: {e}"));
                 state.set_execution_policy(policy);
             }
         }

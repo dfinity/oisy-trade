@@ -28,8 +28,10 @@ pub enum DexArg {
 /// that needs the same value.
 pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u32 = 1_000;
 
-/// Conservative production default for [`InitArg::instruction_budget`]
-/// — 1B instructions per chunk, ~5% of the IC's per-message cap.
+/// Conservative production default for [`InitArg::instruction_budget`]:
+/// 1B instructions per chunk, leaving generous headroom for event
+/// serialization, settling, and stable-memory writes within the IC's
+/// per-message instruction cap.
 pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
 /// Argument for canister initialization.
