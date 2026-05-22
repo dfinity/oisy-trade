@@ -58,10 +58,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                     max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
                     instruction_budget.unwrap_or_else(|| current.instruction_budget()),
                 )
-                .expect(
-                    "BUG: upgrade arg produced an invalid ExecutionPolicy — \
-                     validate upgrade args before recording the event",
-                );
+                .expect("BUG: invalid ExecutionPolicy");
                 state.set_execution_policy(policy);
             }
         }
