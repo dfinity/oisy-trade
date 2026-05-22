@@ -54,8 +54,8 @@ mod assert_caller_is_allowed {
         State::new(
             dex_types_internal::InitArg {
                 mode,
-                max_orders_per_chunk: 1_000,
-                instruction_budget: 1_000_000_000,
+                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
@@ -1134,6 +1134,9 @@ mod execution_policy {
         )
         .unwrap();
 
-        assert_eq!(state.execution_policy(), &ExecutionPolicy::new(17, 12_345));
+        assert_eq!(
+            state.execution_policy(),
+            &ExecutionPolicy::try_new(17, 12_345).unwrap()
+        );
     }
 }

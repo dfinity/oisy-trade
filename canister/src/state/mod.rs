@@ -100,12 +100,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_history: OrderHistory<MH>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
+        let execution_policy =
+            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
         Ok(Self {
             mode: init_arg.mode,
-            execution_policy: ExecutionPolicy::new(
-                init_arg.max_orders_per_chunk,
-                init_arg.instruction_budget,
-            ),
+            execution_policy,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
