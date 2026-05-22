@@ -19,23 +19,10 @@ use ic_stable_structures::Memory;
 #[cfg(test)]
 mod tests;
 
-pub const DEFAULT_MAX_ORDERS_PER_CHUNK: usize = 1_000;
-
-/// 1B instructions per chunk — ~5% of the IC's 20B per-message cap,
-/// leaving generous headroom for event serialization, settling, and
-/// stable-memory writes.
-pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
-
-pub const EXECUTOR: Executor = Executor {
-    max_orders_per_chunk: DEFAULT_MAX_ORDERS_PER_CHUNK,
-    instruction_budget: DEFAULT_INSTRUCTION_BUDGET,
-};
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Executor {
-    pub max_orders_per_chunk: usize,
-    pub instruction_budget: u64,
-}
+pub struct Executor;
+
+pub const EXECUTOR: Executor = Executor;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExecutionStatus {
@@ -72,13 +59,17 @@ impl Executor {
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) -> ExecutionStatus {
+        let policy = state.execution_policy();
+        let max_orders_per_chunk = policy.max_orders_per_chunk() as usize;
+        let instruction_budget = policy.instruction_budget();
+
         // Clear any settling events left over from a prior chunk whose
         // inline drain was interrupted by the instruction budget.
-        self.drain_settling(state, runtime);
+        self.drain_settling(instruction_budget, state, runtime);
 
-        let mut order_budget = self.max_orders_per_chunk;
+        let mut order_budget = max_orders_per_chunk;
         for book_id in books_by_pending_order_count_desc(state) {
-            if order_budget == 0 || runtime.instruction_counter() >= self.instruction_budget {
+            if order_budget == 0 || runtime.instruction_counter() >= instruction_budget {
                 return ExecutionStatus::from_state(state);
             }
             let chunk: Vec<_> = state
@@ -102,7 +93,7 @@ impl Executor {
                 runtime,
             );
             // Settle this book's matches before advancing to the next book.
-            self.drain_settling(state, runtime);
+            self.drain_settling(instruction_budget, state, runtime);
         }
 
         ExecutionStatus::from_state(state)
@@ -110,10 +101,11 @@ impl Executor {
 
     fn drain_settling<MH: Memory, MB: Memory>(
         &self,
+        instruction_budget: u64,
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) {
-        while runtime.instruction_counter() < self.instruction_budget {
+        while runtime.instruction_counter() < instruction_budget {
             let Some(event) = state.take_next_pending_settling_event() else {
                 break;
             };

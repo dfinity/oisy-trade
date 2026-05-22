@@ -53,7 +53,7 @@ benches:
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 1068562070
+      instructions: 1068562078
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -160,7 +160,7 @@ benches:
   bench_process_pending_orders_1000_no_fills:
     total:
       calls: 1
-      instructions: 80115000
+      instructions: 80115008
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -197,7 +197,7 @@ benches:
   bench_process_pending_orders_1_large:
     total:
       calls: 1
-      instructions: 848195186
+      instructions: 848195194
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -346,13 +346,13 @@ benches:
   bench_upgrade_1000_no_fills:
     total:
       calls: 1
-      instructions: 3455766
+      instructions: 3455899
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 2183550
+        instructions: 2183602
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
@@ -362,7 +362,7 @@ benches:
         stable_memory_increase: 0
       post_upgrade::load_snapshot:
         calls: 1
-        instructions: 1005890
+        instructions: 1005942
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::load_stable_memory:
@@ -372,7 +372,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 1156457
+        instructions: 1156538
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:
@@ -382,19 +382,19 @@ benches:
         stable_memory_increase: 0
       pre_upgrade::save_snapshot:
         calls: 1
-        instructions: 1082602
+        instructions: 1082683
         heap_increase: 0
         stable_memory_increase: 128
   bench_upgrade_full_depth:
     total:
       calls: 1
-      instructions: 49800628
+      instructions: 49800761
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 29163814
+        instructions: 29163866
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
@@ -404,7 +404,7 @@ benches:
         stable_memory_increase: 0
       post_upgrade::load_snapshot:
         calls: 1
-        instructions: 13168537
+        instructions: 13168589
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::load_stable_memory:
@@ -414,7 +414,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 17228416
+        instructions: 17228497
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:
@@ -424,7 +424,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade::save_snapshot:
         calls: 1
-        instructions: 11388469
+        instructions: 11388550
         heap_increase: 0
         stable_memory_increase: 128
   bench_write_events:

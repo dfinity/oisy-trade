@@ -382,19 +382,16 @@ fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem
 
 /// Drive matching+settling to completion regardless of chunk policy.
 ///
-/// Benchmarks run inside a single canbench iteration where
-/// `instruction_counter` is monotonic across calls, so the production
-/// `EXECUTOR`'s `INSTRUCTION_BUDGET` would trip once exceeded and a
-/// `while … == MoreWork` loop on it would spin forever (the next `run_once`
-/// can't make progress when the counter is already past the budget). The
-/// unlimited executor here bypasses both bounds so the bench measures a
-/// full matching round in a single `run_once` call.
+/// Sets `state`'s execution policy to its maximum so a single `run_once`
+/// covers the whole bench workload. Without this, the production default
+/// 1B instruction budget would trip part-way through and the bench would
+/// report `MoreWork`, leaving the round half-measured.
 fn drive_matching_to_completion(state: &mut State<storage::VMem, storage::VMem>) {
-    crate::execute::Executor {
-        max_orders_per_chunk: usize::MAX,
-        instruction_budget: u64::MAX,
-    }
-    .run_once(state, &crate::IC_RUNTIME);
+    state.set_execution_policy(crate::state::execution_policy::ExecutionPolicy::new(
+        u64::MAX,
+        crate::state::execution_policy::MAX_INSTRUCTION_BUDGET,
+    ));
+    crate::execute::EXECUTOR.run_once(state, &crate::IC_RUNTIME);
 }
 
 /// Generate a unique principal from a sequential counter.

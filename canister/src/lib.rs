@@ -91,7 +91,7 @@ pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatu
         None => return execute::ExecutionStatus::AlreadyRunning,
     };
 
-    state::with_state_mut(|s| execute::EXECUTOR.run_once(s, runtime))
+    state::with_state_mut(|s| EXECUTOR.run_once(s, runtime))
 }
 
 /// Run one chunk of matching/settling and, if more work remains, schedule a

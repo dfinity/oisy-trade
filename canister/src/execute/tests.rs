@@ -1,6 +1,7 @@
-use crate::execute::{ExecutionStatus, Executor};
+use crate::execute::{EXECUTOR, ExecutionStatus};
 use crate::order::{OrderBookId, OrderId, OrderStatus, Side, TokenId, TokenMetadata, TradingPair};
 use crate::state::State;
+use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
 use crate::test_fixtures;
 use crate::test_fixtures::mocks::MockRuntime;
 use crate::test_fixtures::{
@@ -14,11 +15,15 @@ type TestState = State<VectorMemory, VectorMemory>;
 const BUYER: Principal = Principal::from_slice(&[0x01]);
 const SELLER: Principal = Principal::from_slice(&[0x02]);
 
-fn unlimited_executor() -> Executor {
-    Executor {
-        max_orders_per_chunk: usize::MAX,
-        instruction_budget: u64::MAX,
-    }
+fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u64) {
+    state.set_execution_policy(ExecutionPolicy::new(
+        max_orders_per_chunk,
+        MAX_INSTRUCTION_BUDGET,
+    ));
+}
+
+fn set_unlimited_policy(state: &mut TestState) {
+    set_chunk_policy(state, u64::MAX);
 }
 
 fn runtime() -> MockRuntime {
@@ -70,9 +75,10 @@ fn setup_two_books() -> TestState {
 #[test]
 fn should_return_complete_on_idle_state() {
     let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
     let runtime = runtime();
 
-    let status = unlimited_executor().run_once(&mut state, &runtime);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
 
     assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_orders());
@@ -82,13 +88,14 @@ fn should_return_complete_on_idle_state() {
 #[test]
 fn should_complete_in_one_run_when_budget_covers_all() {
     let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
     let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
     let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
 
-    let status = unlimited_executor().run_once(&mut state, &runtime);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
 
     assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
@@ -109,14 +116,11 @@ fn should_signal_more_work_until_all_orders_are_drained() {
         })
         .collect();
 
-    let executor = Executor {
-        max_orders_per_chunk: 1,
-        instruction_budget: u64::MAX,
-    };
+    set_chunk_policy(&mut state, 1);
 
     let mut statuses = Vec::new();
     while state.has_pending_orders() || state.has_pending_settling_events() {
-        statuses.push(executor.run_once(&mut state, &runtime));
+        statuses.push(EXECUTOR.run_once(&mut state, &runtime));
         // Bound the loop in case of a bug.
         assert!(statuses.len() <= 10, "executor failed to make progress");
     }
@@ -144,22 +148,24 @@ fn should_produce_state_equivalent_to_single_shot_run() {
 
     let single_shot = {
         let mut state = setup_one_book();
+        set_unlimited_policy(&mut state);
         place_workload(&mut state, &pair, lot);
-        unlimited_executor().run_once(&mut state, &runtime());
+        EXECUTOR.run_once(&mut state, &runtime());
         state
     };
 
     let chunked = {
         let mut state = setup_one_book();
+        set_chunk_policy(&mut state, 1);
         place_workload(&mut state, &pair, lot);
-        let executor = Executor {
-            max_orders_per_chunk: 1,
-            instruction_budget: u64::MAX,
-        };
         let runtime = runtime();
         while state.has_pending_orders() || state.has_pending_settling_events() {
-            executor.run_once(&mut state, &runtime);
+            EXECUTOR.run_once(&mut state, &runtime);
         }
+        // Align with `single_shot`'s policy so state equality compares the
+        // matching outcome (books, balances, history) and not the policy
+        // each run executed under.
+        set_unlimited_policy(&mut state);
         state
     };
 
@@ -179,12 +185,9 @@ fn should_process_book_with_more_pending_first_under_tight_chunk_budget() {
     test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 120, lot);
     test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
 
-    let executor = Executor {
-        max_orders_per_chunk: 2,
-        instruction_budget: u64::MAX,
-    };
+    set_chunk_policy(&mut state, 2);
 
-    let status = executor.run_once(&mut state, &runtime());
+    let status = EXECUTOR.run_once(&mut state, &runtime());
 
     assert_eq!(status, ExecutionStatus::MoreWork);
     // Book A (most pending) was processed first and now has 1 left; book B is untouched.
@@ -222,12 +225,9 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
         test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, price, lot);
     }
 
-    let executor = Executor {
-        max_orders_per_chunk: 5,
-        instruction_budget: u64::MAX,
-    };
+    set_chunk_policy(&mut state, 5);
 
-    let status = executor.run_once(&mut state, &runtime());
+    let status = EXECUTOR.run_once(&mut state, &runtime());
 
     assert_eq!(status, ExecutionStatus::MoreWork);
     assert_eq!(
@@ -277,7 +277,8 @@ fn should_drain_leftover_settling_events_before_running_matching() {
     assert!(state.has_pending_settling_events());
     assert!(!state.has_pending_orders());
 
-    let status = unlimited_executor().run_once(&mut state, &runtime());
+    set_unlimited_policy(&mut state);
+    let status = EXECUTOR.run_once(&mut state, &runtime());
 
     assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_settling_events());
@@ -300,7 +301,8 @@ fn should_settle_each_book_before_advancing_to_the_next() {
     test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
     test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
 
-    let status = unlimited_executor().run_once(&mut state, &runtime());
+    set_unlimited_policy(&mut state);
+    let status = EXECUTOR.run_once(&mut state, &runtime());
 
     assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_orders());
@@ -317,12 +319,13 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     let lot = u64::from(LOT_SIZE);
     test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
 
-    let executor = Executor {
-        max_orders_per_chunk: usize::MAX,
-        instruction_budget: 0,
-    };
+    // Minimum budget; mock returns a counter already past it.
+    state.set_execution_policy(ExecutionPolicy::new(u64::MAX, 1));
+    let mut mock = MockRuntime::new();
+    mock.expect_time().return_const(0u64);
+    mock.expect_instruction_counter().return_const(1u64);
 
-    let status = executor.run_once(&mut state, &runtime());
+    let status = EXECUTOR.run_once(&mut state, &mock);
 
     assert_eq!(status, ExecutionStatus::MoreWork);
     assert!(state.has_pending_orders());

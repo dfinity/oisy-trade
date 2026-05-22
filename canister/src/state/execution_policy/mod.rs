@@ -8,7 +8,7 @@ mod tests;
 /// see [`Default`] for the value the canister actually ships with.
 ///
 /// Spec: <https://docs.internetcomputer.org/references/resource-limits/#instruction-limits>
-const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
+pub const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionPolicy {
