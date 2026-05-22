@@ -1173,7 +1173,7 @@ mod book_snapshot {
                 book.add_pending_order(pending.into_order(seq));
             }
             let seqs: Vec<_> = book.pending_order_seqs().collect();
-            book.process_pending_orders(&seqs);
+            let _ = book.process_pending_orders(&seqs);
             for pending in to_leave_pending {
                 let seq = book.next_seq();
                 book.add_pending_order(pending.into_order(seq));

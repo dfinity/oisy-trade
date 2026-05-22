@@ -111,15 +111,12 @@ pub struct MatchingEvent {
 
 /// Outcome of the matching engine:
 /// * balance transitions between maker/taker
-/// * order transitions
 #[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
     pub balance_operations: Vec<BalanceOperation>,
-    #[n(2)]
-    pub transitions: Vec<OrderStatusTransition>,
 }
 
 /// Participants are identified by `OrderSeq` — the apply path resolves each

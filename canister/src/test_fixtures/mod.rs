@@ -677,12 +677,10 @@ pub mod arbitrary {
         (
             any::<u64>(),
             prop::collection::vec(arb_balance_operation(), 0..10),
-            prop::collection::vec(arb_order_status_transition(), 0..10),
         )
-            .prop_map(|(book_id, balance_operations, transitions)| SettlingEvent {
+            .prop_map(|(book_id, balance_operations)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
                 balance_operations,
-                transitions,
             })
     }
 

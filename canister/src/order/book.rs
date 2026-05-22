@@ -93,7 +93,7 @@ impl OrderBook {
     /// - [`MatchResult::Filled`] if the order is fully filled.
     /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
     /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
-    pub fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
+    pub(crate) fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
@@ -175,7 +175,7 @@ impl OrderBook {
     }
 
     /// Enqueue an order for matching.
-    pub fn add_pending_order(&mut self, order: Order) {
+    pub(crate) fn add_pending_order(&mut self, order: Order) {
         assert!(
             self.validate_order(order.price, order.remaining_quantity())
                 .is_ok(),
@@ -188,7 +188,7 @@ impl OrderBook {
 
     /// Match exactly the given pending-order sequences, in order, against
     /// the book.
-    pub fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
+    pub(crate) fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
@@ -258,7 +258,7 @@ impl OrderBook {
     ///
     /// Looks in the resting book first (O(log(num_resting_orders))) and
     /// then in the pending orders (O(num_pending_orders)).
-    pub fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
+    pub(crate) fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
         if let Some((side, price)) = self.resting_orders.remove(&seq) {
             let remaining_quantity = match side {
                 Side::Buy => remove_from_level(self.bids.entry(Reverse(price)), seq),
@@ -378,6 +378,8 @@ fn fill_against_queue<K: Ord>(
 /// `price × remaining_quantity` (or just `remaining_quantity` for Sell) is
 /// the amount to unreserve.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "RemovedOrder must be applied to order_history via `record_cancel_limit_order`; \
+              dropping it leaves the order book and order_history out of sync"]
 pub struct RemovedOrder {
     pub side: Side,
     pub price: Price,
@@ -403,6 +405,8 @@ fn remove_from_level<K: Ord>(
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
 /// orders that began resting in the book, and orders that were fully filled.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[must_use = "MatchingOutput must be applied to order_history via `record_matching_event`; \
+              dropping it leaves the order book and order_history out of sync"]
 pub struct MatchingOutput {
     /// Fills executed during this matching round, in execution order.
     #[n(0)]

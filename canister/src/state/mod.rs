@@ -83,9 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
     /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
     /// for cancels) and drained by the paired `SettlingEvent` dispatch in
-    /// [`Self::record_settling_event`]. Normally empty between messages —
-    /// producers and their paired settling happen atomically in the same
-    /// message (see `process_pending_orders` and `cancel_limit_order`).
+    /// [`Self::record_settling_event`].
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
@@ -256,6 +254,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
+        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // leave settling events queued across messages, draining the whole
+        // queue here lets an unrelated cancel apply balance ops from a
+        // previous matching round and inherit its instruction debt. Pop
+        // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
             audit::process_event(self, event::EventType::Settling(event), runtime);
         }
@@ -290,7 +293,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub fn record_cancel_limit_order(&mut self, order_id: OrderId) {
+    pub fn record_cancel_limit_order(
+        &mut self,
+        order_id: OrderId,
+        persistence: StableMemoryOptions,
+    ) {
         let (book_id, seq) = order_id.into_parts();
         let book = self
             .order_books
@@ -312,6 +319,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             ),
             Side::Sell => (PairToken::Base, remaining_quantity),
         };
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.order_history.set_status(
+                &order_id,
+                OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
+            );
+        }
         self.pending_settling_events
             .push_back(event::SettlingEvent {
                 book_id,
@@ -319,10 +332,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     order: seq,
                     token: refund_token,
                     amount: refund_amount,
-                }],
-                transitions: vec![event::OrderStatusTransition {
-                    seq,
-                    status: OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
                 }],
             });
     }
@@ -355,11 +364,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Drive engine matching for the given book and push the paired
-    /// [`event::SettlingEvent`] (if the round produced any ops) to
-    /// [`State::pending_settling_events`] for the subsequent settling
+    /// Drive engine matching for the given book; when `persistence` is
+    /// [`StableMemoryOptions::Write`], flip every touched order's status
+    /// in `order_history`. Push the paired balance-only
+    /// [`event::SettlingEvent`] (if any balance operations were produced)
+    /// onto [`State::pending_settling_events`] for the settling-event
     /// dispatch to drain.
-    pub fn record_matching_event(&mut self, event: &event::MatchingEvent) {
+    pub fn record_matching_event(
+        &mut self,
+        event: &event::MatchingEvent,
+        persistence: StableMemoryOptions,
+    ) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("matching");
         let book = self
@@ -367,20 +382,28 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
         let output = book.process_pending_orders(&event.orders);
+        if matches!(persistence, StableMemoryOptions::Write) {
+            #[cfg(feature = "canbench-rs")]
+            let _p = canbench_rs::bench_scope("status");
+            for transition in compute_order_status_transitions(&output) {
+                let order_id = OrderId::new(event.book_id, transition.seq);
+                self.order_history.set_status(&order_id, transition.status);
+            }
+        }
         let balance_operations = compute_balance_operations(&output);
-        let transitions = compute_order_status_transitions(&output);
-        if !balance_operations.is_empty() || !transitions.is_empty() {
+        if !balance_operations.is_empty() {
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id: event.book_id,
                     balance_operations,
-                    transitions,
                 });
         }
     }
 
-    /// Apply a declarative list of balance operations and order-status
-    /// transitions.
+    /// Apply a declarative list of balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
+    /// the function's only side effect is on stable-memory-backed
+    /// balances, which are preserved across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
@@ -395,48 +418,38 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_pair(&event.book_id)
             .cloned()
             .expect("BUG: unknown trading pair in SettlingEvent");
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("settling");
-            // Resolve each distinct `OrderSeq` referenced by the operations to
-            // its owning `Principal` once, then reuse from the map in the
-            // loop. A 1000-fill round can reference ~2000 distinct seqs over
-            // ~3000 operations, so caching cuts stable-memory reads by ~35%.
-            let owner_cache = resolve_op_owners(
-                &event.book_id,
-                &event.balance_operations,
-                &self.order_history,
-            );
-            for op in &event.balance_operations {
-                let token = pair.token(match op {
-                    event::BalanceOperation::Transfer { token, .. }
-                    | event::BalanceOperation::Unreserve { token, .. } => token,
-                });
-                match op {
-                    event::BalanceOperation::Transfer {
-                        from_order,
-                        to_order,
-                        amount,
-                        ..
-                    } => {
-                        let from_owner = owner_cache[from_order];
-                        let to_owner = owner_cache[to_order];
-                        self.balances
-                            .transfer(&from_owner, &to_owner, &token, *amount);
-                    }
-                    event::BalanceOperation::Unreserve { order, amount, .. } => {
-                        let owner = owner_cache[order];
-                        self.balances.unreserve(&owner, &token, *amount);
-                    }
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("settling");
+        // Resolve each distinct `OrderSeq` referenced by the operations to
+        // its owning `Principal` once, then reuse from the map in the
+        // loop. A 1000-fill round can reference ~2000 distinct seqs over
+        // ~3000 operations, so caching cuts stable-memory reads by ~35%.
+        let owner_cache = resolve_op_owners(
+            &event.book_id,
+            &event.balance_operations,
+            &self.order_history,
+        );
+        for op in &event.balance_operations {
+            let token = pair.token(match op {
+                event::BalanceOperation::Transfer { token, .. }
+                | event::BalanceOperation::Unreserve { token, .. } => token,
+            });
+            match op {
+                event::BalanceOperation::Transfer {
+                    from_order,
+                    to_order,
+                    amount,
+                    ..
+                } => {
+                    let from_owner = owner_cache[from_order];
+                    let to_owner = owner_cache[to_order];
+                    self.balances
+                        .transfer(&from_owner, &to_owner, &token, *amount);
                 }
-            }
-        }
-        {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("status");
-            for transition in &event.transitions {
-                let order_id = OrderId::new(event.book_id, transition.seq);
-                self.order_history.set_status(&order_id, transition.status);
+                event::BalanceOperation::Unreserve { order, amount, .. } => {
+                    let owner = owner_cache[order];
+                    self.balances.unreserve(&owner, &token, *amount);
+                }
             }
         }
     }
@@ -588,6 +601,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
         self.pending_settling_events.pop_front()
     }
+
+    pub fn has_pending_settling_events(&self) -> bool {
+        !self.pending_settling_events.is_empty()
+    }
 }
 
 /// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
@@ -661,7 +678,9 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
     ops
 }
 
-fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
+fn compute_order_status_transitions(
+    output: &MatchingOutput,
+) -> impl Iterator<Item = event::OrderStatusTransition> + '_ {
     output
         .resting_orders
         .iter()
@@ -678,7 +697,6 @@ fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::Order
                     status: OrderStatus::Filled,
                 }),
         )
-        .collect()
 }
 
 #[cfg(test)]

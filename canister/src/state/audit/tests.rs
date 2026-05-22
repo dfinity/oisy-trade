@@ -7,7 +7,7 @@ use crate::order::{
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent, MatchingEvent,
-    OrderStatusTransition, SettlingEvent, WithdrawEvent,
+    SettlingEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -202,7 +202,8 @@ impl Scenario {
         self.state
             .validate_cancel_limit_order(&user, &order_id)
             .expect("test setup: order must be cancelable");
-        self.state.record_cancel_limit_order(order_id);
+        self.state
+            .record_cancel_limit_order(order_id, StableMemoryOptions::Write);
         let settling_event = self
             .state
             .take_next_pending_settling_event()
@@ -426,16 +427,6 @@ fn should_replay_matching() {
                         amount: Quantity::from(quantity),
                     },
                 ],
-                transitions: vec![
-                    OrderStatusTransition {
-                        seq: buy_id.seq(),
-                        status: OrderStatus::Filled,
-                    },
-                    OrderStatusTransition {
-                        seq: sell_id.seq(),
-                        status: OrderStatus::Filled,
-                    },
-                ],
             },
         )
         // Post-fill balances: buyer holds `quantity` base free, seller holds
@@ -507,16 +498,6 @@ fn should_replay_matching_with_price_improvement() {
                         to_order: buy_id.seq(),
                         token: PairToken::Base,
                         amount: Quantity::from(quantity),
-                    },
-                ],
-                transitions: vec![
-                    OrderStatusTransition {
-                        seq: sell_id.seq(),
-                        status: OrderStatus::Filled,
-                    },
-                    OrderStatusTransition {
-                        seq: buy_id.seq(),
-                        status: OrderStatus::Filled,
                     },
                 ],
             },
@@ -620,16 +601,6 @@ fn should_replay_cancel_partially_filled_order() {
                     to_order: buy_id.seq(),
                     token: PairToken::Base,
                     amount: Quantity::from(quantity),
-                },
-            ],
-            transitions: vec![
-                OrderStatusTransition {
-                    seq: sell_id.seq(),
-                    status: OrderStatus::Filled,
-                },
-                OrderStatusTransition {
-                    seq: buy_id.seq(),
-                    status: OrderStatus::Open,
                 },
             ],
         },

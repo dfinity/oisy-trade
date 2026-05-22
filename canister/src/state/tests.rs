@@ -297,6 +297,41 @@ mod cancel_limit_order {
         );
     }
 
+    #[test]
+    fn should_not_panic_canceling_order_matched_but_not_yet_settled() {
+        use crate::state::CancelLimitOrderError;
+
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        // Crossing pair: both fully fill when matched.
+        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+        let _sell_id = place_order(&mut state, STRANGER, &pair, Side::Sell, 100, lot);
+
+        // Record only the matching half: the book pops both orders into
+        // `filled_orders` and the paired `SettlingEvent` lands on the queue
+        // without being drained — exactly the state left behind by a chunk
+        // whose inline drain was budget-interrupted.
+        let orders: Vec<_> = state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_order_seqs()
+            .collect();
+        state.record_matching_event(
+            &crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders,
+            },
+            crate::state::StableMemoryOptions::Write,
+        );
+        assert!(state.has_pending_settling_events());
+
+        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+    }
+
     /// Cancels `order_id` owned by `user` and asserts that exactly
     /// `expected_amount` units of `refund_token` move from reserved to free;
     /// the other token's balance is unchanged and the order status becomes
