@@ -17,6 +17,14 @@ pub struct ExecutionPolicy {
 }
 
 impl ExecutionPolicy {
+    /// Largest valid `ExecutionPolicy`: unbounded orders per chunk and the
+    /// IC per-message instruction cap. Intended for tests and benchmarks
+    /// that want to drain matching in a single `run_once`.
+    pub const MAX: Self = Self {
+        max_orders_per_chunk: NonZeroU64::MAX,
+        instruction_budget: NonZeroU64::new(MAX_INSTRUCTION_BUDGET).unwrap(),
+    };
+
     /// Build a validated `ExecutionPolicy`. Panics if `max_orders_per_chunk`
     /// or `instruction_budget` is zero, or if `instruction_budget` exceeds
     /// the IC system-subnet per-message cap.

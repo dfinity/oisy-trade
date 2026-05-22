@@ -124,7 +124,7 @@ fn books_by_pending_order_count_desc<MH: Memory, MB: Memory>(
         .map(|(id, book)| (*id, book.pending_orders_len()))
         .filter(|(_, n)| *n > 0)
         .collect();
-    counts.sort_by(
+    counts.sort_unstable_by(
         |(a_id, a_num_pending_orders), (b_id, b_num_pending_orders)| {
             b_num_pending_orders
                 .cmp(a_num_pending_orders)

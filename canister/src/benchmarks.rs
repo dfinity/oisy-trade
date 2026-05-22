@@ -3,7 +3,9 @@ use crate::order::{
     TradingPair,
 };
 
+use crate::EXECUTOR;
 use crate::order::OrderHistory;
+use crate::state::execution_policy::ExecutionPolicy;
 use crate::state::{StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
@@ -45,8 +47,9 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     assert_eq!(book.pending_orders_len(), 1);
     assert_eq!(book.bids_len(), depth.bids.len());
 
+    state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
-        drive_matching_to_completion(&mut state);
+        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -88,8 +91,9 @@ fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), trades.len());
 
+    state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
-        drive_matching_to_completion(&mut state);
+        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -111,8 +115,9 @@ fn bench_process_pending_orders_1000_no_fills() -> canbench_rs::BenchResult {
     let num_resting_orders_before = book.resting_orders_len();
     assert_eq!(book.pending_orders_len(), 1_000);
 
+    state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
-        drive_matching_to_completion(&mut state);
+        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
     let book = state.get_order_book(&pair).unwrap();
@@ -138,7 +143,8 @@ fn bench_upgrade_full_depth() -> canbench_rs::BenchResult {
 fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
     let mut state = new_state();
     place_1000_non_crossing_orders(&mut state);
-    drive_matching_to_completion(&mut state);
+    state.set_execution_policy(ExecutionPolicy::MAX);
+    EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     bench_upgrade_roundtrip(state)
 }
 
@@ -339,7 +345,8 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
         depth.bids.len() + depth.asks.len()
     );
 
-    drive_matching_to_completion(state);
+    state.set_execution_policy(ExecutionPolicy::MAX);
+    EXECUTOR.run_once(state, &crate::IC_RUNTIME);
 
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
@@ -378,20 +385,6 @@ fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem
             },
         );
     }
-}
-
-/// Drive matching+settling to completion regardless of chunk policy.
-///
-/// Sets `state`'s execution policy to its maximum so a single `run_once`
-/// covers the whole bench workload. Without this, the production default
-/// 1B instruction budget would trip part-way through and the bench would
-/// report `MoreWork`, leaving the round half-measured.
-fn drive_matching_to_completion(state: &mut State<storage::VMem, storage::VMem>) {
-    state.set_execution_policy(crate::state::execution_policy::ExecutionPolicy::new(
-        u64::MAX,
-        crate::state::execution_policy::MAX_INSTRUCTION_BUDGET,
-    ));
-    crate::execute::EXECUTOR.run_once(state, &crate::IC_RUNTIME);
 }
 
 /// Generate a unique principal from a sequential counter.

@@ -15,63 +15,6 @@ type TestState = State<VectorMemory, VectorMemory>;
 const BUYER: Principal = Principal::from_slice(&[0x01]);
 const SELLER: Principal = Principal::from_slice(&[0x02]);
 
-fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u64) {
-    state.set_execution_policy(ExecutionPolicy::new(
-        max_orders_per_chunk,
-        MAX_INSTRUCTION_BUDGET,
-    ));
-}
-
-fn set_unlimited_policy(state: &mut TestState) {
-    set_chunk_policy(state, u64::MAX);
-}
-
-fn runtime() -> MockRuntime {
-    let mut mock = MockRuntime::new();
-    mock.expect_time().return_const(0u64);
-    mock.expect_instruction_counter().return_const(0u64);
-    mock
-}
-
-fn setup_one_book() -> TestState {
-    let mut state = test_fixtures::state();
-    state.record_trading_pair(
-        OrderBookId::ZERO,
-        icp_ckbtc_trading_pair(),
-        icp_metadata(),
-        ckbtc_metadata(),
-        TICK_SIZE,
-        LOT_SIZE,
-    );
-    state
-}
-
-fn pair_b() -> TradingPair {
-    TradingPair {
-        base: TokenId::new(Principal::from_slice(&[0xB1])),
-        quote: TokenId::new(Principal::from_slice(&[0xB2])),
-    }
-}
-
-fn setup_two_books() -> TestState {
-    let mut state = setup_one_book();
-    state.record_trading_pair(
-        OrderBookId::ONE,
-        pair_b(),
-        TokenMetadata {
-            symbol: "B".to_string(),
-            decimals: 8,
-        },
-        TokenMetadata {
-            symbol: "Q".to_string(),
-            decimals: 8,
-        },
-        TICK_SIZE,
-        LOT_SIZE,
-    );
-    state
-}
-
 #[test]
 fn should_return_complete_on_idle_state() {
     let mut state = setup_one_book();
@@ -331,6 +274,63 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     assert!(state.has_pending_orders());
     // No matching event was emitted, so no settling was queued either.
     assert!(!state.has_pending_settling_events());
+}
+
+fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u64) {
+    state.set_execution_policy(ExecutionPolicy::new(
+        max_orders_per_chunk,
+        MAX_INSTRUCTION_BUDGET,
+    ));
+}
+
+fn set_unlimited_policy(state: &mut TestState) {
+    set_chunk_policy(state, u64::MAX);
+}
+
+fn runtime() -> MockRuntime {
+    let mut mock = MockRuntime::new();
+    mock.expect_time().return_const(0u64);
+    mock.expect_instruction_counter().return_const(0u64);
+    mock
+}
+
+fn setup_one_book() -> TestState {
+    let mut state = test_fixtures::state();
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        icp_ckbtc_trading_pair(),
+        icp_metadata(),
+        ckbtc_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+    state
+}
+
+fn pair_b() -> TradingPair {
+    TradingPair {
+        base: TokenId::new(Principal::from_slice(&[0xB1])),
+        quote: TokenId::new(Principal::from_slice(&[0xB2])),
+    }
+}
+
+fn setup_two_books() -> TestState {
+    let mut state = setup_one_book();
+    state.record_trading_pair(
+        OrderBookId::ONE,
+        pair_b(),
+        TokenMetadata {
+            symbol: "B".to_string(),
+            decimals: 8,
+        },
+        TokenMetadata {
+            symbol: "Q".to_string(),
+            decimals: 8,
+        },
+        TICK_SIZE,
+        LOT_SIZE,
+    );
+    state
 }
 
 fn place_workload(state: &mut TestState, pair: &TradingPair, lot: u64) {
