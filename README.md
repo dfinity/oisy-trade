@@ -61,8 +61,10 @@ See [`examples/agents.md`](examples/agents.md).
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install)
-- [just](https://github.com/casey/just)
+Install [`mise`](https://mise.jdx.dev/) and then run `mise install` from the repository root to set up Rust, `just`, and other pinned tools defined in [`mise.toml`](mise.toml).
+
+Additionally:
+
 - [icp CLI](https://cli.internetcomputer.org/)
 
 ### Build

@@ -263,7 +263,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
 
     // Minimum budget; mock returns a counter already past it.
-    state.set_execution_policy(ExecutionPolicy::new(u64::MAX, 1));
+    state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
     let mut mock = MockRuntime::new();
     mock.expect_time().return_const(0u64);
     mock.expect_instruction_counter().return_const(1u64);
@@ -276,15 +276,14 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     assert!(!state.has_pending_settling_events());
 }
 
-fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u64) {
-    state.set_execution_policy(ExecutionPolicy::new(
-        max_orders_per_chunk,
-        MAX_INSTRUCTION_BUDGET,
-    ));
+fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
+    state.set_execution_policy(
+        ExecutionPolicy::try_new(max_orders_per_chunk, MAX_INSTRUCTION_BUDGET).unwrap(),
+    );
 }
 
 fn set_unlimited_policy(state: &mut TestState) {
-    set_chunk_policy(state, u64::MAX);
+    set_chunk_policy(state, u32::MAX);
 }
 
 fn runtime() -> MockRuntime {

@@ -54,8 +54,8 @@ mod assert_caller_is_allowed {
         State::new(
             dex_types_internal::InitArg {
                 mode,
-                max_orders_per_chunk: 1_000,
-                instruction_budget: 1_000_000_000,
+                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
@@ -298,14 +298,6 @@ mod cancel_limit_order {
         );
     }
 
-    /// Demonstrates the matched-but-not-yet-settled race flagged in the PR
-    /// review of DEFI-2743: when the Executor records a `MatchingEvent` but
-    /// its inline settling drain is interrupted by the instruction budget,
-    /// `order_history` still reads `Pending` for fully-filled orders while
-    /// the book has already moved them into `filled_orders`. A `cancel`
-    /// arriving in that gap must return `OrderAlreadyFilled` instead of
-    /// trapping on the `book.remove_order(seq).expect(...)` call in
-    /// `record_cancel_limit_order`.
     #[test]
     fn should_not_panic_canceling_order_matched_but_not_yet_settled() {
         use crate::state::CancelLimitOrderError;
@@ -1136,7 +1128,10 @@ mod execution_policy {
         )
         .unwrap();
 
-        assert_eq!(state.execution_policy(), &ExecutionPolicy::new(17, 12_345));
+        assert_eq!(
+            state.execution_policy(),
+            &ExecutionPolicy::try_new(17, 12_345).unwrap()
+        );
     }
 }
 

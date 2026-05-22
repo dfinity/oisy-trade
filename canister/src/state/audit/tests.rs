@@ -84,14 +84,13 @@ impl Scenario {
 
     fn with_upgrade_execution_policy(
         mut self,
-        max_orders_per_chunk: u64,
+        max_orders_per_chunk: u32,
         instruction_budget: u64,
     ) -> Self {
-        self.state
-            .set_execution_policy(crate::state::ExecutionPolicy::new(
-                max_orders_per_chunk,
-                instruction_budget,
-            ));
+        self.state.set_execution_policy(
+            crate::state::ExecutionPolicy::try_new(max_orders_per_chunk, instruction_budget)
+                .unwrap(),
+        );
         self.events.push(upgrade_event(
             None,
             Some(max_orders_per_chunk),

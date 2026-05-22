@@ -1420,8 +1420,8 @@ mod chunked_matching {
     use dex_types::{GetOrderBookDepthRequest, LimitOrderRequest, Side};
     use dex_types_internal::{InitArg, Mode};
 
-    const MAX_ORDERS_PER_CHUNK: u64 = 5;
-    const N_ORDERS: u64 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
+    const MAX_ORDERS_PER_CHUNK: u32 = 5;
+    const N_ORDERS: u32 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
     const PRICE: u64 = 100;
     const QUANTITY: u64 = 1_000_000;
 
@@ -1497,7 +1497,7 @@ mod chunked_matching {
     const MAX_TICKS: u32 = 20;
 
     fn expected_resting_quantity() -> Nat {
-        Nat::from(N_ORDERS * QUANTITY)
+        Nat::from(u64::from(N_ORDERS) * QUANTITY)
     }
 
     async fn install_with_chunked_buy_workload() -> (Setup, Principal) {
@@ -1518,7 +1518,7 @@ mod chunked_matching {
     async fn place_n_buy_orders(setup: &Setup, user: Principal) {
         let pair = setup.trading_pair();
         let per_order_cost = PRICE * QUANTITY;
-        let total_cost = N_ORDERS * per_order_cost;
+        let total_cost = u64::from(N_ORDERS) * per_order_cost;
         setup
             .deposit_flow(user, setup.quote_token_id())
             .mint(total_cost + 2 * QUOTE_LEDGER_FEE)

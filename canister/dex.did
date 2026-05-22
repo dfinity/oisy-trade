@@ -330,7 +330,7 @@ type InitArg = record {
     // Controls who may call update endpoints.
     mode : Mode;
     // Maximum pending orders matched per chunked-execution chunk.
-    max_orders_per_chunk : nat64;
+    max_orders_per_chunk : nat32;
     // Maximum instructions consumed before a chunk yields.
     instruction_budget : nat64;
 };
@@ -340,7 +340,7 @@ type UpgradeArg = record {
     // If set, changes who may call update endpoints.
     mode : opt Mode;
     // If set, overrides the current `max_orders_per_chunk`.
-    max_orders_per_chunk : opt nat64;
+    max_orders_per_chunk : opt nat32;
     // If set, overrides the current `instruction_budget`.
     instruction_budget : opt nat64;
 };

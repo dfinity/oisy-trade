@@ -83,9 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
     /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
     /// for cancels) and drained by the paired `SettlingEvent` dispatch in
-    /// [`Self::record_settling_event`]. Normally empty between messages —
-    /// producers and their paired settling happen atomically in the same
-    /// message (see `process_pending_orders` and `cancel_limit_order`).
+    /// [`Self::record_settling_event`].
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
@@ -100,12 +98,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_history: OrderHistory<MH>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
+        let execution_policy =
+            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
         Ok(Self {
             mode: init_arg.mode,
-            execution_policy: ExecutionPolicy::new(
-                init_arg.max_orders_per_chunk,
-                init_arg.instruction_budget,
-            ),
+            execution_policy,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
@@ -257,6 +254,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
+        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // leave settling events queued across messages, draining the whole
+        // queue here lets an unrelated cancel apply balance ops from a
+        // previous matching round and inherit its instruction debt. Pop
+        // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
             audit::process_event(self, event::EventType::Settling(event), runtime);
         }
@@ -334,12 +336,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             });
     }
 
-    /// Drive engine matching for the given book, flip every touched order's
-    /// status in `order_history` synchronously with the book mutation, and
-    /// push the paired balance-only [`event::SettlingEvent`] (if any
-    /// balance operations were produced) onto
-    /// [`State::pending_settling_events`] for the settling-event dispatch
-    /// to drain.
+    /// Drive engine matching for the given book; when `persistence` is
+    /// [`StableMemoryOptions::Write`], flip every touched order's status
+    /// in `order_history`. Push the paired balance-only
+    /// [`event::SettlingEvent`] (if any balance operations were produced)
+    /// onto [`State::pending_settling_events`] for the settling-event
+    /// dispatch to drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -370,7 +372,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply a declarative list of balance operations.
+    /// Apply a declarative list of balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
+    /// the function's only side effect is on stable-memory-backed
+    /// balances, which are preserved across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
@@ -654,7 +659,9 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
     ops
 }
 
-fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
+fn compute_order_status_transitions(
+    output: &MatchingOutput,
+) -> impl Iterator<Item = event::OrderStatusTransition> + '_ {
     output
         .resting_orders
         .iter()
@@ -671,7 +678,6 @@ fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::Order
                     status: OrderStatus::Filled,
                 }),
         )
-        .collect()
 }
 
 #[cfg(test)]
