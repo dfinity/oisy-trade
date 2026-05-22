@@ -678,7 +678,9 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
     ops
 }
 
-fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::OrderStatusTransition> {
+fn compute_order_status_transitions(
+    output: &MatchingOutput,
+) -> impl Iterator<Item = event::OrderStatusTransition> + '_ {
     output
         .resting_orders
         .iter()
@@ -695,7 +697,6 @@ fn compute_order_status_transitions(output: &MatchingOutput) -> Vec<event::Order
                     status: OrderStatus::Filled,
                 }),
         )
-        .collect()
 }
 
 #[cfg(test)]
