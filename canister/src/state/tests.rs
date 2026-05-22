@@ -297,13 +297,6 @@ mod cancel_limit_order {
         );
     }
 
-    /// Reproduces the matched-but-not-yet-settled race: when matching has
-    /// run but the paired `SettlingEvent` hasn't drained yet,
-    /// `order_history` still reads `Pending` for fully-filled orders while
-    /// the book has already moved them into `filled_orders`. A `cancel`
-    /// arriving in that gap must return `OrderAlreadyFilled` instead of
-    /// trapping on the `book.remove_order(seq).expect(...)` call in
-    /// `record_cancel_limit_order`.
     #[test]
     fn should_not_panic_canceling_order_matched_but_not_yet_settled() {
         use crate::state::CancelLimitOrderError;

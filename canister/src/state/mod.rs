@@ -83,13 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// [`event::SettlingEvent`]s awaiting dispatch. Written by producer
     /// steps (`record_matching_event` for matches, `record_cancel_limit_order`
     /// for cancels) and drained by the paired `SettlingEvent` dispatch in
-    /// [`Self::record_settling_event`]. Normally empty between messages —
-    /// producers and their paired settling happen atomically in the same
-    /// message (see `process_pending_orders` and `cancel_limit_order`).
-    // TODO(DEFI-2743): chunked execution lands in PR #89 — once a matching
-    // chunk can be interrupted by the instruction budget, this queue
-    // persists across messages and the "empty between messages" invariant
-    // no longer holds.
+    /// [`Self::record_settling_event`].
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
