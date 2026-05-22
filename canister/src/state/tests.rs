@@ -297,9 +297,8 @@ mod cancel_limit_order {
         );
     }
 
-    /// Demonstrates the matched-but-not-yet-settled race flagged in the PR
-    /// review of DEFI-2743: when the Executor records a `MatchingEvent` but
-    /// its inline settling drain is interrupted by the instruction budget,
+    /// Reproduces the matched-but-not-yet-settled race: when matching has
+    /// run but the paired `SettlingEvent` hasn't drained yet,
     /// `order_history` still reads `Pending` for fully-filled orders while
     /// the book has already moved them into `filled_orders`. A `cancel`
     /// arriving in that gap must return `OrderAlreadyFilled` instead of

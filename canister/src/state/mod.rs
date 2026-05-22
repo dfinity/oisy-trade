@@ -86,6 +86,10 @@ pub struct State<MH: Memory, MB: Memory> {
     /// [`Self::record_settling_event`]. Normally empty between messages —
     /// producers and their paired settling happen atomically in the same
     /// message (see `process_pending_orders` and `cancel_limit_order`).
+    // TODO(DEFI-2743): chunked execution lands in PR #89 — once a matching
+    // chunk can be interrupted by the instruction budget, this queue
+    // persists across messages and the "empty between messages" invariant
+    // no longer holds.
     pending_settling_events: VecDeque<event::SettlingEvent>,
     active_tasks: BTreeSet<Task>,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
@@ -361,12 +365,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Drive engine matching for the given book, flip every touched order's
-    /// status in `order_history` synchronously with the book mutation, and
-    /// push the paired balance-only [`event::SettlingEvent`] (if any
-    /// balance operations were produced) onto
-    /// [`State::pending_settling_events`] for the settling-event dispatch
-    /// to drain.
+    /// Drive engine matching for the given book; when `persistence` is
+    /// [`StableMemoryOptions::Write`], flip every touched order's status
+    /// in `order_history`. Push the paired balance-only
+    /// [`event::SettlingEvent`] (if any balance operations were produced)
+    /// onto [`State::pending_settling_events`] for the settling-event
+    /// dispatch to drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -397,7 +401,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply a declarative list of balance operations.
+    /// Apply a declarative list of balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
+    /// the function's only side effect is on stable-memory-backed
+    /// balances, which are preserved across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
