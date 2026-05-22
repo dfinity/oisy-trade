@@ -1,0 +1,58 @@
+use dex_types_internal::{DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK};
+use std::num::{NonZeroU32, NonZeroU64};
+
+#[cfg(test)]
+mod tests;
+
+/// Highest instruction budget the validator accepts. Rejects obvious
+/// typos (e.g. `u64::MAX`) without constraining the production policy —
+/// see [`Default`] for the value the canister actually ships with.
+///
+/// Spec: <https://docs.internetcomputer.org/references/resource-limits/#instruction-limits>
+const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionPolicy {
+    max_orders_per_chunk: NonZeroU32,
+    instruction_budget: NonZeroU64,
+}
+
+impl ExecutionPolicy {
+    /// Build a validated `ExecutionPolicy`. Returns `Err` if either field
+    /// is zero or if `instruction_budget` exceeds the IC system-subnet
+    /// per-message cap.
+    pub fn try_new(max_orders_per_chunk: u32, instruction_budget: u64) -> Result<Self, String> {
+        let max_orders_per_chunk = NonZeroU32::new(max_orders_per_chunk)
+            .ok_or_else(|| "max_orders_per_chunk must be non-zero".to_string())?;
+        let instruction_budget = NonZeroU64::new(instruction_budget)
+            .ok_or_else(|| "instruction_budget must be non-zero".to_string())?;
+        if instruction_budget.get() > MAX_INSTRUCTION_BUDGET {
+            return Err(format!(
+                "instruction_budget {} exceeds IC per-message cap ({})",
+                instruction_budget.get(),
+                MAX_INSTRUCTION_BUDGET,
+            ));
+        }
+        Ok(Self {
+            max_orders_per_chunk,
+            instruction_budget,
+        })
+    }
+
+    pub fn max_orders_per_chunk(&self) -> u32 {
+        self.max_orders_per_chunk.get()
+    }
+
+    pub fn instruction_budget(&self) -> u64 {
+        self.instruction_budget.get()
+    }
+}
+
+impl Default for ExecutionPolicy {
+    /// Conservative production policy: see [`DEFAULT_MAX_ORDERS_PER_CHUNK`]
+    /// and [`DEFAULT_INSTRUCTION_BUDGET`].
+    fn default() -> Self {
+        Self::try_new(DEFAULT_MAX_ORDERS_PER_CHUNK, DEFAULT_INSTRUCTION_BUDGET)
+            .expect("BUG: DEFAULT_* constants must produce a valid ExecutionPolicy")
+    }
+}

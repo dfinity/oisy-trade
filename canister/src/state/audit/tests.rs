@@ -78,7 +78,24 @@ impl Scenario {
         if let Some(ref m) = mode {
             self.state.set_mode(m.clone());
         }
-        self.events.push(upgrade_event(mode));
+        self.events.push(upgrade_event(mode, None, None));
+        self
+    }
+
+    fn with_upgrade_execution_policy(
+        mut self,
+        max_orders_per_chunk: u32,
+        instruction_budget: u64,
+    ) -> Self {
+        self.state.set_execution_policy(
+            crate::state::ExecutionPolicy::try_new(max_orders_per_chunk, instruction_budget)
+                .unwrap(),
+        );
+        self.events.push(upgrade_event(
+            None,
+            Some(max_orders_per_chunk),
+            Some(instruction_budget),
+        ));
         self
     }
 
@@ -285,6 +302,13 @@ fn should_replay_init_then_upgrade() {
 #[test]
 fn should_replay_upgrade_without_mode_change() {
     Scenario::new().with_upgrade(None).assert_replay_matches();
+}
+
+#[test]
+fn should_replay_execution_policy_change_on_upgrade() {
+    Scenario::new()
+        .with_upgrade_execution_policy(123, 4_567_890)
+        .assert_replay_matches();
 }
 
 #[test]
@@ -644,7 +668,7 @@ fn should_panic_on_empty_events() {
 #[should_panic(expected = "the first event must be an Init event")]
 fn should_panic_when_first_event_is_not_init() {
     replay_events(
-        vec![upgrade_event(None)],
+        vec![upgrade_event(None, None, None)],
         order_history(),
         balances(),
         StableMemoryOptions::Write,

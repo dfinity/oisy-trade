@@ -44,9 +44,22 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Init(_) => {
             panic!("BUG: state re-initialization is not allowed");
         }
-        EventType::Upgrade(UpgradeArg { mode: new_mode }) => {
+        EventType::Upgrade(UpgradeArg {
+            mode: new_mode,
+            max_orders_per_chunk,
+            instruction_budget,
+        }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
+            }
+            if max_orders_per_chunk.is_some() || instruction_budget.is_some() {
+                let current = state.execution_policy();
+                let policy = crate::state::ExecutionPolicy::try_new(
+                    max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
+                    instruction_budget.unwrap_or_else(|| current.instruction_budget()),
+                )
+                .unwrap_or_else(|e| panic!("BUG: invalid ExecutionPolicy: {e}"));
+                state.set_execution_policy(policy);
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {

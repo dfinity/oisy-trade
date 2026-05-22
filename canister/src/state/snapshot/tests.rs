@@ -126,6 +126,9 @@ mod schema_stability {
                     },
                 ],
             }]),
+            // Non-default policy.
+            max_orders_per_chunk: Some(200),
+            instruction_budget: Some(5_000_000_000),
         }
     }
 
@@ -143,10 +146,11 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        87820080810882828141018261410882814102826142068182828141018141028107818881078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818881078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
         186e818281021a0007a12081810481828141011a000186a08183810782820084810581068201801a\
-        05f5e100820084810681058200801a000f424082828105820280828106820280";
+        05f5e100820084810681058200801a000f424082828105820280828106820280\
+        18c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {
@@ -178,6 +182,10 @@ mod schema_stability {
 #[test]
 fn should_roundtrip_state_through_snapshot() {
     let mut state = fresh_state();
+    // Non-default policy so the round-trip exercises the new
+    // `execution_policy` field rather than silently relying on the
+    // `into_state` fallback.
+    state.set_execution_policy(crate::state::ExecutionPolicy::try_new(42, 12_345).unwrap());
     let pair = icp_ckbtc_trading_pair();
     state.record_trading_pair(
         OrderBookId::ZERO,

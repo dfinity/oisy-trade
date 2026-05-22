@@ -12,6 +12,7 @@ use crate::balance::TokenBalance;
 use crate::order::{
     OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
+use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use candid::Nat;
@@ -41,6 +42,11 @@ pub struct StateSnapshot {
     /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
+    /// Chunked-matching policy, flattened on the wire in 2 fields.
+    #[n(7)]
+    pub max_orders_per_chunk: Option<u32>,
+    #[n(8)]
+    pub instruction_budget: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -71,6 +77,7 @@ impl StateSnapshot {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
         let State {
             mode,
+            execution_policy,
             next_book_id,
             tokens,
             trading_pairs,
@@ -116,6 +123,8 @@ impl StateSnapshot {
             } else {
                 Some(pending_settling_events.iter().cloned().collect())
             },
+            max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
+            instruction_budget: Some(execution_policy.instruction_budget()),
         }
     }
 
@@ -168,8 +177,24 @@ impl StateSnapshot {
             .into_iter()
             .collect();
 
+        let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
+            (Some(max), Some(budget)) => ExecutionPolicy::try_new(max, budget)
+                .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
+            // Snapshots written before this PR carry neither field; fall
+            // back to the production default. Partial states (exactly one
+            // field) imply a schema regression and trap so the bug
+            // surfaces instead of silently reverting to defaults.
+            (None, None) => ExecutionPolicy::default(),
+            (max, budget) => panic!(
+                "invalid snapshot: partial execution policy fields \
+                 (max_orders_per_chunk={:?}, instruction_budget={:?})",
+                max, budget,
+            ),
+        };
+
         State {
             mode: self.mode,
+            execution_policy,
             next_book_id: self.next_book_id,
             tokens,
             trading_pairs,

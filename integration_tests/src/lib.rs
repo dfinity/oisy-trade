@@ -59,7 +59,9 @@ impl Setup {
             canister_id,
             dex_wasm(),
             Encode!(&DexArg::Init(InitArg {
-                mode: Mode::GeneralAvailability
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             }))
             .unwrap(),
             Some(controller),

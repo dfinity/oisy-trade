@@ -272,6 +272,8 @@ fn new_state() -> State<storage::VMem, storage::VMem> {
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
+            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         OrderHistory::new(storage::order_history_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),

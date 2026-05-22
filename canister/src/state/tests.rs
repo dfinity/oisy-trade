@@ -52,7 +52,11 @@ mod assert_caller_is_allowed {
         mode: Mode,
     ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
         State::new(
-            dex_types_internal::InitArg { mode },
+            dex_types_internal::InitArg {
+                mode,
+                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
@@ -1064,5 +1068,32 @@ mod settle_fills {
         let (base_after, quote_after) = sum(&after);
         assert_eq!(base_before, base_after, "base token total changed");
         assert_eq!(quote_before, quote_after, "quote token total changed");
+    }
+}
+
+mod execution_policy {
+    use crate::balance::TokenBalance;
+    use crate::order::OrderHistory;
+    use crate::state::{ExecutionPolicy, State};
+    use dex_types_internal::{InitArg, Mode};
+    use ic_stable_structures::VectorMemory;
+
+    #[test]
+    fn should_thread_init_arg_fields_through_to_execution_policy() {
+        let state = State::new(
+            InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: 17,
+                instruction_budget: 12_345,
+            },
+            OrderHistory::new(VectorMemory::default()),
+            TokenBalance::new(VectorMemory::default()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.execution_policy(),
+            &ExecutionPolicy::try_new(17, 12_345).unwrap()
+        );
     }
 }

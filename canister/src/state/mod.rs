@@ -1,8 +1,10 @@
 pub mod audit;
 pub mod event;
+pub mod execution_policy;
 mod map;
 pub mod snapshot;
 
+pub use execution_policy::ExecutionPolicy;
 pub use map::TradingPairMap;
 pub use snapshot::StateSnapshot;
 
@@ -67,6 +69,7 @@ pub enum StableMemoryOptions {
 #[derive(Debug)]
 pub struct State<MH: Memory, MB: Memory> {
     mode: Mode,
+    execution_policy: ExecutionPolicy,
     next_book_id: OrderBookId,
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: TradingPairMap,
@@ -97,8 +100,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_history: OrderHistory<MH>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
+        let execution_policy =
+            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
         Ok(Self {
             mode: init_arg.mode,
+            execution_policy,
             next_book_id: OrderBookId::default(),
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
@@ -114,6 +120,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
+    }
+
+    pub fn execution_policy(&self) -> &ExecutionPolicy {
+        &self.execution_policy
+    }
+
+    pub fn set_execution_policy(&mut self, policy: ExecutionPolicy) {
+        self.execution_policy = policy;
     }
 
     pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
@@ -672,6 +686,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
     fn clone(&self) -> Self {
         let Self {
             mode,
+            execution_policy,
             next_book_id,
             tokens,
             trading_pairs,
@@ -685,6 +700,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
         } = self;
         Self {
             mode: mode.clone(),
+            execution_policy: execution_policy.clone(),
             next_book_id: *next_book_id,
             tokens: tokens.clone(),
             trading_pairs: trading_pairs.clone(),
@@ -704,6 +720,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
     fn eq(&self, other: &Self) -> bool {
         let Self {
             mode,
+            execution_policy,
             next_book_id,
             tokens,
             trading_pairs,
@@ -717,6 +734,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
         } = self;
         let Self {
             mode: other_mode,
+            execution_policy: other_execution_policy,
             next_book_id: other_next_book_id,
             tokens: other_tokens,
             trading_pairs: other_trading_pairs,
@@ -729,6 +747,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             in_flight_user_ops: other_in_flight_user_ops,
         } = other;
         mode == other_mode
+            && execution_policy == other_execution_policy
             && next_book_id == other_next_book_id
             && tokens == other_tokens
             && trading_pairs == other_trading_pairs
