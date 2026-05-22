@@ -1,5 +1,5 @@
 use dex_types_internal::{DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK};
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 
 #[cfg(test)]
 mod tests;
@@ -13,7 +13,7 @@ const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionPolicy {
-    max_orders_per_chunk: NonZeroU64,
+    max_orders_per_chunk: NonZeroU32,
     instruction_budget: NonZeroU64,
 }
 
@@ -21,8 +21,8 @@ impl ExecutionPolicy {
     /// Build a validated `ExecutionPolicy`. Returns `Err` if either field
     /// is zero or if `instruction_budget` exceeds the IC system-subnet
     /// per-message cap.
-    pub fn try_new(max_orders_per_chunk: u64, instruction_budget: u64) -> Result<Self, String> {
-        let max_orders_per_chunk = NonZeroU64::new(max_orders_per_chunk)
+    pub fn try_new(max_orders_per_chunk: u32, instruction_budget: u64) -> Result<Self, String> {
+        let max_orders_per_chunk = NonZeroU32::new(max_orders_per_chunk)
             .ok_or_else(|| "max_orders_per_chunk must be non-zero".to_string())?;
         let instruction_budget = NonZeroU64::new(instruction_budget)
             .ok_or_else(|| "instruction_budget must be non-zero".to_string())?;
@@ -39,7 +39,7 @@ impl ExecutionPolicy {
         })
     }
 
-    pub fn max_orders_per_chunk(&self) -> u64 {
+    pub fn max_orders_per_chunk(&self) -> u32 {
         self.max_orders_per_chunk.get()
     }
 

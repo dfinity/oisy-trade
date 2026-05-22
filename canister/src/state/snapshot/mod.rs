@@ -44,7 +44,7 @@ pub struct StateSnapshot {
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
     /// Chunked-matching policy, flattened on the wire in 2 fields.
     #[n(7)]
-    pub max_orders_per_chunk: Option<u64>,
+    pub max_orders_per_chunk: Option<u32>,
     #[n(8)]
     pub instruction_budget: Option<u64>,
 }

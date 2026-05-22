@@ -517,7 +517,7 @@ pub mod arbitrary {
 
     pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
         // Stay within ExecutionPolicy's validation bounds so `State::new` won't panic.
-        (arb_mode(), 1..=10_000u64, 1..=40_000_000_000u64).prop_map(
+        (arb_mode(), 1..=10_000u32, 1..=40_000_000_000u64).prop_map(
             |(mode, max_orders_per_chunk, instruction_budget)| InitArg {
                 mode,
                 max_orders_per_chunk,
@@ -529,7 +529,7 @@ pub mod arbitrary {
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
         (
             prop::option::of(arb_mode()),
-            prop::option::of(1..=10_000u64),
+            prop::option::of(1..=10_000u32),
             prop::option::of(1..=40_000_000_000u64),
         )
             .prop_map(

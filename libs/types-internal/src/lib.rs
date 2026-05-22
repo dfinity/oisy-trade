@@ -26,7 +26,7 @@ pub enum DexArg {
 /// Conservative production default for [`InitArg::max_orders_per_chunk`].
 /// Referenced by `ExecutionPolicy::default()` and every test/bench fixture
 /// that needs the same value.
-pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u64 = 1_000;
+pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u32 = 1_000;
 
 /// Conservative production default for [`InitArg::instruction_budget`]
 /// — 1B instructions per chunk, ~5% of the IC's per-message cap.
@@ -41,7 +41,7 @@ pub struct InitArg {
     pub mode: Mode,
     /// Maximum pending orders matched per chunked-execution chunk.
     #[cfg_attr(feature = "event", n(1))]
-    pub max_orders_per_chunk: u64,
+    pub max_orders_per_chunk: u32,
     /// Maximum instructions consumed before a chunk yields.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: u64,
@@ -56,7 +56,7 @@ pub struct UpgradeArg {
     pub mode: Option<Mode>,
     /// If set, overrides the current `max_orders_per_chunk`.
     #[cfg_attr(feature = "event", n(1))]
-    pub max_orders_per_chunk: Option<u64>,
+    pub max_orders_per_chunk: Option<u32>,
     /// If set, overrides the current `instruction_budget`.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: Option<u64>,
