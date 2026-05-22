@@ -254,6 +254,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
+        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // leave settling events queued across messages, draining the whole
+        // queue here lets an unrelated cancel apply balance ops from a
+        // previous matching round and inherit its instruction debt. Pop
+        // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
             audit::process_event(self, event::EventType::Settling(event), runtime);
         }
