@@ -178,11 +178,18 @@ impl StateSnapshot {
             .collect();
 
         let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
-            (Some(max), Some(budget)) => ExecutionPolicy::new(max, budget),
-            // A snapshot written before this PR (both fields absent) falls
-            // back to the production default. Partial states shouldn't occur
-            // in practice; treat them the same way to keep the API total.
-            _ => ExecutionPolicy::default(),
+            (Some(max), Some(budget)) => ExecutionPolicy::try_new(max, budget)
+                .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
+            // Snapshots written before this PR carry neither field; fall
+            // back to the production default. Partial states (exactly one
+            // field) imply a schema regression and trap so the bug
+            // surfaces instead of silently reverting to defaults.
+            (None, None) => ExecutionPolicy::default(),
+            (max, budget) => panic!(
+                "invalid snapshot: partial execution policy fields \
+                 (max_orders_per_chunk={:?}, instruction_budget={:?})",
+                max, budget,
+            ),
         };
 
         State {

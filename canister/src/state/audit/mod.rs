@@ -54,10 +54,15 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             }
             if max_orders_per_chunk.is_some() || instruction_budget.is_some() {
                 let current = state.execution_policy();
-                state.set_execution_policy(crate::state::ExecutionPolicy::new(
+                let policy = crate::state::ExecutionPolicy::try_new(
                     max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
                     instruction_budget.unwrap_or_else(|| current.instruction_budget()),
-                ));
+                )
+                .expect(
+                    "BUG: upgrade arg produced an invalid ExecutionPolicy — \
+                     validate upgrade args before recording the event",
+                );
+                state.set_execution_policy(policy);
             }
         }
         EventType::AddTradingPair(AddTradingPairEvent {

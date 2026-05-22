@@ -185,7 +185,7 @@ fn should_roundtrip_state_through_snapshot() {
     // Non-default policy so the round-trip exercises the new
     // `execution_policy` field rather than silently relying on the
     // `into_state` fallback.
-    state.set_execution_policy(crate::state::ExecutionPolicy::new(42, 12_345));
+    state.set_execution_policy(crate::state::ExecutionPolicy::try_new(42, 12_345).unwrap());
     let pair = icp_ckbtc_trading_pair();
     state.record_trading_pair(
         OrderBookId::ZERO,

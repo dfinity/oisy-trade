@@ -23,6 +23,15 @@ pub enum DexArg {
     Upgrade(Option<UpgradeArg>),
 }
 
+/// Conservative production default for [`InitArg::max_orders_per_chunk`].
+/// Referenced by `ExecutionPolicy::default()` and every test/bench fixture
+/// that needs the same value.
+pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u64 = 1_000;
+
+/// Conservative production default for [`InitArg::instruction_budget`]
+/// — 1B instructions per chunk, ~5% of the IC's per-message cap.
+pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
+
 /// Argument for canister initialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
