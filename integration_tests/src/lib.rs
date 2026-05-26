@@ -39,8 +39,8 @@ impl Setup {
     pub async fn new() -> Self {
         Self::new_with_init_arg(InitArg {
             mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: 1_000,
-            instruction_budget: 1_000_000_000,
+            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         })
         .await
     }
