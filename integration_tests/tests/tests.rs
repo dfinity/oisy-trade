@@ -1477,3 +1477,29 @@ async fn should_expose_metrics() {
 
     setup.drop().await;
 }
+
+mod list_supported_tokens {
+    use dex_int_tests::Setup;
+
+    #[tokio::test]
+    async fn should_return_empty_then_pair_tokens() {
+        // Fresh setup, no trading pair yet — empty list.
+        let setup = Setup::new().await;
+        assert!(
+            setup.dex_client().list_supported_tokens().await.is_empty(),
+            "no trading pair yet, expected empty token list",
+        );
+
+        // After registering a trading pair, both tokens are listed with
+        // the right metadata. Iteration order is an implementation detail
+        // of the canister, so just assert membership.
+        let setup = setup.with_trading_pair().await;
+        let request = setup.add_trading_pair_request();
+        let tokens = setup.dex_client().list_supported_tokens().await;
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens.contains(&request.base));
+        assert!(tokens.contains(&request.quote));
+
+        setup.drop().await;
+    }
+}
