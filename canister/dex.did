@@ -287,6 +287,41 @@ type Balance = record {
     reserved : nat;
 };
 
+// Selector for filtering balances. New variants may be added in
+// backward-compatible upgrades; `ById` is the only one today.
+type FilterToken = variant {
+    ById : TokenId;
+};
+
+// A single `(token, balance)` entry in a `get_balances` response.
+type UserTokenBalance = record {
+    token_id : TokenId;
+    balance : Balance;
+};
+
+// Per-entry error reported in `get_balances` responses.
+type GetBalancesError = variant {
+    TokenNotSupported : TokenId;
+};
+
+// Per-entry result.
+type GetBalanceResult = variant {
+    Ok : UserTokenBalance;
+    Err : GetBalancesError;
+};
+
+// Whole-request error reported when `get_balances` rejects the request
+// before any per-entry lookup runs.
+type GetBalancesRequestError = variant {
+    FilterTooLarge : record { limit : nat32; max : nat32 };
+};
+
+// Response shape for `get_balances`.
+type GetBalancesResponse = variant {
+    Ok : vec GetBalanceResult;
+    Err : GetBalancesRequestError;
+};
+
 // Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
     // The base token of the pair.
@@ -509,8 +544,11 @@ service : (DexArg) -> {
     // withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
 
-    // Query the caller's balance for a given token.
-    get_balance : (TokenId) -> (Balance) query;
+    // Query the caller's balances. With no filter, returns every token the
+    // caller holds with non-zero balance. With a filter, looks up each
+    // entry (including zero balances); unsupported tokens are reported
+    // per-entry as `TokenNotSupported`.
+    get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
     // List every token registered with the DEX. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

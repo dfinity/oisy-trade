@@ -153,12 +153,17 @@ mod add_limit_order {
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
     };
-    use crate::{add_limit_order, get_balance, state};
+    use crate::{Runtime, add_limit_order, get_balances, state};
     use candid::Principal;
-    use dex_types::{Balance, LimitOrderRequest, Side};
+    use dex_types::{Balance, FilterToken, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
 
     const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
+
+    fn balance_of(token: dex_types::TokenId, runtime: &impl Runtime) -> Balance {
+        let mut result = get_balances(Some(vec![FilterToken::ById(token)]), runtime).unwrap();
+        result.remove(0).unwrap().balance
+    }
 
     #[test]
     fn should_add_limit_orders_with_distinct_order_ids() {
@@ -303,9 +308,9 @@ mod add_limit_order {
 
         add_limit_order(order, &runtime).unwrap();
 
-        assert_eq!(get_balance(pair.base.into(), &runtime), Balance::default());
+        assert_eq!(balance_of(pair.base.into(), &runtime), Balance::default());
         assert_eq!(
-            get_balance(pair.quote.into(), &runtime),
+            balance_of(pair.quote.into(), &runtime),
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -338,13 +343,13 @@ mod add_limit_order {
         add_limit_order(order, &runtime).unwrap();
 
         assert_eq!(
-            get_balance(pair.base.into(), &runtime),
+            balance_of(pair.base.into(), &runtime),
             Balance {
                 free: 0u64.into(),
                 reserved: quantity.into(),
             }
         );
-        assert_eq!(get_balance(pair.quote.into(), &runtime), Balance::default());
+        assert_eq!(balance_of(pair.quote.into(), &runtime), Balance::default());
     }
 }
 
@@ -1427,5 +1432,52 @@ mod get_trading_pairs {
                 lot_size: LOT_SIZE.get(),
             }]
         );
+    }
+}
+
+mod get_balances {
+    use crate::get_balances;
+    use crate::test_fixtures::init_state_with_order_book;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use candid::Principal;
+    use dex_types::{FilterToken, GetBalancesRequestError, MAX_FILTER_LEN, TokenId};
+
+    const USER: Principal = Principal::from_slice(&[0xAA]);
+
+    fn dummy_filter(len: u32) -> Vec<FilterToken> {
+        (0..len)
+            .map(|i| {
+                FilterToken::ById(TokenId {
+                    ledger_id: Principal::from_slice(&i.to_be_bytes()),
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn should_reject_filter_above_max_len() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(USER);
+        let filter = dummy_filter(MAX_FILTER_LEN + 1);
+
+        let err = get_balances(Some(filter), &runtime).unwrap_err();
+
+        assert_eq!(
+            err,
+            GetBalancesRequestError::FilterTooLarge {
+                limit: MAX_FILTER_LEN + 1,
+                max: MAX_FILTER_LEN,
+            }
+        );
+    }
+
+    #[test]
+    fn should_accept_filter_at_max_len() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(USER);
+        let filter = dummy_filter(MAX_FILTER_LEN);
+
+        let result = get_balances(Some(filter), &runtime).unwrap();
+        assert_eq!(result.len(), MAX_FILTER_LEN as usize);
     }
 }
