@@ -1164,3 +1164,145 @@ mod execution_policy {
         );
     }
 }
+
+mod get_balances {
+    use crate::order::{OrderBookId, Quantity, TokenId, TradingPair};
+    use crate::state::StableMemoryOptions;
+    use crate::test_fixtures;
+    use candid::Principal;
+    use std::collections::HashSet;
+
+    const USER: Principal = Principal::from_slice(&[0xAA]);
+
+    fn setup_two_token_state() -> (
+        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
+        TokenId,
+        TokenId,
+    ) {
+        let mut state = test_fixtures::state();
+        let a_id = test_fixtures::ckbtc_token_id();
+        let b_id = test_fixtures::icp_token_id();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            TradingPair {
+                base: a_id,
+                quote: b_id,
+            },
+            test_fixtures::ckbtc_metadata(),
+            test_fixtures::icp_metadata(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+        (state, a_id, b_id)
+    }
+
+    #[test]
+    fn should_return_empty_for_user_without_balances_and_no_filter() {
+        let (state, _, _) = setup_two_token_state();
+        assert!(state.get_balances(&USER, None).is_empty());
+    }
+
+    #[test]
+    fn should_return_zero_entry_for_registered_token_in_filter() {
+        let (state, a_id, _) = setup_two_token_state();
+        let result = state.get_balances(&USER, Some(&[a_id]));
+        assert_eq!(result.len(), 1);
+        let entry = result[0].as_ref().unwrap();
+        assert_eq!(entry.token_id, a_id.into());
+        assert_eq!(entry.balance.free, candid::Nat::from(0u64));
+        assert_eq!(entry.balance.reserved, candid::Nat::from(0u64));
+    }
+
+    #[test]
+    fn should_return_non_zero_entries_without_filter() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
+
+        let result = state.get_balances(&USER, None);
+        let tokens: HashSet<_> = result.into_iter().map(|r| r.unwrap().token_id).collect();
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens.contains(&a_id.into()));
+        assert!(tokens.contains(&b_id.into()));
+    }
+
+    #[test]
+    fn should_include_zero_entries_for_filtered_tokens_user_does_not_hold() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+
+        let result = state.get_balances(&USER, Some(&[a_id, b_id]));
+        assert_eq!(result.len(), 2);
+        let a_entry = result[0].as_ref().unwrap();
+        let b_entry = result[1].as_ref().unwrap();
+        assert_eq!(a_entry.token_id, a_id.into());
+        assert_eq!(a_entry.balance.free, candid::Nat::from(10u64));
+        assert_eq!(b_entry.token_id, b_id.into());
+        assert_eq!(b_entry.balance.free, candid::Nat::from(0u64));
+    }
+
+    #[test]
+    fn should_skip_existing_zero_entries_without_filter() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
+        state
+            .withdraw(USER, b_id, Quantity::from(5u64))
+            .expect("withdraw should succeed");
+
+        let result = state.get_balances(&USER, None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_ref().unwrap().token_id, a_id.into());
+    }
+
+    #[test]
+    fn should_return_token_not_supported_for_unknown_filter_entry() {
+        let (state, _, _) = setup_two_token_state();
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let result = state.get_balances(&USER, Some(&[unknown]));
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Err(dex_types::GetBalancesError::TokenNotSupported(
+                unknown.into()
+            ))
+        );
+    }
+
+    #[test]
+    fn should_mix_ok_and_err_entries_in_filter_order() {
+        let (mut state, a_id, _) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+
+        let result = state.get_balances(&USER, Some(&[a_id, unknown]));
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_ref().unwrap().token_id, a_id.into());
+        assert_eq!(
+            result[1],
+            Err(dex_types::GetBalancesError::TokenNotSupported(
+                unknown.into()
+            ))
+        );
+    }
+}

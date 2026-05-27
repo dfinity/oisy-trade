@@ -571,6 +571,45 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .unwrap_or_default()
     }
 
+    pub fn get_balances(
+        &self,
+        user: &Principal,
+        filter: Option<&[TokenId]>,
+    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        match filter {
+            Some(tokens) => tokens
+                .iter()
+                .map(|t| {
+                    if !self.tokens.contains_key(t) {
+                        Err(dex_types::GetBalancesError::TokenNotSupported((*t).into()))
+                    } else {
+                        Ok(dex_types::UserTokenBalance {
+                            token_id: (*t).into(),
+                            balance: self
+                                .balances
+                                .get_balance(user, t)
+                                .unwrap_or_default()
+                                .into(),
+                        })
+                    }
+                })
+                .collect(),
+            None => self
+                .tokens
+                .keys()
+                .filter_map(|t| {
+                    let bal = self.balances.get_balance(user, t).unwrap_or_default();
+                    (!bal.is_zero()).then(|| {
+                        Ok(dex_types::UserTokenBalance {
+                            token_id: (*t).into(),
+                            balance: bal.into(),
+                        })
+                    })
+                })
+                .collect(),
+        }
+    }
+
     /// Set of currently active tasks to avoid parallel execution.
     pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
         &mut self.active_tasks
