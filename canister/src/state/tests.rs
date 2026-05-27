@@ -1132,3 +1132,112 @@ mod execution_policy {
         );
     }
 }
+
+mod list_supported_tokens {
+    use crate::order::{OrderBookId, TokenId, TokenMetadata, TradingPair};
+    use crate::test_fixtures;
+    use candid::Principal;
+
+    fn ckbtc() -> (TokenId, TokenMetadata) {
+        (
+            TokenId::new(Principal::from_slice(&[0xCB])),
+            TokenMetadata {
+                symbol: "ckBTC".to_string(),
+                decimals: 8,
+            },
+        )
+    }
+
+    fn cketh() -> (TokenId, TokenMetadata) {
+        (
+            TokenId::new(Principal::from_slice(&[0xCE])),
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+        )
+    }
+
+    fn ckusdc() -> (TokenId, TokenMetadata) {
+        (
+            TokenId::new(Principal::from_slice(&[0xCC])),
+            TokenMetadata {
+                symbol: "ckUSDC".to_string(),
+                decimals: 6,
+            },
+        )
+    }
+
+    #[test]
+    fn should_return_empty_on_fresh_state() {
+        let state = test_fixtures::state();
+        assert!(state.list_supported_tokens().is_empty());
+    }
+
+    #[test]
+    fn should_return_both_tokens_of_a_single_trading_pair() {
+        let mut state = test_fixtures::state();
+        let (ckbtc_id, ckbtc_meta) = ckbtc();
+        let (ckusdc_id, ckusdc_meta) = ckusdc();
+
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            TradingPair {
+                base: ckbtc_id,
+                quote: ckusdc_id,
+            },
+            ckbtc_meta.clone(),
+            ckusdc_meta.clone(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+
+        let tokens = state.list_supported_tokens();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens.get(&ckbtc_id), Some(&&ckbtc_meta));
+        assert_eq!(tokens.get(&ckusdc_id), Some(&&ckusdc_meta));
+    }
+
+    #[test]
+    fn should_deduplicate_a_token_shared_across_two_pairs() {
+        let mut state = test_fixtures::state();
+        let (ckbtc_id, ckbtc_meta) = ckbtc();
+        let (cketh_id, cketh_meta) = cketh();
+        let (ckusdc_id, ckusdc_meta) = ckusdc();
+
+        // First pair: ckBTC/ckUSDC.
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            TradingPair {
+                base: ckbtc_id,
+                quote: ckusdc_id,
+            },
+            ckbtc_meta.clone(),
+            ckusdc_meta.clone(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+        // Second pair: ckETH/ckUSDC — ckUSDC is shared.
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: cketh_id,
+                quote: ckusdc_id,
+            },
+            cketh_meta.clone(),
+            ckusdc_meta.clone(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+
+        let tokens = state.list_supported_tokens();
+        assert_eq!(
+            tokens.len(),
+            3,
+            "expected exactly 3 distinct tokens (ckBTC, ckETH, ckUSDC), got {tokens:?}",
+        );
+        assert_eq!(tokens.get(&ckbtc_id), Some(&&ckbtc_meta));
+        assert_eq!(tokens.get(&cketh_id), Some(&&cketh_meta));
+        assert_eq!(tokens.get(&ckusdc_id), Some(&&ckusdc_meta));
+    }
+}

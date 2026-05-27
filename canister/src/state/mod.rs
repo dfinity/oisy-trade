@@ -516,6 +516,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self.tokens
     }
 
+    /// Every token registered with the DEX, keyed by `TokenId` for O(log n)
+    /// lookup at the call site. Borrowed metadata lets the caller decide
+    /// whether to clone or convert.
+    pub fn list_supported_tokens(&self) -> BTreeMap<TokenId, &TokenMetadata> {
+        self.tokens.iter().map(|(id, meta)| (*id, meta)).collect()
+    }
+
     pub fn trading_pairs(&self) -> &TradingPairMap {
         &self.trading_pairs
     }
