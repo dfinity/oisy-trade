@@ -307,10 +307,10 @@ pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_
 
 pub fn list_supported_tokens() -> Vec<Token> {
     state::with_state(|s| {
-        s.list_supported_tokens()
-            .into_iter()
+        s.tokens()
+            .iter()
             .map(|(id, meta)| Token {
-                id: id.into(),
+                id: (*id).into(),
                 metadata: meta.clone().into(),
             })
             .collect()
