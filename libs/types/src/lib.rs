@@ -317,8 +317,8 @@ pub struct Balance {
 /// Maximum number of entries allowed in a [`get_balances`] filter.
 pub const MAX_FILTER_LEN: u32 = 100;
 
-/// Selector for filtering balances. New variants may be added in
-/// backward-compatible upgrades; `ById` is the only one today.
+/// Selector for filtering tokens. New variants may be added in
+/// backward-compatible upgrades.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum FilterToken {
     /// Select a token by its identifier.
@@ -338,7 +338,7 @@ pub struct UserTokenBalance {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesError {
     /// The filter referenced a token that the DEX does not support.
-    TokenNotSupported(TokenId),
+    TokenNotSupported(FilterToken),
 }
 
 /// Whole-request error reported when [`get_balances`] rejects the
@@ -348,7 +348,7 @@ pub enum GetBalancesRequestError {
     /// The filter exceeded [`MAX_FILTER_LEN`] entries.
     FilterTooLarge {
         /// The submitted filter length.
-        limit: u32,
+        len: u32,
         /// The maximum allowed filter length ([`MAX_FILTER_LEN`]).
         max: u32,
     },

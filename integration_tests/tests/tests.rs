@@ -1551,7 +1551,12 @@ mod get_balances {
             .await
             .unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], Err(GetBalancesError::TokenNotSupported(unknown)));
+        assert_eq!(
+            result[0],
+            Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                unknown
+            )))
+        );
 
         setup.drop().await;
     }

@@ -287,8 +287,8 @@ type Balance = record {
     reserved : nat;
 };
 
-// Selector for filtering balances. New variants may be added in
-// backward-compatible upgrades; `ById` is the only one today.
+// Selector for filtering tokens. New variants may be added in
+// backward-compatible upgrades.
 type FilterToken = variant {
     ById : TokenId;
 };
@@ -301,7 +301,7 @@ type UserTokenBalance = record {
 
 // Per-entry error reported in `get_balances` responses.
 type GetBalancesError = variant {
-    TokenNotSupported : TokenId;
+    TokenNotSupported : FilterToken;
 };
 
 // Per-entry result.
@@ -313,7 +313,7 @@ type GetBalanceResult = variant {
 // Whole-request error reported when `get_balances` rejects the request
 // before any per-entry lookup runs.
 type GetBalancesRequestError = variant {
-    FilterTooLarge : record { limit : nat32; max : nat32 };
+    FilterTooLarge : record { len : nat32; max : nat32 };
 };
 
 // Response shape for `get_balances`.

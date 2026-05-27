@@ -305,20 +305,13 @@ pub fn get_balances(
         && (f.len() as u32) > MAX_FILTER_LEN
     {
         return Err(GetBalancesRequestError::FilterTooLarge {
-            limit: f.len() as u32,
+            len: f.len() as u32,
             max: MAX_FILTER_LEN,
         });
     }
     let caller = runtime.msg_caller();
-    let resolved: Option<Vec<order::TokenId>> = filter.map(|v| {
-        v.into_iter()
-            .map(|ft| match ft {
-                FilterToken::ById(t) => order::TokenId::from(t),
-            })
-            .collect()
-    });
     Ok(state::with_state(|s| {
-        s.get_balances(&caller, resolved.as_deref())
+        s.get_balances(&caller, filter.as_deref())
     }))
 }
 

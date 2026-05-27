@@ -1169,8 +1169,8 @@ mod get_balances {
     use crate::order::{OrderBookId, Quantity, TokenId, TradingPair};
     use crate::state::StableMemoryOptions;
     use crate::test_fixtures;
-    use candid::Principal;
-    use std::collections::HashSet;
+    use candid::{Nat, Principal};
+    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
 
@@ -1196,21 +1196,35 @@ mod get_balances {
         (state, a_id, b_id)
     }
 
+    fn ok_balance(
+        token: TokenId,
+        free: u64,
+        reserved: u64,
+    ) -> Result<UserTokenBalance, GetBalancesError> {
+        Ok(UserTokenBalance {
+            token_id: token.into(),
+            balance: Balance {
+                free: Nat::from(free),
+                reserved: Nat::from(reserved),
+            },
+        })
+    }
+
     #[test]
     fn should_return_empty_for_user_without_balances_and_no_filter() {
         let (state, _, _) = setup_two_token_state();
-        assert!(state.get_balances(&USER, None).is_empty());
+        assert_eq!(state.get_balances(&USER, None), vec![]);
     }
 
     #[test]
     fn should_return_zero_entry_for_registered_token_in_filter() {
         let (state, a_id, _) = setup_two_token_state();
-        let result = state.get_balances(&USER, Some(&[a_id]));
-        assert_eq!(result.len(), 1);
-        let entry = result[0].as_ref().unwrap();
-        assert_eq!(entry.token_id, a_id.into());
-        assert_eq!(entry.balance.free, candid::Nat::from(0u64));
-        assert_eq!(entry.balance.reserved, candid::Nat::from(0u64));
+        let filter = vec![FilterToken::ById(a_id.into())];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![ok_balance(a_id, 0, 0)],
+        );
     }
 
     #[test]
@@ -1224,11 +1238,12 @@ mod get_balances {
         );
         state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
 
-        let result = state.get_balances(&USER, None);
-        let tokens: HashSet<_> = result.into_iter().map(|r| r.unwrap().token_id).collect();
-        assert_eq!(tokens.len(), 2);
-        assert!(tokens.contains(&a_id.into()));
-        assert!(tokens.contains(&b_id.into()));
+        // BTreeMap iteration follows TokenId ordering; assert as a set.
+        let mut got = state.get_balances(&USER, None);
+        got.sort_by_key(|r| r.as_ref().unwrap().token_id.ledger_id);
+        let mut want = vec![ok_balance(a_id, 10, 0), ok_balance(b_id, 5, 0)];
+        want.sort_by_key(|r| r.as_ref().unwrap().token_id.ledger_id);
+        assert_eq!(got, want);
     }
 
     #[test]
@@ -1240,15 +1255,15 @@ mod get_balances {
             Quantity::from(10u64),
             StableMemoryOptions::Write,
         );
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(b_id.into()),
+        ];
 
-        let result = state.get_balances(&USER, Some(&[a_id, b_id]));
-        assert_eq!(result.len(), 2);
-        let a_entry = result[0].as_ref().unwrap();
-        let b_entry = result[1].as_ref().unwrap();
-        assert_eq!(a_entry.token_id, a_id.into());
-        assert_eq!(a_entry.balance.free, candid::Nat::from(10u64));
-        assert_eq!(b_entry.token_id, b_id.into());
-        assert_eq!(b_entry.balance.free, candid::Nat::from(0u64));
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![ok_balance(a_id, 10, 0), ok_balance(b_id, 0, 0)],
+        );
     }
 
     #[test]
@@ -1265,22 +1280,23 @@ mod get_balances {
             .withdraw(USER, b_id, Quantity::from(5u64))
             .expect("withdraw should succeed");
 
-        let result = state.get_balances(&USER, None);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_ref().unwrap().token_id, a_id.into());
+        assert_eq!(
+            state.get_balances(&USER, None),
+            vec![ok_balance(a_id, 10, 0)]
+        );
     }
 
     #[test]
     fn should_return_token_not_supported_for_unknown_filter_entry() {
         let (state, _, _) = setup_two_token_state();
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let result = state.get_balances(&USER, Some(&[unknown]));
-        assert_eq!(result.len(), 1);
+        let filter = vec![FilterToken::ById(unknown.into())];
+
         assert_eq!(
-            result[0],
-            Err(dex_types::GetBalancesError::TokenNotSupported(
+            state.get_balances(&USER, Some(&filter)),
+            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
                 unknown.into()
-            ))
+            )))],
         );
     }
 
@@ -1294,15 +1310,19 @@ mod get_balances {
             StableMemoryOptions::Write,
         );
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
 
-        let result = state.get_balances(&USER, Some(&[a_id, unknown]));
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].as_ref().unwrap().token_id, a_id.into());
         assert_eq!(
-            result[1],
-            Err(dex_types::GetBalancesError::TokenNotSupported(
-                unknown.into()
-            ))
+            state.get_balances(&USER, Some(&filter)),
+            vec![
+                ok_balance(a_id, 10, 0),
+                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))),
+            ],
         );
     }
 }

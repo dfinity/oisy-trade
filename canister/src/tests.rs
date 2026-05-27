@@ -162,6 +162,7 @@ mod add_limit_order {
 
     fn balance_of(token: dex_types::TokenId, runtime: &impl Runtime) -> Balance {
         let mut result = get_balances(Some(vec![FilterToken::ById(token)]), runtime).unwrap();
+        assert_eq!(result.len(), 1);
         result.remove(0).unwrap().balance
     }
 
@@ -1465,7 +1466,7 @@ mod get_balances {
         assert_eq!(
             err,
             GetBalancesRequestError::FilterTooLarge {
-                limit: MAX_FILTER_LEN + 1,
+                len: MAX_FILTER_LEN + 1,
                 max: MAX_FILTER_LEN,
             }
         );

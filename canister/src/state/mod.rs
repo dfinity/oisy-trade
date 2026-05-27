@@ -574,20 +574,23 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_balances(
         &self,
         user: &Principal,
-        filter: Option<&[TokenId]>,
+        filter: Option<&[dex_types::FilterToken]>,
     ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
         match filter {
-            Some(tokens) => tokens
+            Some(entries) => entries
                 .iter()
-                .map(|t| {
-                    if !self.tokens.contains_key(t) {
-                        Err(dex_types::GetBalancesError::TokenNotSupported((*t).into()))
+                .map(|ft| {
+                    let internal_token = match ft {
+                        dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
+                    };
+                    if !self.tokens.contains_key(&internal_token) {
+                        Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone()))
                     } else {
                         Ok(dex_types::UserTokenBalance {
-                            token_id: (*t).into(),
+                            token_id: internal_token.into(),
                             balance: self
                                 .balances
-                                .get_balance(user, t)
+                                .get_balance(user, &internal_token)
                                 .unwrap_or_default()
                                 .into(),
                         })
@@ -598,13 +601,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 .tokens
                 .keys()
                 .filter_map(|t| {
-                    let bal = self.balances.get_balance(user, t).unwrap_or_default();
-                    (!bal.is_zero()).then(|| {
-                        Ok(dex_types::UserTokenBalance {
-                            token_id: (*t).into(),
-                            balance: bal.into(),
+                    self.balances
+                        .get_balance(user, t)
+                        .filter(|b| !b.is_zero())
+                        .map(|b| {
+                            Ok(dex_types::UserTokenBalance {
+                                token_id: (*t).into(),
+                                balance: b.into(),
+                            })
                         })
-                    })
                 })
                 .collect(),
         }
