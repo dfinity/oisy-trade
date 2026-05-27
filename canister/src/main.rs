@@ -3,7 +3,7 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LedgerTransferError,
     LedgerTransferFromError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, TokenId, TradingPair, TradingPairInfo, WithdrawError,
+    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, WithdrawError,
     WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
@@ -133,6 +133,11 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
 #[ic_cdk::query]
 fn get_balance(token_id: TokenId) -> Balance {
     dex_canister::get_balance(token_id, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::query]
+fn list_supported_tokens() -> Vec<Token> {
+    dex_canister::list_supported_tokens()
 }
 
 #[ic_cdk::update]

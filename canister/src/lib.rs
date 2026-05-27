@@ -2,8 +2,8 @@ use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, TradingPair,
-    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token,
+    TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -302,6 +302,18 @@ pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_
     state::with_state(|s| {
         s.get_balance(&caller, &order::TokenId::from(token_id))
             .into()
+    })
+}
+
+pub fn list_supported_tokens() -> Vec<Token> {
+    state::with_state(|s| {
+        s.list_supported_tokens()
+            .into_iter()
+            .map(|(id, meta)| Token {
+                id: id.into(),
+                metadata: meta.clone().into(),
+            })
+            .collect()
     })
 }
 
