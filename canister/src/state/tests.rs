@@ -134,7 +134,6 @@ mod record_trading_pair {
             decimals: 18,
         };
 
-        // First pair: ICP/ckBTC.
         state.record_trading_pair(
             OrderBookId::ZERO,
             icp_ckbtc_trading_pair(),
@@ -143,7 +142,6 @@ mod record_trading_pair {
             TICK_SIZE,
             LOT_SIZE,
         );
-        // Second pair: ICP/ckETH — ICP is shared, ckETH is new.
         state.record_trading_pair(
             OrderBookId::ONE,
             TradingPair {
@@ -156,8 +154,6 @@ mod record_trading_pair {
             LOT_SIZE,
         );
 
-        // Three distinct tokens registered (ICP, ckBTC, ckETH) — the shared
-        // ICP is counted once.
         assert_eq!(state.tokens().len(), 3);
     }
 
