@@ -10,8 +10,8 @@ use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, OrderStatus, TokenId, TradingPair, TradingPairInfo,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TokenId, TradingPair,
+    TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -148,6 +148,14 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_balance(&self, token_id: TokenId) -> Balance {
         self.runtime
             .call(self.dex_canister, "get_balance", (token_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// List every token registered with the DEX.
+    pub async fn list_supported_tokens(&self) -> Vec<Token> {
+        self.runtime
+            .call(self.dex_canister, "list_supported_tokens", (), 0)
             .await
             .unwrap()
     }

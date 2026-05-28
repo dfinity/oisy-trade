@@ -512,6 +512,9 @@ service : (DexArg) -> {
     // Query the caller's balance for a given token.
     get_balance : (TokenId) -> (Balance) query;
 
+    // List every token registered with the DEX. 
+    list_supported_tokens : () -> (vec Token) query;
+
     // Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 

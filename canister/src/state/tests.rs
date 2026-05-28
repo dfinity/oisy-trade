@@ -126,6 +126,38 @@ mod record_trading_pair {
     }
 
     #[test]
+    fn should_dedup_shared_token_across_pairs() {
+        let mut state = test_fixtures::state();
+        let token_c = TokenId::new(Principal::from_slice(&[0x03]));
+        let token_c_metadata = TokenMetadata {
+            symbol: "ckETH".to_string(),
+            decimals: 18,
+        };
+
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+        state.record_trading_pair(
+            OrderBookId::ONE,
+            TradingPair {
+                base: icp_token_id(),
+                quote: token_c,
+            },
+            icp_metadata(),
+            token_c_metadata,
+            TICK_SIZE,
+            LOT_SIZE,
+        );
+
+        assert_eq!(state.tokens().len(), 3);
+    }
+
+    #[test]
     fn should_assign_distinct_order_book_ids() {
         let mut state = test_fixtures::state();
         let token_c = TokenId::new(Principal::from_slice(&[0x03]));

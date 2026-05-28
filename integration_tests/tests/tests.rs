@@ -1477,3 +1477,22 @@ async fn should_expose_metrics() {
 
     setup.drop().await;
 }
+
+mod list_supported_tokens {
+    use dex_int_tests::Setup;
+
+    #[tokio::test]
+    async fn should_return_empty_then_pair_tokens() {
+        let setup = Setup::new().await;
+        assert!(setup.dex_client().list_supported_tokens().await.is_empty());
+
+        let setup = setup.with_trading_pair().await;
+        let request = setup.add_trading_pair_request();
+        let tokens = setup.dex_client().list_supported_tokens().await;
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens.contains(&request.base));
+        assert!(tokens.contains(&request.quote));
+
+        setup.drop().await;
+    }
+}
