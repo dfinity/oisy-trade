@@ -12,11 +12,15 @@ lint:
     cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all -D warnings
     cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all -D warnings
 
-# Build canister WASM
+# Build canister WASM (native; fast loop for development)
 build:
     cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
     mkdir -p wasms
     gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm > wasms/dex_canister.wasm.gz
+
+# Build canister WASM reproducibly via Docker (bit-identical across hosts)
+docker-build:
+    docker buildx build --platform linux/amd64 --target export --output type=local,dest=./wasms .
 
 # Run all tests
 test: unit-tests integration-tests

@@ -44,7 +44,18 @@ strum = { version = "0.28.0", features = ["derive"] }
 tokio = "1.52.3"
 
 [profile.release]
+# No debug info: smaller WASM, and avoids embedding host paths via DWARF.
 debug = false
+# Link-time optimization: cross-crate inlining and dead-code elimination.
 lto = true
+# Strip remaining symbols and section names from the final binary.
 strip = true
+# Optimize for size; WASM upload and instantiation cost dominate over raw CPU
+# throughput on the IC.
 opt-level = 's'
+# Single codegen unit: deterministic codegen ordering regardless of host CPU
+# count. Required for reproducible builds; pairs with `lto = true`.
+codegen-units = 1
+# Replace unwind machinery with immediate abort. Smaller WASM, simpler control
+# flow; panics on the IC trap anyway.
+panic = "abort"
