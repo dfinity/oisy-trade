@@ -325,7 +325,8 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 **Query calls** (read-only):
 
 - **`get_order_status(order_id)`**: returns the current status of an order. Time: O(1) with an order-ID-indexed map.
-- **`get_balance(token)`**: returns the caller's available and reserved balances. Time: O(1).
+- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, walks every token the caller holds and emits non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: O(n) over the response size.
+- **`list_supported_tokens()`**: returns the full list of tokens registered with the DEX. Time: O(n) over the registered tokens.
 
 ### Expected Load
 

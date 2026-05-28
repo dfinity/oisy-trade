@@ -160,13 +160,14 @@ impl<R: Runtime> DexClient<R> {
     }
 
     /// Client-side convenience: query the caller's balance for a single
-    /// token via [`Self::get_balances`].
-    pub async fn get_balance(&self, token_id: TokenId) -> Balance {
+    /// token via [`Self::get_balances`]. Returns `TokenNotSupported` when
+    /// the DEX does not know the token.
+    pub async fn get_balance(&self, token_id: TokenId) -> Result<Balance, GetBalancesError> {
         let mut result = self
             .get_balances(Some(vec![FilterToken::ById(token_id)]))
             .await
-            .unwrap();
-        result.remove(0).unwrap().balance
+            .expect("single-element filter is always within MAX_FILTER_LEN");
+        result.remove(0).map(|entry| entry.balance)
     }
 
     /// List every token registered with the DEX.
