@@ -1445,19 +1445,20 @@ mod get_trading_pairs {
 mod get_balances {
     use crate::get_balances;
     use crate::state::reset_state;
+    use crate::test_fixtures::arbitrary::arb_filter;
     use crate::test_fixtures::init_state_with_order_book;
     use candid::Principal;
-    use dex_types::{FilterToken, GetBalancesRequestError, MAX_FILTER_LEN, TokenId};
-    use proptest::prelude::*;
+    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
 
     proptest! {
         #[test]
-        fn should_enforce_filter_length_cap(len in 0u32..=MAX_FILTER_LEN + 10) {
+        fn should_enforce_filter_length_cap(filter in arb_filter()) {
             reset_state();
             init_state_with_order_book();
-            let filter = dummy_filter(len);
+            let len = filter.len() as u32;
 
             let result = get_balances(Some(filter), USER);
 
@@ -1473,15 +1474,5 @@ mod get_balances {
                 );
             }
         }
-    }
-
-    fn dummy_filter(len: u32) -> Vec<FilterToken> {
-        (0..len)
-            .map(|i| {
-                FilterToken::ById(TokenId {
-                    ledger_id: Principal::from_slice(&i.to_be_bytes()),
-                })
-            })
-            .collect()
     }
 }
