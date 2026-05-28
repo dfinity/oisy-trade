@@ -336,34 +336,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             });
     }
 
-    pub fn process_pending_orders(&mut self, runtime: &impl Runtime) {
-        // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
-        let book_ids: Vec<OrderBookId> = self
-            .trading_pairs
-            .iter()
-            .map(|(_, book_id)| *book_id)
-            .collect();
-        for book_id in book_ids {
-            let orders: Vec<OrderSeq> = {
-                let book = self
-                    .order_books
-                    .get(&book_id)
-                    .expect("BUG: trading pair registered but order book missing");
-                book.pending_order_seqs().collect()
-            };
-            if !orders.is_empty() {
-                audit::process_event(
-                    self,
-                    event::EventType::Matching(event::MatchingEvent { book_id, orders }),
-                    runtime,
-                );
-            }
-        }
-        while let Some(event) = self.take_next_pending_settling_event() {
-            audit::process_event(self, event::EventType::Settling(event), runtime);
-        }
-    }
-
     /// Drive engine matching for the given book; when `persistence` is
     /// [`StableMemoryOptions::Write`], flip every touched order's status
     /// in `order_history`. Push the paired balance-only
@@ -600,6 +572,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn take_next_pending_settling_event(&mut self) -> Option<event::SettlingEvent> {
         self.pending_settling_events.pop_front()
+    }
+
+    pub fn order_books(&self) -> impl Iterator<Item = (&OrderBookId, &OrderBook)> {
+        self.order_books.iter()
+    }
+
+    pub fn has_pending_orders(&self) -> bool {
+        self.order_books()
+            .any(|(_, book)| book.pending_orders_len() > 0)
     }
 
     pub fn has_pending_settling_events(&self) -> bool {
