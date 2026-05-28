@@ -67,6 +67,10 @@ impl Executor {
         // inline drain was interrupted by the instruction budget.
         self.drain_settling(instruction_budget, state, runtime);
 
+        if runtime.instruction_counter() >= instruction_budget {
+            return ExecutionStatus::from_state(state);
+        }
+
         let mut order_budget = max_orders_per_chunk;
         for book_id in books_by_pending_order_count_desc(state) {
             if order_budget == 0 || runtime.instruction_counter() >= instruction_budget {

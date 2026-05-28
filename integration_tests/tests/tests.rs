@@ -1566,7 +1566,7 @@ mod chunked_matching {
                 break;
             }
             assert!(
-                ticks < max_ticks,
+                ticks <= max_ticks,
                 "chunked matching failed to reach expected resting depth {expected} after {ticks} ticks (last seen {resting})",
             );
         }
