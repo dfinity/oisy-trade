@@ -328,9 +328,9 @@ pub mod arbitrary {
         WithdrawEvent,
     };
     use candid::Principal;
-    use dex_types::{FilterToken, MAX_FILTER_LEN};
+    use dex_types::FilterToken;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
-    use proptest::collection::{btree_set, vec};
+    use proptest::collection::{SizeRange, btree_set, vec};
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};
     use proptest::prop_oneof;
@@ -510,11 +510,13 @@ pub mod arbitrary {
         arb_token_id().prop_map(|id| FilterToken::ById(id.into()))
     }
 
-    /// Strategy for an arbitrary filter `Vec<FilterToken>` whose length
-    /// straddles `MAX_FILTER_LEN`, covering both the under-cap (Ok) and
-    /// over-cap (FilterTooLarge) branches.
-    pub fn arb_filter() -> impl Strategy<Value = Vec<FilterToken>> {
-        vec(arb_filter_token(), 0..=(MAX_FILTER_LEN as usize + 10))
+    /// Strategy for an arbitrary filter (`Vec<FilterToken>`) whose length
+    /// falls within `size`. Pick a range straddling `MAX_FILTER_LEN` to
+    /// exercise both the under-cap and over-cap branches.
+    pub fn arb_filter_tokens(
+        size: impl Into<SizeRange>,
+    ) -> impl Strategy<Value = Vec<FilterToken>> {
+        vec(arb_filter_token(), size)
     }
 
     pub fn arb_token_metadata() -> impl Strategy<Value = TokenMetadata> {

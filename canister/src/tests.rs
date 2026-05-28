@@ -1445,7 +1445,7 @@ mod get_trading_pairs {
 mod get_balances {
     use crate::get_balances;
     use crate::state::reset_state;
-    use crate::test_fixtures::arbitrary::arb_filter;
+    use crate::test_fixtures::arbitrary::arb_filter_tokens;
     use crate::test_fixtures::init_state_with_order_book;
     use candid::Principal;
     use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
@@ -1455,7 +1455,9 @@ mod get_balances {
 
     proptest! {
         #[test]
-        fn should_enforce_filter_length_cap(filter in arb_filter()) {
+        fn should_enforce_filter_length_cap(
+            filter in arb_filter_tokens(0..=(MAX_FILTER_LEN as usize + 10)),
+        ) {
             reset_state();
             init_state_with_order_book();
             let len = filter.len() as u32;
