@@ -1174,46 +1174,6 @@ mod get_balances {
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
 
-    fn setup_two_token_state() -> (
-        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
-        TokenId,
-        TokenId,
-    ) {
-        let mut state = test_fixtures::state();
-        let a_id = test_fixtures::ckbtc_token_id();
-        let b_id = test_fixtures::icp_token_id();
-        state.record_trading_pair(
-            OrderBookId::ZERO,
-            TradingPair {
-                base: a_id,
-                quote: b_id,
-            },
-            test_fixtures::ckbtc_metadata(),
-            test_fixtures::icp_metadata(),
-            test_fixtures::TICK_SIZE,
-            test_fixtures::LOT_SIZE,
-        );
-        (state, a_id, b_id)
-    }
-
-    fn ok_balance(
-        token_id: TokenId,
-        metadata: crate::order::TokenMetadata,
-        free: u64,
-        reserved: u64,
-    ) -> Result<UserTokenBalance, GetBalancesError> {
-        Ok(UserTokenBalance {
-            token: dex_types::Token {
-                id: token_id.into(),
-                metadata: metadata.into(),
-            },
-            balance: Balance {
-                free: Nat::from(free),
-                reserved: Nat::from(reserved),
-            },
-        })
-    }
-
     #[test]
     fn should_return_empty_for_user_without_balances_and_no_filter() {
         let (state, _, _) = setup_two_token_state();
@@ -1334,5 +1294,45 @@ mod get_balances {
                 ))),
             ],
         );
+    }
+
+    fn setup_two_token_state() -> (
+        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
+        TokenId,
+        TokenId,
+    ) {
+        let mut state = test_fixtures::state();
+        let a_id = test_fixtures::ckbtc_token_id();
+        let b_id = test_fixtures::icp_token_id();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            TradingPair {
+                base: a_id,
+                quote: b_id,
+            },
+            test_fixtures::ckbtc_metadata(),
+            test_fixtures::icp_metadata(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+        (state, a_id, b_id)
+    }
+
+    fn ok_balance(
+        token_id: TokenId,
+        metadata: crate::order::TokenMetadata,
+        free: u64,
+        reserved: u64,
+    ) -> Result<UserTokenBalance, GetBalancesError> {
+        Ok(UserTokenBalance {
+            token: dex_types::Token {
+                id: token_id.into(),
+                metadata: metadata.into(),
+            },
+            balance: Balance {
+                free: Nat::from(free),
+                reserved: Nat::from(reserved),
+            },
+        })
     }
 }

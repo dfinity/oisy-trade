@@ -299,7 +299,7 @@ pub async fn withdraw(
 
 pub fn get_balances(
     filter: Option<Vec<FilterToken>>,
-    runtime: &impl Runtime,
+    caller: candid::Principal,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
     if let Some(ref f) = filter
         && (f.len() as u32) > MAX_FILTER_LEN
@@ -309,7 +309,6 @@ pub fn get_balances(
             max: MAX_FILTER_LEN,
         });
     }
-    let caller = runtime.msg_caller();
     Ok(state::with_state(|s| {
         s.get_balances(&caller, filter.as_deref())
     }))

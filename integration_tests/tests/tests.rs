@@ -1593,12 +1593,7 @@ mod get_balances {
             .await
             .unwrap();
 
-        let mut no_filter_sorted: Vec<_> = no_filter.into_iter().map(|r| r.unwrap()).collect();
-        no_filter_sorted.sort_by_key(|e| e.token.id.ledger_id);
-        let mut with_filter_sorted: Vec<_> =
-            with_full_filter.into_iter().map(|r| r.unwrap()).collect();
-        with_filter_sorted.sort_by_key(|e| e.token.id.ledger_id);
-        assert_eq!(no_filter_sorted, with_filter_sorted);
+        assert_eq!(no_filter, with_full_filter);
 
         setup.drop().await;
     }

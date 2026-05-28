@@ -153,15 +153,15 @@ mod add_limit_order {
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
     };
-    use crate::{Runtime, add_limit_order, get_balances, state};
+    use crate::{add_limit_order, get_balances, state};
     use candid::Principal;
     use dex_types::{Balance, FilterToken, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
 
     const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
 
-    fn balance_of(token: dex_types::TokenId, runtime: &impl Runtime) -> Balance {
-        let mut result = get_balances(Some(vec![FilterToken::ById(token)]), runtime).unwrap();
+    fn balance_of(token: dex_types::TokenId, caller: Principal) -> Balance {
+        let mut result = get_balances(Some(vec![FilterToken::ById(token)]), caller).unwrap();
         assert_eq!(result.len(), 1);
         result.remove(0).unwrap().balance
     }
@@ -309,9 +309,12 @@ mod add_limit_order {
 
         add_limit_order(order, &runtime).unwrap();
 
-        assert_eq!(balance_of(pair.base.into(), &runtime), Balance::default());
         assert_eq!(
-            balance_of(pair.quote.into(), &runtime),
+            balance_of(pair.base.into(), DEFAULT_USER),
+            Balance::default()
+        );
+        assert_eq!(
+            balance_of(pair.quote.into(), DEFAULT_USER),
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -344,13 +347,16 @@ mod add_limit_order {
         add_limit_order(order, &runtime).unwrap();
 
         assert_eq!(
-            balance_of(pair.base.into(), &runtime),
+            balance_of(pair.base.into(), DEFAULT_USER),
             Balance {
                 free: 0u64.into(),
                 reserved: quantity.into(),
             }
         );
-        assert_eq!(balance_of(pair.quote.into(), &runtime), Balance::default());
+        assert_eq!(
+            balance_of(pair.quote.into(), DEFAULT_USER),
+            Balance::default()
+        );
     }
 }
 
@@ -1438,12 +1444,36 @@ mod get_trading_pairs {
 
 mod get_balances {
     use crate::get_balances;
+    use crate::state::reset_state;
     use crate::test_fixtures::init_state_with_order_book;
-    use crate::test_fixtures::mocks::mock_runtime_for;
     use candid::Principal;
     use dex_types::{FilterToken, GetBalancesRequestError, MAX_FILTER_LEN, TokenId};
+    use proptest::prelude::*;
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
+
+    proptest! {
+        #[test]
+        fn should_enforce_filter_length_cap(len in 0u32..=MAX_FILTER_LEN + 10) {
+            reset_state();
+            init_state_with_order_book();
+            let filter = dummy_filter(len);
+
+            let result = get_balances(Some(filter), USER);
+
+            if len <= MAX_FILTER_LEN {
+                prop_assert!(result.is_ok());
+            } else {
+                prop_assert_eq!(
+                    result.unwrap_err(),
+                    GetBalancesRequestError::FilterTooLarge {
+                        len,
+                        max: MAX_FILTER_LEN,
+                    }
+                );
+            }
+        }
+    }
 
     fn dummy_filter(len: u32) -> Vec<FilterToken> {
         (0..len)
@@ -1453,32 +1483,5 @@ mod get_balances {
                 })
             })
             .collect()
-    }
-
-    #[test]
-    fn should_reject_filter_above_max_len() {
-        init_state_with_order_book();
-        let runtime = mock_runtime_for(USER);
-        let filter = dummy_filter(MAX_FILTER_LEN + 1);
-
-        let err = get_balances(Some(filter), &runtime).unwrap_err();
-
-        assert_eq!(
-            err,
-            GetBalancesRequestError::FilterTooLarge {
-                len: MAX_FILTER_LEN + 1,
-                max: MAX_FILTER_LEN,
-            }
-        );
-    }
-
-    #[test]
-    fn should_accept_filter_at_max_len() {
-        init_state_with_order_book();
-        let runtime = mock_runtime_for(USER);
-        let filter = dummy_filter(MAX_FILTER_LEN);
-
-        let result = get_balances(Some(filter), &runtime).unwrap();
-        assert_eq!(result.len(), MAX_FILTER_LEN as usize);
     }
 }

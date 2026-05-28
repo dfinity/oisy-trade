@@ -134,7 +134,8 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
 fn get_balances(
     filter: Option<Vec<FilterToken>>,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
-    dex_canister::get_balances(filter, &dex_canister::IC_RUNTIME)
+    use dex_canister::Runtime;
+    dex_canister::get_balances(filter, dex_canister::IC_RUNTIME.msg_caller())
 }
 
 #[ic_cdk::query]
