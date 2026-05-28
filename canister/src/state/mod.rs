@@ -583,30 +583,35 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     let internal_token = match ft {
                         dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
                     };
-                    if !self.tokens.contains_key(&internal_token) {
-                        Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone()))
-                    } else {
-                        Ok(dex_types::UserTokenBalance {
-                            token_id: internal_token.into(),
+                    match self.tokens.get(&internal_token) {
+                        None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
+                        Some(metadata) => Ok(dex_types::UserTokenBalance {
+                            token: dex_types::Token {
+                                id: internal_token.into(),
+                                metadata: metadata.clone().into(),
+                            },
                             balance: self
                                 .balances
                                 .get_balance(user, &internal_token)
                                 .unwrap_or_default()
                                 .into(),
-                        })
+                        }),
                     }
                 })
                 .collect(),
             None => self
                 .tokens
-                .keys()
-                .filter_map(|t| {
+                .iter()
+                .filter_map(|(t, metadata)| {
                     self.balances
                         .get_balance(user, t)
                         .filter(|b| !b.is_zero())
                         .map(|b| {
                             Ok(dex_types::UserTokenBalance {
-                                token_id: (*t).into(),
+                                token: dex_types::Token {
+                                    id: (*t).into(),
+                                    metadata: metadata.clone().into(),
+                                },
                                 balance: b.into(),
                             })
                         })

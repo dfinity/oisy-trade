@@ -1502,7 +1502,6 @@ mod get_balances {
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_types::{FilterToken, GetBalancesError, TokenId};
-    use std::collections::HashSet;
 
     #[tokio::test]
     async fn should_return_empty_without_filter_for_fresh_user() {
@@ -1532,7 +1531,7 @@ mod get_balances {
             .unwrap();
         assert_eq!(result.len(), 1);
         let entry = result[0].as_ref().unwrap();
-        assert_eq!(entry.token_id, token);
+        assert_eq!(entry.token.id, token);
         assert_eq!(entry.balance.free, Nat::from(deposit));
 
         setup.drop().await;
@@ -1594,17 +1593,12 @@ mod get_balances {
             .await
             .unwrap();
 
-        let no_filter_set: HashSet<_> = no_filter
-            .into_iter()
-            .map(|r| r.unwrap())
-            .map(|e| (e.token_id, e.balance.free, e.balance.reserved))
-            .collect();
-        let with_filter_set: HashSet<_> = with_full_filter
-            .into_iter()
-            .map(|r| r.unwrap())
-            .map(|e| (e.token_id, e.balance.free, e.balance.reserved))
-            .collect();
-        assert_eq!(no_filter_set, with_filter_set);
+        let mut no_filter_sorted: Vec<_> = no_filter.into_iter().map(|r| r.unwrap()).collect();
+        no_filter_sorted.sort_by_key(|e| e.token.id.ledger_id);
+        let mut with_filter_sorted: Vec<_> =
+            with_full_filter.into_iter().map(|r| r.unwrap()).collect();
+        with_filter_sorted.sort_by_key(|e| e.token.id.ledger_id);
+        assert_eq!(no_filter_sorted, with_filter_sorted);
 
         setup.drop().await;
     }

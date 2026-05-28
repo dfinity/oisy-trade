@@ -329,8 +329,8 @@ pub enum FilterToken {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct UserTokenBalance {
     /// The token whose balance is reported.
-    pub token_id: TokenId,
-    /// The caller's free + reserved holdings for `token_id`.
+    pub token: Token,
+    /// The caller's free + reserved holdings for `token`.
     pub balance: Balance,
 }
 

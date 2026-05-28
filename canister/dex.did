@@ -295,7 +295,7 @@ type FilterToken = variant {
 
 // A single `(token, balance)` entry in a `get_balances` response.
 type UserTokenBalance = record {
-    token_id : TokenId;
+    token : Token;
     balance : Balance;
 };
 

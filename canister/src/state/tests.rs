@@ -1197,12 +1197,16 @@ mod get_balances {
     }
 
     fn ok_balance(
-        token: TokenId,
+        token_id: TokenId,
+        metadata: crate::order::TokenMetadata,
         free: u64,
         reserved: u64,
     ) -> Result<UserTokenBalance, GetBalancesError> {
         Ok(UserTokenBalance {
-            token_id: token.into(),
+            token: dex_types::Token {
+                id: token_id.into(),
+                metadata: metadata.into(),
+            },
             balance: Balance {
                 free: Nat::from(free),
                 reserved: Nat::from(reserved),
@@ -1223,7 +1227,7 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![ok_balance(a_id, 0, 0)],
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
         );
     }
 
@@ -1240,9 +1244,12 @@ mod get_balances {
 
         // BTreeMap iteration follows TokenId ordering; assert as a set.
         let mut got = state.get_balances(&USER, None);
-        got.sort_by_key(|r| r.as_ref().unwrap().token_id.ledger_id);
-        let mut want = vec![ok_balance(a_id, 10, 0), ok_balance(b_id, 5, 0)];
-        want.sort_by_key(|r| r.as_ref().unwrap().token_id.ledger_id);
+        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut want = vec![
+            ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+            ok_balance(b_id, test_fixtures::icp_metadata(), 5, 0),
+        ];
+        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
         assert_eq!(got, want);
     }
 
@@ -1262,7 +1269,10 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![ok_balance(a_id, 10, 0), ok_balance(b_id, 0, 0)],
+            vec![
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ],
         );
     }
 
@@ -1282,7 +1292,7 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, None),
-            vec![ok_balance(a_id, 10, 0)]
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)]
         );
     }
 
@@ -1318,7 +1328,7 @@ mod get_balances {
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
             vec![
-                ok_balance(a_id, 10, 0),
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
                 Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
                     unknown.into()
                 ))),
