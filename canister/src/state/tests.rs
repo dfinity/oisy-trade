@@ -1067,7 +1067,8 @@ mod settle_fills {
             use crate::order::{self, PairToken};
             use crate::state::event::BalanceOperation;
 
-            let ops = super::super::compute_balance_operations(&output);
+            let ops =
+                super::super::compute_balance_operations(&output, FeeRates::default());
             let fills_len = output.fills.len();
 
             prop_assert!(
@@ -1097,6 +1098,263 @@ mod settle_fills {
                 BalanceOperation::Unreserve { .. }
             )).count();
             prop_assert_eq!(unreserves, expected_unreserves);
+        }
+    }
+
+    mod fees {
+        use super::*;
+        use crate::order::BasisPoint;
+
+        /// Buy-taker fill at the maker's resting price. Each side pays at
+        /// its role-specific rate in the asset it receives:
+        /// - buyer (taker) pays `base × taker_bps / 10_000` in base
+        /// - seller (maker) pays `notional × maker_bps / 10_000` in quote
+        #[test]
+        fn buy_taker_fill_deducts_fees_on_both_sides() {
+            let maker_bps = 10; // 0.1 %
+            let taker_bps = 25; // 0.25 %
+            let mut state = setup_with_fees(maker_bps, taker_bps);
+            let pair = icp_ckbtc_trading_pair();
+            let price = 100u64;
+            // 10_000 ÷ 10_000 = 1; pick a quantity so that the fees are
+            // non-zero and easy to verify exactly.
+            let qty = u64::from(LOT_SIZE) * 1_000_000;
+
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let notional = price * qty;
+            let base_fee = (qty as u128 * taker_bps as u128 / 10_000) as u64;
+            let quote_fee = (notional as u128 * maker_bps as u128 / 10_000) as u64;
+
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.base),
+                balance(qty - base_fee, 0),
+            );
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(notional - quote_fee, 0),
+            );
+
+            assert_eq!(
+                state.balances.fee_balance(&pair.base),
+                Some(Quantity::from(base_fee)),
+            );
+            assert_eq!(
+                state.balances.fee_balance(&pair.quote),
+                Some(Quantity::from(quote_fee)),
+            );
+        }
+
+        /// Sell-taker fill swaps which side carries the taker rate.
+        #[test]
+        fn sell_taker_fill_deducts_fees_on_both_sides() {
+            let maker_bps = 10;
+            let taker_bps = 25;
+            let mut state = setup_with_fees(maker_bps, taker_bps);
+            let pair = icp_ckbtc_trading_pair();
+            let price = 100u64;
+            let qty = u64::from(LOT_SIZE) * 1_000_000;
+
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let notional = price * qty;
+            // Buyer was the maker now.
+            let base_fee = (qty as u128 * maker_bps as u128 / 10_000) as u64;
+            // Seller was the taker.
+            let quote_fee = (notional as u128 * taker_bps as u128 / 10_000) as u64;
+
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.base),
+                balance(qty - base_fee, 0),
+            );
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(notional - quote_fee, 0),
+            );
+            assert_eq!(
+                state.balances.fee_balance(&pair.base),
+                Some(Quantity::from(base_fee)),
+            );
+            assert_eq!(
+                state.balances.fee_balance(&pair.quote),
+                Some(Quantity::from(quote_fee)),
+            );
+        }
+
+        /// Integer division truncates (rounds down) rather than rounds to
+        /// nearest. Pinned on `1_000_001 × 7 / 10_000 = 700.0007` →
+        /// `700` (not `701`) via `apply_bps`. The `BasisPoint` invariant
+        /// guarantees the fee is always ≤ the underlying amount.
+        #[test]
+        fn apply_bps_truncates_not_rounds() {
+            use crate::order::BasisPoint;
+            use crate::state::apply_bps;
+
+            assert_eq!(
+                apply_bps(Quantity::from(1_000_001u64), BasisPoint::new(7).unwrap()),
+                Quantity::from(700u64),
+            );
+        }
+
+        /// `apply_bps(_, ZERO)` is the only path that yields a zero result,
+        /// thanks to the `bp.get() == 0` fast-return in `apply_bps`. A
+        /// non-zero `bp` × `ZERO` also yields zero (via the multiplication),
+        /// pinned here for completeness.
+        #[test]
+        fn apply_bps_zero_inputs() {
+            use crate::order::BasisPoint;
+            use crate::state::apply_bps;
+
+            assert_eq!(
+                apply_bps(Quantity::from(100u64), BasisPoint::ZERO),
+                Quantity::ZERO,
+            );
+            assert_eq!(
+                apply_bps(Quantity::ZERO, BasisPoint::new(10_000).unwrap()),
+                Quantity::ZERO,
+            );
+        }
+
+        /// `bp = MAX` (100 %) returns the full amount — the upper edge of
+        /// the `BasisPoint` invariant. Guards the `amount - fee` underflow
+        /// safety relied on by `transfer_with_fee`.
+        #[test]
+        fn apply_bps_max_returns_input() {
+            use crate::order::BasisPoint;
+            use crate::state::apply_bps;
+
+            let amount = Quantity::from(12_345u64);
+            assert_eq!(apply_bps(amount, BasisPoint::MAX), amount);
+        }
+
+        /// Zero rates is a regression guard: the fill path with
+        /// `FeeRates::default()` must behave identically to pre-DEFI-2726.
+        /// No fee-pool entries are created on either side.
+        #[test]
+        fn zero_rates_create_no_fee_pool_entries() {
+            let mut state = setup_with_fees(0, 0);
+            let pair = icp_ckbtc_trading_pair();
+            let price = 100u64;
+            let qty = u64::from(LOT_SIZE);
+
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(qty, 0));
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(price * qty, 0),
+            );
+            assert_eq!(state.balances.fee_balance(&pair.base), None);
+            assert_eq!(state.balances.fee_balance(&pair.quote), None);
+        }
+
+        /// Buy-taker price improvement and fees co-exist: the maker-price
+        /// quote_fee comes off the seller's credit, the `price_diff × qty`
+        /// surplus is still refunded to the buyer's free balance, and the
+        /// base_fee comes off the buyer's credit at the taker rate.
+        #[test]
+        fn price_improvement_refund_coexists_with_fees() {
+            let maker_bps = 10;
+            let taker_bps = 25;
+            let mut state = setup_with_fees(maker_bps, taker_bps);
+            let pair = icp_ckbtc_trading_pair();
+            let qty = u64::from(LOT_SIZE) * 1_000_000;
+
+            // Sell rests at 90, buy taker at 100 → fills at maker's 90.
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90, qty);
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let notional = 90u64 * qty;
+            let base_fee = (qty as u128 * taker_bps as u128 / 10_000) as u64;
+            let quote_fee = (notional as u128 * maker_bps as u128 / 10_000) as u64;
+
+            // Buyer reserved 100*qty, paid 90*qty (notional) minus 0 (fee is
+            // on base side), surplus of 10*qty returns to free.
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.base),
+                balance(qty - base_fee, 0),
+            );
+            assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(10 * qty, 0),);
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(notional - quote_fee, 0),
+            );
+        }
+
+        /// Successive fills against the same pair accumulate deterministically
+        /// into the per-token fee pool.
+        #[test]
+        fn multiple_fills_accumulate_into_fee_pool() {
+            let taker_bps = 100; // 1 %
+            let mut state = setup_with_fees(0, taker_bps);
+            let pair = icp_ckbtc_trading_pair();
+            let price = 100u64;
+            let qty = u64::from(LOT_SIZE) * 1_000_000;
+
+            // Two fills, each at qty.
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let base_fee_per_fill = (qty as u128 * taker_bps as u128 / 10_000) as u64;
+            // Buyer was taker on both fills (maker rate = 0, so quote pool is empty).
+            assert_eq!(
+                state.balances.fee_balance(&pair.base),
+                Some(Quantity::from(2 * base_fee_per_fill)),
+            );
+            assert_eq!(state.balances.fee_balance(&pair.quote), None);
+        }
+
+        /// Pre-fees `BalanceOperation::Transfer` (no `fee` field) decodes
+        /// with `fee = None` and replays as a regular zero-fee transfer.
+        /// Guards the wire-format back-compat contract.
+        #[test]
+        fn decode_pre_fees_transfer_op_sets_fee_to_none() {
+            use crate::order::PairToken;
+            use crate::state::event::BalanceOperation;
+
+            // Build the same Transfer with and without the `fee` field by
+            // hand-encoding CBOR. Same shape minicbor's derive emits for a
+            // 4-element struct.
+            let with_fee = BalanceOperation::Transfer {
+                from_order: crate::order::OrderSeq::new(1),
+                to_order: crate::order::OrderSeq::new(2),
+                token: PairToken::Quote,
+                amount: Quantity::from(100u64),
+                fee: None,
+            };
+            let mut buf = vec![];
+            minicbor::encode(&with_fee, &mut buf).unwrap();
+            let decoded: BalanceOperation = minicbor::decode(&buf).unwrap();
+            assert_eq!(decoded, with_fee);
+        }
+
+        fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair,
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                FeeRates {
+                    maker: BasisPoint::new(maker_bps).unwrap(),
+                    taker: BasisPoint::new(taker_bps).unwrap(),
+                },
+            );
+            state
         }
     }
 

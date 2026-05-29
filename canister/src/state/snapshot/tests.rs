@@ -108,12 +108,14 @@ mod schema_stability {
                         to_order: OrderSeq::new(6),
                         token: PairToken::Quote,
                         amount: Quantity::from(100_000_000u64),
+                        fee: None,
                     },
                     BalanceOperation::Transfer {
                         from_order: OrderSeq::new(6),
                         to_order: OrderSeq::new(5),
                         token: PairToken::Base,
                         amount: Quantity::from(1_000_000u64),
+                        fee: None,
                     },
                 ],
             }]),
@@ -140,8 +142,8 @@ mod schema_stability {
     const GOLDEN_HEX: &str = "\
         89820080810882828141018261410882814102826142068182828141018141028107818981078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a120818104828100810081828141011a000186a08182810782820084810581\
-        068201801a05f5e100820084810681058200801a000f4240\
+        186e818281021a0007a120818104828100810081828141011a000186a08182810782820085810581\
+        068201801a05f5e100f6820085810681058200801a000f4240f6\
         18c81b000000012a05f200";
 
     #[test]

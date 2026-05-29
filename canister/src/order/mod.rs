@@ -626,6 +626,40 @@ impl Quantity {
             .checked_add(carry as u128)?; // carry from the low addition
         Some(Self { high, low })
     }
+
+    /// Integer-divide `self` by a u64 divisor. Returns `None` if `divisor`
+    /// is zero. Implements u256-by-u64 long division as three u128 steps
+    /// (high limb, upper-low limb, lower-low limb).
+    pub fn checked_div_u64(self, divisor: u64) -> Option<Self> {
+        bench_scopes!("qty", "qty::div_u64");
+        if divisor == 0 {
+            return None;
+        }
+        let d = divisor as u128;
+
+        // Step 1: divide the high limb. Remainder < d ≤ u64::MAX < 2^64.
+        let q_high = self.high / d;
+        let mut rem = self.high % d;
+
+        // Step 2: process the upper 64 bits of `low`. The dividend is
+        // `rem * 2^64 + (low >> 64)`, which fits in u128 since rem < 2^64.
+        let low_hi = self.low >> 64;
+        let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
+        let dividend2 = (rem << 64) | low_hi;
+        let q1 = dividend2 / d;
+        rem = dividend2 % d;
+
+        // Step 3: process the lower 64 bits of `low`. Same overflow argument.
+        let dividend3 = (rem << 64) | low_lo;
+        let q2 = dividend3 / d;
+
+        // `q1 < 2^64` and `q2 < 2^64`, so they combine into the low u128.
+        let low_out = (q1 << 64) | q2;
+        Some(Self {
+            high: q_high,
+            low: low_out,
+        })
+    }
 }
 
 /// CBOR encoding of large numbers:

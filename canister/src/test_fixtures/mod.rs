@@ -687,15 +687,17 @@ pub mod arbitrary {
             arb_order_seq(),
             arb_pair_token(),
             arb_quantity(),
+            option::of(arb_quantity()),
         )
-            .prop_map(
-                |(from_order, to_order, token, amount)| BalanceOperation::Transfer {
+            .prop_map(|(from_order, to_order, token, amount, fee)| {
+                BalanceOperation::Transfer {
                     from_order,
                     to_order,
                     token,
                     amount,
-                },
-            );
+                    fee,
+                }
+            });
         let unreserve = (arb_order_seq(), arb_pair_token(), arb_quantity()).prop_map(
             |(order, token, amount)| BalanceOperation::Unreserve {
                 order,

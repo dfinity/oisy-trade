@@ -353,6 +353,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&event.book_id)
             .expect("BUG: trading pair registered but order book missing");
+        let fee_rates = book.fee_rates();
         let output = book.process_pending_orders(&event.orders);
         if matches!(persistence, StableMemoryOptions::Write) {
             #[cfg(feature = "canbench-rs")]
@@ -362,7 +363,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 self.order_history.set_status(&order_id, transition.status);
             }
         }
-        let balance_operations = compute_balance_operations(&output);
+        let balance_operations = compute_balance_operations(&output, fee_rates);
         if !balance_operations.is_empty() {
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
@@ -411,12 +412,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     from_order,
                     to_order,
                     amount,
+                    fee,
                     ..
                 } => {
                     let from_owner = owner_cache[from_order];
                     let to_owner = owner_cache[to_order];
-                    self.balances
-                        .transfer(&from_owner, &to_owner, &token, *amount, Quantity::ZERO);
+                    self.balances.transfer(
+                        &from_owner,
+                        &to_owner,
+                        &token,
+                        *amount,
+                        fee.unwrap_or(Quantity::ZERO),
+                    );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
                     let owner = owner_cache[order];
@@ -678,18 +685,33 @@ fn resolve_op_owners<M: Memory>(
         .collect()
 }
 
-fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOperation> {
+fn compute_balance_operations(
+    output: &MatchingOutput,
+    fee_rates: FeeRates,
+) -> Vec<event::BalanceOperation> {
     let mut ops = Vec::with_capacity(output.fills.len() * 3);
     for fill in &output.fills {
         let (buyer_seq, seller_seq) = match fill.taker_side {
             Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
             Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
         };
+        // Receive-side convention: buyer pays fee in base (the asset they
+        // receive), seller in quote. Each side's rate is `taker` if they
+        // were the taker, else `maker`.
+        let (buyer_rate, seller_rate) = match fill.taker_side {
+            Side::Buy => (fee_rates.taker, fee_rates.maker),
+            Side::Sell => (fee_rates.maker, fee_rates.taker),
+        };
+        let notional = fill.quote_amount();
+        let quote_fee = apply_bps(notional, seller_rate);
+        let base_fee = apply_bps(fill.quantity, buyer_rate);
+
         ops.push(event::BalanceOperation::Transfer {
             from_order: buyer_seq,
             to_order: seller_seq,
             token: order::PairToken::Quote,
-            amount: fill.quote_amount(),
+            amount: notional,
+            fee: nonzero(quote_fee),
         });
         if fill.taker_side == Side::Buy
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
@@ -709,9 +731,33 @@ fn compute_balance_operations(output: &MatchingOutput) -> Vec<event::BalanceOper
             to_order: buyer_seq,
             token: order::PairToken::Base,
             amount: fill.quantity,
+            fee: nonzero(base_fee),
         });
     }
     ops
+}
+
+/// Compute `amount × bp.get() / 10_000` using `Quantity`'s u256 checked
+/// arithmetic. Safe because `bp.get() ≤ 10_000` (the `BasisPoint`
+/// invariant) — the product is bounded by `amount × 10_000`, which fits
+/// inside u256 given the canister's existing notional-overflow checks.
+/// Integer division truncates (favours the protocol over the user).
+pub(crate) fn apply_bps(amount: Quantity, bp: order::BasisPoint) -> Quantity {
+    if bp.get() == 0 {
+        return Quantity::ZERO;
+    }
+    let scaled = amount
+        .checked_mul_u64(u64::from(bp.get()))
+        .expect("BUG: amount × bps overflow — bps <= 10_000 and notional is already u256-bounded");
+    scaled
+        .checked_div_u64(10_000)
+        .expect("BUG: division by 10_000 is non-zero")
+}
+
+/// Collapse a zero-quantity fee to `None` so we don't materialize empty
+/// fee-pool entries or pay the encoding cost of a redundant tag.
+fn nonzero(q: Quantity) -> Option<Quantity> {
+    if q.is_zero() { None } else { Some(q) }
 }
 
 fn compute_order_status_transitions(

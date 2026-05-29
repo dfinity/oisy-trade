@@ -32,6 +32,10 @@ impl BasisPoint {
         }
         Ok(Self(value))
     }
+
+    pub(crate) const fn get(&self) -> u16 {
+        self.0
+    }
 }
 
 /// Maker/taker fee rates for a trading pair. Each rate is a [`BasisPoint`]

@@ -129,10 +129,6 @@ impl<M: Memory> TokenBalance<M> {
         fee: Quantity,
     ) {
         bench_scopes!("balances", "balances::transfer");
-        assert!(
-            fee <= gross,
-            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
-        );
         let debtor_key = BalanceKey::new(*token, *debtor);
         let mut debtor_balance = self
             .balances
@@ -141,18 +137,21 @@ impl<M: Memory> TokenBalance<M> {
         debtor_balance.debit_reserved(&gross);
         self.balances.insert(debtor_key, debtor_balance);
 
+        // Fast path for the common zero-fee case (no rates configured, or a
+        // rate that truncates to zero): skip the u256 sub + heap entry,
+        // matching the cost of the pre-DEFI-2726 `transfer`. Self-transfer
+        // is safe because `update` re-reads before depositing.
+        if fee.is_zero() {
+            self.update(*creditor, *token, |b| b.deposit(gross));
+            return;
+        }
         let net = gross
             .checked_sub(&fee)
-            .expect("BUG: fee <= gross checked above");
-        // Self-transfer: debtor and creditor are the same user, so the credit
-        // must land on the just-updated balance — re-read before depositing
-        // to avoid clobbering the debit we just persisted.
+            .unwrap_or_else(|| panic!("BUG: fee {fee:?} exceeds gross {gross:?} in transfer"));
         self.update(*creditor, *token, |b| b.deposit(net));
 
-        if !fee.is_zero() {
-            let entry = self.fee_balances.entry(*token).or_default();
-            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
-        }
+        let entry = self.fee_balances.entry(*token).or_default();
+        *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
     }
 
     /// Read the accumulated fee balance for `token`. `None` if no fees have

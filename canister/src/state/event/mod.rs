@@ -136,8 +136,15 @@ pub enum BalanceOperation {
         to_order: OrderSeq,
         #[n(2)]
         token: PairToken,
+        /// Gross amount transferred from the debtor's reserved balance.
+        /// The creditor receives `amount - fee.unwrap_or(ZERO)`; the
+        /// remainder accrues to the canister-owned fee pool of `token`.
         #[n(3)]
         amount: Quantity,
+        /// Fee withheld for the per-token fee pool. `None` for events
+        /// recorded before DEFI-2726; replayed as zero (no fee).
+        #[n(4)]
+        fee: Option<Quantity>,
     },
     /// Producers: the buy-taker price-improvement refund (always quote) and
     /// the cancel-limit-order flow (quote for Buy, base for Sell). The
