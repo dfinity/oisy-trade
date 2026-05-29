@@ -7,7 +7,7 @@ use crate::order::{
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent, MatchingEvent,
-    SettlingEvent, WithdrawEvent,
+    SettlingEvent, WithdrawEvent, WithdrawFeesEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -651,4 +651,47 @@ fn should_panic_when_first_event_is_not_init() {
         balances(),
         StableMemoryOptions::Write,
     );
+}
+
+/// `WithdrawFeesEvent` going through the audit path drains an accrued fee
+/// pool entry into the recipient's free balance. End-to-end replay against
+/// a settled fill is exercised by the integration tests; this unit test
+/// pins the audit-apply leg in isolation.
+#[test]
+fn should_apply_withdraw_fees_event() {
+    use crate::Runtime;
+    use crate::balance::FeeEntry;
+    let token = TokenId::new(base());
+    let admin = user_1();
+    let mut state = state();
+    state.balances.restore_fee_pool(vec![FeeEntry {
+        token,
+        amount: Quantity::from(1_000u64),
+    }]);
+
+    let mock = crate::test_fixtures::mocks::MockRuntime::new();
+    let mut mock = mock;
+    mock.expect_time().return_const(0u64);
+
+    super::process_event(
+        &mut state,
+        EventType::WithdrawFees(WithdrawFeesEvent {
+            token,
+            amount: Quantity::from(400u64),
+            to: admin,
+        }),
+        &mock,
+    );
+
+    assert_eq!(
+        state.balances.fee_balance(&token),
+        Some(Quantity::from(600u64))
+    );
+    assert_eq!(
+        state.get_balance(&admin, &token),
+        crate::balance::Balance::new(400u64, 0u64),
+    );
+
+    // Silence the unused-Runtime trait import warning.
+    let _ = mock.time();
 }

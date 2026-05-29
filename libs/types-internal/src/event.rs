@@ -20,6 +20,14 @@ pub enum EventType {
     Settling(SettlingEvent),
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
+    WithdrawFees(WithdrawFeesEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct WithdrawFeesEvent {
+    pub token: TokenId,
+    pub amount: Nat,
+    pub to: Principal,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

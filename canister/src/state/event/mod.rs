@@ -40,6 +40,8 @@ pub enum EventType {
     Withdraw(#[n(0)] WithdrawEvent),
     #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
+    #[n(9)]
+    WithdrawFees(#[n(0)] WithdrawFeesEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -167,6 +169,19 @@ pub struct OrderStatusTransition {
     pub seq: OrderSeq,
     #[n(1)]
     pub status: OrderStatus,
+}
+
+/// Controller-initiated drain of `amount` of `token` from the canister-owned
+/// fee pool into `to`'s free balance. The recipient then uses the standard
+/// `withdraw` to pull to the ICRC ledger.
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct WithdrawFeesEvent {
+    #[n(0)]
+    pub token: TokenId,
+    #[n(1)]
+    pub amount: Quantity,
+    #[cbor(n(2), with = "icrc_cbor::principal")]
+    pub to: Principal,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

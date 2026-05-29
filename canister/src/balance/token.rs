@@ -161,6 +161,37 @@ impl<M: Memory> TokenBalance<M> {
         self.fee_balances.get(token).copied()
     }
 
+    /// Iterate the fee pool. Order is by `TokenId` (BTreeMap ordering).
+    pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
+        self.fee_balances.iter().map(|(k, v)| (*k, *v))
+    }
+
+    /// Drain `amount` from the fee pool of `token` into `recipient`'s
+    /// free balance. Atomic at the `TokenBalance` API boundary; on
+    /// `Err` the stored state is untouched.
+    pub fn drain_fee_to(
+        &mut self,
+        token: &TokenId,
+        amount: Quantity,
+        recipient: Principal,
+    ) -> Result<(), InsufficientBalanceError> {
+        bench_scopes!("balances", "balances::drain_fee_to");
+        let available = self.fee_balances.get(token).copied().unwrap_or_default();
+        let remainder = available
+            .checked_sub(amount)
+            .ok_or(InsufficientBalanceError {
+                available,
+                required: amount,
+            })?;
+        if remainder.is_zero() {
+            self.fee_balances.remove(token);
+        } else {
+            self.fee_balances.insert(*token, remainder);
+        }
+        self.update(recipient, *token, |b| b.deposit(amount));
+        Ok(())
+    }
+
     /// Snapshot the heap-resident fee pool for pre-upgrade serialization.
     /// Stable user balances are excluded; they survive upgrades on their
     /// own via the underlying [`StableBTreeMap`].

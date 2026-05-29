@@ -279,6 +279,29 @@ type WithdrawError = variant {
 
 type WithdrawResult = variant { Ok : WithdrawResponse; Err : WithdrawError };
 
+// Controller-only request to drain per-token fees from the canister's
+// internal fee pool into a specified principal's free balance. The
+// recipient then uses the regular `withdraw` endpoint to move the funds
+// to the ICRC ledger.
+type WithdrawFeesRequest = record {
+    // The token whose fee pool is being drained.
+    token_id : TokenId;
+    // Amount to drain from the fee pool of `token_id`.
+    amount : nat;
+    // Principal whose free balance is credited with `amount`.
+    to : principal;
+};
+
+// Error returned by the `withdraw_fees` endpoint.
+type WithdrawFeesError = variant {
+    // The caller is not a controller of the canister.
+    NotController;
+    // The requested `amount` exceeds the available fee pool.
+    InsufficientFeeBalance : record { available : nat; required : nat };
+};
+
+type WithdrawFeesResult = variant { Ok; Err : WithdrawFeesError };
+
 // A user's balance for a given token.
 type Balance = record {
     // Funds available for new orders or withdrawal.
@@ -483,6 +506,14 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
+    WithdrawFees : WithdrawFeesEvent;
+};
+
+// Event payload for a successful controller-initiated fee withdrawal.
+type WithdrawFeesEvent = record {
+    token : TokenId;
+    amount : nat;
+    to : principal;
 };
 
 // A canister event with a timestamp.
@@ -574,6 +605,16 @@ service : (DexArg) -> {
 
     // Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
+
+    // Read the canister-owned fee pool for `token`. Returns 0 if no fees
+    // have ever been accrued for the token.
+    fee_balance : (TokenId) -> (nat) query;
+
+    // Drain a controller-specified amount of fees from the per-token fee
+    // pool into the recipient's free balance. The recipient then uses the
+    // standard `withdraw` endpoint to pull to the ICRC ledger. Only
+    // callable by a controller.
+    withdraw_fees : (WithdrawFeesRequest) -> (WithdrawFeesResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

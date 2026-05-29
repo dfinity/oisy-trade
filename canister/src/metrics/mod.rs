@@ -42,8 +42,43 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>) -> std::io::Result<()> {
         let order_book_metrics = OrderBookMetrics::from_state(s);
         encode_order_book_metrics(w, &order_book_metrics)?;
 
+        encode_fee_balances(w, s)?;
+
         Ok(())
     })
+}
+
+/// Per-token canister-owned fee pool. Emitted as a gauge (not a counter)
+/// because withdrawals can decrease the value.
+fn encode_fee_balances<MH, MB>(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    state: &State<MH, MB>,
+) -> std::io::Result<()>
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    let mut metric = w.gauge_vec(
+        "fee_balance",
+        "Per-token canister-owned fee pool balance, accrued from maker/taker fees on fills.",
+    )?;
+    for (token, amount) in state.iter_fee_balances() {
+        let symbol = state
+            .token_metadata(&token)
+            .map(format_token_symbol)
+            .unwrap_or_else(|| token.as_principal().to_text());
+        metric = metric.value(&[("token", &symbol)], amount_to_f64(amount))?;
+    }
+    Ok(())
+}
+
+/// Lossy narrowing for metrics only. Real value lives in stable memory and
+/// is queried via Candid where the full `Nat` precision is preserved.
+fn amount_to_f64(q: crate::order::Quantity) -> f64 {
+    let nat: candid::Nat = q.into();
+    // `Nat::to_string()` is decimal; converting through f64 loses precision
+    // above 2^53 but is the standard Prometheus convention.
+    nat.to_string().parse::<f64>().unwrap_or(f64::NAN)
 }
 
 /// Returns the amount of heap memory in bytes that has been allocated.
