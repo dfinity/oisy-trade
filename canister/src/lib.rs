@@ -7,6 +7,7 @@ use dex_types::{
 };
 use std::{num::NonZeroU64, time::Duration};
 
+pub use execute::EXECUTOR;
 pub use runtime::{IC_RUNTIME, Runtime};
 
 /// Open a pair of canbench scopes: an aggregate scope and a specific scope.
@@ -23,6 +24,7 @@ macro_rules! bench_scopes {
 pub mod balance;
 pub mod cbor;
 pub mod dashboard;
+pub mod execute;
 pub mod guard;
 pub mod lifecycle;
 pub mod metrics;
@@ -83,13 +85,34 @@ pub fn cancel_limit_order(
     Ok(record.into())
 }
 
-pub fn process_pending_orders(runtime: &impl Runtime) {
+pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatus {
     let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
         Some(guard) => guard,
-        None => return,
+        None => return execute::ExecutionStatus::AlreadyRunning,
     };
 
-    state::with_state_mut(|s| s.process_pending_orders(runtime));
+    state::with_state_mut(|s| EXECUTOR.run_once(s, runtime))
+}
+
+/// Run one chunk of matching/settling and, if more work remains, schedule a
+/// zero-delay timer to continue. Intended for IC entry points (the periodic
+/// matching timer and the post-`add_limit_order` kickoff) — tests should call
+/// [`process_pending_orders`] directly, which is synchronous and timer-free.
+pub fn drive_matching() {
+    match process_pending_orders(&IC_RUNTIME) {
+        execute::ExecutionStatus::MoreWork => {
+            // TODO DEFI-2823: coalesce zero-delay matching timers so a
+            // burst of `add_limit_order` kickoffs plus this self-reschedule
+            // chain doesn't queue O(N) redundant timers per burst.
+            ic_cdk_timers::set_timer(Duration::ZERO, async {
+                drive_matching();
+            });
+        }
+        // Complete: nothing left to do. AlreadyRunning: the holder will
+        // reschedule itself if its run left work unfinished, so we don't
+        // pile on another timer.
+        execute::ExecutionStatus::Complete | execute::ExecutionStatus::AlreadyRunning => {}
+    }
 }
 
 pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {

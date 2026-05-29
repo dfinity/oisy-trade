@@ -95,6 +95,6 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
 
 fn setup_timers() {
     ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
-        crate::process_pending_orders(&crate::IC_RUNTIME);
+        crate::drive_matching();
     });
 }

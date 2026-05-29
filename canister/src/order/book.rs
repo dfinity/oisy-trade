@@ -189,7 +189,6 @@ impl OrderBook {
     /// Match exactly the given pending-order sequences, in order, against
     /// the book.
     pub(crate) fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
-        // TODO DEFI-2743: chunk matching orders to avoid hitting the instruction limit.
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
         for expected_seq in expected_seqs {
