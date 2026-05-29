@@ -9,8 +9,8 @@
 # The output is `wasms/dex_canister.wasm.gz`, byte-identical regardless of
 # host platform (Apple Silicon runs the linux/amd64 image via emulation).
 #
-# Post-build `ic-wasm` embeds the Candid interface and init-arg type into
-# the WASM as custom metadata sections, then shrinks the binary.
+# Post-build `ic-wasm` shrinks the binary, then embeds the Candid interface
+# and init-arg type as custom metadata sections.
 #
 # The base image ships rustc/cargo 1.93.0 + gcc + curl/xz + ca-certificates,
 # matching rust-toolchain.toml exactly. Bump the Rust version in BOTH this
@@ -47,9 +47,9 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL \
 WORKDIR /src
 COPY . .
 
-# Build the canister, embed Candid metadata, shrink, and gzip. Each ic-wasm
-# step writes back to the same file; this matches the conventional pattern
-# used across the dfinity canister ecosystem.
+# Build the canister, shrink it, embed Candid metadata, and gzip. Each
+# ic-wasm step writes back to the same file; this matches the conventional
+# pattern used across the dfinity canister ecosystem.
 RUN cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister \
  && mkdir -p /out \
  && cp target/wasm32-unknown-unknown/release/dex_canister.wasm /out/dex_canister.wasm \
