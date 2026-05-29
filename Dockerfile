@@ -35,8 +35,19 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 # Install rustup with no default toolchain; cargo will auto-install the
 # version pinned in rust-toolchain.toml (plus the wasm32-unknown-unknown
 # target) on first invocation. Single source of truth.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --no-modify-path --default-toolchain none --profile minimal
+#
+# Download a pinned rustup-init binary and verify its SHA-256 rather than
+# piping a remote shell script — the bytes we execute can't silently change
+# between builds.
+ARG RUSTUP_VERSION=1.29.0
+ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+RUN curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
+        -o /tmp/rustup-init \
+ && echo "${RUSTUP_INIT_SHA256}  /tmp/rustup-init" | sha256sum -c - \
+ && chmod +x /tmp/rustup-init \
+ && /tmp/rustup-init -y --no-modify-path --default-toolchain none --profile minimal \
+ && rm /tmp/rustup-init
 
 WORKDIR /src
 COPY . .
