@@ -25,7 +25,6 @@ RUN apt-get update \
         ca-certificates \
         curl \
         build-essential \
-        pkg-config \
  && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTUP_HOME=/usr/local/rustup \
