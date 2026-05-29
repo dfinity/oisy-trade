@@ -23,9 +23,13 @@ build:
     gzip -fckn9 wasms/dex_canister.wasm > wasms/dex_canister.wasm.gz
     rm wasms/dex_canister.wasm
 
-# Build canister WASM reproducibly via Docker (bit-identical across hosts)
+# Build canister WASM reproducibly via Docker (bit-identical across hosts).
+# Platform is pinned to linux/amd64 by the Dockerfile's `FROM --platform=...`
+# directive, so no `--platform` flag is needed here — handy for setups
+# (e.g., `brew install docker` without the docker-buildx plugin) where the
+# CLI doesn't accept that flag.
 docker-build:
-    docker buildx build --platform linux/amd64 --target export --output type=local,dest=./wasms .
+    docker buildx build --target export --output type=local,dest=./wasms .
 
 # Run all tests
 test: unit-tests integration-tests
