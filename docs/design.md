@@ -191,12 +191,44 @@ Matching runs on a timer and processes pending queued orders, which makes it pos
 
 ### Fee Model
 
-- **Maker fee**: charged on fills where the order was resting in the book (can be 0 or negative for rebates).
-- **Taker fee**: charged on fills where the order was the incoming aggressor.
-- **Platform fee**: a fee charged on every trade (both maker and taker sides), used to cover canister cycle costs and fund protocol development.
-- Maker and taker fees are deducted from the proceeds at fill time. The platform fee is deducted in addition to the maker/taker fee.
-- All collected fees are accumulated in a fee account controlled by the canister admin.
-- Fee rates are configurable per trading pair.
+Each trading pair carries a `FeeRates { maker, taker }` configuration; the two rates are independent `BasisPoint` values (a `u16` wrapper enforcing `value ≤ 10_000` at construction, so a fee can never exceed the underlying amount). Rates are stored on the `OrderBook` and looked up per fill — they are *not* snapshotted onto resting orders, so a future update will apply to any pending matches without back-patching.
+
+**Maker** is the resting side of a fill (the order that was already in the book). **Taker** is the incoming aggressor that crossed the book.
+
+**Notional.** A fill at price `P` for quantity `Q` has a notional value `N = P × Q` (in quote units). This is what the buyer pays in quote and what the seller receives in quote, before any fee. The codebase exposes it as `Fill::quote_amount()`.
+
+**Asset convention: receive-side.** Each side pays the fee in the asset they receive. This matches Binance ([FAQ](https://www.binance.com/en/support/faq/what-is-binance-spot-trading-fee-and-how-to-calculate-e85d6e703b874674840122196b89780a)) and Coinbase ([Prime](https://docs.cdp.coinbase.com/prime/concepts/trading/trading-fees)); Kraken defaults to quote-side with an opt-in to base ([Kraken](https://support.kraken.com/articles/201893638-how-trading-fees-work-on-kraken)). Per fill there are exactly two fees: one in base (paid by the buyer), one in quote (paid by the seller). Each side's role-specific rate is `taker` if that side was the taker, else `maker`:
+
+| Taker side | Buyer pays in base at | Seller pays in quote at |
+|---|---|---|
+| Buy  | `taker`  | `maker` |
+| Sell | `maker`  | `taker` |
+
+The math (integer arithmetic, truncated — conservative for the protocol):
+
+```text
+base_fee  = Q × buyer_rate  / 10_000     // in base, deducted from buyer's credit
+quote_fee = N × seller_rate / 10_000     // in quote, deducted from seller's credit
+```
+
+**Where the fee goes.** Both fees accumulate into a single canister-owned fee pool, partitioned by token, owned by `TokenBalance` (the same type that owns user balances). The per-token canister-wide invariant is
+
+```text
+Σ users(free + reserved) + Σ fee_pool = Σ deposits − Σ withdrawals
+```
+
+— enforced at the `TokenBalance` API boundary via an atomic `transfer_with_fee` method, so the user-credit and fee-pool-credit can never be applied separately.
+
+**Storage.** User balances stay in stable memory (auto-survives upgrades). The fee pool is a heap `BTreeMap<TokenId, Quantity>` because it is bounded by the number of listed tokens (10s–100s in any realistic timeframe); it is serialized into the `StateSnapshot` at `pre_upgrade` and restored at `post_upgrade`, same path as `tokens`, `trading_pairs`, `order_books`.
+
+**Accumulation, withdrawal, visibility.** Fees accrue at fill time. Withdrawal is a controller-only operation that drains a per-token amount from the pool into a chosen principal's free balance (which the recipient then withdraws to the ICRC ledger via the standard `withdraw` endpoint). The `/metrics` endpoint exposes `dex_fee_balance{token}` as a gauge.
+
+**Deferred / out of scope for v1:**
+
+- **Rebates.** A negative maker rate that credits the maker instead of debiting. The data model is forward-compatible (extending `BasisPoint` to signed is a schema-additive change), but rebates require a per-asset funding-pool invariant that is not trivially per-fill safe — because the maker's rebate and the taker's fee land in *different* asset pools (one base, one quote), the simple `|maker| ≤ taker` constraint cannot guarantee per-asset non-negativity. Binance handles this via cross-asset accounting against its general revenue pool; the canister has no equivalent, so funding requires an explicit pre-funded budget per asset or a debt model.
+- **Per-trade platform fee** (an extra fee on every fill regardless of role). Not currently planned.
+- **Controller endpoint to update rates** post-creation. Rates are set at `add_trading_pair` time. The per-fill lookup of `book.fee_rates()` is structured so this can be added without back-patching resting orders.
+- **Tiered rates** (volume-based, account-based). Requires a notion of "user" that doesn't exist inside the canister today.
 
 ## Balances
 
