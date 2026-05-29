@@ -8,8 +8,12 @@
 #
 # The output is `wasms/dex_canister.wasm.gz`, byte-identical regardless of
 # host platform (Apple Silicon runs the linux/amd64 image via emulation).
+#
+# The base image ships rustc/cargo 1.93.0 + gcc + ca-certificates, matching
+# rust-toolchain.toml exactly. Bump the Rust version in BOTH this Dockerfile
+# and rust-toolchain.toml together.
 
-FROM --platform=linux/amd64 ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64 AS builder
+FROM --platform=linux/amd64 rust:1.93.0-slim-bookworm@sha256:776861219cd851131c1cec3bbd7cbeb16b99a794048097eb69ad9682a8ed0d57 AS builder
 
 # Locale-independent ordering for any string-handling build tool.
 ENV LC_ALL=C
@@ -20,33 +24,9 @@ ENV SOURCE_DATE_EPOCH=1
 # also covers the case of running outside Docker.
 ENV RUSTFLAGS="--remap-path-prefix=/src=/"
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        build-essential \
- && rm -rf /var/lib/apt/lists/*
-
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
-
-# Install rustup with no default toolchain; cargo will auto-install the
-# version pinned in rust-toolchain.toml (plus the wasm32-unknown-unknown
-# target) on first invocation. Single source of truth.
-#
-# Download a pinned rustup-init binary and verify its SHA-256 rather than
-# piping a remote shell script — the bytes we execute can't silently change
-# between builds.
-ARG RUSTUP_VERSION=1.29.0
-ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-RUN curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
-        -o /tmp/rustup-init \
- && echo "${RUSTUP_INIT_SHA256}  /tmp/rustup-init" | sha256sum -c - \
- && chmod +x /tmp/rustup-init \
- && /tmp/rustup-init -y --no-modify-path --default-toolchain none --profile minimal \
- && rm /tmp/rustup-init
+# The slim image ships the host (x86_64-unknown-linux-gnu) toolchain; the
+# wasm32 target is the one extra component we need.
+RUN rustup target add wasm32-unknown-unknown
 
 WORKDIR /src
 COPY . .
