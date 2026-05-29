@@ -189,43 +189,77 @@ This fits comfortably within the 4 GiB Wasm heap. Even with 100 trading pairs of
 
 Matching runs on a timer and processes pending queued orders, which makes it possible to chunk the matching process into smaller batches.
 
-### Fee Model
+### Fees 
 
-Each trading pair has a **maker fee** and a **taker fee**, both expressed in **basis points** (1 bps = 0.01 % = 0.0001). Either rate may be zero. The two rates can change over the lifetime of a trading pair without affecting any orders already resting in the book — the next fill on that pair uses whichever rates are in effect at fill time. Rates are non-negative in v1.
+Each trading pair has a **maker fee** and a **taker fee**, both expressed in **basis points** (1 bps = 0.01 % = 0.0001):
+* Either rate may be zero.
+* Rates are non-negative. (They could be expanded to offer a rebate mechanism for the maker fee to incentivize liquidity).
+
+The two rates may change over the lifetime of a trading pair without affecting any orders already resting in the book — the next fill on that pair uses whichever rates are in effect at fill time. 
 
 Each fill has two sides:
 
 - **Maker** — the resting order that provided liquidity. Pays the maker fee.
 - **Taker** — the incoming order that crossed the book. Pays the taker fee.
 
-Each side pays its fee in the asset it receives: the buyer receives the base asset and pays its fee in base; the seller receives the quote asset and pays its fee in quote. The fee is deducted from the side's proceeds at fill time — the side ends up with `proceeds × (1 − fee_bps / 10_000)` of the asset they would otherwise have received. Integer truncation is used (rounded down), which is conservative for the protocol.
+Each side pays its fee in the asset it **receives**: 
+* the buyer receives the base asset and pays its fee in base; 
+* the seller receives the quote asset and pays its fee in quote. 
 
-#### Worked example
+The fee is deducted from the side's proceeds at fill time — the side ends up with `proceeds × (1 − fee_bps / 10_000)` of the asset they would otherwise have received.
+In case rounding is needed, the rounding is **always** in favor of the protocol (see examples below).
 
-ICP/BTC, 10 ICP filled at 0.0001 BTC per ICP, with a maker fee of 10 bps (0.1 %) and a taker fee of 25 bps (0.25 %). The taker is the buyer.
+#### Examples
+
+Consider the following parameters (chosen for ease of computation):
+* ICP/BTC, 10 ICP filled at 0.0001 BTC per ICP
+* maker fee of 10 bps (0.1 %) 
+* taker fee of 25 bps (0.25 %).
+
+**Taker is the buyer** (incoming buy hits a resting sell):
 
 | Side   | Role  | Receives    | Fee rate | Fee paid       | Net credit    |
 |--------|-------|-------------|----------|----------------|---------------|
 | Buyer  | Taker | 10 ICP      | 25 bps   | 0.025 ICP      | 9.975 ICP     |
 | Seller | Maker | 0.001 BTC   | 10 bps   | 0.000001 BTC   | 0.000999 BTC  |
 
-If the same fill came from a selling taker hitting a resting buy, the rates simply swap roles: the buyer (now the maker) would pay at the maker rate in base, and the seller (now the taker) would pay at the taker rate in quote.
+**Taker is the seller** (incoming sell hits a resting buy) — the same fill, with the rates swapped because the roles are reversed:
 
-References for the receive-side convention:
+| Side   | Role  | Receives    | Fee rate | Fee paid       | Net credit     |
+|--------|-------|-------------|----------|----------------|----------------|
+| Buyer  | Maker | 10 ICP      | 10 bps   | 0.01 ICP       | 9.99 ICP       |
+| Seller | Taker | 0.001 BTC   | 25 bps   | 0.0000025 BTC  | 0.0009975 BTC  |
 
-- [Binance — How to Calculate Spot Trading Fees](https://www.binance.com/en/support/faq/what-is-binance-spot-trading-fee-and-how-to-calculate-e85d6e703b874674840122196b89780a)
-- [Coinbase Prime — Trading Fees](https://docs.cdp.coinbase.com/prime/concepts/trading/trading-fees)
-- [Kraken — How trading fees work](https://support.kraken.com/articles/201893638-how-trading-fees-work-on-kraken)
+
+**Rounding made visible.** The ICP/BTC fills above happen to divide evenly into `10_000` at base-unit precision, so no rounding actually occurs. 
+To exercise the rounding step, take a dust fill where each side receives 1_000 base units, with a maker fee of 33 bps and a taker fee of 47 bps. The taker is the buyer.
+
+| Side   | Role  | Receives          | Fee rate | Fee paid         | Net credit  |
+|--------|-------|-------------------|----------|------------------|-------------|
+| Buyer  | Taker | 1_000 base units  | 47 bps   | 5 (exact: 4.7)   | 995 units   |
+| Seller | Maker | 1_000 base units  | 33 bps   | 4 (exact: 3.3)   | 996 units   |
 
 #### Collection and withdrawal
 
-Collected fees accumulate per token into an internal canister-owned balance, one entry per token. The controller can withdraw any amount from the per-token balance to a recipient principal via an admin endpoint; the recipient then uses the standard withdrawal flow to pull the funds out of the canister.
-
-A `fee_balance{token}` Prometheus gauge exposes the per-token total at the `/metrics` endpoint.
+Collected fees accumulate per token into an internal canister-owned balance, one entry per token.
+The controller can withdraw any amount from the per-token balance to a recipient principal via an admin endpoint;
+the recipient then uses the standard withdrawal flow to pull the funds out of the canister.
 
 #### Memory estimate
 
-The fee balance map is bounded by the number of listed tokens, not by any user-driven dimension. For comparison, Binance currently lists ~400 spot tokens; even at an aggressive 10 000-token cap (an order of magnitude beyond any realistic IC DEX scope), the heap footprint is on the order of 1 MiB — negligible against the 4 GiB Wasm heap.
+The fee balance map is bounded by the number of listed tokens, not by any user-driven dimension. Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is (very) small:
+* in size it will be on the order of tens of KB, negligible against the 4 GiB Wasm heap.
+* in number of instructions needed to serialize/deserialize upon canister upgrades.
+
+#### References
+
+The receive-side fee mechanism is one way to accrue fees, but is not the only one. It is used by
+- [Binance — How to Calculate Spot Trading Fees](https://www.binance.com/en/support/faq/what-is-binance-spot-trading-fee-and-how-to-calculate-e85d6e703b874674840122196b89780a)
+- [Coinbase Prime — Trading Fees](https://docs.cdp.coinbase.com/prime/concepts/trading/trading-fees)
+
+In contrast, Kraken uses send-side fee mechanism (see [add order](https://docs.kraken.com/api/docs/websocket-v1/addorder/)):
+- `fcib`: prefer fee in base currency (default if selling)
+- `fciq`: prefer fee in quote currency (default if buying, mutually exclusive with fcib)
 
 ## Balances
 
