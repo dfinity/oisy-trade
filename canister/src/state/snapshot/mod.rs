@@ -8,7 +8,7 @@
 //! serialized here at `pre_upgrade` and restored at `post_upgrade`.
 
 use super::State;
-use crate::balance::TokenBalance;
+use crate::balance::{FeeEntry, TokenBalance};
 use crate::order::{
     OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
@@ -47,6 +47,10 @@ pub struct StateSnapshot {
     pub max_orders_per_chunk: Option<u32>,
     #[n(8)]
     pub instruction_budget: Option<u64>,
+    /// Heap-resident fee pool inside [`TokenBalance`]. Absent in snapshots
+    /// written before DEFI-2726; restored as an empty pool.
+    #[n(9)]
+    pub fee_pool: Option<Vec<FeeEntry>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -82,8 +86,9 @@ impl StateSnapshot {
             tokens,
             trading_pairs,
             order_books,
-            // ignored: live in stable memory,
-            balances: _,
+            // only the heap fee pool is snapshotted below; user balances
+            // live in stable memory and survive upgrades on their own.
+            balances,
             // ignored: live in stable memory,
             order_history: _,
             // ignored: timers are reset upon upgrades
@@ -125,6 +130,7 @@ impl StateSnapshot {
             },
             max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
             instruction_budget: Some(execution_policy.instruction_budget()),
+            fee_pool: Some(balances.fee_pool_snapshot()),
         }
     }
 
@@ -133,7 +139,7 @@ impl StateSnapshot {
     pub fn into_state<MH: Memory, MB: Memory>(
         self,
         order_history: OrderHistory<MH>,
-        balances: TokenBalance<MB>,
+        mut balances: TokenBalance<MB>,
     ) -> State<MH, MB> {
         let mut tokens = BTreeMap::new();
         for entry in self.tokens {
@@ -176,6 +182,8 @@ impl StateSnapshot {
             .unwrap_or_default()
             .into_iter()
             .collect();
+
+        balances.restore_fee_pool(self.fee_pool.unwrap_or_default());
 
         let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
             (Some(max), Some(budget)) => ExecutionPolicy::try_new(max, budget)

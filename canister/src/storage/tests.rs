@@ -13,6 +13,7 @@ fn empty_snapshot() -> StateSnapshot {
         pending_settling_events: None,
         max_orders_per_chunk: None,
         instruction_budget: None,
+        fee_pool: None,
     }
 }
 

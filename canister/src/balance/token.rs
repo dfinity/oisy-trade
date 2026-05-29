@@ -2,11 +2,34 @@ use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
 use candid::Principal;
 use ic_stable_structures::{Memory, StableBTreeMap};
+use std::collections::BTreeMap;
 
-/// Per-token balance ledger, stored in an `ic_stable_structures::StableBTreeMap`
-/// keyed by `(TokenId, Principal)` (see [`BalanceKey`]).
+/// Canister-wide token accounting:
+///
+/// - Per-`(token, user)` `Balance` entries in a stable [`StableBTreeMap`]
+///   (auto-survives upgrades via the memory ID).
+/// - A heap-resident fee pool indexed by `TokenId`, accrued by fills via
+///   [`TokenBalance::transfer_with_fee`] and persisted across upgrades
+///   through the [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
+///   [`restore_fee_pool`](Self::restore_fee_pool) pair plumbed through
+///   `StateSnapshot`.
+///
+/// The fee pool lives on the heap because it is bounded by the number of
+/// listed tokens (10s–100s), whereas user balances are unbounded and
+/// belong in stable memory.
+///
+/// All token-conservation operations route through this type, so the
+/// canister-wide invariant
+///
+/// ```text
+/// for each token: Σ users(free + reserved) + fee_pool[token]
+///                  = Σ deposits − Σ withdrawals
+/// ```
+///
+/// is enforceable at one API boundary.
 pub struct TokenBalance<M: Memory> {
     balances: StableBTreeMap<BalanceKey, Balance, M>,
+    fee_balances: BTreeMap<TokenId, Quantity>,
 }
 
 impl<M: Memory> std::fmt::Debug for TokenBalance<M> {
@@ -21,6 +44,7 @@ impl<M: Memory> TokenBalance<M> {
     pub fn new(memory: M) -> Self {
         Self {
             balances: StableBTreeMap::init(memory),
+            fee_balances: BTreeMap::new(),
         }
     }
 
@@ -111,6 +135,93 @@ impl<M: Memory> TokenBalance<M> {
         self.update(*creditor, *token, |b| b.deposit(amount));
     }
 
+    /// Transfer `gross` from `debtor`'s reserved into `creditor`'s free,
+    /// withholding `fee` for the canister-owned fee pool of `token`.
+    /// The creditor receives exactly `gross - fee`; the fee pool gains `fee`.
+    ///
+    /// Together these three updates conserve `gross` units of `token` across
+    /// the per-token invariant
+    /// `Σ users(free + reserved) + fee_pool = Σ deposits − Σ withdrawals`,
+    /// and `fee = 0` makes this equivalent to [`transfer`](Self::transfer).
+    ///
+    /// # Panics
+    ///
+    /// - `fee > gross` (preconditions are the caller's responsibility; the
+    ///   per-pair `BasisPoint` invariant guarantees this at the fill path).
+    /// - The debtor has no balance entry, or `gross` exceeds the debtor's
+    ///   reserved balance (same as [`transfer`](Self::transfer)).
+    pub fn transfer_with_fee(
+        &mut self,
+        debtor: &Principal,
+        creditor: &Principal,
+        token: &TokenId,
+        gross: Quantity,
+        fee: Quantity,
+    ) {
+        bench_scopes!("balances", "balances::transfer_with_fee");
+        assert!(
+            fee <= gross,
+            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer_with_fee"
+        );
+        let debtor_key = BalanceKey::new(*token, *debtor);
+        let mut debtor_balance = self
+            .balances
+            .get(&debtor_key)
+            .expect("BUG: debtor balance missing");
+        debtor_balance.debit_reserved(&gross);
+        self.balances.insert(debtor_key, debtor_balance);
+
+        let net = gross
+            .checked_sub(&fee)
+            .expect("BUG: fee <= gross checked above");
+        self.update(*creditor, *token, |b| b.deposit(net));
+
+        if !fee.is_zero() {
+            let entry = self.fee_balances.entry(*token).or_default();
+            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
+        }
+    }
+
+    /// Read the accumulated fee balance for `token`. `None` if no fees have
+    /// ever been accrued for this token.
+    pub fn fee_balance(&self, token: &TokenId) -> Option<Quantity> {
+        self.fee_balances.get(token).copied()
+    }
+
+    /// Iterate the fee pool. Order is by `TokenId` (BTreeMap ordering).
+    pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
+        self.fee_balances.iter().map(|(k, v)| (*k, *v))
+    }
+
+    /// Snapshot the heap-resident fee pool for pre-upgrade serialization.
+    /// Stable user balances are excluded; they survive upgrades on their
+    /// own via the underlying [`StableBTreeMap`].
+    pub fn fee_pool_snapshot(&self) -> Vec<FeeEntry> {
+        self.fee_balances
+            .iter()
+            .map(|(token, amount)| FeeEntry {
+                token: *token,
+                amount: *amount,
+            })
+            .collect()
+    }
+
+    /// Restore the heap-resident fee pool after a `post_upgrade` decode.
+    /// Replaces any existing pool; intended to run exactly once during
+    /// post-upgrade. Duplicate `TokenId` entries in `snapshot` trap.
+    pub fn restore_fee_pool(&mut self, snapshot: Vec<FeeEntry>) {
+        self.fee_balances.clear();
+        for entry in snapshot {
+            assert!(
+                self.fee_balances
+                    .insert(entry.token, entry.amount)
+                    .is_none(),
+                "invalid snapshot: duplicate fee-pool entry for {:?}",
+                entry.token,
+            );
+        }
+    }
+
     /// Read-modify-write for an infallible mutation. Creates the entry if
     /// absent. Skips the write when the mutation left the balance at the
     /// default and no entry existed, so no-op closures (e.g. `deposit(ZERO)`)
@@ -151,6 +262,16 @@ impl<M: Memory> TokenBalance<M> {
     }
 }
 
+/// CBOR-serializable entry of the fee pool, used by
+/// [`TokenBalance::fee_pool_snapshot`] and `StateSnapshot`.
+#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub struct FeeEntry {
+    #[n(0)]
+    pub token: TokenId,
+    #[n(1)]
+    pub amount: Quantity,
+}
+
 // Tests that compare full `State` values clone the ledger and assert
 // equality. Production code uses `TokenBalance<VMem>` (stable memory, not
 // cloneable); tests use `TokenBalance<VectorMemory>`. Gate these impls on
@@ -162,6 +283,7 @@ impl Clone for TokenBalance<ic_stable_structures::VectorMemory> {
         for (key, balance) in self.iter() {
             fresh.balances.insert(key, balance);
         }
+        fresh.fee_balances = self.fee_balances.clone();
         fresh
     }
 }
@@ -169,7 +291,7 @@ impl Clone for TokenBalance<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for TokenBalance<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
+        self.iter().eq(other.iter()) && self.fee_balances == other.fee_balances
     }
 }
 

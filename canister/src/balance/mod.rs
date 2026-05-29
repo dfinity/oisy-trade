@@ -1,6 +1,6 @@
 mod token;
 
-pub use token::TokenBalance;
+pub use token::{FeeEntry, TokenBalance};
 
 use crate::order::{Quantity, TokenId};
 use candid::Principal;

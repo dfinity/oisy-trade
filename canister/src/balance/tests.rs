@@ -282,6 +282,253 @@ mod token_balance {
     }
 }
 
+mod fee_pool {
+    use crate::balance::{Balance, FeeEntry, TokenBalance};
+    use crate::order::{Quantity, TokenId};
+    use candid::Principal;
+
+    #[test]
+    fn fee_balance_is_none_for_unknown_token() {
+        let tb = TokenBalance::default();
+        assert_eq!(tb.fee_balance(&token_a()), None);
+    }
+
+    #[test]
+    fn transfer_with_zero_fee_matches_transfer() {
+        let mut with_fee = setup_alice_reserve(100);
+        let mut plain = setup_alice_reserve(100);
+
+        with_fee.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(40u64),
+            Quantity::ZERO,
+        );
+        plain.transfer(&alice(), &bob(), &token_a(), Quantity::from(40u64));
+
+        assert_eq!(
+            with_fee.get_balance(&alice(), &token_a()),
+            plain.get_balance(&alice(), &token_a()),
+        );
+        assert_eq!(
+            with_fee.get_balance(&bob(), &token_a()),
+            plain.get_balance(&bob(), &token_a()),
+        );
+        assert_eq!(with_fee.fee_balance(&token_a()), None);
+    }
+
+    #[test]
+    fn transfer_with_fee_credits_net_to_creditor_and_accrues_to_pool() {
+        let mut tb = setup_alice_reserve(100);
+
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(40u64),
+            Quantity::from(3u64),
+        );
+
+        // Debtor's reserved is debited by the full gross.
+        assert_eq!(
+            tb.get_balance(&alice(), &token_a()),
+            Some(Balance::new(0u64, 60u64))
+        );
+        // Creditor receives gross − fee.
+        assert_eq!(
+            tb.get_balance(&bob(), &token_a()),
+            Some(Balance::new(37u64, 0u64))
+        );
+        assert_eq!(tb.fee_balance(&token_a()), Some(Quantity::from(3u64)));
+    }
+
+    #[test]
+    fn multiple_accruals_sum_per_token() {
+        let mut tb = setup_alice_reserve(100);
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(40u64),
+            Quantity::from(3u64),
+        );
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(20u64),
+            Quantity::from(1u64),
+        );
+
+        assert_eq!(tb.fee_balance(&token_a()), Some(Quantity::from(4u64)));
+    }
+
+    /// `Σ users(free + reserved) + fee_pool` is conserved on every
+    /// transfer_with_fee call. The pool absorbs exactly the fee withheld
+    /// from the creditor.
+    #[test]
+    fn invariant_holds_across_a_mixed_workload() {
+        let mut tb = setup_alice_reserve(100);
+        tb.deposit(bob(), token_b(), Quantity::from(50u64));
+
+        // Several operations against token_a:
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(40u64),
+            Quantity::from(2u64),
+        );
+        tb.reserve(&bob(), &token_a(), Quantity::from(10u64))
+            .unwrap();
+        tb.unreserve(&bob(), &token_a(), Quantity::from(5u64));
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(10u64),
+            Quantity::from(1u64),
+        );
+
+        let total_a = sum_users(&tb, &token_a())
+            .checked_add(tb.fee_balance(&token_a()).unwrap_or_default())
+            .unwrap();
+        // 100 was deposited into token_a; no withdrawals; invariant holds.
+        assert_eq!(total_a, Quantity::from(100u64));
+
+        // token_b had no fee activity; user sum equals the deposit.
+        assert_eq!(sum_users(&tb, &token_b()), Quantity::from(50u64));
+        assert_eq!(tb.fee_balance(&token_b()), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee")]
+    fn should_panic_when_fee_exceeds_gross() {
+        let mut tb = setup_alice_reserve(100);
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(10u64),
+            Quantity::from(11u64),
+        );
+    }
+
+    #[test]
+    fn snapshot_roundtrips_through_save_and_restore() {
+        let mut tb = setup_alice_reserve(100);
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(40u64),
+            Quantity::from(3u64),
+        );
+        tb.deposit(alice(), token_b(), Quantity::from(50u64));
+        tb.reserve(&alice(), &token_b(), Quantity::from(20u64))
+            .unwrap();
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_b(),
+            Quantity::from(20u64),
+            Quantity::from(2u64),
+        );
+
+        let snapshot: Vec<FeeEntry> = tb.fee_pool_snapshot();
+        assert_eq!(snapshot.len(), 2);
+
+        let mut restored = TokenBalance::default();
+        restored.restore_fee_pool(snapshot.clone());
+        assert_eq!(restored.fee_balance(&token_a()), Some(Quantity::from(3u64)));
+        assert_eq!(restored.fee_balance(&token_b()), Some(Quantity::from(2u64)));
+
+        // Snapshot order is by TokenId; round-tripping the Vec yields the
+        // same Vec.
+        let resnap: Vec<FeeEntry> = restored.fee_pool_snapshot();
+        assert_eq!(resnap, snapshot);
+    }
+
+    #[test]
+    fn restore_replaces_any_existing_pool() {
+        let mut tb = setup_alice_reserve(100);
+        tb.transfer_with_fee(
+            &alice(),
+            &bob(),
+            &token_a(),
+            Quantity::from(20u64),
+            Quantity::from(5u64),
+        );
+        assert_eq!(tb.fee_balance(&token_a()), Some(Quantity::from(5u64)));
+
+        tb.restore_fee_pool(vec![FeeEntry {
+            token: token_b(),
+            amount: Quantity::from(7u64),
+        }]);
+
+        assert_eq!(tb.fee_balance(&token_a()), None);
+        assert_eq!(tb.fee_balance(&token_b()), Some(Quantity::from(7u64)));
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate fee-pool entry")]
+    fn restore_traps_on_duplicate_entries() {
+        let mut tb = TokenBalance::default();
+        tb.restore_fee_pool(vec![
+            FeeEntry {
+                token: token_a(),
+                amount: Quantity::from(1u64),
+            },
+            FeeEntry {
+                token: token_a(),
+                amount: Quantity::from(2u64),
+            },
+        ]);
+    }
+
+    fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
+        let mut tb = TokenBalance::default();
+        tb.deposit(alice(), token_a(), Quantity::from(amount));
+        tb.reserve(&alice(), &token_a(), Quantity::from(amount))
+            .unwrap();
+        tb
+    }
+
+    fn sum_users(
+        tb: &TokenBalance<ic_stable_structures::VectorMemory>,
+        token: &TokenId,
+    ) -> Quantity {
+        let mut acc = Quantity::ZERO;
+        for (key, balance) in tb.iter() {
+            if key.token() == token {
+                let free_plus_reserved = balance
+                    .free()
+                    .checked_add(*balance.reserved())
+                    .expect("test overflow");
+                acc = acc.checked_add(free_plus_reserved).expect("test overflow");
+            }
+        }
+        acc
+    }
+
+    fn alice() -> Principal {
+        Principal::from_slice(&[0x01])
+    }
+
+    fn bob() -> Principal {
+        Principal::from_slice(&[0x02])
+    }
+
+    fn token_a() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xA0]))
+    }
+
+    fn token_b() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xB0]))
+    }
+}
+
 mod key {
     use super::super::BalanceKey;
     use crate::test_fixtures::arbitrary::arb_balance_key;
