@@ -1438,6 +1438,184 @@ mod order_book {
     }
 }
 
+mod chunked_matching {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use dex_types::{GetOrderBookDepthRequest, LimitOrderRequest, Side};
+    use dex_types_internal::{InitArg, Mode};
+
+    const MAX_ORDERS_PER_CHUNK: u32 = 5;
+    const N_ORDERS: u32 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
+    const PRICE: u64 = 100;
+    const QUANTITY: u64 = 1_000_000;
+
+    /// Installs the canister with a tiny `ExecutionPolicy` (5 orders per
+    /// chunk), submits 6 non-crossing orders in a single PocketIC round,
+    /// and verifies that the chunked-matching pipeline drains the backlog
+    /// and produces at least two `MatchingEvent`s (one per chunk) —
+    /// proving the work actually splits rather than being absorbed by a
+    /// single oversized chunk.
+    #[tokio::test]
+    async fn should_drain_pending_orders_across_chunks() {
+        let (setup, _user) = install_with_chunked_buy_workload().await;
+
+        tick_until_depth_reaches(&setup, expected_resting_quantity(), MAX_TICKS).await;
+        assert_matching_events_at_least(&setup, 2).await;
+
+        setup.drop().await;
+    }
+
+    /// Same workload as `should_drain_pending_orders_across_chunks`, but
+    /// the canister is installed with an instruction budget so small that
+    /// no chunk can make progress. Pending orders accumulate but never
+    /// match. An upgrade then raises the budget; the post-upgrade timer
+    /// drains the backlog with chunked matching.
+    ///
+    /// Stopping cleanly mid-chunk isn't reliable: every `add_limit_order`
+    /// schedules its own zero-delay timer and PocketIC's `update_call`
+    /// advances enough rounds to fire them, so a tight workload can drain
+    /// inside the placement phase (see DEFI-2823 for the timer-coalescing
+    /// follow-up). Starving the budget instead lets the kickoff timers
+    /// fire harmlessly and gives us a deterministic pending-only state to
+    /// upgrade across.
+    #[tokio::test]
+    async fn should_drain_pending_orders_across_upgrade() {
+        let setup = Setup::new_with_init_arg(InitArg {
+            mode: Mode::GeneralAvailability,
+            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+            instruction_budget: 1, // intentionally too small to make progress
+        })
+        .await
+        .with_trading_pair()
+        .await;
+
+        let user = Principal::from_slice(&[0x43]);
+        place_n_buy_orders(&setup, user).await;
+
+        // No matching could progress under the starved budget, so all
+        // orders are still pending and depth is 0.
+        assert_eq!(depth_quantity(&setup).await, Nat::from(0u64));
+
+        setup
+            .upgrade(Some(dex_types_internal::UpgradeArg {
+                mode: None,
+                max_orders_per_chunk: None,
+                instruction_budget: Some(1_000_000_000),
+            }))
+            .await;
+
+        // The original kickoff timers were lost across the upgrade; advance
+        // past the periodic matching interval (1 min) so the heartbeat
+        // matching timer fires and drains the backlog.
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+
+        tick_until_depth_reaches(&setup, expected_resting_quantity(), MAX_TICKS).await;
+        assert_matching_events_at_least(&setup, 2).await;
+
+        setup.drop().await;
+    }
+
+    const MAX_TICKS: u32 = 20;
+
+    fn expected_resting_quantity() -> Nat {
+        Nat::from(u64::from(N_ORDERS) * QUANTITY)
+    }
+
+    async fn install_with_chunked_buy_workload() -> (Setup, Principal) {
+        let setup = Setup::new_with_init_arg(InitArg {
+            mode: Mode::GeneralAvailability,
+            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+            instruction_budget: 1_000_000_000,
+        })
+        .await
+        .with_trading_pair()
+        .await;
+
+        let user = Principal::from_slice(&[0x42]);
+        place_n_buy_orders(&setup, user).await;
+        (setup, user)
+    }
+
+    async fn place_n_buy_orders(setup: &Setup, user: Principal) {
+        let pair = setup.trading_pair();
+        let per_order_cost = PRICE * QUANTITY;
+        let total_cost = u64::from(N_ORDERS) * per_order_cost;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(total_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(total_cost + QUOTE_LEDGER_FEE)
+            .deposit(total_cost)
+            .execute()
+            .await;
+
+        let client = setup.dex_client_with_caller(user);
+        for _ in 0..N_ORDERS {
+            client
+                .add_limit_order(LimitOrderRequest {
+                    pair,
+                    side: Side::Buy,
+                    price: PRICE,
+                    quantity: Nat::from(QUANTITY),
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn depth_quantity(setup: &Setup) -> Nat {
+        setup
+            .dex_client()
+            .get_order_book_depth(GetOrderBookDepthRequest {
+                trading_pair: setup.trading_pair(),
+                limit: None,
+            })
+            .await
+            .unwrap()
+            .bids
+            .first()
+            .map(|level| level.quantity.clone())
+            .unwrap_or_else(|| Nat::from(0u64))
+    }
+
+    async fn tick_until_depth_reaches(setup: &Setup, expected: Nat, max_ticks: u32) {
+        let mut ticks = 0;
+        loop {
+            setup.env().tick().await;
+            ticks += 1;
+            let resting = depth_quantity(setup).await;
+            if resting == expected {
+                break;
+            }
+            assert!(
+                ticks <= max_ticks,
+                "chunked matching failed to reach expected resting depth {expected} after {ticks} ticks (last seen {resting})",
+            );
+        }
+    }
+
+    async fn assert_matching_events_at_least(setup: &Setup, min: usize) {
+        let matching_events = setup
+            .get_all_events()
+            .await
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    event.payload,
+                    dex_types_internal::event::EventType::Matching(_),
+                )
+            })
+            .count();
+        assert!(
+            matching_events >= min,
+            "expected ≥ {min} MatchingEvents (chunk size {MAX_ORDERS_PER_CHUNK}, workload {N_ORDERS} orders), got {matching_events}",
+        );
+    }
+}
+
 #[tokio::test]
 async fn should_expose_metrics() {
     let setup = Setup::new().await.with_trading_pair().await;

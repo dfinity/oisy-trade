@@ -20,8 +20,10 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         request
     );
     // Trigger matching immediately, no need to wait for the periodic timer.
+    // TODO DEFI-2823: coalesce — a burst of order placements currently
+    // queues one zero-delay timer per call.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        dex_canister::process_pending_orders(&dex_canister::IC_RUNTIME);
+        dex_canister::drive_matching();
     });
     Ok(order_id)
 }

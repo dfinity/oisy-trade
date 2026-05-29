@@ -728,6 +728,7 @@ pub mod mocks {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller().return_const(caller);
         mock.expect_time().return_const(0u64);
+        mock.expect_instruction_counter().return_const(0u64);
         mock
     }
 
