@@ -1,7 +1,7 @@
 [tools]
 just = "1.38.0"
 "ubi:DevinR528/cargo-sort" = "2.1.3"
-"ubi:dfinity/ic-wasm" = "0.9.10"
+"ubi:dfinity/ic-wasm" = { version = "0.9.10", matching = ".tar.xz" }
 
 [settings]
 idiomatic_version_file_enable_tools = ["rust"]
