@@ -207,37 +207,41 @@ Each side pays its fee in the asset it **receives**:
 * the seller receives the quote asset and pays its fee in quote. 
 
 The fee is deducted from the side's proceeds at fill time — the side ends up with `proceeds × (1 − fee_bps / 10_000)` of the asset they would otherwise have received.
-In case rounding is needed, the rounding is **always** in favor of the protocol (see examples below).
+In case rounding is needed, the rounding is **always** in favor of the protocol, see examples below. 
+(Not rounding in favor of the protocol was for example a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)). 
 
 #### Examples
 
 Consider the following parameters (chosen for ease of computation):
-* ICP/BTC, 10 ICP filled at 0.0001 BTC per ICP
+* ICP/BTC, 10 ICP filled at 0.0001 BTC per ICP (both tokens use 8 decimals)
 * maker fee of 10 bps (0.1 %) 
 * taker fee of 25 bps (0.25 %).
 
 **Taker is the buyer** (incoming buy hits a resting sell):
 
-| Side   | Role  | Receives    | Fee rate | Fee paid       | Net credit    |
-|--------|-------|-------------|----------|----------------|---------------|
-| Buyer  | Taker | 10 ICP      | 25 bps   | 0.025 ICP      | 9.975 ICP     |
-| Seller | Maker | 0.001 BTC   | 10 bps   | 0.000001 BTC   | 0.000999 BTC  |
+Both tokens are assumed to have 8 decimals, so amounts are shown in base units (`1 token = 10^8` base units) with the whole-token equivalent in parentheses.
+
+| Side   | Role  | Receives                | Fee rate | Fee paid              | Net credit              |
+|--------|-------|-------------------------|----------|-----------------------|-------------------------|
+| Buyer  | Taker | 1_000_000_000 (10 ICP)  | 25 bps   | 2_500_000 (0.025 ICP) | 997_500_000 (9.975 ICP) |
+| Seller | Maker | 100_000 (0.001 BTC)     | 10 bps   | 100 (0.000001 BTC)    | 99_900 (0.000999 BTC)   |
 
 **Taker is the seller** (incoming sell hits a resting buy) — the same fill, with the rates swapped because the roles are reversed:
 
-| Side   | Role  | Receives    | Fee rate | Fee paid       | Net credit     |
-|--------|-------|-------------|----------|----------------|----------------|
-| Buyer  | Maker | 10 ICP      | 10 bps   | 0.01 ICP       | 9.99 ICP       |
-| Seller | Taker | 0.001 BTC   | 25 bps   | 0.0000025 BTC  | 0.0009975 BTC  |
+| Side   | Role  | Receives                | Fee rate | Fee paid              | Net credit              |
+|--------|-------|-------------------------|----------|-----------------------|-------------------------|
+| Buyer  | Maker | 1_000_000_000 (10 ICP)  | 10 bps   | 1_000_000 (0.01 ICP)  | 999_000_000 (9.99 ICP)  |
+| Seller | Taker | 100_000 (0.001 BTC)     | 25 bps   | 250 (0.0000025 BTC)   | 99_750 (0.0009975 BTC)  |
 
 
-**Rounding made visible.** The ICP/BTC fills above happen to divide evenly into `10_000` at base-unit precision, so no rounding actually occurs. 
-To exercise the rounding step, take a dust fill where each side receives 1_000 base units, with a maker fee of 33 bps and a taker fee of 47 bps. The taker is the buyer.
+**Rounding made visible.** The receives above are all multiples of `10_000`, so the bps math comes out integer and no rounding occurs. With a smaller dust fill (`1_000` base units, the smallest "clean" amount not divisible by `10_000`) the fee has a sub-unit remainder and rounds up. Maker fee 33 bps, taker fee 47 bps; the taker is the buyer:
 
-| Side   | Role  | Receives          | Fee rate | Fee paid         | Net credit  |
-|--------|-------|-------------------|----------|------------------|-------------|
-| Buyer  | Taker | 1_000 base units  | 47 bps   | 5 (exact: 4.7)   | 995 units   |
-| Seller | Maker | 1_000 base units  | 33 bps   | 4 (exact: 3.3)   | 996 units   |
+| Side   | Role  | Receives             | Fee rate | Fee paid             | Net credit            |
+|--------|-------|----------------------|----------|----------------------|-----------------------|
+| Buyer  | Taker | 1_000 (0.00001 ICP)  | 47 bps   | 5 (0.00000005 ICP)   | 995 (0.00000995 ICP)  |
+| Seller | Maker | 1_000 (0.00001 BTC)  | 33 bps   | 4 (0.00000004 BTC)   | 996 (0.00000996 BTC)  |
+
+Exact pre-rounding fees: `1_000 × 47 / 10_000 = 4.7` and `1_000 × 33 / 10_000 = 3.3`, both ceil-ed in the protocol's favor.
 
 #### Collection and withdrawal
 
@@ -247,7 +251,8 @@ the recipient then uses the standard withdrawal flow to pull the funds out of th
 
 #### Memory estimate
 
-The fee balance map is bounded by the number of listed tokens, not by any user-driven dimension. Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is (very) small:
+The fee balance map is bounded by the number of listed tokens, not by any user-driven dimension. 
+Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is (very) small:
 * in size it will be on the order of tens of KB, negligible against the 4 GiB Wasm heap.
 * in number of instructions needed to serialize/deserialize upon canister upgrades.
 
