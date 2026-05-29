@@ -1,5 +1,5 @@
 use super::StateSnapshot;
-use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
+use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
@@ -93,6 +93,7 @@ mod schema_stability {
                     orders: vec![resting_sell],
                 }],
                 filled_orders: vec![OrderSeq::new(4)],
+                fee_rates: None,
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -183,6 +184,7 @@ fn should_roundtrip_state_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
 
     let buyer = Principal::from_slice(&[0x01]);

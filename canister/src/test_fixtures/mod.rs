@@ -2,8 +2,8 @@ pub mod event;
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
-    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
+    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::{order, state};
@@ -106,11 +106,12 @@ pub fn trading_pair_request(
         },
         tick_size: TICK_SIZE.get(),
         lot_size: LOT_SIZE.get(),
+        fee_rates: dex_types::FeeRates::default(),
     }
 }
 
 pub fn order_book() -> OrderBook {
-    OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE)
+    OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE, FeeRates::default())
 }
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {
@@ -197,6 +198,7 @@ pub fn init_state_with_order_book() {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
     });
 }
@@ -318,9 +320,9 @@ pub fn transfer_from_response(
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, CanceledOrderInfo, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord,
-        OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
-        TokenMetadata,
+        self, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
+        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
+        TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -577,6 +579,7 @@ pub mod arbitrary {
                         lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
                         base_metadata,
                         quote_metadata,
+                        fee_rates: Some(FeeRates::default()),
                     }
                 },
             )

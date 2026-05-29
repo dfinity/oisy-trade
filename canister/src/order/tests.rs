@@ -784,7 +784,9 @@ mod order_book {
 
         #[test]
         fn should_saturate_aggregated_quantity_on_overflow() {
-            use crate::order::{LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize};
+            use crate::order::{
+                FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
+            };
             use std::num::NonZeroU64;
 
             // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
@@ -793,6 +795,7 @@ mod order_book {
                 OrderBookId::ZERO,
                 TickSize::new(NonZeroU64::new(1).unwrap()),
                 LotSize::new(NonZeroU64::new(1).unwrap()),
+                FeeRates::default(),
             );
             let max_buy = |seq: u64| {
                 PendingOrder {
@@ -1157,7 +1160,7 @@ mod history {
 }
 
 mod book_snapshot {
-    use crate::order::{OrderBook, OrderBookSnapshot};
+    use crate::order::{FeeRates, OrderBook, OrderBookSnapshot};
     use crate::test_fixtures::{LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_pending_order};
     use proptest::prelude::*;
 
@@ -1167,7 +1170,7 @@ mod book_snapshot {
             to_process in prop::collection::vec(arb_pending_order(), 0..100),
             to_leave_pending in prop::collection::vec(arb_pending_order(), 0..50),
         ) {
-            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE, FeeRates::default());
             for pending in to_process {
                 let seq = book.next_seq();
                 book.add_pending_order(pending.into_order(seq));
@@ -1188,7 +1191,7 @@ mod book_snapshot {
 }
 
 mod levels_consistency {
-    use crate::order::{OrderBook, OrderSeq};
+    use crate::order::{FeeRates, OrderBook, OrderSeq};
     use crate::test_fixtures::{
         LOT_SIZE, TEST_BOOK_ID, TICK_SIZE, arbitrary::arb_non_matching_orders,
     };
@@ -1197,7 +1200,7 @@ mod levels_consistency {
     proptest! {
         #[test]
         fn top_of_depth_matches_ticker(orders in arb_non_matching_orders()) {
-            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE);
+            let mut book = OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE, FeeRates::default());
             for (i, pending) in orders.into_iter().enumerate() {
                 book.match_order(pending.into_order(OrderSeq::new(i as u64))).unwrap();
             }

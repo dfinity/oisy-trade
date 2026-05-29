@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 
 use crate::EXECUTOR;
@@ -298,6 +298,7 @@ fn new_state() -> State<storage::VMem, storage::VMem> {
         },
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
     state
 }

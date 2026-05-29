@@ -1,6 +1,6 @@
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity, Side,
-    TickSize, TokenId, TokenMetadata,
+    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity,
+    Side, TickSize, TokenId, TokenMetadata,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, UpgradeArg};
@@ -58,6 +58,10 @@ pub struct AddTradingPairEvent {
     pub base_metadata: TokenMetadata,
     #[n(6)]
     pub quote_metadata: TokenMetadata,
+    /// `None` for events recorded before DEFI-2726; replayed as
+    /// [`FeeRates::default`] (zero rates).
+    #[n(7)]
+    pub fee_rates: Option<FeeRates>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

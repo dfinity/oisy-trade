@@ -65,7 +65,7 @@ mod assert_caller_is_allowed {
 }
 
 mod record_trading_pair {
-    use crate::order::{OrderBookId, TokenId, TokenMetadata, TradingPair};
+    use crate::order::{FeeRates, OrderBookId, TokenId, TokenMetadata, TradingPair};
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata,
@@ -83,6 +83,7 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         assert_eq!(state.token_metadata(&icp_token_id()), Some(&icp_metadata()));
@@ -109,6 +110,7 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         // Second pair: ICP/ckETH — ICP already registered with same metadata
@@ -122,6 +124,7 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
     }
 
@@ -141,6 +144,7 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         state.record_trading_pair(
             OrderBookId::ONE,
@@ -152,6 +156,7 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         assert_eq!(state.tokens().len(), 3);
@@ -169,6 +174,7 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         state.record_trading_pair(
@@ -184,6 +190,7 @@ mod record_trading_pair {
             },
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         let book_ids: Vec<_> = state.trading_pairs().iter().map(|(_, id)| id).collect();
@@ -193,7 +200,7 @@ mod record_trading_pair {
 }
 
 mod add_limit_order {
-    use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
@@ -213,6 +220,7 @@ mod add_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         let user = Principal::from_slice(&[0x01]);
         let pending = PendingOrder {
@@ -230,7 +238,7 @@ mod cancel_limit_order {
     use crate::EXECUTOR;
     use crate::balance::Balance;
     use crate::order::{
-        CanceledOrderInfo, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side,
+        CanceledOrderInfo, FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side,
     };
     use crate::state::State;
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
@@ -427,13 +435,16 @@ mod cancel_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         state
     }
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize};
+    use crate::order::{
+        FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
+    };
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
@@ -476,6 +487,7 @@ mod validate_overflow_invariant {
                 ckbtc_metadata(),
                 tick,
                 lot,
+                FeeRates::default(),
             );
 
             let price = Price::new(price_raw);
@@ -507,7 +519,7 @@ mod validate_overflow_invariant {
 mod settle_fills {
     use crate::EXECUTOR;
     use crate::balance::Balance;
-    use crate::order::{OrderBookId, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
@@ -855,7 +867,7 @@ mod settle_fills {
     /// drain loop would silently drop the second book's settlement.
     #[test]
     fn should_settle_matches_across_multiple_books() {
-        use crate::order::{TokenId, TokenMetadata, TradingPair};
+        use crate::order::{FeeRates, TokenId, TokenMetadata, TradingPair};
 
         let mut state = test_fixtures::state();
         let lot = u64::from(LOT_SIZE);
@@ -870,6 +882,7 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         // Pair B: a distinct base/quote token pair on a second book.
         let base_b = TokenId::new(Principal::from_slice(&[0xB1]));
@@ -891,6 +904,7 @@ mod settle_fills {
             },
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
 
         let buyer_a = Principal::from_slice(&[0x0A, 0x01]);
@@ -931,6 +945,7 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         state
     }
@@ -1168,7 +1183,7 @@ mod execution_policy {
 }
 
 mod get_balances {
-    use crate::order::{OrderBookId, Quantity, TokenId, TradingPair};
+    use crate::order::{FeeRates, OrderBookId, Quantity, TokenId, TradingPair};
     use crate::state::StableMemoryOptions;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
@@ -1360,6 +1375,7 @@ mod get_balances {
             test_fixtures::icp_metadata(),
             test_fixtures::TICK_SIZE,
             test_fixtures::LOT_SIZE,
+            FeeRates::default(),
         );
         (state, a_id, b_id)
     }
@@ -1385,7 +1401,7 @@ mod get_balances {
 
 mod pending_state_predicates {
     use crate::EXECUTOR;
-    use crate::order::{OrderBookId, Side};
+    use crate::order::{FeeRates, OrderBookId, Side};
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
@@ -1451,6 +1467,7 @@ mod pending_state_predicates {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         state
     }

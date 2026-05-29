@@ -136,6 +136,7 @@ impl Setup {
             },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,
+            fee_rates: dex_types::FeeRates::default(),
         }
     }
 

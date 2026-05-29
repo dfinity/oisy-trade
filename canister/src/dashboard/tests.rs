@@ -1,5 +1,7 @@
 use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
-use crate::order::{OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair};
+use crate::order::{
+    FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
+};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
@@ -187,6 +189,7 @@ fn record_pair(state: &mut State<VectorMemory, VectorMemory>) {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
 }
 

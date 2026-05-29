@@ -354,6 +354,16 @@ pub enum GetBalancesRequestError {
     },
 }
 
+/// Maker/taker fee rates for a trading pair, in basis points
+/// (1 bps = 0.01 %). Each rate must be in `0..=10_000`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct FeeRates {
+    /// Rate charged on the resting (maker) side of a fill.
+    pub maker_bps: u16,
+    /// Rate charged on the incoming (taker) side of a fill.
+    pub taker_bps: u16,
+}
+
 /// Request to add a new trading pair to the DEX.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct AddTradingPairRequest {
@@ -365,6 +375,8 @@ pub struct AddTradingPairRequest {
     pub tick_size: u64,
     /// Minimum order quantity. Must be greater than zero.
     pub lot_size: u64,
+    /// Maker/taker fee rates applied to fills on this pair.
+    pub fee_rates: FeeRates,
 }
 
 /// Request to withdraw tokens from the DEX.
@@ -446,6 +458,10 @@ pub enum AddTradingPairError {
     InvalidTickSize,
     /// The lot size must be greater than zero.
     InvalidLotSize,
+    /// The maker fee rate is outside `0..=10_000` bps.
+    InvalidMakerFeeBps(u16),
+    /// The taker fee rate is outside `0..=10_000` bps.
+    InvalidTakerFeeBps(u16),
     /// A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists,
     /// The submitted token metadata does not match the previously registered metadata.
