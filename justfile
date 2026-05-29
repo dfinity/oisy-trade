@@ -16,7 +16,12 @@ lint:
 build:
     cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
     mkdir -p wasms
-    gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm > wasms/dex_canister.wasm.gz
+    cp target/wasm32-unknown-unknown/release/dex_canister.wasm wasms/dex_canister.wasm
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm shrink
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm metadata candid:service -f canister/dex.did -v public
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm metadata candid:args -d '(DexArg)' -v public
+    gzip -fckn9 wasms/dex_canister.wasm > wasms/dex_canister.wasm.gz
+    rm wasms/dex_canister.wasm
 
 # Build canister WASM reproducibly via Docker (bit-identical across hosts)
 docker-build:
