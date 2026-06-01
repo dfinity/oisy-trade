@@ -189,7 +189,7 @@ This fits comfortably within the 4 GiB Wasm heap. Even with 100 trading pairs of
 
 Matching runs on a timer and processes pending queued orders, which makes it possible to chunk the matching process into smaller batches.
 
-### Fees 
+### Fees
 
 Each trading pair has a **maker fee** and a **taker fee**, both expressed in **basis points** (1 bps = 0.01 % = 0.0001):
 * Either rate may be zero.
@@ -206,8 +206,7 @@ Each side pays its fee in the asset it **receives**:
 * the buyer receives the base asset and pays its fee in base; 
 * the seller receives the quote asset and pays its fee in quote. 
 
-The fee is deducted from the side's proceeds at fill time — the side ends up with `proceeds × (1 − fee_bps / 10_000)` of the asset they would otherwise have received.
-In case rounding is needed, the rounding is **always** in favor of the protocol, see examples below. 
+The fee is deducted from the side's proceeds at fill time. In base units, `fee = ceil(proceeds × fee_bps / 10_000)` and `net_credit = proceeds − fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
 (Not rounding in favor of the protocol was for example a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)). 
 
 #### Examples
@@ -234,7 +233,7 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 | Seller | Taker | 100_000 (0.001 BTC)     | 25 bps   | 250 (0.0000025 BTC)   | 99_750 (0.0009975 BTC)  |
 
 
-**Rounding made visible.** The receives above are all multiples of `10_000`, so the bps math comes out integer and no rounding occurs. With a smaller dust fill (`1_000` base units, the smallest "clean" amount not divisible by `10_000`) the fee has a sub-unit remainder and rounds up. Maker fee 33 bps, taker fee 47 bps; the taker is the buyer:
+**Rounding made visible.** The receives above are all multiples of `10_000`, so the bps math comes out integer and no rounding occurs. With a smaller dust fill (`1_000` base units, a simple amount not divisible by `10_000`) the fee has a sub-unit remainder and rounds up. Maker fee 33 bps, taker fee 47 bps; the taker is the buyer:
 
 | Side   | Role  | Receives             | Fee rate | Fee paid             | Net credit            |
 |--------|-------|----------------------|----------|----------------------|-----------------------|
