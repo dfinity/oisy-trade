@@ -12,9 +12,10 @@
 # Post-build `ic-wasm` shrinks the binary, then embeds the Candid interface
 # and init-arg type as custom metadata sections.
 #
-# The base image ships rustc/cargo 1.93.0 + gcc + curl/xz + ca-certificates,
-# matching rust-toolchain.toml exactly. Bump the Rust version in BOTH this
-# Dockerfile and rust-toolchain.toml together.
+# The base image ships rustc/cargo 1.93.0 + gcc + curl/xz + ca-certificates.
+# The check below asserts the image's rustc matches rust-toolchain.toml, so
+# drift between the two fails the build loudly instead of silently triggering
+# a rustup toolchain download at `cargo build` time.
 
 FROM --platform=linux/amd64 rust:1.93.0-bookworm@sha256:d0a4aa3ca2e1088ac0c81690914a0d810f2eee188197034edf366ed010a2b382 AS builder
 
@@ -26,6 +27,14 @@ ENV SOURCE_DATE_EPOCH=1
 # into the WASM. `/src` is already canonical inside the container, but this
 # also covers the case of running outside Docker.
 ENV RUSTFLAGS="--remap-path-prefix=/src=/"
+
+# Fail the build if the base image's rustc has drifted from rust-toolchain.toml.
+COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+RUN expected="$(awk -F'"' '/^channel/ {print $2}' /tmp/rust-toolchain.toml)" \
+ && actual="$(rustc --version | awk '{print $2}')" \
+ && [ "$expected" = "$actual" ] \
+    || { echo "rustc $actual in base image != $expected in rust-toolchain.toml" >&2; exit 1; } \
+ && rm /tmp/rust-toolchain.toml
 
 # The base ships the host (x86_64-unknown-linux-gnu) toolchain; the wasm32
 # target is the one extra component we need.
