@@ -322,15 +322,6 @@ type GetBalancesResponse = variant {
     Err : GetBalancesRequestError;
 };
 
-// Maker/taker fee rates for a trading pair, in basis points
-// (1 bps = 0.01 %). Each rate must be in 0..=10_000.
-type FeeRates = record {
-    // Rate charged on the resting (maker) side of a fill.
-    maker_bps : nat16;
-    // Rate charged on the incoming (taker) side of a fill.
-    taker_bps : nat16;
-};
-
 // Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
     // The base token of the pair.
@@ -341,8 +332,10 @@ type AddTradingPairRequest = record {
     tick_size : nat64;
     // Minimum order quantity. Must be greater than zero.
     lot_size : nat64;
-    // Maker/taker fee rates applied to fills on this pair.
-    fee_rates : FeeRates;
+    // Maker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
+    maker_fee_bps : nat16;
+    // Taker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
+    taker_fee_bps : nat16;
 };
 
 // Error returned by the add_trading_pair endpoint.
@@ -355,10 +348,8 @@ type AddTradingPairError = variant {
     InvalidTickSize;
     // The lot size must be greater than zero.
     InvalidLotSize;
-    // The maker fee rate is outside 0..=10_000 bps.
-    InvalidMakerFeeBps : nat16;
-    // The taker fee rate is outside 0..=10_000 bps.
-    InvalidTakerFeeBps : nat16;
+    // One of the fee rates is outside 0..=10_000 bps; the carried value is the offending bps.
+    InvalidBasisPoint : nat16;
     // A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists;
     // The submitted token metadata does not match the previously registered metadata.

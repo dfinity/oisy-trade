@@ -365,10 +365,10 @@ pub fn add_trading_pair(
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
-    let maker = order::BasisPoint::new(request.fee_rates.maker_bps)
-        .map_err(|_| AddTradingPairError::InvalidMakerFeeBps(request.fee_rates.maker_bps))?;
-    let taker = order::BasisPoint::new(request.fee_rates.taker_bps)
-        .map_err(|_| AddTradingPairError::InvalidTakerFeeBps(request.fee_rates.taker_bps))?;
+    let maker = order::BasisPoint::new(request.maker_fee_bps)
+        .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.maker_fee_bps))?;
+    let taker = order::BasisPoint::new(request.taker_fee_bps)
+        .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.taker_fee_bps))?;
     let fee_rates = order::FeeRates { maker, taker };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {

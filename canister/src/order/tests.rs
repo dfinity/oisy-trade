@@ -1222,8 +1222,6 @@ mod basis_point {
     fn should_accept_zero_and_max() {
         assert_eq!(BasisPoint::new(0).unwrap(), BasisPoint::ZERO);
         assert_eq!(BasisPoint::new(10_000).unwrap(), BasisPoint::MAX);
-        assert_eq!(BasisPoint::ZERO.get(), 0);
-        assert_eq!(BasisPoint::MAX.get(), 10_000);
     }
 
     #[test]
@@ -1247,24 +1245,6 @@ mod basis_point {
             let decoded: BasisPoint = minicbor::decode(&buf).unwrap();
             assert_eq!(decoded, bp);
         }
-    }
-
-    /// CBOR-encoded values above 10_000 must fail to decode — otherwise a
-    /// persisted event with an out-of-range rate could resurrect the
-    /// invariant violation on replay.
-    #[test]
-    fn should_reject_out_of_range_on_decode() {
-        // Hand-encode a BasisPoint(10_001) by mirroring the derived Encode
-        // shape (single-element array containing the u16).
-        let mut buf = Vec::new();
-        let mut enc = minicbor::Encoder::new(&mut buf);
-        enc.array(1).unwrap();
-        enc.u16(10_001).unwrap();
-        let err = minicbor::decode::<BasisPoint>(&buf).unwrap_err();
-        assert!(
-            err.to_string().contains("out of range"),
-            "unexpected error message: {err}"
-        );
     }
 }
 

@@ -21,9 +21,7 @@ pub struct OrderBook {
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: LotSize,
-    /// Maker/taker fee rates. Looked up per fill (not snapshotted onto
-    /// resting orders) so a future rate update applies to pending matches
-    /// without back-patching.
+    /// Maker/taker fee rates applied at fill-time.
     fee_rates: FeeRates,
     /// Orders awaiting matching, processed by the timer.
     pending_orders: VecDeque<Order>,
@@ -545,8 +543,7 @@ pub struct OrderBookSnapshot {
     pub asks: Vec<PriceLevel>,
     #[n(7)]
     pub filled_orders: Vec<OrderSeq>,
-    /// `None` in snapshots written before DEFI-2726; restored as
-    /// [`FeeRates::default`] (zero rates) for back-compat.
+    /// Restored as [`FeeRates::default`] (zero rates) for back-compat.
     #[n(8)]
     pub fee_rates: Option<FeeRates>,
 }

@@ -106,7 +106,8 @@ pub fn trading_pair_request(
         },
         tick_size: TICK_SIZE.get(),
         lot_size: LOT_SIZE.get(),
-        fee_rates: dex_types::FeeRates::default(),
+        maker_fee_bps: 0,
+        taker_fee_bps: 0,
     }
 }
 
