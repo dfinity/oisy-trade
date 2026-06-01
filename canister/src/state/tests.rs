@@ -1185,77 +1185,77 @@ mod settle_fills {
             );
         }
 
-        /// `apply_bps` rounds **up** when the exact fee has a sub-unit
-        /// remainder — in the protocol's favor (see the Fees section of
-        /// `docs/design.md`). Pinned on three cases:
+        /// `BasisPoint::apply_to` rounds **up** when the exact fee has a
+        /// sub-unit remainder — in the protocol's favor (see the Fees
+        /// section of `docs/design.md`). Pinned on three cases:
         /// - `1_000_001 × 7 / 10_000 = 700.0007` → `701`.
         /// - The two dust examples from the spec's "Rounding made visible"
         ///   table: `1_000 × 47 / 10_000 = 4.7` → `5`, and
         ///   `1_000 × 33 / 10_000 = 3.3` → `4`.
         #[test]
-        fn apply_bps_rounds_up_in_protocols_favor() {
+        fn apply_to_rounds_up_in_protocols_favor() {
             use crate::order::BasisPoint;
-            use crate::state::apply_bps;
 
             assert_eq!(
-                apply_bps(Quantity::from(1_000_001u64), BasisPoint::new(7).unwrap()),
+                BasisPoint::new(7)
+                    .unwrap()
+                    .apply_to(Quantity::from(1_000_001u64)),
                 Quantity::from(701u64),
             );
             assert_eq!(
-                apply_bps(Quantity::from(1_000u64), BasisPoint::new(47).unwrap()),
+                BasisPoint::new(47)
+                    .unwrap()
+                    .apply_to(Quantity::from(1_000u64)),
                 Quantity::from(5u64),
             );
             assert_eq!(
-                apply_bps(Quantity::from(1_000u64), BasisPoint::new(33).unwrap()),
+                BasisPoint::new(33)
+                    .unwrap()
+                    .apply_to(Quantity::from(1_000u64)),
                 Quantity::from(4u64),
             );
         }
 
-        /// An exact-division input has no rounding contribution: `apply_bps`
-        /// returns the exact value, not `value + 1`. Pinned on the spec's
-        /// non-dust example (`1_000_000_000 × 25 / 10_000 = 2_500_000`).
+        /// Exact division has no rounding contribution: the value isn't
+        /// bumped to `value + 1`. Pinned on the spec's non-dust example
+        /// (`1_000_000_000 × 25 / 10_000 = 2_500_000`).
         #[test]
-        fn apply_bps_does_not_round_when_exact() {
+        fn apply_to_does_not_round_when_exact() {
             use crate::order::BasisPoint;
-            use crate::state::apply_bps;
 
             assert_eq!(
-                apply_bps(
-                    Quantity::from(1_000_000_000u64),
-                    BasisPoint::new(25).unwrap(),
-                ),
+                BasisPoint::new(25)
+                    .unwrap()
+                    .apply_to(Quantity::from(1_000_000_000u64)),
                 Quantity::from(2_500_000u64),
             );
         }
 
-        /// Calling `apply_bps` with the largest representable amount and the
-        /// largest valid rate must not trap — the previous implementation
-        /// computed `amount × bps` first and would overflow u256 on any
-        /// amount in the top 1/10_000 of u256. With `bp = MAX` (100 %) the
-        /// expected result is `amount` itself (no remainder for any input).
+        /// `apply_to` with the largest representable amount and the largest
+        /// valid rate must not trap — a naive `amount × bps` implementation
+        /// would overflow u256 on any amount in the top 1/10_000 of u256.
+        /// With `bp = MAX` (100 %) the expected result is `amount` itself
+        /// (no remainder for any input).
         #[test]
-        fn apply_bps_does_not_trap_on_max_amount() {
+        fn apply_to_does_not_trap_on_max_amount() {
             use crate::order::BasisPoint;
-            use crate::state::apply_bps;
 
-            assert_eq!(apply_bps(Quantity::MAX, BasisPoint::MAX), Quantity::MAX);
+            assert_eq!(BasisPoint::MAX.apply_to(Quantity::MAX), Quantity::MAX);
         }
 
-        /// `apply_bps(_, ZERO)` is the only path that yields a zero result,
-        /// thanks to the `bp.get() == 0` fast-return in `apply_bps`. A
-        /// non-zero `bp` × `ZERO` also yields zero (via the multiplication),
-        /// pinned here for completeness.
+        /// `BasisPoint::ZERO` is the only path that yields a zero result,
+        /// thanks to the `bps == 0` fast-return. A non-zero rate × `ZERO`
+        /// amount also yields zero, pinned here for completeness.
         #[test]
-        fn apply_bps_zero_inputs() {
+        fn apply_to_zero_inputs() {
             use crate::order::BasisPoint;
-            use crate::state::apply_bps;
 
             assert_eq!(
-                apply_bps(Quantity::from(100u64), BasisPoint::ZERO),
+                BasisPoint::ZERO.apply_to(Quantity::from(100u64)),
                 Quantity::ZERO,
             );
             assert_eq!(
-                apply_bps(Quantity::ZERO, BasisPoint::new(10_000).unwrap()),
+                BasisPoint::new(10_000).unwrap().apply_to(Quantity::ZERO),
                 Quantity::ZERO,
             );
         }
@@ -1264,12 +1264,11 @@ mod settle_fills {
         /// the `BasisPoint` invariant. Guards the `amount - fee` underflow
         /// safety relied on by `transfer_with_fee`.
         #[test]
-        fn apply_bps_max_returns_input() {
+        fn apply_to_max_returns_input() {
             use crate::order::BasisPoint;
-            use crate::state::apply_bps;
 
             let amount = Quantity::from(12_345u64);
-            assert_eq!(apply_bps(amount, BasisPoint::MAX), amount);
+            assert_eq!(BasisPoint::MAX.apply_to(amount), amount);
         }
 
         /// Zero rates is a regression guard: the fill path with

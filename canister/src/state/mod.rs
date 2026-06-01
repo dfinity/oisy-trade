@@ -703,8 +703,8 @@ fn compute_balance_operations(
             Side::Sell => (fee_rates.maker, fee_rates.taker),
         };
         let notional = fill.quote_amount();
-        let quote_fee = apply_bps(notional, seller_rate);
-        let base_fee = apply_bps(fill.quantity, buyer_rate);
+        let quote_fee = seller_rate.apply_to(notional);
+        let base_fee = buyer_rate.apply_to(fill.quantity);
 
         ops.push(event::BalanceOperation::Transfer {
             from_order: buyer_seq,
@@ -735,40 +735,6 @@ fn compute_balance_operations(
         });
     }
     ops
-}
-
-/// Compute `ceil(amount × bp.get() / 10_000)` using `Quantity`'s u256
-/// checked arithmetic. Rounding is up, in the protocol's favor — see
-/// the Fees section in `docs/design.md` for the rationale.
-///
-/// Decomposing `amount = q × 10_000 + r` with `q = amount / 10_000`
-/// and `r = amount % 10_000 < 10_000` gives
-///
-/// ```text
-/// ceil(amount × bps / 10_000)
-///     = q × bps + ceil((r × bps) / 10_000)
-/// ```
-///
-/// which is overflow-safe at every step: `q × bps` fits in u256
-/// (`q ≤ u256::MAX / 10_000` and `bps ≤ 10_000`), and `r × bps` fits
-/// in u32 (`r < 10_000` and `bps ≤ 10_000`, so the product is below
-/// 10^8). A naive `(amount × bps) / 10_000` would trap on amounts in
-/// the top 1/10_000 of u256.
-pub(crate) fn apply_bps(amount: Quantity, bp: order::BasisPoint) -> Quantity {
-    let bps = u64::from(bp.get());
-    if bps == 0 {
-        return Quantity::ZERO;
-    }
-    let (q, r) = amount
-        .checked_div_rem_u64(10_000)
-        .expect("BUG: division by 10_000 is non-zero");
-    let main = q
-        .checked_mul_u64(bps)
-        .expect("BUG: q × bps overflow despite q ≤ u256::MAX / 10_000 and bps ≤ 10_000");
-    let rem_num = u128::from(r) * u128::from(bps);
-    let rem_ceil = (rem_num / 10_000 + u128::from(rem_num % 10_000 != 0)) as u64;
-    main.checked_add(Quantity::from(rem_ceil))
-        .expect("BUG: ceiled fee overflowed u256 — impossible if amount fits in u256")
 }
 
 /// Collapse a zero-quantity fee to `None` so we don't materialize empty
