@@ -408,6 +408,9 @@ pub struct WithdrawFeesRequest {
 pub enum WithdrawFeesError {
     /// The caller is not a controller of the canister.
     NotController,
+    /// The requested `amount` exceeds the maximum supported value (the
+    /// internal `Quantity` type is u256).
+    AmountExceedsMaximum,
     /// The requested `amount` exceeds the available fee pool for the
     /// targeted token.
     InsufficientFeeBalance {

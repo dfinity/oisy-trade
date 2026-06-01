@@ -148,6 +148,77 @@ mod add_trading_pair {
     }
 }
 
+mod withdraw_fees {
+    use crate::test_fixtures::{init_state_with_order_book, mocks::MockRuntime};
+    use crate::withdraw_fees;
+    use candid::{Nat, Principal};
+    use dex_types::{TokenId, WithdrawFeesError, WithdrawFeesRequest};
+
+    #[test]
+    fn should_reject_non_controller() {
+        init_state_with_order_book();
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller()
+            .return_const(Principal::anonymous());
+        mock.expect_is_controller().return_const(false);
+
+        let result = withdraw_fees(request(Nat::from(1u64)), &mock);
+
+        assert_eq!(result, Err(WithdrawFeesError::NotController));
+    }
+
+    /// Calling `withdraw_fees` with an amount that does not fit in u256
+    /// (the internal `Quantity` type) must return `AmountExceedsMaximum`
+    /// rather than trapping the canister via `.expect()`.
+    #[test]
+    fn should_reject_amount_exceeding_u256() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        // 2^256, guaranteed to fail Quantity::try_from (Quantity is u256).
+        let amount = Nat(num_bigint::BigUint::from(1u8) << 256);
+
+        let result = withdraw_fees(request(amount), &runtime);
+
+        assert_eq!(result, Err(WithdrawFeesError::AmountExceedsMaximum));
+    }
+
+    #[test]
+    fn should_reject_amount_exceeding_pool() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+
+        // Pool is empty for the requested token; any positive amount
+        // exceeds it.
+        let result = withdraw_fees(request(Nat::from(1u64)), &runtime);
+
+        assert_eq!(
+            result,
+            Err(WithdrawFeesError::InsufficientFeeBalance {
+                available: Nat::from(0u64),
+                required: Nat::from(1u64),
+            })
+        );
+    }
+
+    fn request(amount: Nat) -> WithdrawFeesRequest {
+        WithdrawFeesRequest {
+            token_id: TokenId {
+                ledger_id: Principal::from_slice(&[0xA0]),
+            },
+            amount,
+            to: Principal::from_slice(&[0xBB]),
+        }
+    }
+
+    fn controller_runtime() -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_msg_caller()
+            .return_const(Principal::anonymous());
+        mock.expect_is_controller().return_const(true);
+        mock
+    }
+}
+
 mod add_limit_order {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{

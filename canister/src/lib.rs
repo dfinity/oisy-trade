@@ -416,7 +416,7 @@ pub fn withdraw_fees(
     }
     let token = order::TokenId::from(request.token_id);
     let amount = order::Quantity::try_from(request.amount.clone())
-        .expect("WithdrawFeesRequest.amount must fit in u256");
+        .map_err(|_| dex_types::WithdrawFeesError::AmountExceedsMaximum)?;
     state::with_state_mut(|s| -> Result<(), dex_types::WithdrawFeesError> {
         let available = s.fee_balance(&token).unwrap_or_default();
         if available < amount {

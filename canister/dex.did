@@ -296,6 +296,8 @@ type WithdrawFeesRequest = record {
 type WithdrawFeesError = variant {
     // The caller is not a controller of the canister.
     NotController;
+    // The requested `amount` exceeds the maximum supported value.
+    AmountExceedsMaximum;
     // The requested `amount` exceeds the available fee pool.
     InsufficientFeeBalance : record { available : nat; required : nat };
 };
