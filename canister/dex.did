@@ -287,6 +287,41 @@ type Balance = record {
     reserved : nat;
 };
 
+// Selector for filtering tokens. New variants may be added in
+// backward-compatible upgrades.
+type FilterToken = variant {
+    ById : TokenId;
+};
+
+// A single `(token, balance)` entry in a `get_balances` response.
+type UserTokenBalance = record {
+    token : Token;
+    balance : Balance;
+};
+
+// Per-entry error reported in `get_balances` responses.
+type GetBalancesError = variant {
+    TokenNotSupported : FilterToken;
+};
+
+// Per-entry result.
+type GetBalanceResult = variant {
+    Ok : UserTokenBalance;
+    Err : GetBalancesError;
+};
+
+// Whole-request error reported when `get_balances` rejects the request
+// before any per-entry lookup runs.
+type GetBalancesRequestError = variant {
+    FilterTooLarge : record { len : nat32; max : nat32 };
+};
+
+// Response shape for `get_balances`.
+type GetBalancesResponse = variant {
+    Ok : vec GetBalanceResult;
+    Err : GetBalancesRequestError;
+};
+
 // Request to add a new trading pair to the DEX.
 type AddTradingPairRequest = record {
     // The base token of the pair.
@@ -509,10 +544,23 @@ service : (DexArg) -> {
     // withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
 
-    // Query the caller's balance for a given token.
-    get_balance : (TokenId) -> (Balance) query;
+    // Query the caller's balances.
+    //
+    // - `null`: returns every token the caller holds with non-zero balance.
+    // - `opt vec { ... }`: looks up each entry in the filter (including
+    //   zero balances); unsupported tokens are reported per-entry as
+    //   `TokenNotSupported`. Duplicate filter entries are collapsed and
+    //   reported only once. An empty filter (`opt vec {}`) returns an
+    //   empty `Ok` vector, and is semantically distinct from `null`.
+    //
+    // The order of entries in the returned `vec GetBalanceResult` is
+    // unspecified; callers must identify each result by the `token` field
+    // (or the `FilterToken` echoed by `TokenNotSupported`).
+    get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
-    // List every token registered with the DEX. 
+    // List every token registered with the DEX. Intended as a primitive
+    // for clients that need to discover which tokens a user might hold
+    // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
 
     // Add a new trading pair to the DEX. Only callable by a controller.

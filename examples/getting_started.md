@@ -143,13 +143,13 @@ The DEX tracks balance per `(caller, token)`:
 
 ```bash
 # Seller's base balance
-icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
-(record { ledger_id = principal "$BASE_LEDGER" })
+icp canister call dex get_balances --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
+(opt vec { variant { ById = record { ledger_id = principal "$BASE_LEDGER" } } })
 EOF
 
 # Buyer's quote balance
-icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
-(record { ledger_id = principal "$QUOTE_LEDGER" })
+icp canister call dex get_balances --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
+(opt vec { variant { ById = record { ledger_id = principal "$QUOTE_LEDGER" } } })
 EOF
 ```
 
@@ -222,13 +222,13 @@ Re-check balances to confirm the trade settled. The seller's newly received quot
 
 ```bash
 # Seller's quote (credited by the fill)
-icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
-(record { ledger_id = principal "$QUOTE_LEDGER" })
+icp canister call dex get_balances --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
+(opt vec { variant { ById = record { ledger_id = principal "$QUOTE_LEDGER" } } })
 EOF
 
 # Buyer's base (credited by the fill)
-icp canister call dex get_balance --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
-(record { ledger_id = principal "$BASE_LEDGER" })
+icp canister call dex get_balances --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
+(opt vec { variant { ById = record { ledger_id = principal "$BASE_LEDGER" } } })
 EOF
 ```
 

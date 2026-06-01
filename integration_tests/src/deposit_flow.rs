@@ -68,7 +68,7 @@ impl<'a> DepositFlow<'a> {
             let ledger_fee = ledger.icrc1_fee().await;
 
             let ledger_balance_before = ledger.icrc1_balance_of(self.user).await;
-            let dex_balance_before = dex_client.get_balance(self.token_id.clone()).await;
+            let dex_balance_before = dex_client.get_balance(self.token_id.clone()).await.unwrap();
 
             dex_client
                 .deposit(DepositRequest {
@@ -85,7 +85,7 @@ impl<'a> DepositFlow<'a> {
                 "ledger balance should decrease by deposit amount + fee"
             );
 
-            let dex_balance_after = dex_client.get_balance(self.token_id.clone()).await;
+            let dex_balance_after = dex_client.get_balance(self.token_id.clone()).await.unwrap();
             assert_eq!(
                 dex_balance_after,
                 Balance {
