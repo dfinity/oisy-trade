@@ -1298,6 +1298,50 @@ mod get_balances {
         );
     }
 
+    #[test]
+    fn should_dedup_filter_entries() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(b_id.into()),
+            FilterToken::ById(unknown.into()),
+            FilterToken::ById(b_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_return_empty_for_empty_filter() {
+        let (mut state, a_id, _) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+
+        assert_eq!(state.get_balances(&USER, Some(&[])), vec![]);
+    }
+
     fn setup_two_token_state() -> (
         crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
         TokenId,

@@ -544,10 +544,18 @@ service : (DexArg) -> {
     // withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
 
-    // Query the caller's balances. With no filter, returns every token the
-    // caller holds with non-zero balance. With a filter, looks up each
-    // entry (including zero balances); unsupported tokens are reported
-    // per-entry as `TokenNotSupported`.
+    // Query the caller's balances.
+    //
+    // - `null`: returns every token the caller holds with non-zero balance.
+    // - `opt vec { ... }`: looks up each entry in the filter (including
+    //   zero balances); unsupported tokens are reported per-entry as
+    //   `TokenNotSupported`. Duplicate filter entries are collapsed and
+    //   reported only once. An empty filter (`opt vec {}`) returns an
+    //   empty `Ok` vector, and is semantically distinct from `null`.
+    //
+    // The order of entries in the returned `vec GetBalanceResult` is
+    // unspecified; callers must identify each result by the `token` field
+    // (or the `FilterToken` echoed by `TokenNotSupported`).
     get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
     // List every token registered with the DEX. Intended as a primitive

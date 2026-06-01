@@ -549,28 +549,32 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         filter: Option<&[dex_types::FilterToken]>,
     ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
         match filter {
-            Some(entries) => entries
-                .iter()
-                .map(|ft| {
-                    let internal_token = match ft {
-                        dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
-                    };
-                    match self.tokens.get(&internal_token) {
-                        None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
-                        Some(metadata) => Ok(dex_types::UserTokenBalance {
-                            token: dex_types::Token {
-                                id: internal_token.into(),
-                                metadata: metadata.clone().into(),
-                            },
-                            balance: self
-                                .balances
-                                .get_balance(user, &internal_token)
-                                .unwrap_or_default()
-                                .into(),
-                        }),
-                    }
-                })
-                .collect(),
+            Some(entries) => {
+                let mut seen: BTreeSet<dex_types::FilterToken> = BTreeSet::new();
+                entries
+                    .iter()
+                    .filter(|ft| seen.insert((*ft).clone()))
+                    .map(|ft| {
+                        let internal_token = match ft {
+                            dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
+                        };
+                        match self.tokens.get(&internal_token) {
+                            None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
+                            Some(metadata) => Ok(dex_types::UserTokenBalance {
+                                token: dex_types::Token {
+                                    id: internal_token.into(),
+                                    metadata: metadata.clone().into(),
+                                },
+                                balance: self
+                                    .balances
+                                    .get_balance(user, &internal_token)
+                                    .unwrap_or_default()
+                                    .into(),
+                            }),
+                        }
+                    })
+                    .collect()
+            }
             None => self
                 .tokens
                 .iter()

@@ -319,7 +319,7 @@ pub const MAX_FILTER_LEN: u32 = 100;
 
 /// Selector for filtering tokens. New variants may be added in
 /// backward-compatible upgrades.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, CandidType)]
 pub enum FilterToken {
     /// Select a token by its identifier.
     ById(TokenId),
