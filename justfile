@@ -12,11 +12,24 @@ lint:
     cargo clippy --locked --verbose --tests --benches --workspace -- -D clippy::all -D warnings
     cargo clippy --locked --verbose --target wasm32-unknown-unknown -p dex_canister -- -D clippy::all -D warnings
 
-# Build canister WASM
+# Build canister WASM (native; fast loop for development)
 build:
     cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister
     mkdir -p wasms
-    gzip -fckn9 target/wasm32-unknown-unknown/release/dex_canister.wasm > wasms/dex_canister.wasm.gz
+    cp target/wasm32-unknown-unknown/release/dex_canister.wasm wasms/dex_canister.wasm
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm shrink
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm metadata candid:service -f canister/dex.did -v public
+    ic-wasm wasms/dex_canister.wasm -o wasms/dex_canister.wasm metadata candid:args -d '(DexArg)' -v public
+    gzip -fckn9 wasms/dex_canister.wasm > wasms/dex_canister.wasm.gz
+    rm wasms/dex_canister.wasm
+
+# Build canister WASM reproducibly via Docker (bit-identical across hosts).
+# Platform is pinned to linux/amd64 by the Dockerfile's `FROM --platform=...`
+# directive, so no `--platform` flag is needed here — handy for setups
+# (e.g., `brew install docker` without the docker-buildx plugin) where the
+# CLI doesn't accept that flag.
+docker-build:
+    docker buildx build --target export --output type=local,dest=./wasms .
 
 # Run all tests
 test: unit-tests integration-tests

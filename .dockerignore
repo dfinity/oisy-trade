@@ -1,0 +1,8 @@
+target/
+wasms/
+.git/
+.github/
+.claude/
+docs/
+examples/
+*.md
