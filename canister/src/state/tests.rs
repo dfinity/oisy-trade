@@ -1185,19 +1185,60 @@ mod settle_fills {
             );
         }
 
-        /// Integer division truncates (rounds down) rather than rounds to
-        /// nearest. Pinned on `1_000_001 × 7 / 10_000 = 700.0007` →
-        /// `700` (not `701`) via `apply_bps`. The `BasisPoint` invariant
-        /// guarantees the fee is always ≤ the underlying amount.
+        /// `apply_bps` rounds **up** when the exact fee has a sub-unit
+        /// remainder — in the protocol's favor (see the Fees section of
+        /// `docs/design.md`). Pinned on three cases:
+        /// - `1_000_001 × 7 / 10_000 = 700.0007` → `701`.
+        /// - The two dust examples from the spec's "Rounding made visible"
+        ///   table: `1_000 × 47 / 10_000 = 4.7` → `5`, and
+        ///   `1_000 × 33 / 10_000 = 3.3` → `4`.
         #[test]
-        fn apply_bps_truncates_not_rounds() {
+        fn apply_bps_rounds_up_in_protocols_favor() {
             use crate::order::BasisPoint;
             use crate::state::apply_bps;
 
             assert_eq!(
                 apply_bps(Quantity::from(1_000_001u64), BasisPoint::new(7).unwrap()),
-                Quantity::from(700u64),
+                Quantity::from(701u64),
             );
+            assert_eq!(
+                apply_bps(Quantity::from(1_000u64), BasisPoint::new(47).unwrap()),
+                Quantity::from(5u64),
+            );
+            assert_eq!(
+                apply_bps(Quantity::from(1_000u64), BasisPoint::new(33).unwrap()),
+                Quantity::from(4u64),
+            );
+        }
+
+        /// An exact-division input has no rounding contribution: `apply_bps`
+        /// returns the exact value, not `value + 1`. Pinned on the spec's
+        /// non-dust example (`1_000_000_000 × 25 / 10_000 = 2_500_000`).
+        #[test]
+        fn apply_bps_does_not_round_when_exact() {
+            use crate::order::BasisPoint;
+            use crate::state::apply_bps;
+
+            assert_eq!(
+                apply_bps(
+                    Quantity::from(1_000_000_000u64),
+                    BasisPoint::new(25).unwrap(),
+                ),
+                Quantity::from(2_500_000u64),
+            );
+        }
+
+        /// Calling `apply_bps` with the largest representable amount and the
+        /// largest valid rate must not trap — the previous implementation
+        /// computed `amount × bps` first and would overflow u256 on any
+        /// amount in the top 1/10_000 of u256. With `bp = MAX` (100 %) the
+        /// expected result is `amount` itself (no remainder for any input).
+        #[test]
+        fn apply_bps_does_not_trap_on_max_amount() {
+            use crate::order::BasisPoint;
+            use crate::state::apply_bps;
+
+            assert_eq!(apply_bps(Quantity::MAX, BasisPoint::MAX), Quantity::MAX);
         }
 
         /// `apply_bps(_, ZERO)` is the only path that yields a zero result,

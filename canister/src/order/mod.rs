@@ -628,10 +628,17 @@ impl Quantity {
     }
 
     /// Integer-divide `self` by a u64 divisor. Returns `None` if `divisor`
-    /// is zero. Implements u256-by-u64 long division as three u128 steps
-    /// (high limb, upper-low limb, lower-low limb).
+    /// is zero. Thin wrapper over [`checked_div_rem_u64`](Self::checked_div_rem_u64).
     pub fn checked_div_u64(self, divisor: u64) -> Option<Self> {
-        bench_scopes!("qty", "qty::div_u64");
+        self.checked_div_rem_u64(divisor).map(|(q, _)| q)
+    }
+
+    /// Integer-divide `self` by a u64 divisor, returning `(quotient, remainder)`.
+    /// Returns `None` if `divisor` is zero. Implements u256-by-u64 long
+    /// division as three u128 steps (high limb, upper-low limb,
+    /// lower-low limb). `remainder` is `< divisor`, so it always fits in u64.
+    pub fn checked_div_rem_u64(self, divisor: u64) -> Option<(Self, u64)> {
+        bench_scopes!("qty", "qty::div_rem_u64");
         if divisor == 0 {
             return None;
         }
@@ -652,13 +659,17 @@ impl Quantity {
         // Step 3: process the lower 64 bits of `low`. Same overflow argument.
         let dividend3 = (rem << 64) | low_lo;
         let q2 = dividend3 / d;
+        let rem = dividend3 % d;
 
         // `q1 < 2^64` and `q2 < 2^64`, so they combine into the low u128.
         let low_out = (q1 << 64) | q2;
-        Some(Self {
-            high: q_high,
-            low: low_out,
-        })
+        Some((
+            Self {
+                high: q_high,
+                low: low_out,
+            },
+            rem as u64,
+        ))
     }
 }
 
