@@ -79,7 +79,7 @@ This separation means the matching engine never waits on async inter-canister ca
 
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected platform fees   |
+| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees            |
 | **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance                                |
 
 - No allowlisting: any principal can trade on any active pair.
@@ -191,7 +191,7 @@ Matching runs on a timer and processes pending queued orders, which makes it pos
 
 ### Fees
 
-Each trading pair has a **maker fee** and a **taker fee**, both expressed in **basis points** (1 bps = 0.01 % = 0.0001):
+Each trading pair has a **maker fee** and a **taker fee**, both expressed in **basis points** (1 bps = 0.01% = 0.0001):
 * Either rate may be zero.
 * Rates are non-negative. (They could be expanded to offer a rebate mechanism for the maker fee to incentivize liquidity).
 
@@ -207,14 +207,14 @@ Each side pays its fee in the asset it **receives**:
 * the seller receives the quote asset and pays its fee in quote. 
 
 The fee is deducted from the side's proceeds at fill time. In base units, `fee = ceil(proceeds × fee_bps / 10_000)` and `net_credit = proceeds − fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
-(Not rounding in favor of the protocol was for example a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)). 
+(Not rounding in favor of the protocol was, for example, a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)).
 
 #### Examples
 
 Consider the following parameters (chosen for ease of computation):
 * ICP/BTC, 10 ICP filled at 0.0001 BTC per ICP (both tokens use 8 decimals)
-* maker fee of 10 bps (0.1 %) 
-* taker fee of 25 bps (0.25 %).
+* maker fee of 10 bps (0.1%)
+* taker fee of 25 bps (0.25%).
 
 **Taker is the buyer** (incoming buy hits a resting sell):
 
@@ -240,7 +240,7 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 | Buyer  | Taker | 1_000 (0.00001 ICP)  | 47 bps   | 5 (0.00000005 ICP)   | 995 (0.00000995 ICP)  |
 | Seller | Maker | 1_000 (0.00001 BTC)  | 33 bps   | 4 (0.00000004 BTC)   | 996 (0.00000996 BTC)  |
 
-Exact pre-rounding fees: `1_000 × 47 / 10_000 = 4.7` and `1_000 × 33 / 10_000 = 3.3`, both ceil-ed in the protocol's favor.
+Exact pre-rounding fees: `1_000 × 47 / 10_000 = 4.7` and `1_000 × 33 / 10_000 = 3.3`, both rounded up in the protocol's favor.
 
 #### Collection and withdrawal
 
@@ -268,7 +268,7 @@ The receive-side fee mechanism is one way to accrue fees, but is not the only on
 - [Binance — How to Calculate Spot Trading Fees](https://www.binance.com/en/support/faq/what-is-binance-spot-trading-fee-and-how-to-calculate-e85d6e703b874674840122196b89780a)
 - [Coinbase Prime — Trading Fees](https://docs.cdp.coinbase.com/prime/concepts/trading/trading-fees)
 
-In contrast, Kraken uses send-side fee mechanism (see [add order](https://docs.kraken.com/api/docs/websocket-v1/addorder/)):
+In contrast, Kraken uses a send-side fee mechanism (see [add order](https://docs.kraken.com/api/docs/websocket-v1/addorder/)):
 - `fcib`: prefer fee in base currency (default if selling)
 - `fciq`: prefer fee in quote currency (default if buying, mutually exclusive with fcib)
 
