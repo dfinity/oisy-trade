@@ -254,11 +254,13 @@ The fee balances live on the heap, and are persisted across canister upgrades th
 
 The alternative would have been to co-locate them with user balances in the canister's stable-memory ledger. The trade-offs:
 
-* **Stable memory.** Auto-survives upgrades with no serialization step, and capacity is effectively unbounded. But every fee accrual at fill time triggers a stable-memory read + write (~thousands of instructions per accrual); across a chunked round of 1_000 fills this adds millions of instructions to the hot path. Each new stable region is also a permanent commitment to the canister's memory layout — once shipped, the ID and shape are part of the upgrade contract forever.
+* **Stable memory.** 
+    * Auto-survives upgrades with no serialization step, and capacity is effectively unbounded. 
+    * But every fee accrual at fill time triggers a stable-memory read + write (~thousands of instructions per accrual); across a chunked round of 1_000 fills this adds millions of instructions to the hot path. 
 
-* **Heap (chosen).** Per-fill cost is a heap-map insert + integer add (~hundreds of instructions), so the hot path stays cheap. The cost is paid once per upgrade as CBOR (de)serialization, and its magnitude is bounded by the number of listed tokens, not by any user-driven dimension. Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is on the order of tens of KB, negligible against the 4 GiB Wasm heap, and the corresponding (de)serialization cost is small.
-
-Stable memory is reserved for genuinely unbounded, per-user / per-order data. The fee balance map doesn't fit that shape, and paying a stable-memory write on every fill would be a much larger ongoing cost than the once-per-upgrade serialization on the heap.
+* **Heap (chosen).** 
+    * Per-fill cost is a heap-map insert + integer add (~hundreds of instructions), so the hot path stays cheap. The cost is paid once per upgrade as CBOR (de)serialization, and its magnitude is bounded by the number of listed tokens, not by any user-driven dimension.
+    * Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is on the order of tens of KB, negligible against the 4 GiB Wasm heap, and the corresponding (de)serialization cost is small.
 
 #### References
 
