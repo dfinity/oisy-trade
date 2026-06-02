@@ -79,8 +79,8 @@ This separation means the matching engine never waits on async inter-canister ca
 
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees            |
-| **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance                                |
+| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees |
+| **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance |
 
 - No allowlisting: any principal can trade on any active pair.
 - Admin operations are guarded by `ic_cdk::api::is_controller()`.
@@ -195,18 +195,18 @@ Each trading pair has a **maker fee** and a **taker fee**, both expressed in **b
 * Either rate may be zero.
 * Rates are non-negative. (They could be expanded to offer a rebate mechanism for the maker fee to incentivize liquidity).
 
-The two rates may change over the lifetime of a trading pair without affecting any orders already resting in the book — the next fill on that pair uses whichever rates are in effect at fill time. 
+The two rates may change over the lifetime of a trading pair without affecting any orders already resting in the book — the next fill on that pair uses whichever rates are in effect at fill time.
 
 Each fill has two sides:
 
 - **Maker** — the resting order that provided liquidity. Pays the maker fee.
 - **Taker** — the incoming order that crossed the book. Pays the taker fee.
 
-Each side pays its fee in the asset it **receives**: 
-* the buyer receives the base asset and pays its fee in base; 
-* the seller receives the quote asset and pays its fee in quote. 
+Each side pays its fee in the asset it **receives** (the side's **proceeds**):
+* the buyer receives the base asset and pays its fee in base;
+* the seller receives the quote asset and pays its fee in quote.
 
-The fee is deducted from the side's proceeds at fill time. In base units, `fee = ceil(proceeds × fee_bps / 10_000)` and `net_credit = proceeds − fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
+The fee is deducted from the side's proceeds at fill time. In base units, `fee = ceil(proceeds * fee_bps / 10_000)` and `net_credit = proceeds - fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
 (Not rounding in favor of the protocol was, for example, a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)).
 
 #### Examples
@@ -225,7 +225,7 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 | Buyer  | Taker | 1_000_000_000 (10 ICP)  | 25 bps   | 2_500_000 (0.025 ICP) | 997_500_000 (9.975 ICP) |
 | Seller | Maker | 100_000 (0.001 BTC)     | 10 bps   | 100 (0.000001 BTC)    | 99_900 (0.000999 BTC)   |
 
-**Taker is the seller** (incoming sell hits a resting buy) — the same fill, with the rates swapped because the roles are reversed:
+**Mirror-image fill — taker is the seller** (incoming sell hits a resting buy): same sizes as the first table, with the roles reversed so each rate now applies to the opposite side:
 
 | Side   | Role  | Receives                | Fee rate | Fee paid              | Net credit              |
 |--------|-------|-------------------------|----------|-----------------------|-------------------------|
@@ -233,14 +233,14 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 | Seller | Taker | 100_000 (0.001 BTC)     | 25 bps   | 250 (0.0000025 BTC)   | 99_750 (0.0009975 BTC)  |
 
 
-**Rounding made visible.** The receives above are all multiples of `10_000`, so the bps math comes out integer and no rounding occurs. With a smaller dust fill (`1_000` base units, a simple amount not divisible by `10_000`) the fee has a sub-unit remainder and rounds up. Maker fee 33 bps, taker fee 47 bps; the taker is the buyer:
+**Rounding made visible.** The proceeds above are all multiples of `10_000`, so the bps math comes out integer and no rounding occurs. The rounding direction matters only for a fill whose proceeds don't divide evenly by `10_000`. Two abstract examples (any token, any side):
 
-| Side   | Role  | Receives             | Fee rate | Fee paid             | Net credit            |
-|--------|-------|----------------------|----------|----------------------|-----------------------|
-| Buyer  | Taker | 1_000 (0.00001 ICP)  | 47 bps   | 5 (0.00000005 ICP)   | 995 (0.00000995 ICP)  |
-| Seller | Maker | 1_000 (0.00001 BTC)  | 33 bps   | 4 (0.00000004 BTC)   | 996 (0.00000996 BTC)  |
+| Proceeds (base units) | Fee rate | Exact `proceeds * bps / 10_000` | Fee paid | Net credit |
+|-----------------------|----------|---------------------------------|----------|------------|
+| 1_000                 | 47 bps   | 4.7                             | 5        | 995        |
+| 1_000                 | 33 bps   | 3.3                             | 4        | 996        |
 
-Exact pre-rounding fees: `1_000 × 47 / 10_000 = 4.7` and `1_000 × 33 / 10_000 = 3.3`, both rounded up in the protocol's favor.
+Both fees are rounded up in the protocol's favor.
 
 #### Collection and withdrawal
 
@@ -254,11 +254,11 @@ The fee balances live on the heap, and are persisted across canister upgrades th
 
 The alternative would have been to co-locate them with user balances in the canister's stable-memory ledger. The trade-offs:
 
-* **Stable memory.** 
-    * Auto-survives upgrades with no serialization step, and capacity is effectively unbounded. 
-    * But every fee accrual at fill time triggers a stable-memory read + write (~thousands of instructions per accrual); across a chunked round of 1_000 fills this adds millions of instructions to the hot path. 
+* **Stable memory.**
+    * Auto-survives upgrades with no serialization step, and capacity is effectively unbounded.
+    * But every fee accrual at fill time triggers a stable-memory read + write (~thousands of instructions per accrual); across a chunked round of 1_000 fills this adds millions of instructions to the hot path.
 
-* **Heap (chosen).** 
+* **Heap (chosen).**
     * Per-fill cost is a heap-map insert + integer add (~hundreds of instructions), so the hot path stays cheap. The cost is paid once per upgrade as CBOR (de)serialization, and its magnitude is bounded by the number of listed tokens, not by any user-driven dimension.
     * Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is on the order of tens of KB, negligible against the 4 GiB Wasm heap, and the corresponding (de)serialization cost is small.
 
