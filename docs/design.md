@@ -264,7 +264,7 @@ The alternative would have been to co-locate them with user balances in the cani
 
 #### References
 
-The receive-side fee mechanism is one way to accrue fees, but is not the only one. It is used by
+The receive-side fee mechanism is one way to accrue fees, but is not the only one. It is used by:
 - [Binance — How to Calculate Spot Trading Fees](https://www.binance.com/en/support/faq/what-is-binance-spot-trading-fee-and-how-to-calculate-e85d6e703b874674840122196b89780a)
 - [Coinbase Prime — Trading Fees](https://docs.cdp.coinbase.com/prime/concepts/trading/trading-fees)
 
