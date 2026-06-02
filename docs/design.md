@@ -206,7 +206,7 @@ Each side pays its fee in the asset it **receives** (the side's **proceeds**):
 * the buyer receives the base asset and pays its fee in base;
 * the seller receives the quote asset and pays its fee in quote.
 
-The fee is deducted from the side's proceeds at fill time. In base units, `fee = ceil(proceeds * fee_bps / 10_000)` and `net_credit = proceeds - fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
+The fee is deducted from the side's proceeds at fill time. In smallest units, `fee = ceil(proceeds * fee_bps / 10_000)` and `net_credit = proceeds - fee`, so rounding (when needed) is **always** in favor of the protocol (see examples below).
 (Not rounding in favor of the protocol was, for example, a problem for [Aave before version 3.5](https://github.com/aave-dao/aave-v3-origin/blob/f6f9cfc373d3c127d5f9a80afd7818cbcc5724fc/docs/3.5/Aave-v3.5-features.md?plain=1#L57)).
 
 #### Examples
