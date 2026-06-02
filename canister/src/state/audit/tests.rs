@@ -177,9 +177,14 @@ impl Scenario {
                 },
             )
             .unwrap();
-        self.state
-            .record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
         let timestamp = self.timestamp();
+        self.state.record_limit_order(
+            user,
+            order_id.book_id(),
+            order,
+            timestamp,
+            StableMemoryOptions::Write,
+        );
         self.events.push(Event {
             timestamp,
             payload: EventType::AddLimitOrder(AddLimitOrderEvent {

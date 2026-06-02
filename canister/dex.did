@@ -166,6 +166,8 @@ type OrderRecord = record {
     quantity : nat;
     /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
     status : OrderStatus;
+    /// Submission time in nanoseconds since the Unix epoch.
+    timestamp : nat64;
 };
 
 // A token identified by its ledger canister ID.

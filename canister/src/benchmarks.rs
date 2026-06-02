@@ -417,7 +417,13 @@ fn place_order(
 ) {
     let pair = trading_pair();
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    state.record_limit_order(
+        user,
+        order_id.book_id(),
+        order,
+        0,
+        StableMemoryOptions::Write,
+    );
 }
 
 mod event_storage {

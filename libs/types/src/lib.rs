@@ -215,6 +215,8 @@ pub struct OrderRecord {
     pub quantity: Nat,
     /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
     pub status: OrderStatus,
+    /// Submission time in nanoseconds since the Unix epoch.
+    pub timestamp: u64,
 }
 
 /// A token identified by its ledger canister ID.

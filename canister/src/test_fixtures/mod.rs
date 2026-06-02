@@ -259,7 +259,13 @@ where
     let (order_id, order) = state
         .validate_limit_order(user, pair.clone(), pending)
         .expect("place_order: validate_limit_order failed");
-    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    state.record_limit_order(
+        user,
+        order_id.book_id(),
+        order,
+        0,
+        StableMemoryOptions::Write,
+    );
     order_id
 }
 
@@ -489,6 +495,7 @@ pub mod arbitrary {
                     price: Price::new(price_ticks * tick),
                     quantity: Quantity::from(qty_lots * lot),
                     status,
+                    timestamp: None,
                 },
             )
     }

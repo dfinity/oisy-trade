@@ -24,6 +24,11 @@ pub struct OrderRecord {
     pub quantity: Quantity,
     #[n(4)]
     pub status: OrderStatus,
+    /// Submission time in nanoseconds since the Unix epoch, taken from the
+    /// add-limit-order event. Display-only; ordering uses the per-user index.
+    /// `Option` so records written before this field existed decode to `None`.
+    #[n(5)]
+    pub timestamp: Option<u64>,
 }
 
 impl From<OrderRecord> for dex_types::OrderRecord {
@@ -34,6 +39,7 @@ impl From<OrderRecord> for dex_types::OrderRecord {
             price: record.price.into(),
             quantity: record.quantity.into(),
             status: record.status.into(),
+            timestamp: record.timestamp.unwrap_or(0),
         }
     }
 }

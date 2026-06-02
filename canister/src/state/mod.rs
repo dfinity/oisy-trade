@@ -196,6 +196,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: Principal,
         book_id: OrderBookId,
         order: Order,
+        timestamp: u64,
         persistence: StableMemoryOptions,
     ) {
         let pair = self
@@ -234,6 +235,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     price: order.price(),
                     quantity: *order.remaining_quantity(),
                     status: OrderStatus::Pending,
+                    timestamp: Some(timestamp),
                 },
             );
         }

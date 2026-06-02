@@ -370,9 +370,17 @@ mod cancel_limit_order {
             "only buyer can cancel buy order"
         );
 
+        let canceled = buyer_client
+            .cancel_limit_order(buy_id.clone())
+            .await
+            .unwrap();
+        assert!(
+            canceled.timestamp > 0,
+            "canceled order should carry a submission timestamp"
+        );
         assert_eq!(
-            buyer_client.cancel_limit_order(buy_id.clone()).await,
-            Ok(OrderRecord {
+            canceled,
+            OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
                 price: 100,
@@ -380,7 +388,8 @@ mod cancel_limit_order {
                 status: OrderStatus::Canceled(CanceledOrderInfo {
                     remaining_quantity: Nat::from(2_000_000u64),
                 }),
-            })
+                timestamp: canceled.timestamp,
+            }
         );
 
         assert_eq!(

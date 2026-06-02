@@ -426,6 +426,7 @@ mod cancel_limit_order {
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 }),
+                timestamp: 0,
             })
         );
 
@@ -471,6 +472,7 @@ mod cancel_limit_order {
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 }),
+                timestamp: 0,
             })
         );
         assert_eq!(

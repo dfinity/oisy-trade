@@ -19,8 +19,9 @@ pub fn process_event<MH: Memory, MB: Memory>(
     payload: EventType,
     runtime: &impl Runtime,
 ) {
-    apply_state_transition(state, &payload, StableMemoryOptions::Write);
-    storage::record_event(runtime.time(), payload);
+    let timestamp = runtime.time();
+    apply_state_transition(state, &payload, timestamp, StableMemoryOptions::Write);
+    storage::record_event(timestamp, payload);
 }
 
 /// Append `payload` to the event log without applying it to `state`. Use this
@@ -36,6 +37,7 @@ pub fn record_event(payload: EventType, runtime: &impl Runtime) {
 fn apply_state_transition<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: &EventType,
+    timestamp: u64,
     persistence: StableMemoryOptions,
 ) {
     use crate::order;
@@ -117,7 +119,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            state.record_limit_order(*user, book_id, order, persistence);
+            state.record_limit_order(*user, book_id, order, timestamp, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
             state.record_cancel_limit_order(*order_id, persistence);
@@ -150,7 +152,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, persistence);
+        apply_state_transition(&mut state, &event.payload, event.timestamp, persistence);
     }
     // Replaying events accumulate pending settling events
     // that must have been already consumed when being written
