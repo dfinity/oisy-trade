@@ -58,10 +58,8 @@ pub struct AddTradingPairEvent {
     pub base_metadata: TokenMetadata,
     #[n(6)]
     pub quote_metadata: TokenMetadata,
-    /// `None` for events recorded before DEFI-2726; replayed as
-    /// [`FeeRates::default`] (zero rates).
     #[n(7)]
-    pub fee_rates: Option<FeeRates>,
+    pub fee_rates: FeeRates,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

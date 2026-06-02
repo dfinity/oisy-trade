@@ -1217,39 +1217,30 @@ mod levels_consistency {
 
 mod basis_point {
     use crate::order::{BasisPoint, InvalidBasisPoint};
+    use crate::test_fixtures::arbitrary::arb_basis_point;
+    use proptest::prelude::*;
 
-    #[test]
-    fn should_accept_zero_and_max() {
-        assert_eq!(BasisPoint::new(0).unwrap(), BasisPoint::ZERO);
-        assert_eq!(BasisPoint::new(10_000).unwrap(), BasisPoint::MAX);
-    }
+    proptest! {
+        /// `BasisPoint::new` rejects every value above the `10_000` cap.
+        #[test]
+        fn should_reject_out_of_range(v in 10_001u16..=u16::MAX) {
+            prop_assert_eq!(BasisPoint::new(v), Err(InvalidBasisPoint::OutOfRange(v)));
+        }
 
-    #[test]
-    fn should_reject_out_of_range() {
-        assert_eq!(
-            BasisPoint::new(10_001),
-            Err(InvalidBasisPoint::OutOfRange(10_001))
-        );
-        assert_eq!(
-            BasisPoint::new(u16::MAX),
-            Err(InvalidBasisPoint::OutOfRange(u16::MAX))
-        );
-    }
-
-    #[test]
-    fn should_roundtrip_through_cbor() {
-        for v in [0u16, 1, 100, 9_999, 10_000] {
-            let bp = BasisPoint::new(v).unwrap();
+        #[test]
+        fn should_roundtrip_through_cbor(bp in arb_basis_point()) {
             let mut buf = Vec::new();
             minicbor::encode(bp, &mut buf).unwrap();
             let decoded: BasisPoint = minicbor::decode(&buf).unwrap();
-            assert_eq!(decoded, bp);
+            prop_assert_eq!(decoded, bp);
         }
     }
 }
 
 mod fee_rates {
     use crate::order::{BasisPoint, FeeRates};
+    use crate::test_fixtures::arbitrary::arb_fee_rates;
+    use proptest::prelude::*;
 
     #[test]
     fn default_is_zero_rates() {
@@ -1258,15 +1249,13 @@ mod fee_rates {
         assert_eq!(r.taker, BasisPoint::ZERO);
     }
 
-    #[test]
-    fn should_roundtrip_through_cbor() {
-        let r = FeeRates {
-            maker: BasisPoint::new(10).unwrap(),
-            taker: BasisPoint::new(25).unwrap(),
-        };
-        let mut buf = Vec::new();
-        minicbor::encode(r, &mut buf).unwrap();
-        let decoded: FeeRates = minicbor::decode(&buf).unwrap();
-        assert_eq!(decoded, r);
+    proptest! {
+        #[test]
+        fn should_roundtrip_through_cbor(rates in arb_fee_rates()) {
+            let mut buf = Vec::new();
+            minicbor::encode(rates, &mut buf).unwrap();
+            let decoded: FeeRates = minicbor::decode(&buf).unwrap();
+            prop_assert_eq!(decoded, rates);
+        }
     }
 }

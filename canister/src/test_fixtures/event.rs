@@ -48,7 +48,7 @@ pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             lot_size: LOT_SIZE,
             base_metadata: base_metadata(),
             quote_metadata: quote_metadata(),
-            fee_rates: Some(FeeRates::default()),
+            fee_rates: FeeRates::default(),
         }),
     }
 }
@@ -168,10 +168,10 @@ fn add_trading_pair() -> EventType {
             symbol: max_symbol(),
             decimals: u8::MAX,
         },
-        fee_rates: Some(FeeRates {
+        fee_rates: FeeRates {
             maker: crate::order::BasisPoint::MAX,
             taker: crate::order::BasisPoint::MAX,
-        }),
+        },
     })
 }
 

@@ -83,7 +83,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 quote_metadata.clone(),
                 *tick_size,
                 *lot_size,
-                fee_rates.unwrap_or_default(),
+                *fee_rates,
             );
         }
         EventType::Deposit(DepositEvent {

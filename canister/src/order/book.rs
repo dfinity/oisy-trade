@@ -543,9 +543,8 @@ pub struct OrderBookSnapshot {
     pub asks: Vec<PriceLevel>,
     #[n(7)]
     pub filled_orders: Vec<OrderSeq>,
-    /// Restored as [`FeeRates::default`] (zero rates) for back-compat.
     #[n(8)]
-    pub fee_rates: Option<FeeRates>,
+    pub fee_rates: FeeRates,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -581,7 +580,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
                 })
                 .collect(),
             filled_orders: book.filled_orders.iter().copied().collect(),
-            fee_rates: Some(book.fee_rates),
+            fee_rates: book.fee_rates,
         }
     }
 }
@@ -635,7 +634,7 @@ impl From<OrderBookSnapshot> for OrderBook {
             next_seq: snapshot.next_seq,
             tick_size: snapshot.tick_size,
             lot_size: snapshot.lot_size,
-            fee_rates: snapshot.fee_rates.unwrap_or_default(),
+            fee_rates: snapshot.fee_rates,
             pending_orders,
             bids,
             asks,

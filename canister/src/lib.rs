@@ -391,7 +391,7 @@ pub fn add_trading_pair(
             lot_size,
             base_metadata,
             quote_metadata,
-            fee_rates: Some(fee_rates),
+            fee_rates,
         };
         state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
         Ok(())

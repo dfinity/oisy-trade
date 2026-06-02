@@ -321,9 +321,9 @@ pub fn transfer_from_response(
 pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
-        TickSize, TokenId, TokenMetadata,
+        self, BasisPoint, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        Side, TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -560,6 +560,18 @@ pub mod arbitrary {
             )
     }
 
+    /// Strategy for any valid [`BasisPoint`] — uniformly sampled across the
+    /// full `0..=10_000` range.
+    pub fn arb_basis_point() -> impl Strategy<Value = BasisPoint> {
+        (0..=10_000u16).prop_map(|v| BasisPoint::new(v).unwrap())
+    }
+
+    /// Strategy for any valid [`FeeRates`], independently sampling maker
+    /// and taker rates over the full `BasisPoint` range.
+    pub fn arb_fee_rates() -> impl Strategy<Value = FeeRates> {
+        (arb_basis_point(), arb_basis_point()).prop_map(|(maker, taker)| FeeRates { maker, taker })
+    }
+
     pub fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
         (
             any::<u64>(),
@@ -569,19 +581,27 @@ pub mod arbitrary {
             1..u64::MAX,
             arb_token_metadata(),
             arb_token_metadata(),
+            arb_fee_rates(),
         )
             .prop_map(
-                |(book_id, base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
-                    AddTradingPairEvent {
-                        book_id: OrderBookId::new(book_id),
-                        base: TokenId::new(base),
-                        quote: TokenId::new(quote),
-                        tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
-                        lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
-                        base_metadata,
-                        quote_metadata,
-                        fee_rates: Some(FeeRates::default()),
-                    }
+                |(
+                    book_id,
+                    base,
+                    quote,
+                    tick_size,
+                    lot_size,
+                    base_metadata,
+                    quote_metadata,
+                    fee_rates,
+                )| AddTradingPairEvent {
+                    book_id: OrderBookId::new(book_id),
+                    base: TokenId::new(base),
+                    quote: TokenId::new(quote),
+                    tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
+                    lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
+                    base_metadata,
+                    quote_metadata,
+                    fee_rates,
                 },
             )
     }
