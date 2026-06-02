@@ -1,10 +1,10 @@
 use dex_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LedgerTransferError,
-    LedgerTransferFromError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
+    DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
+    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
+    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -133,8 +133,11 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
 }
 
 #[ic_cdk::query]
-fn get_balance(token_id: TokenId) -> Balance {
-    dex_canister::get_balance(token_id, &dex_canister::IC_RUNTIME)
+fn get_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    use dex_canister::Runtime;
+    dex_canister::get_balances(filter, dex_canister::IC_RUNTIME.msg_caller())
 }
 
 #[ic_cdk::query]

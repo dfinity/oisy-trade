@@ -34,9 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
@@ -48,36 +48,81 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-#        TODO DEFI-2722: setup reproducible build with Docker
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
           cache: false
       - name: Docker build
-        run: just build
+        run: just docker-build
 
       - name: 'Archive Artifact'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        # `archive: false` uploads the file as-is, without zip-wrapping. The
+        # artifact name is taken from the file name (the `name:` input is
+        # ignored in this mode). Downloaders get exactly the bytes whose
+        # SHA-256 is shown in the job summary below.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dex_canister.wasm.gz
           path: ./wasms/dex_canister.wasm.gz
           if-no-files-found: error
+          archive: false
 
       - name: 'Add summary'
         run: |
           hash=`sha256sum ./wasms/dex_canister.wasm.gz`
           echo "SHA-256 :hash: ${hash}" >> $GITHUB_STEP_SUMMARY
 
+  # Independently rebuild the canister on a different runner image and assert
+  # the SHA-256 matches the artifact produced by `reproducible-build`. This
+  # gates any non-determinism leaking in from the runner environment, the
+  # Docker daemon version, or accidental host-state dependencies in the build.
+  reproducibility-verify:
+    needs: [reproducible-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup mise
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
+      - name: 'Independent Docker build'
+        run: just docker-build
+
+      - name: 'Download canonical artifact'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dex_canister.wasm.gz
+          path: ./canonical
+
+      - name: 'Compare hashes'
+        run: |
+          canonical_hash=$(sha256sum ./canonical/dex_canister.wasm.gz | awk '{print $1}')
+          local_hash=$(sha256sum ./wasms/dex_canister.wasm.gz | awk '{print $1}')
+          echo "Canonical: $canonical_hash"
+          echo "Local:     $local_hash"
+          if [[ "$canonical_hash" != "$local_hash" ]]; then
+            echo "::error::Reproducibility check failed — hashes differ between runners"
+            echo "SHA-256 mismatch :x:" >> $GITHUB_STEP_SUMMARY
+            echo "- canonical (\`reproducible-build\` on ubuntu-22.04): \`$canonical_hash\`" >> $GITHUB_STEP_SUMMARY
+            echo "- this job (ubuntu-24.04): \`$local_hash\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "SHA-256 reproducibility OK :white_check_mark: \`$local_hash\`" >> $GITHUB_STEP_SUMMARY
+
   unit-tests:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
@@ -90,17 +135,17 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
           cache: false
 
       - name: 'Download Artifacts'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dex_canister.wasm.gz
 
@@ -121,15 +166,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: 'Download WASM'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dex_canister.wasm.gz
 
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
@@ -146,16 +191,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: 'Checkout baseline branch'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: main
           path: _canbench_baseline_branch
 
       - name: Setup mise
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           # Disable cache to avoid issues with wasm32 target
           # See https://github.com/jdx/mise-action/issues/215
@@ -164,12 +209,12 @@ jobs:
       - name: 'Benchmark'
         run: bash ./scripts/ci_run_benchmark.sh canister ${{ github.job }}
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: canbench_result_${{ github.job }}
           path: /tmp/canbench_result_${{ github.job }}.md
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: canbench_results_${{ github.job }}_csv
           path: /tmp/canbench_results_${{ github.job }}.csv
@@ -186,7 +231,7 @@ jobs:
           mkdir -p ./pr_number
           echo ${{ github.event.pull_request.number }} > ./pr_number/pr_number
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pr_number
           path: pr_number/
@@ -200,6 +245,7 @@ jobs:
     needs:
       - lint
       - reproducible-build
+      - reproducibility-verify
       - unit-tests
       - integration-tests
       - check-canister-wasm-endpoints

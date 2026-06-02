@@ -66,17 +66,34 @@ Install [`mise`](https://mise.jdx.dev/) and then run `mise install` from the rep
 Additionally:
 
 - [icp CLI](https://cli.internetcomputer.org/)
+- [Docker](https://docs.docker.com/get-docker/) with `buildx` (only for `just docker-build`)
 
 ### Build
 
 List all available recipes with `just`.
 
-| Command      | Description                      |
-|--------------|----------------------------------|
-| `just lint`  | Run linter                       |
-| `just build` | Build the canister WASM          |
-| `just test`  | Run unit and integration tests   |
-| `just ci`    | Run all checks, build, and tests |
+| Command             | Description                                |
+|---------------------|--------------------------------------------|
+| `just lint`         | Run linter                                 |
+| `just build`        | Build the canister WASM (native)           |
+| `just docker-build` | Build the canister WASM reproducibly       |
+| `just test`         | Run unit and integration tests             |
+| `just ci`           | Run all checks, build, and tests           |
+
+### Reproducible build
+
+`just docker-build` produces `wasms/dex_canister.wasm.gz` that is byte-identical regardless of host platform, as long as Docker is available. The build runs inside a `linux/amd64` container with a digest-pinned base image and a pinned Rust toolchain; on Apple Silicon it transparently runs under Rosetta/QEMU.
+
+CI verifies reproducibility by building the same commit twice on different runner images (`ubuntu-22.04` and `ubuntu-24.04`) and asserting the SHA-256 hashes match.
+
+To verify a tagged release against the canister deployed on the IC, check out the tag and run:
+
+```bash
+just docker-build
+sha256sum wasms/dex_canister.wasm.gz
+```
+
+The resulting hash should match both the SHA-256 published in the GitHub Release notes and the canister's module hash on the IC.
 
 ### Deploy to staging
 

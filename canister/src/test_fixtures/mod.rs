@@ -328,9 +328,12 @@ pub mod arbitrary {
         WithdrawEvent,
     };
     use candid::Principal;
+    use dex_types::FilterToken;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
-    use proptest::collection::btree_set;
-    use proptest::prelude::*;
+    use proptest::collection::{SizeRange, btree_set, vec};
+    use proptest::option;
+    use proptest::prelude::{Just, Strategy, any};
+    use proptest::prop_oneof;
     use std::num::NonZeroU64;
 
     use super::{LOT_SIZE, TICK_SIZE};
@@ -384,9 +387,8 @@ pub mod arbitrary {
     }
 
     pub fn arb_non_matching_orders() -> impl Strategy<Value = Vec<PendingOrder>> {
-        (2u64..500u64).prop_flat_map(|mid_ticks| {
-            prop::collection::vec(arb_pending_order_around_mid(mid_ticks, 1000), 0..30)
-        })
+        (2u64..500u64)
+            .prop_flat_map(|mid_ticks| vec(arb_pending_order_around_mid(mid_ticks, 1000), 0..30))
     }
 
     /// Strategy for a valid [`Fill`] with unique order sequences.
@@ -432,7 +434,7 @@ pub mod arbitrary {
     /// byte slice (up to 29 bytes), covering the full principal byte-length
     /// range that appears in canister state.
     pub fn arb_principal() -> impl Strategy<Value = Principal> {
-        prop::collection::vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+        vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
     }
 
     pub fn arb_balance_key() -> impl Strategy<Value = BalanceKey> {
@@ -503,6 +505,20 @@ pub mod arbitrary {
         arb_principal().prop_map(TokenId::new)
     }
 
+    /// Strategy for an arbitrary [`FilterToken`] built over [`arb_token_id`].
+    pub fn arb_filter_token() -> impl Strategy<Value = FilterToken> {
+        arb_token_id().prop_map(|id| FilterToken::ById(id.into()))
+    }
+
+    /// Strategy for an arbitrary filter (`Vec<FilterToken>`) whose length
+    /// falls within `size`. Pick a range straddling `MAX_FILTER_LEN` to
+    /// exercise both the under-cap and over-cap branches.
+    pub fn arb_filter_tokens(
+        size: impl Into<SizeRange>,
+    ) -> impl Strategy<Value = Vec<FilterToken>> {
+        vec(arb_filter_token(), size)
+    }
+
     pub fn arb_token_metadata() -> impl Strategy<Value = TokenMetadata> {
         ("[a-zA-Z]{1,10}", any::<u8>())
             .prop_map(|(symbol, decimals)| TokenMetadata { symbol, decimals })
@@ -528,9 +544,9 @@ pub mod arbitrary {
 
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
         (
-            prop::option::of(arb_mode()),
-            prop::option::of(1..=10_000u32),
-            prop::option::of(1..=40_000_000_000u64),
+            option::of(arb_mode()),
+            option::of(1..=10_000u32),
+            option::of(1..=40_000_000_000u64),
         )
             .prop_map(
                 |(mode, max_orders_per_chunk, instruction_budget)| UpgradeArg {
@@ -619,7 +635,7 @@ pub mod arbitrary {
         // fits in a u64.
         let arb_any_fill = any::<u32>().prop_flat_map(|i| arb_fill(i as u64));
         (
-            prop::collection::vec(arb_any_fill, 0..5),
+            vec(arb_any_fill, 0..5),
             btree_set(arb_order_seq(), 0..5),
             btree_set(arb_order_seq(), 0..5),
         )
@@ -631,12 +647,10 @@ pub mod arbitrary {
     }
 
     pub fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
-        (any::<u64>(), prop::collection::vec(arb_order_seq(), 0..5)).prop_map(
-            |(book_id, orders)| MatchingEvent {
-                book_id: order::OrderBookId::new(book_id),
-                orders,
-            },
-        )
+        (any::<u64>(), vec(arb_order_seq(), 0..5)).prop_map(|(book_id, orders)| MatchingEvent {
+            book_id: order::OrderBookId::new(book_id),
+            orders,
+        })
     }
 
     pub fn arb_pair_token() -> impl Strategy<Value = PairToken> {
@@ -674,14 +688,12 @@ pub mod arbitrary {
     }
 
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (
-            any::<u64>(),
-            prop::collection::vec(arb_balance_operation(), 0..10),
-        )
-            .prop_map(|(book_id, balance_operations)| SettlingEvent {
+        (any::<u64>(), vec(arb_balance_operation(), 0..10)).prop_map(
+            |(book_id, balance_operations)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
                 balance_operations,
-            })
+            },
+        )
     }
 
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {

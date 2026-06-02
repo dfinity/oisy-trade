@@ -314,6 +314,46 @@ pub struct Balance {
     pub reserved: Nat,
 }
 
+/// Maximum number of entries allowed in a [`get_balances`] filter.
+pub const MAX_FILTER_LEN: u32 = 100;
+
+/// Selector for filtering tokens. New variants may be added in
+/// backward-compatible upgrades.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, CandidType)]
+pub enum FilterToken {
+    /// Select a token by its identifier.
+    ById(TokenId),
+}
+
+/// A single `(token, balance)` entry in a [`get_balances`] response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct UserTokenBalance {
+    /// The token whose balance is reported.
+    pub token: Token,
+    /// The caller's free + reserved holdings for `token`.
+    pub balance: Balance,
+}
+
+/// Per-entry error reported in [`get_balances`] responses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum GetBalancesError {
+    /// The filter referenced a token that the DEX does not support.
+    TokenNotSupported(FilterToken),
+}
+
+/// Whole-request error reported when [`get_balances`] rejects the
+/// request before any per-entry lookup runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum GetBalancesRequestError {
+    /// The filter exceeded [`MAX_FILTER_LEN`] entries.
+    FilterTooLarge {
+        /// The submitted filter length.
+        len: u32,
+        /// The maximum allowed filter length ([`MAX_FILTER_LEN`]).
+        max: u32,
+    },
+}
+
 /// Request to add a new trading pair to the DEX.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct AddTradingPairRequest {

@@ -1167,6 +1167,222 @@ mod execution_policy {
     }
 }
 
+mod get_balances {
+    use crate::order::{OrderBookId, Quantity, TokenId, TradingPair};
+    use crate::state::StableMemoryOptions;
+    use crate::test_fixtures;
+    use candid::{Nat, Principal};
+    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+
+    const USER: Principal = Principal::from_slice(&[0xAA]);
+
+    #[test]
+    fn should_return_empty_for_user_without_balances_and_no_filter() {
+        let (state, _, _) = setup_two_token_state();
+        assert_eq!(state.get_balances(&USER, None), vec![]);
+    }
+
+    #[test]
+    fn should_return_zero_entry_for_registered_token_in_filter() {
+        let (state, a_id, _) = setup_two_token_state();
+        let filter = vec![FilterToken::ById(a_id.into())];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+        );
+    }
+
+    #[test]
+    fn should_return_non_zero_entries_without_filter() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
+
+        // BTreeMap iteration follows TokenId ordering; assert as a set.
+        let mut got = state.get_balances(&USER, None);
+        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut want = vec![
+            ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+            ok_balance(b_id, test_fixtures::icp_metadata(), 5, 0),
+        ];
+        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn should_include_zero_entries_for_filtered_tokens_user_does_not_hold() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(b_id.into()),
+        ];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_skip_existing_zero_entries_without_filter() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
+        state
+            .withdraw(USER, b_id, Quantity::from(5u64))
+            .expect("withdraw should succeed");
+
+        assert_eq!(
+            state.get_balances(&USER, None),
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)]
+        );
+    }
+
+    #[test]
+    fn should_return_token_not_supported_for_unknown_filter_entry() {
+        let (state, _, _) = setup_two_token_state();
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![FilterToken::ById(unknown.into())];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                unknown.into()
+            )))],
+        );
+    }
+
+    #[test]
+    fn should_mix_ok_and_err_entries_in_filter_order() {
+        let (mut state, a_id, _) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_dedup_filter_entries() {
+        let (mut state, a_id, b_id) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(b_id.into()),
+            FilterToken::ById(unknown.into()),
+            FilterToken::ById(b_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
+
+        assert_eq!(
+            state.get_balances(&USER, Some(&filter)),
+            vec![
+                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_return_empty_for_empty_filter() {
+        let (mut state, a_id, _) = setup_two_token_state();
+        state.deposit(
+            USER,
+            a_id,
+            Quantity::from(10u64),
+            StableMemoryOptions::Write,
+        );
+
+        assert_eq!(state.get_balances(&USER, Some(&[])), vec![]);
+    }
+
+    fn setup_two_token_state() -> (
+        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
+        TokenId,
+        TokenId,
+    ) {
+        let mut state = test_fixtures::state();
+        let a_id = test_fixtures::ckbtc_token_id();
+        let b_id = test_fixtures::icp_token_id();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            TradingPair {
+                base: a_id,
+                quote: b_id,
+            },
+            test_fixtures::ckbtc_metadata(),
+            test_fixtures::icp_metadata(),
+            test_fixtures::TICK_SIZE,
+            test_fixtures::LOT_SIZE,
+        );
+        (state, a_id, b_id)
+    }
+
+    fn ok_balance(
+        token_id: TokenId,
+        metadata: crate::order::TokenMetadata,
+        free: u64,
+        reserved: u64,
+    ) -> Result<UserTokenBalance, GetBalancesError> {
+        Ok(UserTokenBalance {
+            token: dex_types::Token {
+                id: token_id.into(),
+                metadata: metadata.into(),
+            },
+            balance: Balance {
+                free: Nat::from(free),
+                reserved: Nat::from(reserved),
+            },
+        })
+    }
+}
+
 mod pending_state_predicates {
     use crate::EXECUTOR;
     use crate::order::{OrderBookId, Side};

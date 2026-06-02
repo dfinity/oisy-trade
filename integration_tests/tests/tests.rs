@@ -30,22 +30,22 @@ async fn assert_balances<R: Runtime>(
     expected_user2_ckbtc: u64,
 ) {
     assert_eq!(
-        client1.get_balance(cksol.clone()).await,
+        client1.get_balance(cksol.clone()).await.unwrap(),
         expected_balance(expected_user1_cksol),
         "user1 ckSOL balance mismatch"
     );
     assert_eq!(
-        client1.get_balance(ckbtc.clone()).await,
+        client1.get_balance(ckbtc.clone()).await.unwrap(),
         expected_balance(expected_user1_ckbtc),
         "user1 ckBTC balance mismatch"
     );
     assert_eq!(
-        client2.get_balance(cksol.clone()).await,
+        client2.get_balance(cksol.clone()).await.unwrap(),
         expected_balance(expected_user2_cksol),
         "user2 ckSOL balance mismatch"
     );
     assert_eq!(
-        client2.get_balance(ckbtc.clone()).await,
+        client2.get_balance(ckbtc.clone()).await.unwrap(),
         expected_balance(expected_user2_ckbtc),
         "user2 ckBTC balance mismatch"
     );
@@ -94,7 +94,7 @@ mod add_limit_order {
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
-            client.get_balance(token_id).await,
+            client.get_balance(token_id).await.unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -142,7 +142,7 @@ mod add_limit_order {
 
         let order_id = client.add_limit_order(order).await.unwrap();
         assert_eq!(
-            client.get_balance(token_id).await,
+            client.get_balance(token_id).await.unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -246,14 +246,20 @@ mod add_limit_order {
 
         // Buyer: received 1M base tokens, spent 100M quote tokens
         assert_eq!(
-            buyer_client.get_balance(setup.base_token_id()).await,
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: required_base_amount.into(),
                 reserved: 0u64.into()
             },
         );
         assert_eq!(
-            buyer_client.get_balance(setup.quote_token_id()).await,
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: 0u64.into()
@@ -262,14 +268,20 @@ mod add_limit_order {
 
         // Seller: spent 1M base tokens, received 100M quote tokens
         assert_eq!(
-            seller_client.get_balance(setup.base_token_id()).await,
+            seller_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: 0u64.into()
             },
         );
         assert_eq!(
-            seller_client.get_balance(setup.quote_token_id()).await,
+            seller_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: required_quote_amount.into(),
                 reserved: 0u64.into()
@@ -342,7 +354,10 @@ mod cancel_limit_order {
             OrderStatus::Open
         );
         assert_eq!(
-            buyer_client.get_balance(setup.quote_token_id()).await,
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: 200_000_000u64.into(),
@@ -375,14 +390,20 @@ mod cancel_limit_order {
             })
         );
         assert_eq!(
-            buyer_client.get_balance(setup.quote_token_id()).await,
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: 200_000_000u64.into(),
                 reserved: 0u64.into(),
             }
         );
         assert_eq!(
-            buyer_client.get_balance(setup.base_token_id()).await,
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
             Balance {
                 free: 1_000_000u64.into(),
                 reserved: 0u64.into(),
@@ -992,7 +1013,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
         .execute()
         .await;
     assert_eq!(
-        client.get_balance(cksol.clone()).await,
+        client.get_balance(cksol.clone()).await.unwrap(),
         expected_balance(deposit_amount)
     );
 
@@ -1010,7 +1031,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
 
     // DEX balance decreased by the full withdraw amount
     assert_eq!(
-        client.get_balance(cksol.clone()).await,
+        client.get_balance(cksol.clone()).await.unwrap(),
         expected_balance(deposit_amount - withdraw_amount)
     );
 
@@ -1116,7 +1137,7 @@ async fn should_fail_withdraw_on_negative_cases() {
         );
 
         assert_eq!(
-            client.get_balance(cksol.clone()).await,
+            client.get_balance(cksol.clone()).await.unwrap(),
             expected_balance(deposit_amount)
         );
     }
@@ -1175,7 +1196,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .unwrap();
 
         assert_eq!(
-            client.get_balance(cksol.clone()).await,
+            client.get_balance(cksol.clone()).await.unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: deposit_amount.into(),
@@ -1197,7 +1218,7 @@ async fn should_fail_withdraw_on_negative_cases() {
         );
 
         assert_eq!(
-            client.get_balance(cksol.clone()).await,
+            client.get_balance(cksol.clone()).await.unwrap(),
             Balance {
                 free: 0u64.into(),
                 reserved: deposit_amount.into(),
@@ -1238,7 +1259,11 @@ async fn should_fail_withdraw_on_negative_cases() {
         );
 
         assert_eq!(
-            setup.dex_client_with_caller(user).get_balance(cksol).await,
+            setup
+                .dex_client_with_caller(user)
+                .get_balance(cksol)
+                .await
+                .unwrap(),
             expected_balance(deposit_amount)
         );
     }
@@ -1670,6 +1695,108 @@ mod list_supported_tokens {
         assert_eq!(tokens.len(), 2);
         assert!(tokens.contains(&request.base));
         assert!(tokens.contains(&request.quote));
+
+        setup.drop().await;
+    }
+}
+
+mod get_balances {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{FilterToken, GetBalancesError, TokenId};
+
+    #[tokio::test]
+    async fn should_return_empty_without_filter_for_fresh_user() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let result = setup.dex_client().get_balances(None).await.unwrap();
+        assert!(result.is_empty());
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_ok_for_registered_filter_entry() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let token = setup.base_token_id();
+        let deposit = 1_000_000u64;
+        setup
+            .deposit_flow(setup.user(), token.clone())
+            .mint(deposit + 2 * BASE_LEDGER_FEE)
+            .approve(deposit + BASE_LEDGER_FEE)
+            .deposit(deposit)
+            .execute()
+            .await;
+
+        let result = setup
+            .dex_client()
+            .get_balances(Some(vec![FilterToken::ById(token.clone())]))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        let entry = result[0].as_ref().unwrap();
+        assert_eq!(entry.token.id, token);
+        assert_eq!(entry.balance.free, Nat::from(deposit));
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_token_not_supported_for_unknown_filter_entry() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let unknown = TokenId {
+            ledger_id: Principal::from_slice(&[0xFF]),
+        };
+
+        let result = setup
+            .dex_client()
+            .get_balances(Some(vec![FilterToken::ById(unknown.clone())]))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                unknown
+            )))
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_match_full_filter_to_no_filter_when_user_holds_every_supported_token() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let base = setup.base_token_id();
+        let quote = setup.quote_token_id();
+        setup
+            .deposit_flow(setup.user(), base.clone())
+            .mint(1_000_000u64 + 2 * BASE_LEDGER_FEE)
+            .approve(1_000_000u64 + BASE_LEDGER_FEE)
+            .deposit(1_000_000u64)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(setup.user(), quote.clone())
+            .mint(500_000u64 + 2 * QUOTE_LEDGER_FEE)
+            .approve(500_000u64 + QUOTE_LEDGER_FEE)
+            .deposit(500_000u64)
+            .execute()
+            .await;
+
+        let supported = setup.dex_client().list_supported_tokens().await;
+        let full_filter: Vec<FilterToken> = supported
+            .iter()
+            .map(|t| FilterToken::ById(t.id.clone()))
+            .collect();
+
+        let no_filter = setup.dex_client().get_balances(None).await.unwrap();
+        let with_full_filter = setup
+            .dex_client()
+            .get_balances(Some(full_filter))
+            .await
+            .unwrap();
+
+        assert_eq!(no_filter, with_full_filter);
 
         setup.drop().await;
     }

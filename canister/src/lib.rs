@@ -1,9 +1,10 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token,
-    TradingPair, TradingPairInfo, WithdrawError, WithdrawRequest, WithdrawResponse,
+    DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
+    GetBalancesError, GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token, TradingPair,
+    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -319,13 +320,21 @@ pub async fn withdraw(
     }
 }
 
-pub fn get_balance(token_id: dex_types::TokenId, runtime: &impl Runtime) -> dex_types::Balance {
-    // TODO(DEFI-2741): Return an error if the token is not supported by the DEX.
-    let caller = runtime.msg_caller();
-    state::with_state(|s| {
-        s.get_balance(&caller, &order::TokenId::from(token_id))
-            .into()
-    })
+pub fn get_balances(
+    filter: Option<Vec<FilterToken>>,
+    caller: candid::Principal,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    if let Some(ref f) = filter
+        && (f.len() as u32) > MAX_FILTER_LEN
+    {
+        return Err(GetBalancesRequestError::FilterTooLarge {
+            len: f.len() as u32,
+            max: MAX_FILTER_LEN,
+        });
+    }
+    Ok(state::with_state(|s| {
+        s.get_balances(&caller, filter.as_deref())
+    }))
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {

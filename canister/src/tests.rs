@@ -153,12 +153,18 @@ mod add_limit_order {
     use crate::test_fixtures::{
         fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
     };
-    use crate::{add_limit_order, get_balance, state};
+    use crate::{add_limit_order, get_balances, state};
     use candid::Principal;
-    use dex_types::{Balance, LimitOrderRequest, Side};
+    use dex_types::{Balance, FilterToken, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
 
     const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
+
+    fn balance_of(token: dex_types::TokenId, caller: Principal) -> Balance {
+        let mut result = get_balances(Some(vec![FilterToken::ById(token)]), caller).unwrap();
+        assert_eq!(result.len(), 1);
+        result.remove(0).unwrap().balance
+    }
 
     #[test]
     fn should_add_limit_orders_with_distinct_order_ids() {
@@ -303,9 +309,12 @@ mod add_limit_order {
 
         add_limit_order(order, &runtime).unwrap();
 
-        assert_eq!(get_balance(pair.base.into(), &runtime), Balance::default());
         assert_eq!(
-            get_balance(pair.quote.into(), &runtime),
+            balance_of(pair.base.into(), DEFAULT_USER),
+            Balance::default()
+        );
+        assert_eq!(
+            balance_of(pair.quote.into(), DEFAULT_USER),
             Balance {
                 free: 0u64.into(),
                 reserved: required.into(),
@@ -338,13 +347,16 @@ mod add_limit_order {
         add_limit_order(order, &runtime).unwrap();
 
         assert_eq!(
-            get_balance(pair.base.into(), &runtime),
+            balance_of(pair.base.into(), DEFAULT_USER),
             Balance {
                 free: 0u64.into(),
                 reserved: quantity.into(),
             }
         );
-        assert_eq!(get_balance(pair.quote.into(), &runtime), Balance::default());
+        assert_eq!(
+            balance_of(pair.quote.into(), DEFAULT_USER),
+            Balance::default()
+        );
     }
 }
 
@@ -1427,6 +1439,43 @@ mod get_trading_pairs {
                 lot_size: LOT_SIZE.get(),
             }]
         );
+    }
+}
+
+mod get_balances {
+    use crate::get_balances;
+    use crate::state::reset_state;
+    use crate::test_fixtures::arbitrary::arb_filter_tokens;
+    use crate::test_fixtures::init_state_with_order_book;
+    use candid::Principal;
+    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
+
+    const USER: Principal = Principal::from_slice(&[0xAA]);
+
+    proptest! {
+        #[test]
+        fn should_enforce_filter_length_cap(
+            filter in arb_filter_tokens(0..=(MAX_FILTER_LEN as usize + 10)),
+        ) {
+            reset_state();
+            init_state_with_order_book();
+            let len = filter.len() as u32;
+
+            let result = get_balances(Some(filter), USER);
+
+            if len <= MAX_FILTER_LEN {
+                prop_assert!(result.is_ok());
+            } else {
+                prop_assert_eq!(
+                    result.unwrap_err(),
+                    GetBalancesRequestError::FilterTooLarge {
+                        len,
+                        max: MAX_FILTER_LEN,
+                    }
+                );
+            }
+        }
     }
 }
 
