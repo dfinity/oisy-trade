@@ -1,5 +1,5 @@
 mod book;
-pub mod fees;
+mod fees;
 mod history;
 #[cfg(test)]
 mod tests;
