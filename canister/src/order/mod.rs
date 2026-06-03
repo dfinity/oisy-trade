@@ -1,4 +1,5 @@
 mod book;
+mod fees;
 mod history;
 #[cfg(test)]
 mod tests;
@@ -7,6 +8,7 @@ pub use book::{
     Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
     RemovedOrder,
 };
+pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use history::OrderHistory;
 
 use candid::{Nat, Principal};

@@ -136,6 +136,8 @@ impl Setup {
             },
             tick_size: TICK_SIZE,
             lot_size: LOT_SIZE,
+            maker_fee_bps: 0,
+            taker_fee_bps: 0,
         }
     }
 

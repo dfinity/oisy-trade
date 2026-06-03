@@ -1,4 +1,6 @@
-use super::{LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize};
+use super::{
+    FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
+};
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
@@ -19,6 +21,8 @@ pub struct OrderBook {
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: LotSize,
+    /// Maker/taker fee rates applied at fill-time.
+    fee_rates: FeeRates,
     /// Orders awaiting matching, processed by the timer.
     pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
@@ -33,12 +37,18 @@ pub struct OrderBook {
 
 impl OrderBook {
     /// Creates a new empty order book with the given constraints.
-    pub fn new(id: OrderBookId, tick_size: TickSize, lot_size: LotSize) -> Self {
+    pub fn new(
+        id: OrderBookId,
+        tick_size: TickSize,
+        lot_size: LotSize,
+        fee_rates: FeeRates,
+    ) -> Self {
         Self {
             id,
             next_seq: OrderSeq::default(),
             tick_size,
             lot_size,
+            fee_rates,
             pending_orders: VecDeque::new(),
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
@@ -70,6 +80,10 @@ impl OrderBook {
 
     pub fn lot_size(&self) -> LotSize {
         self.lot_size
+    }
+
+    pub fn fee_rates(&self) -> FeeRates {
+        self.fee_rates
     }
 
     /// Returns the best (highest price) bid order, or `None` if the bid side is empty.
@@ -529,6 +543,8 @@ pub struct OrderBookSnapshot {
     pub asks: Vec<PriceLevel>,
     #[n(7)]
     pub filled_orders: Vec<OrderSeq>,
+    #[n(8)]
+    pub fee_rates: FeeRates,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -564,6 +580,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
                 })
                 .collect(),
             filled_orders: book.filled_orders.iter().copied().collect(),
+            fee_rates: book.fee_rates,
         }
     }
 }
@@ -617,6 +634,7 @@ impl From<OrderBookSnapshot> for OrderBook {
             next_seq: snapshot.next_seq,
             tick_size: snapshot.tick_size,
             lot_size: snapshot.lot_size,
+            fee_rates: snapshot.fee_rates,
             pending_orders,
             bids,
             asks,

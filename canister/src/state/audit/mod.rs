@@ -70,6 +70,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             lot_size,
             base_metadata,
             quote_metadata,
+            fee_rates,
         }) => {
             let pair = order::TradingPair {
                 base: *base,
@@ -82,6 +83,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 quote_metadata.clone(),
                 *tick_size,
                 *lot_size,
+                *fee_rates,
             );
         }
         EventType::Deposit(DepositEvent {

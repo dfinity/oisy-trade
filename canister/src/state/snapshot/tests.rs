@@ -1,5 +1,5 @@
 use super::StateSnapshot;
-use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
+use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
@@ -10,8 +10,9 @@ use candid::Principal;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder, Price,
-        PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+        FeeRates, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder,
+        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
+        TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
@@ -93,6 +94,7 @@ mod schema_stability {
                     orders: vec![resting_sell],
                 }],
                 filled_orders: vec![OrderSeq::new(4)],
+                fee_rates: FeeRates::default(),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -135,10 +137,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818881078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818981078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810481828141011a000186a08182810782820084810581068201801a\
-        05f5e100820084810681058200801a000f4240\
+        186e818281021a0007a120818104828100810081828141011a000186a08182810782820084810581\
+        068201801a05f5e100820084810681058200801a000f4240\
         18c81b000000012a05f200";
 
     #[test]
@@ -183,6 +185,7 @@ fn should_roundtrip_state_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
 
     let buyer = Principal::from_slice(&[0x01]);
