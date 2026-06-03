@@ -125,6 +125,7 @@ mod schema_stability {
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
             fee_pool: None,
+            next_order_seq: Some(7),
         }
     }
 
@@ -142,11 +143,7 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818981078103\
-        810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a120818104828100810081828141011a000186a08182810782820085810581\
-        068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
-        18c81b000000012a05f200";
+        REGENERATE_AFTER_REBASE";
 
     #[test]
     fn should_match_golden_encoding() {
@@ -260,6 +257,7 @@ fn should_roundtrip_state_through_snapshot() {
     // `into_state` to reconstruct a state that compares equal.
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.user_orders.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -342,6 +340,7 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.user_orders.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );

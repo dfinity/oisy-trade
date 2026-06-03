@@ -1,5 +1,5 @@
 use crate::balance::TokenBalance;
-use crate::order::OrderHistory;
+use crate::order::{OrderHistory, UserOrders};
 use crate::state::audit;
 use crate::state::event::EventType;
 use crate::state::{State, StateSnapshot};
@@ -16,11 +16,18 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
         }
     };
     let order_history = OrderHistory::new(storage::order_history_memory());
+    let user_orders = UserOrders::new(storage::user_orders_memory());
     let balances = TokenBalance::new(storage::balances_memory());
     let user_registry = UserRegistry::new(storage::user_registry_memory());
     state::init_state(
-        State::new(init_arg.clone(), order_history, user_registry, balances)
-            .expect("ERROR: invalid init args"),
+        State::new(
+            init_arg.clone(),
+            order_history,
+            user_registry,
+            user_orders,
+            balances,
+        )
+        .expect("ERROR: invalid init args"),
     );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
@@ -53,11 +60,12 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
 
-    let (order_history, balances, user_registry) = {
+    let (order_history, user_orders, balances, user_registry) = {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
         (
             OrderHistory::new(storage::order_history_memory()),
+            UserOrders::new(storage::user_orders_memory()),
             TokenBalance::new(storage::balances_memory()),
             UserRegistry::new(storage::user_registry_memory()),
         )
@@ -74,7 +82,12 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::into_state");
-        state::init_state(snapshot.into_state(order_history, balances, user_registry));
+        state::init_state(snapshot.into_state(
+            order_history,
+            user_orders,
+            balances,
+            user_registry,
+        ));
     }
 
     match arg {

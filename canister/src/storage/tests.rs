@@ -14,6 +14,7 @@ fn empty_snapshot() -> StateSnapshot {
         max_orders_per_chunk: None,
         instruction_budget: None,
         fee_pool: None,
+        next_order_seq: None,
     }
 }
 

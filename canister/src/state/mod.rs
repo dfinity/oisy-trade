@@ -19,6 +19,7 @@ use crate::order::{
     self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    UserOrders,
 };
 use crate::storage::VMem;
 use crate::user::UserRegistry;
@@ -79,6 +80,14 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
+    /// Per-user index over `order_history`, ordered newest-first. Populated
+    /// alongside `order_history` on order placement; lives in its own stable
+    /// memory region and survives upgrades independently of the snapshot.
+    user_orders: UserOrders<MH>,
+    /// Monotonic counter assigning each placed order a canister-global
+    /// insertion sequence, used as the ordering key in `user_orders`. Carried
+    /// in the upgrade snapshot.
+    next_order_seq: u64,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -99,6 +108,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
         user_registry: UserRegistry<MB>,
+        user_orders: UserOrders<MH>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
         let execution_policy =
@@ -113,6 +123,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
+            user_orders,
+            next_order_seq: 0,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -247,6 +259,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     timestamp,
                 },
             );
+
+            let seq = self.next_order_seq;
+            self.next_order_seq += 1;
+            self.user_orders.insert(user, seq, order_id);
         }
         book.add_pending_order(order);
     }
@@ -883,6 +899,8 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
+            user_orders,
+            next_order_seq,
             pending_settling_events,
             in_flight_user_ops,
         } = self;
@@ -898,6 +916,8 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
+            user_orders: user_orders.clone(),
+            next_order_seq: *next_order_seq,
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
         }
@@ -919,6 +939,8 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
+            user_orders,
+            next_order_seq,
             pending_settling_events,
             in_flight_user_ops,
         } = self;
@@ -934,6 +956,8 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
+            user_orders: other_user_orders,
+            next_order_seq: other_next_order_seq,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
         } = other;
@@ -948,6 +972,8 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
+            && user_orders == other_user_orders
+            && next_order_seq == other_next_order_seq
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
     }

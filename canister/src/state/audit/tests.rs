@@ -12,7 +12,7 @@ use crate::state::event::{
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
     LOT_SIZE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata, state,
-    user_registry,
+    user_orders, user_registry,
 };
 use candid::Principal;
 use dex_types_internal::Mode;
@@ -288,6 +288,7 @@ impl Scenario {
             self.events,
             order_history(),
             user_registry(),
+            user_orders(),
             balances(),
             StableMemoryOptions::Write,
         );
@@ -645,6 +646,7 @@ fn should_panic_on_empty_events() {
         Vec::<Event>::new(),
         order_history(),
         user_registry(),
+        user_orders(),
         balances(),
         StableMemoryOptions::Write,
     );
@@ -657,6 +659,7 @@ fn should_panic_when_first_event_is_not_init() {
         vec![upgrade_event(None, None, None)],
         order_history(),
         user_registry(),
+        user_orders(),
         balances(),
         StableMemoryOptions::Write,
     );
