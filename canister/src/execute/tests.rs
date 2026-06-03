@@ -265,7 +265,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     // Minimum budget; mock returns a counter already past it.
     state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
     let mut mock = MockRuntime::new();
-    mock.expect_time().return_const(crate::Timestamp::new(0));
+    mock.expect_time().return_const(crate::Timestamp::EPOCH);
     mock.expect_instruction_counter().return_const(1u64);
 
     let status = EXECUTOR.run_once(&mut state, &mock);
@@ -288,7 +288,7 @@ fn set_unlimited_policy(state: &mut TestState) {
 
 fn runtime() -> MockRuntime {
     let mut mock = MockRuntime::new();
-    mock.expect_time().return_const(crate::Timestamp::new(0));
+    mock.expect_time().return_const(crate::Timestamp::EPOCH);
     mock.expect_instruction_counter().return_const(0u64);
     mock
 }

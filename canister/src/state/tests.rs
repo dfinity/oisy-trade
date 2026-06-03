@@ -378,7 +378,7 @@ mod cancel_limit_order {
         expected_remaining: impl Into<Quantity>,
     ) {
         let mut runtime = MockRuntime::new();
-        runtime.expect_time().return_const(crate::Timestamp::new(0));
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();

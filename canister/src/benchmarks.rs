@@ -421,7 +421,7 @@ fn place_order(
         user,
         order_id.book_id(),
         order,
-        crate::Timestamp::new(0),
+        crate::Timestamp::EPOCH,
         StableMemoryOptions::Write,
     );
 }

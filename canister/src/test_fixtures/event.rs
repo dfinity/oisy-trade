@@ -14,7 +14,7 @@ use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
-        timestamp: Timestamp::new(0),
+        timestamp: Timestamp::EPOCH,
         payload: EventType::Init(InitArg {
             mode,
             max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
@@ -113,15 +113,15 @@ impl WorstCaseEvent {
 
     pub fn expected_memory_size(&self) -> usize {
         match self {
-            Self::Init => 342,
-            Self::Upgrade => 342,
-            Self::AddTradingPair => 136,
-            Self::Deposit => 95,
-            Self::Withdraw => 104,
-            Self::AddLimitOrder => 97,
-            Self::CancelLimitOrder => 35,
-            Self::Matching => 10_027,
-            Self::Settling => 91_327,
+            Self::Init => 343,
+            Self::Upgrade => 343,
+            Self::AddTradingPair => 137,
+            Self::Deposit => 96,
+            Self::Withdraw => 105,
+            Self::AddLimitOrder => 98,
+            Self::CancelLimitOrder => 36,
+            Self::Matching => 10_028,
+            Self::Settling => 91_328,
         }
     }
 }

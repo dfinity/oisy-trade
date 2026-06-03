@@ -6,8 +6,7 @@ use ic_cdk::call::{Call, CallFailed, Response};
 pub const IC_RUNTIME: IcRuntime = IcRuntime;
 
 /// A point in time, in nanoseconds since the Unix epoch, as reported by the IC
-/// system API. Encoded transparently as its inner `u64`, so it is wire-compatible
-/// with a bare `u64` wherever it is persisted (e.g. the event log).
+/// system API.
 #[derive(
     Clone,
     Copy,
@@ -21,10 +20,12 @@ pub const IC_RUNTIME: IcRuntime = IcRuntime;
     minicbor::Encode,
     minicbor::Decode,
 )]
-#[cbor(transparent)]
 pub struct Timestamp(#[n(0)] u64);
 
 impl Timestamp {
+    /// The Unix epoch (zero nanoseconds).
+    pub const EPOCH: Self = Self(0);
+
     pub const fn new(nanos: u64) -> Self {
         Self(nanos)
     }

@@ -263,7 +263,7 @@ where
         user,
         order_id.book_id(),
         order,
-        Timestamp::new(0),
+        Timestamp::EPOCH,
         StableMemoryOptions::Write,
     );
     order_id
@@ -496,7 +496,7 @@ pub mod arbitrary {
                     price: Price::new(price_ticks * tick),
                     quantity: Quantity::from(qty_lots * lot),
                     status,
-                    timestamp: Timestamp::new(0),
+                    timestamp: Timestamp::EPOCH,
                 },
             )
     }
@@ -738,7 +738,7 @@ pub mod mocks {
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller().return_const(caller);
-        mock.expect_time().return_const(Timestamp::new(0));
+        mock.expect_time().return_const(Timestamp::EPOCH);
         mock.expect_instruction_counter().return_const(0u64);
         mock
     }
@@ -841,7 +841,7 @@ pub mod mocks {
         }
 
         fn time(&self) -> Timestamp {
-            Timestamp::new(0)
+            Timestamp::EPOCH
         }
     }
 }
