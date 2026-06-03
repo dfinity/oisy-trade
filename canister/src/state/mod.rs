@@ -416,7 +416,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     let from_owner = owner_cache[from_order];
                     let to_owner = owner_cache[to_order];
                     self.balances
-                        .transfer(&from_owner, &to_owner, &token, *amount);
+                        .transfer(&from_owner, &to_owner, &token, *amount, Quantity::ZERO);
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
                     let owner = owner_cache[order];

@@ -47,8 +47,8 @@ pub struct StateSnapshot {
     pub max_orders_per_chunk: Option<u32>,
     #[n(8)]
     pub instruction_budget: Option<u64>,
-    /// Heap-resident fee pool inside [`TokenBalance`]. Absent in snapshots
-    /// written before DEFI-2726; restored as an empty pool.
+    /// Heap-resident fee pool inside [`TokenBalance`]. Encoded as `None`
+    /// when the pool is empty.
     #[n(9)]
     pub fee_pool: Option<Vec<FeeEntry>>,
 }
@@ -130,7 +130,14 @@ impl StateSnapshot {
             },
             max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
             instruction_budget: Some(execution_policy.instruction_budget()),
-            fee_pool: Some(balances.fee_pool_snapshot()),
+            fee_pool: {
+                let snapshot = balances.fee_pool_snapshot();
+                if snapshot.is_empty() {
+                    None
+                } else {
+                    Some(snapshot)
+                }
+            },
         }
     }
 

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 /// - Per-`(token, user)` `Balance` entries in a stable [`StableBTreeMap`]
 ///   (auto-survives upgrades via the memory ID).
 /// - A heap-resident fee pool indexed by `TokenId`, accrued by fills via
-///   [`TokenBalance::transfer_with_fee`] and persisted across upgrades
+///   [`TokenBalance::transfer`] and persisted across upgrades
 ///   through the [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
 ///   [`restore_fee_pool`](Self::restore_fee_pool) pair plumbed through
 ///   `StateSnapshot`.
@@ -106,51 +106,21 @@ impl<M: Memory> TokenBalance<M> {
         self.balances.insert(key, balance);
     }
 
-    /// Move `amount` from a debtor's reserved to a creditor's free balance
-    /// for the given token. Creates the creditor entry if absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the debtor has no balance entry, or if the debtor's
-    /// reserved balance is insufficient.
-    pub fn transfer(
-        &mut self,
-        debtor: &Principal,
-        creditor: &Principal,
-        token: &TokenId,
-        amount: Quantity,
-    ) {
-        bench_scopes!("balances", "balances::transfer");
-        let debtor_key = BalanceKey::new(*token, *debtor);
-        let mut debtor_balance = self
-            .balances
-            .get(&debtor_key)
-            .expect("BUG: debtor balance missing");
-        debtor_balance.debit_reserved(&amount);
-        self.balances.insert(debtor_key, debtor_balance);
-
-        // Self-transfer: debtor and creditor are the same user, so the credit
-        // must land on the just-updated balance — re-read before depositing
-        // to avoid clobbering the debit we just persisted.
-        self.update(*creditor, *token, |b| b.deposit(amount));
-    }
-
     /// Transfer `gross` from `debtor`'s reserved into `creditor`'s free,
-    /// withholding `fee` for the canister-owned fee pool of `token`.
-    /// The creditor receives exactly `gross - fee`; the fee pool gains `fee`.
+    /// withholding `fee` for the canister-owned fee pool of `token`. The
+    /// creditor receives exactly `gross - fee`; the fee pool gains `fee`.
+    /// `fee = ZERO` is the non-fee case.
     ///
-    /// Together these three updates conserve `gross` units of `token` across
-    /// the per-token invariant
-    /// `Σ users(free + reserved) + fee_pool = Σ deposits − Σ withdrawals`,
-    /// and `fee = 0` makes this equivalent to [`transfer`](Self::transfer).
+    /// Conserves `gross` units of `token` across the per-token invariant
+    /// `Σ users(free + reserved) + fee_pool = Σ deposits − Σ withdrawals`.
     ///
     /// # Panics
     ///
     /// - `fee > gross` (preconditions are the caller's responsibility; the
     ///   per-pair `BasisPoint` invariant guarantees this at the fill path).
     /// - The debtor has no balance entry, or `gross` exceeds the debtor's
-    ///   reserved balance (same as [`transfer`](Self::transfer)).
-    pub fn transfer_with_fee(
+    ///   reserved balance.
+    pub fn transfer(
         &mut self,
         debtor: &Principal,
         creditor: &Principal,
@@ -158,10 +128,10 @@ impl<M: Memory> TokenBalance<M> {
         gross: Quantity,
         fee: Quantity,
     ) {
-        bench_scopes!("balances", "balances::transfer_with_fee");
+        bench_scopes!("balances", "balances::transfer");
         assert!(
             fee <= gross,
-            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer_with_fee"
+            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
         );
         let debtor_key = BalanceKey::new(*token, *debtor);
         let mut debtor_balance = self
@@ -174,6 +144,9 @@ impl<M: Memory> TokenBalance<M> {
         let net = gross
             .checked_sub(&fee)
             .expect("BUG: fee <= gross checked above");
+        // Self-transfer: debtor and creditor are the same user, so the credit
+        // must land on the just-updated balance — re-read before depositing
+        // to avoid clobbering the debit we just persisted.
         self.update(*creditor, *token, |b| b.deposit(net));
 
         if !fee.is_zero() {
@@ -186,11 +159,6 @@ impl<M: Memory> TokenBalance<M> {
     /// ever been accrued for this token.
     pub fn fee_balance(&self, token: &TokenId) -> Option<Quantity> {
         self.fee_balances.get(token).copied()
-    }
-
-    /// Iterate the fee pool. Order is by `TokenId` (BTreeMap ordering).
-    pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
-        self.fee_balances.iter().map(|(k, v)| (*k, *v))
     }
 
     /// Snapshot the heap-resident fee pool for pre-upgrade serialization.

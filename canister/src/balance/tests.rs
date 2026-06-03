@@ -212,7 +212,13 @@ mod token_balance {
         tb.reserve(&alice(), &token_a(), Quantity::from(100u64))
             .unwrap();
 
-        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(100u64));
+        tb.transfer(
+            &alice(),
+            &bob,
+            &token_a(),
+            Quantity::from(100u64),
+            Quantity::ZERO,
+        );
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
@@ -231,7 +237,13 @@ mod token_balance {
         tb.reserve(&alice(), &token_a(), Quantity::from(60u64))
             .unwrap();
 
-        tb.transfer(&alice(), &alice(), &token_a(), Quantity::from(60u64));
+        tb.transfer(
+            &alice(),
+            &alice(),
+            &token_a(),
+            Quantity::from(60u64),
+            Quantity::ZERO,
+        );
 
         assert_eq!(
             tb.get_balance(&alice(), &token_a()),
@@ -244,7 +256,13 @@ mod token_balance {
     fn should_panic_transfer_missing_debtor() {
         let bob = Principal::from_slice(&[0x02]);
         let mut tb = TokenBalance::default();
-        tb.transfer(&alice(), &bob, &token_a(), Quantity::from(10u64));
+        tb.transfer(
+            &alice(),
+            &bob,
+            &token_a(),
+            Quantity::from(10u64),
+            Quantity::ZERO,
+        );
     }
 
     #[test]
@@ -294,35 +312,10 @@ mod fee_pool {
     }
 
     #[test]
-    fn transfer_with_zero_fee_matches_transfer() {
-        let mut with_fee = setup_alice_reserve(100);
-        let mut plain = setup_alice_reserve(100);
-
-        with_fee.transfer_with_fee(
-            &alice(),
-            &bob(),
-            &token_a(),
-            Quantity::from(40u64),
-            Quantity::ZERO,
-        );
-        plain.transfer(&alice(), &bob(), &token_a(), Quantity::from(40u64));
-
-        assert_eq!(
-            with_fee.get_balance(&alice(), &token_a()),
-            plain.get_balance(&alice(), &token_a()),
-        );
-        assert_eq!(
-            with_fee.get_balance(&bob(), &token_a()),
-            plain.get_balance(&bob(), &token_a()),
-        );
-        assert_eq!(with_fee.fee_balance(&token_a()), None);
-    }
-
-    #[test]
-    fn transfer_with_fee_credits_net_to_creditor_and_accrues_to_pool() {
+    fn transfer_credits_net_to_creditor_and_accrues_to_pool() {
         let mut tb = setup_alice_reserve(100);
 
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -346,14 +339,14 @@ mod fee_pool {
     #[test]
     fn multiple_accruals_sum_per_token() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(3u64),
         );
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -365,7 +358,7 @@ mod fee_pool {
     }
 
     /// `Σ users(free + reserved) + fee_pool` is conserved on every
-    /// transfer_with_fee call. The pool absorbs exactly the fee withheld
+    /// transfer call. The pool absorbs exactly the fee withheld
     /// from the creditor.
     #[test]
     fn invariant_holds_across_a_mixed_workload() {
@@ -373,7 +366,7 @@ mod fee_pool {
         tb.deposit(bob(), token_b(), Quantity::from(50u64));
 
         // Several operations against token_a:
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -383,7 +376,7 @@ mod fee_pool {
         tb.reserve(&bob(), &token_a(), Quantity::from(10u64))
             .unwrap();
         tb.unreserve(&bob(), &token_a(), Quantity::from(5u64));
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -406,7 +399,7 @@ mod fee_pool {
     #[should_panic(expected = "fee")]
     fn should_panic_when_fee_exceeds_gross() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -418,7 +411,7 @@ mod fee_pool {
     #[test]
     fn snapshot_roundtrips_through_save_and_restore() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),
@@ -428,7 +421,7 @@ mod fee_pool {
         tb.deposit(alice(), token_b(), Quantity::from(50u64));
         tb.reserve(&alice(), &token_b(), Quantity::from(20u64))
             .unwrap();
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_b(),
@@ -453,7 +446,7 @@ mod fee_pool {
     #[test]
     fn restore_replaces_any_existing_pool() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer_with_fee(
+        tb.transfer(
             &alice(),
             &bob(),
             &token_a(),

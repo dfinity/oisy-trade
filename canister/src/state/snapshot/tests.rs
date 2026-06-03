@@ -285,7 +285,7 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         .balances
         .reserve(&buyer, &pair.quote, Quantity::from(500u64))
         .unwrap();
-    state.balances.transfer_with_fee(
+    state.balances.transfer(
         &buyer,
         &seller,
         &pair.quote,
@@ -305,18 +305,6 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         "fee pool entry must survive the snapshot round-trip",
     );
     assert_eq!(state, restored);
-}
-
-/// Snapshots written before DEFI-2726 carry no `fee_pool` field
-/// (`Option<Vec<FeeEntry>>` decodes as `None`); restoring must produce an
-/// empty pool rather than trapping.
-#[test]
-fn should_restore_pre_fees_snapshot_with_empty_fee_pool() {
-    let state = fresh_state();
-    let mut snapshot = StateSnapshot::from_state(&state);
-    snapshot.fee_pool = None;
-    let restored = snapshot.into_state(state.order_history.clone(), state.balances.clone());
-    assert_eq!(restored.balances.iter_fee_balances().count(), 0);
 }
 
 /// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are
