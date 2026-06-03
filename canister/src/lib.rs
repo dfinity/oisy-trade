@@ -9,7 +9,7 @@ use dex_types::{
 use std::{num::NonZeroU64, time::Duration};
 
 pub use execute::EXECUTOR;
-pub use runtime::{IC_RUNTIME, Runtime};
+pub use runtime::{IC_RUNTIME, Runtime, Timestamp};
 
 /// Open a pair of canbench scopes: an aggregate scope and a specific scope.
 /// Both are no-ops when the `canbench-rs` feature is not enabled.

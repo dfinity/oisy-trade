@@ -13,6 +13,7 @@ mod tests;
 
 use crate::Runtime;
 use crate::Task;
+use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
@@ -196,7 +197,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: Principal,
         book_id: OrderBookId,
         order: Order,
-        timestamp: u64,
+        timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         let pair = self
@@ -235,7 +236,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     price: order.price(),
                     quantity: *order.remaining_quantity(),
                     status: OrderStatus::Pending,
-                    timestamp: Some(timestamp),
+                    timestamp,
                 },
             );
         }

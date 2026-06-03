@@ -378,7 +378,7 @@ mod cancel_limit_order {
         expected_remaining: impl Into<Quantity>,
     ) {
         let mut runtime = MockRuntime::new();
-        runtime.expect_time().return_const(0u64);
+        runtime.expect_time().return_const(crate::Timestamp::new(0));
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
@@ -473,7 +473,7 @@ mod record_limit_order {
                 },
             )
             .unwrap();
-        let timestamp = 1_700_000_000_000_000_000u64;
+        let timestamp = crate::Timestamp::new(1_700_000_000_000_000_000);
 
         state.record_limit_order(
             OWNER,
@@ -485,7 +485,7 @@ mod record_limit_order {
 
         assert_eq!(
             state.order_history.get(&order_id).unwrap().timestamp,
-            Some(timestamp)
+            timestamp
         );
     }
 }

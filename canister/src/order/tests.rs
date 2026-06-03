@@ -1099,7 +1099,7 @@ mod history {
             price: Price::new(100),
             quantity: Quantity::from(1_000_000u64),
             status: OrderStatus::Pending,
-            timestamp: None,
+            timestamp: crate::Timestamp::new(0),
         }
     }
 

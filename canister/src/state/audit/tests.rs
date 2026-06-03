@@ -68,10 +68,10 @@ impl Scenario {
         }
     }
 
-    fn timestamp(&mut self) -> u64 {
+    fn timestamp(&mut self) -> crate::Timestamp {
         let ts = self.next_ts;
         self.next_ts += 1;
-        ts
+        crate::Timestamp::new(ts)
     }
 
     fn with_upgrade(mut self, mode: Option<Mode>) -> Self {

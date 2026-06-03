@@ -1,4 +1,5 @@
 use super::{OrderId, OrderStatus, Price, Quantity, Side};
+use crate::Timestamp;
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
@@ -24,11 +25,10 @@ pub struct OrderRecord {
     pub quantity: Quantity,
     #[n(4)]
     pub status: OrderStatus,
-    /// Submission time in nanoseconds since the Unix epoch, taken from the
-    /// add-limit-order event. Display-only; ordering uses the per-user index.
-    /// `Option` so records written before this field existed decode to `None`.
+    /// Submission time, taken from the add-limit-order event. Display-only;
+    /// ordering uses the per-user index.
     #[n(5)]
-    pub timestamp: Option<u64>,
+    pub timestamp: Timestamp,
 }
 
 impl From<OrderRecord> for dex_types::OrderRecord {
@@ -39,7 +39,7 @@ impl From<OrderRecord> for dex_types::OrderRecord {
             price: record.price.into(),
             quantity: record.quantity.into(),
             status: record.status.into(),
-            timestamp: record.timestamp.unwrap_or(0),
+            timestamp: record.timestamp.as_nanos(),
         }
     }
 }

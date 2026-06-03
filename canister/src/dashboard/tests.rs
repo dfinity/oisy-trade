@@ -226,7 +226,7 @@ fn place(
         user,
         order_id.book_id(),
         order,
-        0,
+        crate::Timestamp::new(0),
         StableMemoryOptions::Write,
     );
     order_id

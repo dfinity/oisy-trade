@@ -1,3 +1,4 @@
+use crate::Timestamp;
 use crate::order::{
     LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize, TokenId,
     TokenMetadata,
@@ -13,7 +14,7 @@ use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
-        timestamp: 0,
+        timestamp: Timestamp::new(0),
         payload: EventType::Init(InitArg {
             mode,
             max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
@@ -28,7 +29,7 @@ pub fn upgrade_event(
     instruction_budget: Option<u64>,
 ) -> Event {
     Event {
-        timestamp: 1,
+        timestamp: Timestamp::new(1),
         payload: EventType::Upgrade(UpgradeArg {
             mode,
             max_orders_per_chunk,
@@ -39,7 +40,7 @@ pub fn upgrade_event(
 
 pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
     Event {
-        timestamp: 2,
+        timestamp: Timestamp::new(2),
         payload: EventType::AddTradingPair(AddTradingPairEvent {
             book_id: OrderBookId::ZERO,
             base: TokenId::new(base),
@@ -127,7 +128,7 @@ impl WorstCaseEvent {
 
 fn max_timestamp(payload: EventType) -> Event {
     Event {
-        timestamp: u64::MAX,
+        timestamp: Timestamp::new(u64::MAX),
         payload,
     }
 }

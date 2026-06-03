@@ -1,3 +1,4 @@
+use crate::Timestamp;
 use crate::state::event::{Event, EventType};
 use ic_stable_structures::DefaultMemoryImpl;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
@@ -33,7 +34,7 @@ thread_local! {
     });
 }
 
-pub fn record_event(timestamp: u64, payload: EventType) {
+pub fn record_event(timestamp: Timestamp, payload: EventType) {
     EVENTS
         .with(|events| events.borrow().append(&Event { timestamp, payload }))
         .expect("recording an event should succeed");

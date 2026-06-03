@@ -1,5 +1,4 @@
 use super::{StableMemoryOptions, State};
-use crate::Runtime;
 use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
@@ -7,6 +6,7 @@ use crate::state::event::{
     WithdrawEvent,
 };
 use crate::storage;
+use crate::{Runtime, Timestamp};
 use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
 use std::collections::VecDeque;
@@ -37,7 +37,7 @@ pub fn record_event(payload: EventType, runtime: &impl Runtime) {
 fn apply_state_transition<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: &EventType,
-    timestamp: u64,
+    timestamp: Timestamp,
     persistence: StableMemoryOptions,
 ) {
     use crate::order;

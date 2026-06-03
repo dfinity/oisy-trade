@@ -687,7 +687,7 @@ mod withdraw {
     fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
         let mut runtime = MockRuntime::new();
         runtime.expect_msg_caller().return_const(USER);
-        runtime.expect_time().return_const(0u64);
+        runtime.expect_time().return_const(crate::Timestamp::new(0));
 
         let mut seq = Sequence::new();
         for response in responses {
