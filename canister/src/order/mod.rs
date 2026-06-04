@@ -634,9 +634,46 @@ impl Quantity {
     }
 
     /// Integer-divide `self` by a u64 divisor, returning `(quotient, remainder)`.
-    /// Returns `None` if `divisor` is zero. Implements u256-by-u64 long
-    /// division as three u128 steps (high limb, upper-low limb,
-    /// lower-low limb). `remainder` is `< divisor`, so it always fits in u64.
+    /// Returns `None` if `divisor` is zero.
+    ///
+    /// Schoolbook long division on `self` split into three chunks:
+    /// the full `high` limb (top 128 bits) and the two 64-bit halves
+    /// of `low`. Write `self = high · 2^128 + low_hi · 2^64 + low_lo`
+    /// and divide chunk-by-chunk, carrying each remainder into the
+    /// next step.
+    ///
+    /// **Step 1.** Divide the high limb: `high = q1 · d + r1`.
+    /// Substituting back and grouping the settled term:
+    ///
+    /// ```text
+    /// self = q1 · d · 2^128  +  r1 · 2^128 + low_hi · 2^64 + low_lo
+    ///        └── settled ──┘    └────── still to divide ──────┘
+    /// ```
+    ///
+    /// **Step 2.** Factor a `2^64` out of the leftover's top two
+    /// terms (since `2^128 = 2^64 · 2^64`) — the leftover now has
+    /// the same shape as the original, one 64-bit digit shorter:
+    ///
+    /// ```text
+    /// r1 · 2^128 + low_hi · 2^64 + low_lo
+    ///     = (r1 · 2^64 + low_hi) · 2^64 + low_lo
+    /// ```
+    ///
+    /// The new leading 128-bit chunk `(r1 · 2^64 + low_hi)` is
+    /// step 2's dividend: `r1 · 2^64 + low_hi = q2 · d + r2`.
+    ///
+    /// **Step 3.** Same factoring again leaves `r2 · 2^64 + low_lo`
+    /// as the final dividend: `r2 · 2^64 + low_lo = q3 · d + r3`.
+    ///
+    /// ```text
+    /// quotient  = q1 · 2^128 + q2 · 2^64 + q3
+    /// remainder = r3
+    /// ```
+    ///
+    /// Every dividend fits in u128: each `rᵢ < d ≤ 2^64`, leaving
+    /// room for the `· 2^64` shift before the next 64-bit chunk is
+    /// OR'd in. The final remainder is `< divisor ≤ u64::MAX`, so
+    /// it always fits in u64.
     pub fn checked_div_rem_u64(self, divisor: u64) -> Option<(Self, u64)> {
         bench_scopes!("qty", "qty::div_rem_u64");
         if divisor == 0 {
@@ -644,31 +681,30 @@ impl Quantity {
         }
         let d = divisor as u128;
 
-        // Step 1: divide the high limb. Remainder < d ≤ u64::MAX < 2^64.
-        let q_high = self.high / d;
-        let mut rem = self.high % d;
+        // Step 1: divide the high limb. r1 < d ≤ u64::MAX < 2^64.
+        let q1 = self.high / d;
+        let r1 = self.high % d;
 
-        // Step 2: process the upper 64 bits of `low`. The dividend is
-        // `rem * 2^64 + (low >> 64)`, which fits in u128 since rem < 2^64.
+        // Step 2: dividend is `r1 · 2^64 + low_hi`, fits in u128 since r1 < 2^64.
         let low_hi = self.low >> 64;
         let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
-        let dividend2 = (rem << 64) | low_hi;
-        let q1 = dividend2 / d;
-        rem = dividend2 % d;
+        let dividend2 = (r1 << 64) | low_hi;
+        let q2 = dividend2 / d;
+        let r2 = dividend2 % d;
 
-        // Step 3: process the lower 64 bits of `low`. Same overflow argument.
-        let dividend3 = (rem << 64) | low_lo;
-        let q2 = dividend3 / d;
-        let rem = dividend3 % d;
+        // Step 3: dividend is `r2 · 2^64 + low_lo`. Same overflow argument.
+        let dividend3 = (r2 << 64) | low_lo;
+        let q3 = dividend3 / d;
+        let r3 = dividend3 % d;
 
-        // `q1 < 2^64` and `q2 < 2^64`, so they combine into the low u128.
-        let low_out = (q1 << 64) | q2;
+        // q2 < 2^64 and q3 < 2^64, so they combine into the low u128.
+        let low_out = (q2 << 64) | q3;
         Some((
             Self {
-                high: q_high,
+                high: q1,
                 low: low_out,
             },
-            rem as u64,
+            r3 as u64,
         ))
     }
 }
