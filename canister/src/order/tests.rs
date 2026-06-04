@@ -88,19 +88,19 @@ mod quantity {
         let a = Quantity::new(1, 0);
         // 1
         let b = Quantity::new(0, 1);
-        assert_eq!(a.checked_sub(&b), Some(Quantity::new(0, u128::MAX)));
+        assert_eq!(a.checked_sub(b), Some(Quantity::new(0, u128::MAX)));
 
-        assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+        assert_eq!(a.checked_sub(a), Some(Quantity::ZERO));
 
         // 2^128 + 1
         let c = Quantity::new(1, 1);
-        assert_eq!(a.checked_sub(&c), None);
+        assert_eq!(a.checked_sub(c), None);
 
         // other.high == u128::MAX with borrow: high + borrow would overflow u128
         // without checked_add.
         let d = Quantity::new(u128::MAX, 0);
         let e = Quantity::new(u128::MAX, 1);
-        assert_eq!(d.checked_sub(&e), None);
+        assert_eq!(d.checked_sub(e), None);
     }
 
     proptest! {
@@ -117,14 +117,14 @@ mod quantity {
         #[test]
         fn checked_add_then_sub_roundtrip(a in arb_quantity(), b in arb_quantity()) {
             if let Some(sum) = a.checked_add(b) {
-                prop_assert_eq!(sum.checked_sub(&b), Some(a));
-                prop_assert_eq!(sum.checked_sub(&a), Some(b));
+                prop_assert_eq!(sum.checked_sub(b), Some(a));
+                prop_assert_eq!(sum.checked_sub(a), Some(b));
             }
         }
 
         #[test]
         fn checked_sub_self_is_zero(a in arb_quantity()) {
-            prop_assert_eq!(a.checked_sub(&a), Some(Quantity::ZERO));
+            prop_assert_eq!(a.checked_sub(a), Some(Quantity::ZERO));
         }
 
         #[test]
@@ -133,7 +133,7 @@ mod quantity {
             b in arb_small_quantity(),
         ) {
             if a < b {
-                prop_assert_eq!(a.checked_sub(&b), None);
+                prop_assert_eq!(a.checked_sub(b), None);
             }
         }
 

@@ -505,7 +505,7 @@ impl Quantity {
         }
     }
 
-    pub fn checked_sub(&self, other: &Self) -> Option<Self> {
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
         bench_scopes!("qty", "qty::checked_sub");
         let (low, borrow) = self.low.overflowing_sub(other.low);
         let high = self
@@ -736,7 +736,7 @@ impl Order {
     pub fn reduce_quantity(&mut self, amount: &Quantity) {
         self.remaining_quantity = self
             .remaining_quantity
-            .checked_sub(amount)
+            .checked_sub(*amount)
             .expect("cannot reduce quantity below zero");
     }
 }
@@ -783,7 +783,7 @@ impl RestingOrder {
     pub fn reduce_quantity(&mut self, amount: &Quantity) {
         self.remaining_quantity = self
             .remaining_quantity
-            .checked_sub(amount)
+            .checked_sub(*amount)
             .expect("cannot reduce quantity below zero");
     }
 }

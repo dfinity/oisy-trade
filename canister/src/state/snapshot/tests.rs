@@ -120,6 +120,7 @@ mod schema_stability {
             // Non-default policy.
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
+            fee_pool: None,
         }
     }
 
@@ -253,6 +254,56 @@ fn should_roundtrip_state_through_snapshot() {
     // `into_state` to reconstruct a state that compares equal.
     let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
 
+    assert_eq!(state, restored);
+}
+
+/// The heap-resident fee pool inside `TokenBalance` is part of the
+/// `StateSnapshot` payload and must round-trip through CBOR + restore.
+#[test]
+fn should_roundtrip_fee_pool_through_snapshot() {
+    let mut state = fresh_state();
+    let pair = icp_ckbtc_trading_pair();
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        pair.clone(),
+        icp_metadata(),
+        ckbtc_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+        FeeRates::default(),
+    );
+
+    let buyer = Principal::from_slice(&[0x01]);
+    let seller = Principal::from_slice(&[0x02]);
+    state.deposit(
+        buyer,
+        pair.quote,
+        Quantity::from(1_000u64),
+        StableMemoryOptions::Write,
+    );
+    state
+        .balances
+        .reserve(&buyer, &pair.quote, Quantity::from(500u64))
+        .unwrap();
+    state.balances.transfer(
+        &buyer,
+        &seller,
+        &pair.quote,
+        Quantity::from(100u64),
+        Quantity::from(7u64),
+    );
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+
+    assert_eq!(
+        restored.balances.fee_balance(&pair.quote),
+        Some(Quantity::from(7u64)),
+        "fee pool entry must survive the snapshot round-trip",
+    );
     assert_eq!(state, restored);
 }
 
