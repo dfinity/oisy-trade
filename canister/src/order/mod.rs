@@ -482,8 +482,15 @@ impl Quantity {
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
+        let divisor = lot_size.get();
+        // Fast path for the common small-quantity case (`high == 0`):
+        // a single `u128 % u64` is ~250 instructions cheaper than the
+        // long-division below, and validation paths place dense calls.
+        if self.high == 0 {
+            return self.low.is_multiple_of(divisor as u128);
+        }
         let (_, remainder) = (*self)
-            .checked_div_rem_u64(lot_size.get())
+            .checked_div_rem_u64(divisor)
             .expect("LotSize is NonZeroU64");
         remainder == 0
     }
