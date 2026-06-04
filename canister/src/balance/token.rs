@@ -129,6 +129,10 @@ impl<M: Memory> TokenBalance<M> {
         fee: Quantity,
     ) {
         bench_scopes!("balances", "balances::transfer");
+        assert!(
+            fee <= gross,
+            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
+        );
         let debtor_key = BalanceKey::new(*token, *debtor);
         let mut debtor_balance = self
             .balances
@@ -145,8 +149,8 @@ impl<M: Memory> TokenBalance<M> {
             return;
         }
         let net = gross
-            .checked_sub(&fee)
-            .unwrap_or_else(|| panic!("BUG: fee {fee:?} exceeds gross {gross:?} in transfer"));
+            .checked_sub(fee)
+            .expect("BUG: fee <= gross checked above");
         self.update(*creditor, *token, |b| b.deposit(net));
 
         let entry = self.fee_balances.entry(*token).or_default();

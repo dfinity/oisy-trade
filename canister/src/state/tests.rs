@@ -415,7 +415,7 @@ mod cancel_limit_order {
                 refunded_before.free().checked_add(expected_amount).unwrap(),
                 refunded_before
                     .reserved()
-                    .checked_sub(&expected_amount)
+                    .checked_sub(expected_amount)
                     .unwrap(),
             ),
             "refund on {refund_token:?} differed from expected {expected_amount:?}",

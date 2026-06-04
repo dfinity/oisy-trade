@@ -4,8 +4,11 @@
 //! (see [`crate::balance::TokenBalance`] and [`crate::order::OrderHistory`])
 //! and survive upgrades on their own — they are *not* copied into the
 //! snapshot. Everything else [`State`] carries — `mode`, `next_book_id`,
-//! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache` — is
-//! serialized here at `pre_upgrade` and restored at `post_upgrade`.
+//! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache`,
+//! `pending_settling_events`, the chunked-matching `execution_policy`
+//! (`max_orders_per_chunk` + `instruction_budget`), and the heap-resident
+//! `fee_pool` inside [`crate::balance::TokenBalance`] — is serialized
+//! here at `pre_upgrade` and restored at `post_upgrade`.
 
 use super::State;
 use crate::balance::{FeeEntry, TokenBalance};
