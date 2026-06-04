@@ -482,27 +482,10 @@ impl Quantity {
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
-        // Quantity is (high, low) pair of u128, representing (high * 2^128 + low).
-        // We want: (high * 2^128 + low) mod d == 0
-        let divisor = lot_size.get() as u128;
-        if self.high == 0 {
-            self.low.is_multiple_of(divisor)
-        } else {
-            // Using the modular identity:
-            // (high * 2^128 + low) mod d = ((high mod d) * (2^128 mod d) + (low mod d)) mod d
-            let high_rem = self.high % divisor;
-            // 2^128 doesn't fit in u128, so compute it as (u128::MAX + 1) mod d.
-            let shift_rem = (u128::MAX % divisor + 1) % divisor;
-            // Cannot overflow: high_rem and shift_rem are both < divisor (a u64),
-            // so their product is at most (u64::MAX-1)^2, and self.low % divisor
-            // is at most u64::MAX-1, leaving plenty of room in u128.
-            let combined = (high_rem
-                .checked_mul(shift_rem)
-                .expect("high_rem and shift_rem are < d (a u64)")
-                + self.low % divisor)
-                % divisor;
-            combined == 0
-        }
+        let (_, remainder) = (*self)
+            .checked_div_rem_u64(lot_size.get())
+            .expect("LotSize is NonZeroU64");
+        remainder == 0
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
@@ -625,12 +608,6 @@ impl Quantity {
             .checked_add(prod_hi >> 64)? // upper bits of prod_hi that spilled past bit 128
             .checked_add(carry as u128)?; // carry from the low addition
         Some(Self { high, low })
-    }
-
-    /// Integer-divide `self` by a u64 divisor. Returns `None` if `divisor`
-    /// is zero. Thin wrapper over [`checked_div_rem_u64`](Self::checked_div_rem_u64).
-    pub fn checked_div_u64(self, divisor: u64) -> Option<Self> {
-        self.checked_div_rem_u64(divisor).map(|(q, _)| q)
     }
 
     /// Integer-divide `self` by a u64 divisor, returning `(quotient, remainder)`.

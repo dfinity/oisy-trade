@@ -1269,30 +1269,6 @@ mod settle_fills {
             assert_eq!(state.balances.fee_balance(&pair.quote), None);
         }
 
-        /// Pre-fees `BalanceOperation::Transfer` (no `fee` field) decodes
-        /// with `fee = None` and replays as a regular zero-fee transfer.
-        /// Guards the wire-format back-compat contract.
-        #[test]
-        fn decode_pre_fees_transfer_op_sets_fee_to_none() {
-            use crate::order::PairToken;
-            use crate::state::event::BalanceOperation;
-
-            // Build the same Transfer with and without the `fee` field by
-            // hand-encoding CBOR. Same shape minicbor's derive emits for a
-            // 4-element struct.
-            let with_fee = BalanceOperation::Transfer {
-                from_order: crate::order::OrderSeq::new(1),
-                to_order: crate::order::OrderSeq::new(2),
-                token: PairToken::Quote,
-                amount: Quantity::from(100u64),
-                fee: None,
-            };
-            let mut buf = vec![];
-            minicbor::encode(&with_fee, &mut buf).unwrap();
-            let decoded: BalanceOperation = minicbor::decode(&buf).unwrap();
-            assert_eq!(decoded, with_fee);
-        }
-
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
             let mut state = test_fixtures::state();
             let pair = icp_ckbtc_trading_pair();

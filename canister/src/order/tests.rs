@@ -203,6 +203,34 @@ mod quantity {
             prop_assert!(q.is_multiple_of(lot_size));
         }
 
+        /// For quantities that fit in u128 (`high == 0`), `checked_div_rem_u64`
+        /// must agree with plain u128 `/` and `%`.
+        #[test]
+        fn checked_div_rem_u64_matches_u128(value in any::<u128>(), divisor in 1u64..=u64::MAX) {
+            let q = Quantity::from_u128(value);
+            let d = divisor as u128;
+            let (quotient, remainder) = q.checked_div_rem_u64(divisor).unwrap();
+            prop_assert_eq!(quotient, Quantity::from_u128(value / d));
+            prop_assert_eq!(u128::from(remainder), value % d);
+        }
+
+        /// Fundamental div-mod identity: `q = quotient × divisor + remainder`
+        /// with `remainder < divisor`, for any quantity and any non-zero divisor.
+        #[test]
+        fn checked_div_rem_u64_satisfies_identity(
+            q in arb_quantity(),
+            divisor in 1u64..=u64::MAX,
+        ) {
+            let (quotient, remainder) = q.checked_div_rem_u64(divisor).unwrap();
+            prop_assert!(remainder < divisor);
+            let reconstructed = quotient
+                .checked_mul_u64(divisor)
+                .unwrap()
+                .checked_add(Quantity::from(remainder))
+                .unwrap();
+            prop_assert_eq!(reconstructed, q);
+        }
+
         #[test]
         fn is_zero_iff_default(high in any::<u128>(), low in any::<u128>()) {
             let q = Quantity::new(high, low);
