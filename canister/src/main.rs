@@ -3,9 +3,8 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TokenId,
-    TradingPair, TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
+    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -142,6 +141,13 @@ fn get_balances(
 }
 
 #[ic_cdk::query]
+fn get_fee_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    dex_canister::get_fee_balances(filter)
+}
+
+#[ic_cdk::query]
 fn list_supported_tokens() -> Vec<Token> {
     dex_canister::list_supported_tokens()
 }
@@ -149,11 +155,6 @@ fn list_supported_tokens() -> Vec<Token> {
 #[ic_cdk::update]
 fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
     dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
-}
-
-#[ic_cdk::query]
-fn fee_balance(token: TokenId) -> candid::Nat {
-    dex_canister::fee_balance(token)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.

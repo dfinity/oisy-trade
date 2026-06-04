@@ -1,4 +1,3 @@
-use candid::Nat;
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
@@ -399,10 +398,16 @@ pub fn add_trading_pair(
     })
 }
 
-pub fn fee_balance(token: dex_types::TokenId) -> Nat {
-    state::with_state(|s| {
-        s.fee_balance(&order::TokenId::from(token))
-            .map(Into::into)
-            .unwrap_or(Nat::from(0u64))
-    })
+pub fn get_fee_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    if let Some(ref f) = filter
+        && (f.len() as u32) > MAX_FILTER_LEN
+    {
+        return Err(GetBalancesRequestError::FilterTooLarge {
+            len: f.len() as u32,
+            max: MAX_FILTER_LEN,
+        });
+    }
+    Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }

@@ -530,6 +530,64 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.balances.iter_fee_balances()
     }
 
+    /// Returns the canister-owned fee pool, shaped like [`get_balances`].
+    /// - `None`: every token with a non-zero fee pool entry.
+    /// - `Some(filter)`: each filter entry resolved per-entry; unsupported
+    ///   tokens are reported as [`dex_types::GetBalancesError::TokenNotSupported`].
+    ///   Registered tokens with no accrual return `Balance::ZERO`.
+    pub fn get_fee_balances(
+        &self,
+        filter: Option<&[dex_types::FilterToken]>,
+    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        match filter {
+            Some(entries) => {
+                let mut seen: BTreeSet<dex_types::FilterToken> = BTreeSet::new();
+                entries
+                    .iter()
+                    .filter(|ft| seen.insert((*ft).clone()))
+                    .map(|ft| {
+                        let internal_token = match ft {
+                            dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
+                        };
+                        match self.tokens.get(&internal_token) {
+                            None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
+                            Some(metadata) => Ok(dex_types::UserTokenBalance {
+                                token: dex_types::Token {
+                                    id: internal_token.into(),
+                                    metadata: metadata.clone().into(),
+                                },
+                                balance: fee_only_balance(
+                                    self.balances
+                                        .fee_balance(&internal_token)
+                                        .unwrap_or_default(),
+                                ),
+                            }),
+                        }
+                    })
+                    .collect()
+            }
+            None => self
+                .balances
+                .iter_fee_balances()
+                .filter(|(_, amount)| !amount.is_zero())
+                .map(|(token, amount)| {
+                    let metadata = self
+                        .tokens
+                        .get(&token)
+                        .expect("BUG: fee pool entry for unregistered token")
+                        .clone();
+                    Ok(dex_types::UserTokenBalance {
+                        token: dex_types::Token {
+                            id: token.into(),
+                            metadata: metadata.into(),
+                        },
+                        balance: fee_only_balance(amount),
+                    })
+                })
+                .collect(),
+        }
+    }
+
     /// Credits `amount` to the user's free balance.
     pub fn deposit(
         &mut self,
@@ -751,6 +809,17 @@ fn compute_balance_operations(
 /// charged".
 fn nonzero(q: Quantity) -> Option<Quantity> {
     if q.is_zero() { None } else { Some(q) }
+}
+
+/// `dex_types::Balance` carrying a fee amount in `free` and zero in
+/// `reserved`. Fees have no reserved concept; the `Balance` shape is
+/// reused to keep the `get_fee_balances` response identical in shape to
+/// `get_balances`.
+fn fee_only_balance(amount: Quantity) -> dex_types::Balance {
+    dex_types::Balance {
+        free: amount.into(),
+        reserved: candid::Nat::from(0u64),
+    }
 }
 
 fn compute_order_status_transitions(

@@ -567,6 +567,18 @@ service : (DexArg) -> {
     // (or the `FilterToken` echoed by `TokenNotSupported`).
     get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
+    // Query the canister-owned fee pool. Mirrors `get_balances` shape:
+    //
+    // - `null`: returns every token with a non-zero fee balance.
+    // - `opt vec { ... }`: looks up each entry (including zero
+    //   balances); unsupported tokens are reported per-entry as
+    //   `TokenNotSupported`. Duplicates collapsed; empty filter returns
+    //   an empty `Ok` vector.
+    //
+    // Each returned `Balance` carries the fee amount in `free`;
+    // `reserved` is always zero (fees have no reserved concept).
+    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+
     // List every token registered with the DEX. Intended as a primitive
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
@@ -574,10 +586,6 @@ service : (DexArg) -> {
 
     // Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
-
-    // Read the canister-owned fee pool for `token`. Returns 0 if no fees
-    // have ever been accrued for the token.
-    fee_balance : (TokenId) -> (nat) query;
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.
