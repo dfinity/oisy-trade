@@ -1,6 +1,6 @@
 use crate::order::{
-    FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata, TradingPair,
+    BasisPoint, FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata, TradingPair,
 };
 
 use crate::EXECUTOR;
@@ -64,26 +64,41 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
 /// Each order is placed by a different user (worst case for balance lookups).
 #[bench(raw)]
 fn bench_process_pending_orders_1000() -> canbench_rs::BenchResult {
-    let depth = crate::benchmarks::load_depth();
-    let trades = crate::benchmarks::load_trades();
-    let mut state = crate::benchmarks::new_state();
+    bench_process_pending_orders_1000_with(FeeRates::default())
+}
 
-    crate::benchmarks::populate_state(&mut state, &depth);
+/// Same workload as [`bench_process_pending_orders_1000`] with non-zero
+/// maker/taker rates (10 bps / 20 bps) — exercises the fee accrual path
+/// during matching/settling.
+#[bench(raw)]
+fn bench_process_pending_orders_1000_with_fees() -> canbench_rs::BenchResult {
+    bench_process_pending_orders_1000_with(FeeRates {
+        maker: BasisPoint::new(10).unwrap(),
+        taker: BasisPoint::new(20).unwrap(),
+    })
+}
+
+fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let trades = load_trades();
+    let mut state = new_state_with_fees(fee_rates);
+
+    populate_state(&mut state, &depth);
 
     // Queue 1000 pending orders from aggregated trades.
     // Binance `m` field: true = buyer is maker, so the taker is a seller.
-    let pair = crate::benchmarks::trading_pair();
+    let pair = trading_pair();
     let taker_id_offset = depth.bids.len() + depth.asks.len();
     for (i, trade) in trades.iter().enumerate() {
-        let principal = crate::benchmarks::user((taker_id_offset + i) as u64);
-        crate::benchmarks::fund_user(&mut state, principal);
+        let principal = user((taker_id_offset + i) as u64);
+        fund_user(&mut state, principal);
         place_order(
             &mut state,
             principal,
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
-                price: Price::new(crate::benchmarks::parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(crate::benchmarks::parse_decimal_8(&trade.q)),
+                price: Price::new(parse_decimal_8(&trade.p)),
+                quantity: Quantity::from(parse_decimal_8(&trade.q)),
             },
         );
     }
@@ -274,6 +289,10 @@ fn load_trades() -> Vec<AggTrade> {
 }
 
 fn new_state() -> State<storage::VMem, storage::VMem> {
+    new_state_with_fees(FeeRates::default())
+}
+
+fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMem> {
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
@@ -297,7 +316,7 @@ fn new_state() -> State<storage::VMem, storage::VMem> {
         },
         TICK_SIZE,
         LOT_SIZE,
-        FeeRates::default(),
+        fee_rates,
     );
     state
 }
