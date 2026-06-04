@@ -4,7 +4,7 @@ use crate::order::{
 };
 
 use crate::EXECUTOR;
-use crate::order::{OrderHistory, UserOrders};
+use crate::order::OrderHistory;
 use crate::state::execution_policy::ExecutionPolicy;
 use crate::state::{StableMemoryOptions, State};
 use crate::storage;
@@ -299,9 +299,11 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
-        OrderHistory::new(storage::order_history_memory()),
+        OrderHistory::new(
+            storage::order_history_memory(),
+            storage::user_orders_memory(),
+        ),
         crate::user::UserRegistry::new(storage::user_registry_memory()),
-        UserOrders::new(storage::user_orders_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),
     )
     .unwrap();

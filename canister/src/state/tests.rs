@@ -57,9 +57,11 @@ mod assert_caller_is_allowed {
                 max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
-            crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::state::OrderHistory::new(
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+            ),
             crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
-            crate::order::UserOrders::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
@@ -511,7 +513,10 @@ mod record_limit_order {
         let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
         let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
 
-        assert_eq!(state.user_orders.page(OWNER, 0, 10), vec![second, first]);
+        assert_eq!(
+            state.order_history.orders_by_user(OWNER, 0, 10),
+            vec![second, first]
+        );
     }
 }
 
@@ -1429,9 +1434,8 @@ mod execution_policy {
                 max_orders_per_chunk: 17,
                 instruction_budget: 12_345,
             },
-            OrderHistory::new(VectorMemory::default()),
+            OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             crate::user::UserRegistry::new(VectorMemory::default()),
-            crate::order::UserOrders::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();

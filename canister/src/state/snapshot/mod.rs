@@ -14,7 +14,6 @@ use super::State;
 use crate::balance::{FeeEntry, TokenBalance};
 use crate::order::{
     OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
-    UserOrders,
 };
 use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
@@ -102,8 +101,6 @@ impl StateSnapshot {
             balances,
             // ignored: live in stable memory,
             order_history: _,
-            // ignored: lives in stable memory,
-            user_orders: _,
             next_order_seq,
             // ignored: timers are reset upon upgrades
             active_tasks: _,
@@ -161,7 +158,6 @@ impl StateSnapshot {
     pub fn into_state<MH: Memory, MB: Memory>(
         self,
         order_history: OrderHistory<MH>,
-        user_orders: UserOrders<MH>,
         mut balances: TokenBalance<MB>,
         user_registry: UserRegistry<MB>,
     ) -> State<MH, MB> {
@@ -234,7 +230,6 @@ impl StateSnapshot {
             user_registry,
             balances,
             order_history,
-            user_orders,
             next_order_seq: self.next_order_seq.unwrap_or(0),
             active_tasks: Default::default(),
             ledger_fee_cache,

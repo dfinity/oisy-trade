@@ -1,6 +1,6 @@
 use super::{StableMemoryOptions, State};
 use crate::balance::TokenBalance;
-use crate::order::{OrderHistory, UserOrders};
+use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
     WithdrawEvent,
@@ -144,7 +144,6 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
     order_history: OrderHistory<MH>,
     user_registry: UserRegistry<MB>,
-    user_orders: UserOrders<MH>,
     balances: TokenBalance<MB>,
     persistence: StableMemoryOptions,
 ) -> State<MH, MB> {
@@ -156,7 +155,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history, user_registry, user_orders, balances)
+        } => State::new(init_arg, order_history, user_registry, balances)
             .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };

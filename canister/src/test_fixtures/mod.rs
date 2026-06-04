@@ -3,7 +3,7 @@ pub mod event;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
-    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair, UserOrders,
+    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::user::{UserId, UserRegistry};
@@ -62,7 +62,6 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
         },
         order_history(),
         user_registry(),
-        user_orders(),
         balances(),
     )
     .unwrap()
@@ -77,9 +76,11 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
-        order::OrderHistory::new(crate::storage::order_history_memory()),
+        order::OrderHistory::new(
+            crate::storage::order_history_memory(),
+            crate::storage::user_orders_memory(),
+        ),
         UserRegistry::new(crate::storage::user_registry_memory()),
-        order::UserOrders::new(crate::storage::user_orders_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
     )
     .unwrap()
@@ -225,9 +226,11 @@ pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, f
 }
 
 pub fn init_state_with_order_book() {
-    let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
+    let order_history = order::OrderHistory::new(
+        crate::storage::order_history_memory(),
+        crate::storage::user_orders_memory(),
+    );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
-    let user_orders = order::UserOrders::new(crate::storage::user_orders_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
@@ -238,7 +241,6 @@ pub fn init_state_with_order_book() {
             },
             order_history,
             user_registry,
-            user_orders,
             balances,
         )
         .unwrap(),
@@ -339,11 +341,7 @@ pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, qua
 }
 
 pub fn order_history() -> OrderHistory<VectorMemory> {
-    OrderHistory::new(VectorMemory::default())
-}
-
-pub fn user_orders() -> UserOrders<VectorMemory> {
-    UserOrders::new(VectorMemory::default())
+    OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
 pub fn balances() -> TokenBalance<VectorMemory> {

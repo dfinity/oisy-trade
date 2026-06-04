@@ -3,7 +3,6 @@ mod fees;
 mod history;
 #[cfg(test)]
 mod tests;
-mod user_orders;
 
 pub use book::{
     Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
@@ -11,7 +10,6 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use history::OrderHistory;
-pub use user_orders::UserOrders;
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;

@@ -67,8 +67,18 @@ impl Storable for OrderRecord {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+/// Record of every order from submission through terminal state, plus a
+/// secondary per-user index over it.
+///
+/// Two stable maps that must stay in lockstep — so [`Self::insert_once`] writes
+/// both — kept together here rather than split across the caller:
+/// - `orders`: the primary store, keyed by [`OrderId`].
+/// - `by_user`: a per-user index keyed by `(owner, u64::MAX - global_seq)`,
+///   so a forward range scan over an owner's prefix yields that user's orders
+///   newest-first. The value is the [`OrderId`], pointing back into `orders`.
 pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, OrderRecord, M>,
+    by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
 }
 
 impl<M: Memory> std::fmt::Debug for OrderHistory<M> {
@@ -80,19 +90,28 @@ impl<M: Memory> std::fmt::Debug for OrderHistory<M> {
 }
 
 impl<M: Memory> OrderHistory<M> {
-    pub fn new(memory: M) -> Self {
+    pub fn new(orders_memory: M, by_user_memory: M) -> Self {
         Self {
-            orders: StableBTreeMap::init(memory),
+            orders: StableBTreeMap::init(orders_memory),
+            by_user: StableBTreeMap::init(by_user_memory),
         }
     }
 
-    /// Insert a new order record. Panics if the order ID already exists.
-    pub fn insert_once(&mut self, id: OrderId, record: OrderRecord) {
+    /// Insert a new order record and index it under its owner with the given
+    /// canister-global insertion `seq` (which orders the per-user index
+    /// newest-first). Panics if the order ID is already present.
+    pub fn insert_once(&mut self, id: OrderId, seq: u64, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
+        let owner = record.owner;
         assert_eq!(
             self.orders.insert(id, record),
             None,
             "BUG: duplicate order ID {id}"
+        );
+        assert_eq!(
+            self.by_user.insert(UserOrderKey::from_seq(owner, seq), id),
+            None,
+            "BUG: duplicate user-order index entry for {owner} seq {seq}"
         );
     }
 
@@ -113,20 +132,123 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.insert(*id, record);
     }
 
+    /// Returns up to `length` of `owner`'s orders, newest first, after skipping
+    /// the first `start`.
+    pub fn orders_by_user(&self, owner: Principal, start: usize, length: usize) -> Vec<OrderId> {
+        bench_scopes!("order_history", "order_history::orders_by_user");
+        self.by_user
+            .range(UserOrderKey::newest(owner)..=UserOrderKey::oldest(owner))
+            .skip(start)
+            .take(length)
+            .map(|entry| entry.value())
+            .collect()
+    }
+
     #[cfg(test)]
     fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
     }
+
+    #[cfg(test)]
+    fn user_index_iter(&self) -> impl Iterator<Item = (UserOrderKey, OrderId)> + '_ {
+        self.by_user
+            .iter()
+            .map(|entry| (*entry.key(), entry.value()))
+    }
+}
+
+/// Key into the per-user index: `owner` followed by the complement of the
+/// canister-global insertion sequence. Encoded so byte order matches
+/// `(owner, newest-first)`, which is what [`OrderHistory::orders_by_user`]
+/// relies on for its forward range scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct UserOrderKey {
+    owner: Principal,
+    rev_seq: u64,
+}
+
+impl UserOrderKey {
+    fn from_seq(owner: Principal, seq: u64) -> Self {
+        Self {
+            owner,
+            rev_seq: u64::MAX - seq,
+        }
+    }
+
+    /// Lower bound of `owner`'s range — the newest possible order.
+    fn newest(owner: Principal) -> Self {
+        Self { owner, rev_seq: 0 }
+    }
+
+    /// Upper bound of `owner`'s range — the oldest possible order.
+    fn oldest(owner: Principal) -> Self {
+        Self {
+            owner,
+            rev_seq: u64::MAX,
+        }
+    }
+}
+
+/// Principals are at most 29 bytes.
+const PRINCIPAL_MAX_LEN: usize = 29;
+/// 1 length byte + the (zero-padded) principal + 8 bytes of `rev_seq`.
+const USER_ORDER_KEY_LEN: usize = 1 + PRINCIPAL_MAX_LEN + 8;
+
+impl Storable for UserOrderKey {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let principal = self.owner.as_slice();
+        let mut buf = [0u8; USER_ORDER_KEY_LEN];
+        buf[0] = principal.len() as u8;
+        buf[1..1 + principal.len()].copy_from_slice(principal);
+        buf[1 + PRINCIPAL_MAX_LEN..].copy_from_slice(&self.rev_seq.to_be_bytes());
+        Cow::Owned(buf.to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(
+            bytes.len(),
+            USER_ORDER_KEY_LEN,
+            "UserOrderKey must decode from exactly {USER_ORDER_KEY_LEN} bytes"
+        );
+        let len = bytes[0] as usize;
+        assert!(
+            len <= PRINCIPAL_MAX_LEN,
+            "UserOrderKey principal length {len} exceeds {PRINCIPAL_MAX_LEN}"
+        );
+        let owner = Principal::from_slice(&bytes[1..1 + len]);
+        let rev_seq = u64::from_be_bytes(
+            bytes[1 + PRINCIPAL_MAX_LEN..]
+                .try_into()
+                .expect("8-byte slice"),
+        );
+        Self { owner, rev_seq }
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: USER_ORDER_KEY_LEN as u32,
+        is_fixed_size: true,
+    };
 }
 
 #[cfg(test)]
 impl Clone for OrderHistory<ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
-        let mut fresh = Self::new(ic_stable_structures::VectorMemory::default());
+        let mut fresh = Self::new(
+            ic_stable_structures::VectorMemory::default(),
+            ic_stable_structures::VectorMemory::default(),
+        );
         for (id, record) in self.iter() {
-            fresh.insert_once(id, record);
+            assert_eq!(fresh.orders.insert(id, record), None);
+        }
+        for (key, id) in self.user_index_iter() {
+            assert_eq!(fresh.by_user.insert(key, id), None);
         }
         fresh
     }
@@ -135,7 +257,7 @@ impl Clone for OrderHistory<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
+        self.iter().eq(other.iter()) && self.user_index_iter().eq(other.user_index_iter())
     }
 }
 
