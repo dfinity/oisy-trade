@@ -1216,8 +1216,8 @@ mod levels_consistency {
 }
 
 mod basis_point {
-    use crate::order::{BasisPoint, InvalidBasisPoint};
-    use crate::test_fixtures::arbitrary::arb_basis_point;
+    use crate::order::{BasisPoint, InvalidBasisPoint, Quantity};
+    use crate::test_fixtures::arbitrary::{arb_basis_point, arb_quantity};
     use proptest::prelude::*;
 
     proptest! {
@@ -1234,6 +1234,76 @@ mod basis_point {
             let decoded: BasisPoint = minicbor::decode(&buf).unwrap();
             prop_assert_eq!(decoded, bp);
         }
+
+        /// `mul_ceil(amount, bps) <= amount` for any valid `bps` (≤ 10_000).
+        #[test]
+        fn mul_ceil_never_exceeds_amount(bp in arb_basis_point(), amount in arb_quantity()) {
+            prop_assert!(bp.mul_ceil(amount) <= amount);
+        }
+
+        /// `ZERO × amount = 0` and `bp × ZERO = 0` for any inputs.
+        #[test]
+        fn mul_ceil_zero_inputs(bp in arb_basis_point(), amount in arb_quantity()) {
+            prop_assert_eq!(BasisPoint::ZERO.mul_ceil(amount), Quantity::ZERO);
+            prop_assert_eq!(bp.mul_ceil(Quantity::ZERO), Quantity::ZERO);
+        }
+
+        /// `MAX × amount = amount` — the upper edge of the invariant.
+        /// Guards the `amount - fee` underflow safety relied on by `transfer`.
+        #[test]
+        fn mul_ceil_max_returns_input(amount in arb_quantity()) {
+            prop_assert_eq!(BasisPoint::MAX.mul_ceil(amount), amount);
+        }
+    }
+
+    /// `mul_ceil` rounds **up** when the exact fee has a sub-unit remainder
+    /// — in the protocol's favor (see the Fees section of `docs/design.md`).
+    /// Pinned on three cases:
+    /// - `1_000_001 × 7 / 10_000 = 700.0007` → `701`.
+    /// - The two dust examples from the spec's "Rounding made visible"
+    ///   table: `1_000 × 47 / 10_000 = 4.7` → `5`, and
+    ///   `1_000 × 33 / 10_000 = 3.3` → `4`.
+    #[test]
+    fn mul_ceil_rounds_up_in_protocols_favor() {
+        assert_eq!(
+            BasisPoint::new(7)
+                .unwrap()
+                .mul_ceil(Quantity::from(1_000_001u64)),
+            Quantity::from(701u64),
+        );
+        assert_eq!(
+            BasisPoint::new(47)
+                .unwrap()
+                .mul_ceil(Quantity::from(1_000u64)),
+            Quantity::from(5u64),
+        );
+        assert_eq!(
+            BasisPoint::new(33)
+                .unwrap()
+                .mul_ceil(Quantity::from(1_000u64)),
+            Quantity::from(4u64),
+        );
+    }
+
+    /// Exact division has no rounding contribution: the value isn't
+    /// bumped to `value + 1`. Pinned on the spec's non-dust example
+    /// (`1_000_000_000 × 25 / 10_000 = 2_500_000`).
+    #[test]
+    fn mul_ceil_does_not_round_when_exact() {
+        assert_eq!(
+            BasisPoint::new(25)
+                .unwrap()
+                .mul_ceil(Quantity::from(1_000_000_000u64)),
+            Quantity::from(2_500_000u64),
+        );
+    }
+
+    /// `mul_ceil` with the largest representable amount and the largest
+    /// valid rate must not trap — a naive `amount × bps` implementation
+    /// would overflow u256 on any amount in the top 1/10_000 of u256.
+    #[test]
+    fn mul_ceil_does_not_trap_on_max_amount() {
+        assert_eq!(BasisPoint::MAX.mul_ceil(Quantity::MAX), Quantity::MAX);
     }
 }
 

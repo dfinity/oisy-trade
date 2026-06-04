@@ -193,8 +193,7 @@ fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
 /// Benchmark `get_order_book_depth` at the hard cap (1000 levels per side)
 /// against a fully populated Binance ICP/USDT snapshot. Upper bound on the
 /// instructions a depth query consumes for this fixture; per-level cost
-/// scales with resting orders at each price (see DEFI-2795), so denser
-/// books can exceed it.
+/// scales with resting orders at each price, so denser books can exceed it.
 #[bench(raw)]
 fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     install_populated_state();

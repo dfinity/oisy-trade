@@ -1185,95 +1185,9 @@ mod settle_fills {
             );
         }
 
-        /// `BasisPoint::apply_to` rounds **up** when the exact fee has a
-        /// sub-unit remainder — in the protocol's favor (see the Fees
-        /// section of `docs/design.md`). Pinned on three cases:
-        /// - `1_000_001 × 7 / 10_000 = 700.0007` → `701`.
-        /// - The two dust examples from the spec's "Rounding made visible"
-        ///   table: `1_000 × 47 / 10_000 = 4.7` → `5`, and
-        ///   `1_000 × 33 / 10_000 = 3.3` → `4`.
-        #[test]
-        fn apply_to_rounds_up_in_protocols_favor() {
-            use crate::order::BasisPoint;
-
-            assert_eq!(
-                BasisPoint::new(7)
-                    .unwrap()
-                    .apply_to(Quantity::from(1_000_001u64)),
-                Quantity::from(701u64),
-            );
-            assert_eq!(
-                BasisPoint::new(47)
-                    .unwrap()
-                    .apply_to(Quantity::from(1_000u64)),
-                Quantity::from(5u64),
-            );
-            assert_eq!(
-                BasisPoint::new(33)
-                    .unwrap()
-                    .apply_to(Quantity::from(1_000u64)),
-                Quantity::from(4u64),
-            );
-        }
-
-        /// Exact division has no rounding contribution: the value isn't
-        /// bumped to `value + 1`. Pinned on the spec's non-dust example
-        /// (`1_000_000_000 × 25 / 10_000 = 2_500_000`).
-        #[test]
-        fn apply_to_does_not_round_when_exact() {
-            use crate::order::BasisPoint;
-
-            assert_eq!(
-                BasisPoint::new(25)
-                    .unwrap()
-                    .apply_to(Quantity::from(1_000_000_000u64)),
-                Quantity::from(2_500_000u64),
-            );
-        }
-
-        /// `apply_to` with the largest representable amount and the largest
-        /// valid rate must not trap — a naive `amount × bps` implementation
-        /// would overflow u256 on any amount in the top 1/10_000 of u256.
-        /// With `bp = MAX` (100 %) the expected result is `amount` itself
-        /// (no remainder for any input).
-        #[test]
-        fn apply_to_does_not_trap_on_max_amount() {
-            use crate::order::BasisPoint;
-
-            assert_eq!(BasisPoint::MAX.apply_to(Quantity::MAX), Quantity::MAX);
-        }
-
-        /// `BasisPoint::ZERO` is the only path that yields a zero result,
-        /// thanks to the `bps == 0` fast-return. A non-zero rate × `ZERO`
-        /// amount also yields zero, pinned here for completeness.
-        #[test]
-        fn apply_to_zero_inputs() {
-            use crate::order::BasisPoint;
-
-            assert_eq!(
-                BasisPoint::ZERO.apply_to(Quantity::from(100u64)),
-                Quantity::ZERO,
-            );
-            assert_eq!(
-                BasisPoint::new(10_000).unwrap().apply_to(Quantity::ZERO),
-                Quantity::ZERO,
-            );
-        }
-
-        /// `bp = MAX` (100 %) returns the full amount — the upper edge of
-        /// the `BasisPoint` invariant. Guards the `amount - fee` underflow
-        /// safety relied on by `transfer_with_fee`.
-        #[test]
-        fn apply_to_max_returns_input() {
-            use crate::order::BasisPoint;
-
-            let amount = Quantity::from(12_345u64);
-            assert_eq!(BasisPoint::MAX.apply_to(amount), amount);
-        }
-
         /// Zero rates is a regression guard: the fill path with
-        /// `FeeRates::default()` must behave identically to pre-DEFI-2726.
-        /// No fee-pool entries are created on either side.
+        /// `FeeRates::default()` must produce no fee-pool entries on
+        /// either side.
         #[test]
         fn zero_rates_create_no_fee_pool_entries() {
             let mut state = setup_with_fees(0, 0);

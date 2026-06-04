@@ -141,8 +141,8 @@ pub enum BalanceOperation {
         /// remainder accrues to the canister-owned fee pool of `token`.
         #[n(3)]
         amount: Quantity,
-        /// Fee withheld for the per-token fee pool. `None` for events
-        /// recorded before DEFI-2726; replayed as zero (no fee).
+        /// Fee withheld for the per-token fee pool. `None` is replayed
+        /// as zero (no fee).
         #[n(4)]
         fee: Option<Quantity>,
     },

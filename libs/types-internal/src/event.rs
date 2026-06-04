@@ -84,8 +84,8 @@ pub enum BalanceOperation {
         to_order: u64,
         token: PairToken,
         amount: Nat,
-        /// Fee withheld from the credited transfer for the per-token fee
-        /// pool. `None` for transfers recorded before DEFI-2726.
+        /// Fee withheld from the credited transfer for the per-token
+        /// fee pool. `None` means no fee.
         fee: Option<Nat>,
     },
     /// `order` is the order sequence number whose reserved balance is being

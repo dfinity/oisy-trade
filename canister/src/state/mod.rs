@@ -703,8 +703,8 @@ fn compute_balance_operations(
             Side::Sell => (fee_rates.maker, fee_rates.taker),
         };
         let notional = fill.quote_amount();
-        let quote_fee = seller_rate.apply_to(notional);
-        let base_fee = buyer_rate.apply_to(fill.quantity);
+        let quote_fee = seller_rate.mul_ceil(notional);
+        let base_fee = buyer_rate.mul_ceil(fill.quantity);
 
         ops.push(event::BalanceOperation::Transfer {
             from_order: buyer_seq,

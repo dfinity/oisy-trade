@@ -138,9 +138,8 @@ impl<M: Memory> TokenBalance<M> {
         self.balances.insert(debtor_key, debtor_balance);
 
         // Fast path for the common zero-fee case (no rates configured, or a
-        // rate that truncates to zero): skip the u256 sub + heap entry,
-        // matching the cost of the pre-DEFI-2726 `transfer`. Self-transfer
-        // is safe because `update` re-reads before depositing.
+        // rate that truncates to zero): skip the u256 sub + heap entry.
+        // Self-transfer is safe because `update` re-reads before depositing.
         if fee.is_zero() {
             self.update(*creditor, *token, |b| b.deposit(gross));
             return;

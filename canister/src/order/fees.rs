@@ -35,23 +35,7 @@ impl BasisPoint {
     }
 
     /// Compute `ceil(amount × self / 10_000)` as a u256 [`Quantity`].
-    /// Rounding is up, in the protocol's favor — see the Fees section
-    /// in `docs/design.md`.
-    ///
-    /// Decomposing `amount = q × 10_000 + r` with `q = amount / 10_000`
-    /// and `r = amount % 10_000 < 10_000` gives
-    ///
-    /// ```text
-    /// ceil(amount × bps / 10_000)
-    ///     = q × bps + ceil((r × bps) / 10_000)
-    /// ```
-    ///
-    /// which is overflow-safe at every step: `q × bps` fits in u256
-    /// (`q ≤ u256::MAX / 10_000` and `bps ≤ 10_000`), and `r × bps`
-    /// fits in u32 (`r < 10_000` and `bps ≤ 10_000`, so the product is
-    /// below 10^8). A naive `(amount × bps) / 10_000` would trap on
-    /// amounts in the top 1/10_000 of u256.
-    pub fn apply_to(self, amount: Quantity) -> Quantity {
+    pub fn mul_ceil(self, amount: Quantity) -> Quantity {
         let bps = u64::from(self.0);
         if bps == 0 {
             return Quantity::ZERO;
@@ -62,8 +46,10 @@ impl BasisPoint {
         let main = q
             .checked_mul_u64(bps)
             .expect("BUG: q × bps overflow despite q ≤ u256::MAX / 10_000 and bps ≤ 10_000");
-        let rem_num = u128::from(r) * u128::from(bps);
-        let rem_ceil = (rem_num / 10_000 + u128::from(rem_num % 10_000 != 0)) as u64;
+        let rem_num = r
+            .checked_mul(bps)
+            .expect("BUG: r × bps fits in u64 — r < 10_000 and bps ≤ 10_000");
+        let rem_ceil = rem_num.div_ceil(10_000);
         main.checked_add(Quantity::from(rem_ceil))
             .expect("BUG: ceiled fee overflowed u256 — impossible if amount fits in u256")
     }
