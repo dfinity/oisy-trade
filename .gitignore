@@ -17,7 +17,8 @@ target
 .idea/
 
 # Generated wasms
-wasms
+wasms/*
+!wasms/.gitkeep
 
 # Local Claude settings
 .claude/settings.local.json
