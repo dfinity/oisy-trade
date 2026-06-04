@@ -35,6 +35,20 @@ impl BasisPoint {
     }
 
     /// Compute `ceil(amount × self / 10_000)` as a u256 [`Quantity`].
+    ///
+    /// Decomposing `amount = q × 10_000 + r` with `q = amount / 10_000`
+    /// and `r = amount % 10_000 < 10_000` gives
+    ///
+    /// ```text
+    /// ceil(amount × bps / 10_000)
+    ///     = q × bps + ceil((r × bps) / 10_000)
+    /// ```
+    ///
+    /// which is overflow-safe at every step: `q × bps` fits in u256
+    /// (`q ≤ u256::MAX / 10_000` and `bps ≤ 10_000`), and `r × bps`
+    /// fits in u64 (`r < 10_000` and `bps ≤ 10_000`, so the product is
+    /// below 10^8). A naive `(amount × bps) / 10_000` would trap on
+    /// amounts in the top 1/10_000 of u256.
     pub fn mul_ceil(self, amount: Quantity) -> Quantity {
         let bps = u64::from(self.0);
         if bps == 0 {
