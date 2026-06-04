@@ -36,11 +36,13 @@ publish = false # the canister is released as a wasm asset, never to crates.io
 
 [[package]]
 name = "dex_client"
-publish = false # flip to true to start publishing the client to crates.io
+# not released yet; set `release = true` + `publish = true` to start publishing to crates.io
+release = false
 
 [[package]]
 name = "dex_types"
-publish = false # part of the dex_client public API; flip to true alongside dex_client
+# part of the dex_client public API; release/publish it alongside dex_client
+release = false
 
 [[package]]
 name = "dex_types_internal"
