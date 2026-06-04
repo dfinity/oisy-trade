@@ -50,10 +50,13 @@ impl BasisPoint {
     /// below 10^8). A naive `(amount × bps) / 10_000` would trap on
     /// amounts in the top 1/10_000 of u256.
     pub fn mul_ceil(self, amount: Quantity) -> Quantity {
-        let bps = u64::from(self.0);
-        if bps == 0 {
+        if self == BasisPoint::ZERO || amount == Quantity::ZERO {
             return Quantity::ZERO;
         }
+        if self == BasisPoint::MAX {
+            return amount;
+        }
+        let bps = u64::from(self.0);
         let (q, r) = amount
             .checked_div_rem_u64(10_000)
             .expect("BUG: division by 10_000 is non-zero");
