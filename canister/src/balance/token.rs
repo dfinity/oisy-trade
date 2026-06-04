@@ -141,20 +141,18 @@ impl<M: Memory> TokenBalance<M> {
         debtor_balance.debit_reserved(&gross);
         self.balances.insert(debtor_key, debtor_balance);
 
-        // Fast path for the common zero-fee case (no rates configured, or a
-        // rate that truncates to zero): skip the u256 sub + heap entry.
-        // Self-transfer is safe because `update` re-reads before depositing.
-        if fee.is_zero() {
-            self.update(*creditor, *token, |b| b.deposit(gross));
-            return;
-        }
         let net = gross
             .checked_sub(fee)
             .expect("BUG: fee <= gross checked above");
+        // Self-transfer: debtor and creditor are the same user, so the
+        // credit must land on the just-updated balance — `update` re-reads
+        // before depositing to avoid clobbering the debit.
         self.update(*creditor, *token, |b| b.deposit(net));
 
-        let entry = self.fee_balances.entry(*token).or_default();
-        *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
+        if !fee.is_zero() {
+            let entry = self.fee_balances.entry(*token).or_default();
+            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
+        }
     }
 
     /// Read the accumulated fee balance for `token`. `None` if no fees have

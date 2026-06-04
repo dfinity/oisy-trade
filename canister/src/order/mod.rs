@@ -497,6 +497,9 @@ impl Quantity {
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         bench_scopes!("qty", "qty::checked_sub");
+        if other.is_zero() {
+            return Some(self);
+        }
         let (low, borrow) = self.low.overflowing_sub(other.low);
         let high = self
             .high

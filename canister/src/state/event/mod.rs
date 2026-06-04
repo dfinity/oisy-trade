@@ -141,7 +141,7 @@ pub enum BalanceOperation {
         /// remainder accrues to the canister-owned fee pool of `token`.
         #[n(3)]
         amount: Quantity,
-        /// Fee withheld for the per-token fee pool. `None` is replayed
+        /// Fee withheld for the per-token fee pool. `None` is interpreted
         /// as zero (no fee).
         #[n(4)]
         fee: Option<Quantity>,

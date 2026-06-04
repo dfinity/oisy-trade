@@ -737,8 +737,10 @@ fn compute_balance_operations(
     ops
 }
 
-/// Collapse a zero-quantity fee to `None` so we don't materialize empty
-/// fee-pool entries or pay the encoding cost of a redundant tag.
+/// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for
+/// "fee was actually charged" so callers (audit log, apply path,
+/// `/metrics`) can distinguish "no fee on this fill" from "fee of zero
+/// charged".
 fn nonzero(q: Quantity) -> Option<Quantity> {
     if q.is_zero() { None } else { Some(q) }
 }

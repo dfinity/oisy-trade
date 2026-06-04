@@ -1105,67 +1105,55 @@ mod settle_fills {
         use super::*;
         use crate::order::BasisPoint;
 
-        /// Buy-taker fill at the maker's resting price. Each side pays at
-        /// its role-specific rate in the asset it receives:
-        /// - buyer (taker) pays `base × taker_bps / 10_000` in base
-        /// - seller (maker) pays `notional × maker_bps / 10_000` in quote
+        /// Fill deducts fees on both sides at the role-specific rates.
+        /// Parameterized over which side crosses (taker):
+        /// - buyer's base fee uses the buyer's role rate
+        /// - seller's quote fee uses the seller's role rate
+        ///
+        /// where "role rate" is `taker_bps` for the crossing side and
+        /// `maker_bps` for the resting side.
         #[test]
         fn buy_taker_fill_deducts_fees_on_both_sides() {
+            fill_deducts_fees_on_both_sides(Side::Buy);
+        }
+
+        #[test]
+        fn sell_taker_fill_deducts_fees_on_both_sides() {
+            fill_deducts_fees_on_both_sides(Side::Sell);
+        }
+
+        fn fill_deducts_fees_on_both_sides(taker_side: Side) {
             let maker_bps = 10; // 0.1 %
             let taker_bps = 25; // 0.25 %
             let mut state = setup_with_fees(maker_bps, taker_bps);
             let pair = icp_ckbtc_trading_pair();
             let price = 100u64;
-            // 10_000 ÷ 10_000 = 1; pick a quantity so that the fees are
-            // non-zero and easy to verify exactly.
+            // qty chosen so the two fees are exact (no ceiling rounding).
             let qty = u64::from(LOT_SIZE) * 1_000_000;
 
-            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
-            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
+            // Maker rests first, taker crosses. SELLER always sells, BUYER
+            // always buys.
+            let (first_side, second_side) = match taker_side {
+                Side::Buy => (Side::Sell, Side::Buy),
+                Side::Sell => (Side::Buy, Side::Sell),
+            };
+            let (first_user, second_user) = match first_side {
+                Side::Sell => (SELLER, BUYER),
+                Side::Buy => (BUYER, SELLER),
+            };
+            test_fixtures::place_order(&mut state, first_user, &pair, first_side, price, qty);
+            test_fixtures::place_order(&mut state, second_user, &pair, second_side, price, qty);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let notional = price * qty;
-            let base_fee = (qty as u128 * taker_bps as u128 / 10_000) as u64;
-            let quote_fee = (notional as u128 * maker_bps as u128 / 10_000) as u64;
-
-            assert_eq!(
-                state.get_balance(&BUYER, &pair.base),
-                balance(qty - base_fee, 0),
-            );
-            assert_eq!(
-                state.get_balance(&SELLER, &pair.quote),
-                balance(notional - quote_fee, 0),
-            );
-
-            assert_eq!(
-                state.balances.fee_balance(&pair.base),
-                Some(Quantity::from(base_fee)),
-            );
-            assert_eq!(
-                state.balances.fee_balance(&pair.quote),
-                Some(Quantity::from(quote_fee)),
-            );
-        }
-
-        /// Sell-taker fill swaps which side carries the taker rate.
-        #[test]
-        fn sell_taker_fill_deducts_fees_on_both_sides() {
-            let maker_bps = 10;
-            let taker_bps = 25;
-            let mut state = setup_with_fees(maker_bps, taker_bps);
-            let pair = icp_ckbtc_trading_pair();
-            let price = 100u64;
-            let qty = u64::from(LOT_SIZE) * 1_000_000;
-
-            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, qty);
-            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, qty);
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let notional = price * qty;
-            // Buyer was the maker now.
-            let base_fee = (qty as u128 * maker_bps as u128 / 10_000) as u64;
-            // Seller was the taker.
-            let quote_fee = (notional as u128 * taker_bps as u128 / 10_000) as u64;
+            // Buyer pays the role rate of whoever crossed on the buy side;
+            // same for seller on the sell side.
+            let (buyer_role_bps, seller_role_bps) = match taker_side {
+                Side::Buy => (taker_bps, maker_bps),
+                Side::Sell => (maker_bps, taker_bps),
+            };
+            let base_fee = (qty as u128 * buyer_role_bps as u128 / 10_000) as u64;
+            let quote_fee = (notional as u128 * seller_role_bps as u128 / 10_000) as u64;
 
             assert_eq!(
                 state.get_balance(&BUYER, &pair.base),
