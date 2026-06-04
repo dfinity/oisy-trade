@@ -62,9 +62,13 @@ jobs:
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 'Checkout'
+      - name: 'Checkout released tag'
         if: steps.meta.outputs.has_canister == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Build from the exact tagged commit, not main HEAD, so the asset
+          # provably corresponds to the release tag even if main advances.
+          ref: ${{ steps.meta.outputs.tag }}
 
       - name: Setup mise
         if: steps.meta.outputs.has_canister == 'true'
@@ -100,9 +104,12 @@ jobs:
         run: |
           set -euo pipefail
           notes=$(parse-changelog canister/CHANGELOG.md "$RELEASE_VERSION")
+          # Restrict substitution to our known placeholders so stray `$VAR`
+          # sequences in the changelog text are left untouched.
           CHANGELOG="$notes" RELEASE_TAG="$RELEASE_TAG" \
             DEX_CANISTER_WASM_GZ_SHA256="$DEX_CANISTER_WASM_GZ_SHA256" \
-            envsubst < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
+            envsubst '$DEX_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
+            < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
 
       - name: 'Publish GitHub release'
         if: steps.meta.outputs.has_canister == 'true'
