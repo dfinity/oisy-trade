@@ -4,7 +4,7 @@ use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    WithdrawEvent, WithdrawFeesEvent,
+    WithdrawEvent,
 };
 use crate::storage;
 use dex_types_internal::UpgradeArg;
@@ -123,13 +123,6 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
             state.record_cancel_limit_order(*order_id, persistence);
-        }
-        EventType::WithdrawFees(WithdrawFeesEvent { token, amount, to }) => {
-            if matches!(persistence, StableMemoryOptions::Write) {
-                state
-                    .drain_fees(token, *amount, *to)
-                    .expect("BUG: insufficient fee balance for WithdrawFees event");
-            }
         }
         EventType::Matching(event) => {
             state.record_matching_event(event, persistence);

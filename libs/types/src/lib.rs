@@ -389,38 +389,6 @@ pub struct WithdrawResponse {
     pub block_index: Nat,
 }
 
-/// Controller-only request to drain per-token fees from the canister's
-/// internal fee pool into a specified principal's free balance. The
-/// recipient then uses the regular `withdraw` endpoint to move the funds
-/// to the ICRC ledger.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub struct WithdrawFeesRequest {
-    /// The token whose fee pool is being drained.
-    pub token_id: TokenId,
-    /// Amount to drain from the fee pool of `token_id`.
-    pub amount: Nat,
-    /// Principal whose free balance is credited with `amount`.
-    pub to: candid::Principal,
-}
-
-/// Error returned by the `withdraw_fees` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum WithdrawFeesError {
-    /// The caller is not a controller of the canister.
-    NotController,
-    /// The requested `amount` exceeds the maximum supported value (the
-    /// internal `Quantity` type is u256).
-    AmountExceedsMaximum,
-    /// The requested `amount` exceeds the available fee pool for the
-    /// targeted token.
-    InsufficientFeeBalance {
-        /// The current pool balance.
-        available: Nat,
-        /// The amount that was requested.
-        required: Nat,
-    },
-}
-
 /// Error returned by the withdraw endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum WithdrawError {

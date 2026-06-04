@@ -156,13 +156,6 @@ fn fee_balance(token: TokenId) -> candid::Nat {
     dex_canister::fee_balance(token)
 }
 
-#[ic_cdk::update]
-fn withdraw_fees(
-    request: dex_types::WithdrawFeesRequest,
-) -> Result<(), dex_types::WithdrawFeesError> {
-    dex_canister::withdraw_fees(request, &dex_canister::IC_RUNTIME)
-}
-
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
 #[ic_cdk::query]
 fn get_events(
@@ -269,13 +262,6 @@ fn get_events(
                         .map(map_balance_operation)
                         .collect(),
                 }),
-                EventType::WithdrawFees(e) => {
-                    event::EventType::WithdrawFees(event::WithdrawFeesEvent {
-                        token: dex_types::TokenId::from(e.token),
-                        amount: e.amount.into(),
-                        to: e.to,
-                    })
-                }
             },
         }
     }

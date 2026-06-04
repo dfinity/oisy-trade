@@ -406,31 +406,3 @@ pub fn fee_balance(token: dex_types::TokenId) -> Nat {
             .unwrap_or(Nat::from(0u64))
     })
 }
-
-pub fn withdraw_fees(
-    request: dex_types::WithdrawFeesRequest,
-    runtime: &impl Runtime,
-) -> Result<(), dex_types::WithdrawFeesError> {
-    if !runtime.is_controller(&runtime.msg_caller()) {
-        return Err(dex_types::WithdrawFeesError::NotController);
-    }
-    let token = order::TokenId::from(request.token_id);
-    let amount = order::Quantity::try_from(request.amount.clone())
-        .map_err(|_| dex_types::WithdrawFeesError::AmountExceedsMaximum)?;
-    state::with_state_mut(|s| -> Result<(), dex_types::WithdrawFeesError> {
-        let available = s.fee_balance(&token).unwrap_or_default();
-        if available < amount {
-            return Err(dex_types::WithdrawFeesError::InsufficientFeeBalance {
-                available: available.into(),
-                required: request.amount.clone(),
-            });
-        }
-        let event = state::event::WithdrawFeesEvent {
-            token,
-            amount,
-            to: request.to,
-        };
-        state::audit::process_event(s, state::event::EventType::WithdrawFees(event), runtime);
-        Ok(())
-    })
-}

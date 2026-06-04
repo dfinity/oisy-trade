@@ -522,19 +522,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.balances.withdraw(&user, &token_id, amount)
     }
 
-    /// Drain `amount` from the per-token fee pool into `recipient`'s free
-    /// balance. Used by the controller-only `withdraw_fees` endpoint;
-    /// the recipient then uses the regular `withdraw` to pull to the
-    /// ICRC ledger.
-    pub fn drain_fees(
-        &mut self,
-        token: &TokenId,
-        amount: Quantity,
-        recipient: Principal,
-    ) -> Result<(), crate::balance::InsufficientBalanceError> {
-        self.balances.drain_fee_to(token, amount, recipient)
-    }
-
     pub fn fee_balance(&self, token: &TokenId) -> Option<Quantity> {
         self.balances.fee_balance(token)
     }

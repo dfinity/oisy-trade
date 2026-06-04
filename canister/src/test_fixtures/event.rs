@@ -66,7 +66,6 @@ pub enum WorstCaseEvent {
     CancelLimitOrder,
     Matching,
     Settling,
-    WithdrawFees,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -81,7 +80,6 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::CancelLimitOrder(_) => Self::CancelLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
-            EventType::WithdrawFees(_) => Self::WithdrawFees,
         }
     }
 }
@@ -104,7 +102,6 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => cancel_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
-            Self::WithdrawFees => withdraw_fees(max_quantity()),
         })
     }
 
@@ -125,7 +122,6 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => 35,
             Self::Matching => 10_027,
             Self::Settling => 127_327,
-            Self::WithdrawFees => 95,
         }
     }
 }
@@ -209,14 +205,6 @@ fn withdraw(amount: Quantity) -> EventType {
         user: max_principal(0),
         token: TokenId::new(max_principal(1)),
         amount,
-    })
-}
-
-fn withdraw_fees(amount: Quantity) -> EventType {
-    EventType::WithdrawFees(crate::state::event::WithdrawFeesEvent {
-        token: TokenId::new(max_principal(1)),
-        amount,
-        to: max_principal(0),
     })
 }
 
