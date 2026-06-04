@@ -188,7 +188,10 @@ mod add_trading_pair {
 
         let result = add_trading_pair(req, &runtime);
 
-        assert_eq!(result, Err(AddTradingPairError::InvalidBasisPoint(u16::MAX)));
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InvalidBasisPoint(u16::MAX))
+        );
     }
 
     fn controller_runtime() -> MockRuntime {
