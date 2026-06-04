@@ -383,12 +383,14 @@ mod fee_pool {
             Quantity::from(10u64),
             Quantity::from(1u64),
         );
+        tb.withdraw(&bob(), &token_a(), Quantity::from(7u64))
+            .unwrap();
 
         let total_a = sum_users(&tb, &token_a())
             .checked_add(tb.fee_balance(&token_a()).unwrap_or_default())
             .unwrap();
-        // 100 was deposited into token_a; no withdrawals; invariant holds.
-        assert_eq!(total_a, Quantity::from(100u64));
+        // 100 deposited into token_a, 7 withdrawn; invariant holds.
+        assert_eq!(total_a, Quantity::from(93u64));
 
         // token_b had no fee activity; user sum equals the deposit.
         assert_eq!(sum_users(&tb, &token_b()), Quantity::from(50u64));

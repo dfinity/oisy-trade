@@ -142,7 +142,7 @@ impl<M: Memory> TokenBalance<M> {
         self.balances.insert(debtor_key, debtor_balance);
 
         let net = gross
-            .checked_sub(&fee)
+            .checked_sub(fee)
             .expect("BUG: fee <= gross checked above");
         // Self-transfer: debtor and creditor are the same user, so the credit
         // must land on the just-updated balance — re-read before depositing
