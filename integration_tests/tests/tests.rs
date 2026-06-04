@@ -1683,6 +1683,183 @@ async fn should_expose_metrics() {
     setup.drop().await;
 }
 
+/// `/metrics` exposes a `fee_balance` gauge per token with a non-zero
+/// accrual after a fee-charging fill. Mirror of the
+/// `get_fee_balances::should_report_accrued_fees_after_a_fill` test but
+/// asserting the Prometheus surface.
+#[tokio::test]
+async fn should_expose_fee_balance_metric() {
+    use candid::Principal;
+    use dex_types::AddTradingPairRequest;
+    let setup = Setup::new().await;
+    let request = AddTradingPairRequest {
+        maker_fee_bps: 10,
+        taker_fee_bps: 25,
+        ..setup.add_trading_pair_request()
+    };
+    setup
+        .dex_client_with_caller(setup.controller())
+        .add_trading_pair(request)
+        .await
+        .unwrap();
+
+    let seller = Principal::from_slice(&[0x01]);
+    let buyer = Principal::from_slice(&[0x02]);
+    let qty = 1_000_000u64;
+    let price = 100u64;
+    let notional = price * qty;
+    setup
+        .deposit_flow(seller, setup.base_token_id())
+        .mint(qty + 2 * BASE_LEDGER_FEE)
+        .approve(qty + BASE_LEDGER_FEE)
+        .deposit(qty)
+        .execute()
+        .await;
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(notional + 2 * QUOTE_LEDGER_FEE)
+        .approve(notional + QUOTE_LEDGER_FEE)
+        .deposit(notional)
+        .execute()
+        .await;
+    setup
+        .dex_client_with_caller(seller)
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price,
+            quantity: qty.into(),
+        })
+        .await
+        .unwrap();
+    setup
+        .dex_client_with_caller(buyer)
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price,
+            quantity: qty.into(),
+        })
+        .await
+        .unwrap();
+    setup.env().tick().await;
+
+    // Buyer crossed → CKSOL (base) fee at taker rate (25 bps),
+    // CKBTC (quote) fee at maker rate (10 bps).
+    let base_fee = qty * 25 / 10_000;
+    let quote_fee = notional * 10 / 10_000;
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching(format!(r#"fee_balance\{{token="CKSOL"\}} {base_fee}"#))
+        .assert_contains_metric_matching(format!(r#"fee_balance\{{token="CKBTC"\}} {quote_fee}"#));
+
+    setup.drop().await;
+}
+
+mod get_fee_balances {
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{AddTradingPairRequest, FilterToken, LimitOrderRequest, Side};
+
+    /// Stand up a trading pair with non-zero maker/taker fees and run one
+    /// cross so both sides accrue into the canister-owned fee pool. Asserts
+    /// that `get_fee_balances` reports the accrued amounts.
+    #[tokio::test]
+    async fn should_report_accrued_fees_after_a_fill() {
+        let setup = Setup::new().await;
+        // Place a trading pair with 10 bps maker and 25 bps taker.
+        let request = AddTradingPairRequest {
+            maker_fee_bps: 10,
+            taker_fee_bps: 25,
+            ..setup.add_trading_pair_request()
+        };
+        setup
+            .dex_client_with_caller(setup.controller())
+            .add_trading_pair(request)
+            .await
+            .unwrap();
+
+        // Seller posts a resting sell (base), buyer crosses (taker).
+        let seller = Principal::from_slice(&[0x01]);
+        let buyer = Principal::from_slice(&[0x02]);
+        let base = setup.base_token_id();
+        let quote = setup.quote_token_id();
+        let qty = 1_000_000u64;
+        let price = 100u64;
+        let notional = price * qty;
+        setup
+            .deposit_flow(seller, base.clone())
+            .mint(qty + 2 * BASE_LEDGER_FEE)
+            .approve(qty + BASE_LEDGER_FEE)
+            .deposit(qty)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(buyer, quote.clone())
+            .mint(notional + 2 * QUOTE_LEDGER_FEE)
+            .approve(notional + QUOTE_LEDGER_FEE)
+            .deposit(notional)
+            .execute()
+            .await;
+
+        setup
+            .dex_client_with_caller(seller)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(qty),
+            })
+            .await
+            .unwrap();
+        setup
+            .dex_client_with_caller(buyer)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(qty),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        // Buyer crossed → base fee uses taker rate (25 bps), quote fee
+        // uses maker rate (10 bps).
+        let expected_base_fee = qty * 25 / 10_000;
+        let expected_quote_fee = notional * 10 / 10_000;
+
+        let no_filter = setup.dex_client().get_fee_balances(None).await.unwrap();
+        assert_eq!(no_filter.len(), 2);
+
+        let with_filter = setup
+            .dex_client()
+            .get_fee_balances(Some(vec![
+                FilterToken::ById(base.clone()),
+                FilterToken::ById(quote.clone()),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(with_filter.len(), 2);
+        let base_entry = with_filter
+            .iter()
+            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == base))
+            .expect("base fee entry");
+        assert_eq!(base_entry.balance.free, Nat::from(expected_base_fee));
+        assert_eq!(base_entry.balance.reserved, Nat::from(0u64));
+        let quote_entry = with_filter
+            .iter()
+            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == quote))
+            .expect("quote fee entry");
+        assert_eq!(quote_entry.balance.free, Nat::from(expected_quote_fee));
+        assert_eq!(quote_entry.balance.reserved, Nat::from(0u64));
+
+        setup.drop().await;
+    }
+}
+
 mod list_supported_tokens {
     use dex_int_tests::Setup;
 
