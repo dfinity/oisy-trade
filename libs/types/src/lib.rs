@@ -367,6 +367,10 @@ pub struct AddTradingPairRequest {
     pub tick_size: u64,
     /// Minimum order quantity. Must be greater than zero.
     pub lot_size: u64,
+    /// Maker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
+    pub maker_fee_bps: u16,
+    /// Taker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
+    pub taker_fee_bps: u16,
 }
 
 /// Request to withdraw tokens from the DEX.
@@ -448,6 +452,9 @@ pub enum AddTradingPairError {
     InvalidTickSize,
     /// The lot size must be greater than zero.
     InvalidLotSize,
+    /// One of the fee rates is outside `0..=10_000` bps; the carried
+    /// value is the offending bps.
+    InvalidBasisPoint(u16),
     /// A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists,
     /// The submitted token metadata does not match the previously registered metadata.

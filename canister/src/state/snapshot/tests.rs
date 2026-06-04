@@ -1,5 +1,5 @@
 use super::StateSnapshot;
-use crate::order::{OrderBookId, PendingOrder, Price, Quantity, Side};
+use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
@@ -10,8 +10,9 @@ use candid::Principal;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder, Price,
-        PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+        FeeRates, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder,
+        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
+        TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
@@ -93,6 +94,7 @@ mod schema_stability {
                     orders: vec![resting_sell],
                 }],
                 filled_orders: vec![OrderSeq::new(4)],
+                fee_rates: FeeRates::default(),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -118,6 +120,7 @@ mod schema_stability {
             // Non-default policy.
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
+            fee_pool: None,
         }
     }
 
@@ -135,10 +138,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818881078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818981078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810481828141011a000186a08182810782820084810581068201801a\
-        05f5e100820084810681058200801a000f4240\
+        186e818281021a0007a120818104828100810081828141011a000186a08182810782820084810581\
+        068201801a05f5e100820084810681058200801a000f4240\
         18c81b000000012a05f200";
 
     #[test]
@@ -183,6 +186,7 @@ fn should_roundtrip_state_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
 
     let buyer = Principal::from_slice(&[0x01]);
@@ -252,6 +256,56 @@ fn should_roundtrip_state_through_snapshot() {
     // `into_state` to reconstruct a state that compares equal.
     let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
 
+    assert_eq!(state, restored);
+}
+
+/// The heap-resident fee pool inside `TokenBalance` is part of the
+/// `StateSnapshot` payload and must round-trip through CBOR + restore.
+#[test]
+fn should_roundtrip_fee_pool_through_snapshot() {
+    let mut state = fresh_state();
+    let pair = icp_ckbtc_trading_pair();
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        pair.clone(),
+        icp_metadata(),
+        ckbtc_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+        FeeRates::default(),
+    );
+
+    let buyer = Principal::from_slice(&[0x01]);
+    let seller = Principal::from_slice(&[0x02]);
+    state.deposit(
+        buyer,
+        pair.quote,
+        Quantity::from(1_000u64),
+        StableMemoryOptions::Write,
+    );
+    state
+        .balances
+        .reserve(&buyer, &pair.quote, Quantity::from(500u64))
+        .unwrap();
+    state.balances.transfer(
+        &buyer,
+        &seller,
+        &pair.quote,
+        Quantity::from(100u64),
+        Quantity::from(7u64),
+    );
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+
+    assert_eq!(
+        restored.balances.fee_balance(&pair.quote),
+        Some(Quantity::from(7u64)),
+        "fee pool entry must survive the snapshot round-trip",
+    );
     assert_eq!(state, restored);
 }
 

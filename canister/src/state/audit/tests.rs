@@ -1,8 +1,8 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    CanceledOrderInfo, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity,
-    Side, TokenId, TradingPair,
+    CanceledOrderInfo, FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price,
+    Quantity, Side, TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
@@ -107,6 +107,7 @@ impl Scenario {
             quote_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
         self.events.push(add_trading_pair_event(base(), quote()));
         self

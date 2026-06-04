@@ -1,5 +1,7 @@
 use crate::execute::{EXECUTOR, ExecutionStatus};
-use crate::order::{OrderBookId, OrderId, OrderStatus, Side, TokenId, TokenMetadata, TradingPair};
+use crate::order::{
+    FeeRates, OrderBookId, OrderId, OrderStatus, Side, TokenId, TokenMetadata, TradingPair,
+};
 use crate::state::State;
 use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
 use crate::test_fixtures;
@@ -302,6 +304,7 @@ fn setup_one_book() -> TestState {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
     state
 }
@@ -328,6 +331,7 @@ fn setup_two_books() -> TestState {
         },
         TICK_SIZE,
         LOT_SIZE,
+        FeeRates::default(),
     );
     state
 }

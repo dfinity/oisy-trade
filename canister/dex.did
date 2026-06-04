@@ -334,6 +334,10 @@ type AddTradingPairRequest = record {
     tick_size : nat64;
     // Minimum order quantity. Must be greater than zero.
     lot_size : nat64;
+    // Maker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
+    maker_fee_bps : nat16;
+    // Taker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
+    taker_fee_bps : nat16;
 };
 
 // Error returned by the add_trading_pair endpoint.
@@ -346,6 +350,8 @@ type AddTradingPairError = variant {
     InvalidTickSize;
     // The lot size must be greater than zero.
     InvalidLotSize;
+    // One of the fee rates is outside 0..=10_000 bps; the carried value is the offending bps.
+    InvalidBasisPoint : nat16;
     // A trading pair with the same base and quote tokens already exists.
     TradingPairAlreadyExists;
     // The submitted token metadata does not match the previously registered metadata.

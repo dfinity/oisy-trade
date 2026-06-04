@@ -1,6 +1,6 @@
 mod token;
 
-pub use token::TokenBalance;
+pub use token::{FeeEntry, TokenBalance};
 
 use crate::order::{Quantity, TokenId};
 use candid::Principal;
@@ -64,7 +64,7 @@ impl Balance {
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn debit_reserved(&mut self, amount: &Quantity) {
         bench_scopes!("bal", "bal::debit_reserved");
-        self.reserved = self.reserved.checked_sub(amount).unwrap_or_else(|| {
+        self.reserved = self.reserved.checked_sub(*amount).unwrap_or_else(|| {
             panic!(
                 "BUG: debit_reserved underflow: reserved={:?}, amount={:?}",
                 self.reserved, amount
@@ -78,7 +78,7 @@ impl Balance {
     /// Panics if `amount` exceeds the reserved balance (invariant violation).
     pub fn unreserve(&mut self, amount: Quantity) {
         bench_scopes!("bal", "bal::unreserve");
-        self.reserved = self.reserved.checked_sub(&amount).unwrap_or_else(|| {
+        self.reserved = self.reserved.checked_sub(amount).unwrap_or_else(|| {
             panic!(
                 "BUG: unreserve underflow: reserved={:?}, amount={:?}",
                 self.reserved, amount
@@ -93,7 +93,7 @@ impl Balance {
     pub fn withdraw(&mut self, amount: Quantity) -> Result<(), InsufficientBalanceError> {
         self.free = self
             .free
-            .checked_sub(&amount)
+            .checked_sub(amount)
             .ok_or(InsufficientBalanceError {
                 available: self.free,
                 required: amount,
@@ -105,7 +105,7 @@ impl Balance {
         bench_scopes!("bal", "bal::reserve");
         self.free = self
             .free
-            .checked_sub(&required)
+            .checked_sub(required)
             .ok_or(InsufficientBalanceError {
                 available: self.free,
                 required,

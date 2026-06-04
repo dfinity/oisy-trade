@@ -2,8 +2,8 @@ pub mod event;
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder, Price,
-    Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
+    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::{Timestamp, order, state};
@@ -106,11 +106,13 @@ pub fn trading_pair_request(
         },
         tick_size: TICK_SIZE.get(),
         lot_size: LOT_SIZE.get(),
+        maker_fee_bps: 0,
+        taker_fee_bps: 0,
     }
 }
 
 pub fn order_book() -> OrderBook {
-    OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE)
+    OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE, FeeRates::default())
 }
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {
@@ -197,6 +199,7 @@ pub fn init_state_with_order_book() {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            FeeRates::default(),
         );
     });
 }
@@ -325,9 +328,9 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, CanceledOrderInfo, Fill, LotSize, MatchingOutput, OrderBookId, OrderId, OrderRecord,
-        OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side, TickSize, TokenId,
-        TokenMetadata,
+        self, BasisPoint, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        Side, TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -565,6 +568,18 @@ pub mod arbitrary {
             )
     }
 
+    /// Strategy for any valid [`BasisPoint`] — uniformly sampled across the
+    /// full `0..=10_000` range.
+    pub fn arb_basis_point() -> impl Strategy<Value = BasisPoint> {
+        (0..=10_000u16).prop_map(|v| BasisPoint::new(v).unwrap())
+    }
+
+    /// Strategy for any valid [`FeeRates`], independently sampling maker
+    /// and taker rates over the full `BasisPoint` range.
+    pub fn arb_fee_rates() -> impl Strategy<Value = FeeRates> {
+        (arb_basis_point(), arb_basis_point()).prop_map(|(maker, taker)| FeeRates { maker, taker })
+    }
+
     pub fn arb_add_trading_pair_event() -> impl Strategy<Value = AddTradingPairEvent> {
         (
             any::<u64>(),
@@ -574,18 +589,27 @@ pub mod arbitrary {
             1..u64::MAX,
             arb_token_metadata(),
             arb_token_metadata(),
+            arb_fee_rates(),
         )
             .prop_map(
-                |(book_id, base, quote, tick_size, lot_size, base_metadata, quote_metadata)| {
-                    AddTradingPairEvent {
-                        book_id: OrderBookId::new(book_id),
-                        base: TokenId::new(base),
-                        quote: TokenId::new(quote),
-                        tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
-                        lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
-                        base_metadata,
-                        quote_metadata,
-                    }
+                |(
+                    book_id,
+                    base,
+                    quote,
+                    tick_size,
+                    lot_size,
+                    base_metadata,
+                    quote_metadata,
+                    fee_rates,
+                )| AddTradingPairEvent {
+                    book_id: OrderBookId::new(book_id),
+                    base: TokenId::new(base),
+                    quote: TokenId::new(quote),
+                    tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
+                    lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
+                    base_metadata,
+                    quote_metadata,
+                    fee_rates,
                 },
             )
     }

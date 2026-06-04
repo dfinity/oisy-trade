@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
-    LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize, TokenId,
-    TokenMetadata,
+    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
@@ -49,6 +49,7 @@ pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             lot_size: LOT_SIZE,
             base_metadata: base_metadata(),
             quote_metadata: quote_metadata(),
+            fee_rates: FeeRates::default(),
         }),
     }
 }
@@ -115,7 +116,7 @@ impl WorstCaseEvent {
         match self {
             Self::Init => 343,
             Self::Upgrade => 343,
-            Self::AddTradingPair => 137,
+            Self::AddTradingPair => 146,
             Self::Deposit => 96,
             Self::Withdraw => 105,
             Self::AddLimitOrder => 98,
@@ -167,6 +168,10 @@ fn add_trading_pair() -> EventType {
         quote_metadata: TokenMetadata {
             symbol: max_symbol(),
             decimals: u8::MAX,
+        },
+        fee_rates: FeeRates {
+            maker: crate::order::BasisPoint::MAX,
+            taker: crate::order::BasisPoint::MAX,
         },
     })
 }

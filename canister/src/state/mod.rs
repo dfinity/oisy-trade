@@ -16,7 +16,7 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
+    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
@@ -419,7 +419,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     let from_owner = owner_cache[from_order];
                     let to_owner = owner_cache[to_order];
                     self.balances
-                        .transfer(&from_owner, &to_owner, &token, *amount);
+                        .transfer(&from_owner, &to_owner, &token, *amount, Quantity::ZERO);
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
                     let owner = owner_cache[order];
@@ -441,6 +441,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.trading_pairs.contains(pair)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_trading_pair(
         &mut self,
         book_id: OrderBookId,
@@ -449,11 +450,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         quote_metadata: TokenMetadata,
         tick_size: TickSize,
         lot_size: LotSize,
+        fee_rates: FeeRates,
     ) {
         self.record_token(pair.base, base_metadata);
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
-        let book = OrderBook::new(book_id, tick_size, lot_size);
+        let book = OrderBook::new(book_id, tick_size, lot_size, fee_rates);
         self.trading_pairs.insert(pair, book_id);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
