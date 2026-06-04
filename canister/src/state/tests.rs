@@ -1152,8 +1152,17 @@ mod settle_fills {
                 Side::Buy => (taker_bps, maker_bps),
                 Side::Sell => (maker_bps, taker_bps),
             };
-            let base_fee = (qty as u128 * buyer_role_bps as u128 / 10_000) as u64;
-            let quote_fee = (notional as u128 * seller_role_bps as u128 / 10_000) as u64;
+            let base_fee_num = qty as u128 * buyer_role_bps as u128;
+            let quote_fee_num = notional as u128 * seller_role_bps as u128;
+            let base_fee = (base_fee_num / 10_000) as u64;
+            let quote_fee = (quote_fee_num / 10_000) as u64;
+            // Workload picks qty/price so the fees are exact (no ceiling
+            // rounding) and strictly positive — keeps the equality
+            // assertions below tight.
+            assert_eq!(base_fee_num % 10_000, 0, "base fee should be exact");
+            assert_eq!(quote_fee_num % 10_000, 0, "quote fee should be exact");
+            assert!(base_fee > 0, "base fee should be > 0");
+            assert!(quote_fee > 0, "quote fee should be > 0");
 
             assert_eq!(
                 state.get_balance(&BUYER, &pair.base),
