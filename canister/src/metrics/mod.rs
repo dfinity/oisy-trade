@@ -76,9 +76,13 @@ where
 /// is queried via Candid where the full `Nat` precision is preserved.
 fn amount_to_f64(q: crate::order::Quantity) -> f64 {
     let nat: candid::Nat = q.into();
-    // `Nat::to_string()` is decimal; converting through f64 loses precision
-    // above 2^53 but is the standard Prometheus convention.
-    nat.to_string().parse::<f64>().unwrap_or(f64::NAN)
+    // `candid::Nat`'s `Display` impl emits underscore separators (e.g.
+    // "1_000_000") which `f64::from_str` rejects → NaN. Strip them so the
+    // metric carries the actual value.
+    nat.to_string()
+        .replace('_', "")
+        .parse::<f64>()
+        .unwrap_or(f64::NAN)
 }
 
 /// Returns the amount of heap memory in bytes that has been allocated.
