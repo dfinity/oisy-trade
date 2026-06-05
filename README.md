@@ -36,6 +36,7 @@ See the [design document](docs/design.md) for the full architecture.
 
 | Environment         | Canister ID                                                                                                  | Listings          |
 |---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
+| 🚀 Production | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | _Coming soon!_ |
 | 🧪 Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
 
 <a id="usage"></a>
