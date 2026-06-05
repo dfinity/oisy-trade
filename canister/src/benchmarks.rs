@@ -19,6 +19,50 @@ const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
+/// Number of `checked_div_rem_u64` calls per iteration in the microbenches
+/// below. Picked large enough to dominate the per-iteration scope-entry
+/// overhead from `bench_scopes!`, so divide by `N_DIV_REM_ITERATIONS` for a
+/// per-call cost estimate.
+const N_DIV_REM_ITERATIONS: u64 = 10_000;
+
+/// Microbench for `Quantity::checked_div_rem_u64` with `high == 0`
+/// (the workload realistic case: trade values fit in u64). With the
+/// `high == 0` fast path this returns immediately via a single u128 `/`
+/// and `%`; without the fast path it falls through to the three-chunk
+/// long division.
+#[bench(raw)]
+fn bench_checked_div_rem_u64_high_zero() -> canbench_rs::BenchResult {
+    let amount = std::hint::black_box(Quantity::from(123_456_789_000_000u64));
+    canbench_rs::bench_fn(|| {
+        for _ in 0..N_DIV_REM_ITERATIONS {
+            // `10_000` is a literal here — matches the real call site
+            // in `BasisPoint::mul_ceil`, so the compiler is free to
+            // specialize the division (magic-number multiplication).
+            let result = amount.checked_div_rem_u64(10_000);
+            std::hint::black_box(result);
+        }
+    })
+}
+
+/// Microbench for `Quantity::checked_div_rem_u64` with `high != 0`
+/// (forces the slow path even with the fast path present). Pins the
+/// cost of the original three-chunk long division independently of the
+/// fast-path branch.
+#[bench(raw)]
+fn bench_checked_div_rem_u64_high_nonzero() -> canbench_rs::BenchResult {
+    let amount = std::hint::black_box(Quantity::new(
+        1_234_567u128,
+        987_654_321_098_765_432_109u128,
+    ));
+    let divisor = std::hint::black_box(10_000u64);
+    canbench_rs::bench_fn(|| {
+        for _ in 0..N_DIV_REM_ITERATIONS {
+            let result = amount.checked_div_rem_u64(divisor);
+            std::hint::black_box(result);
+        }
+    })
+}
+
 /// Benchmark a single large sell order that sweeps all 697 bid levels from the
 /// Binance depth snapshot, producing one fill per price level.
 #[bench(raw)]
