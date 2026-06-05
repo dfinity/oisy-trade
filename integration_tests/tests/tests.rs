@@ -328,6 +328,7 @@ mod cancel_limit_order {
             .execute()
             .await;
 
+        let before_placement = setup.time_nanos().await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -337,6 +338,7 @@ mod cancel_limit_order {
             })
             .await
             .unwrap();
+        let after_placement = setup.time_nanos().await;
         seller_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -374,12 +376,18 @@ mod cancel_limit_order {
             .cancel_limit_order(buy_id.clone())
             .await
             .unwrap();
+        // The record must carry the order's *submission* time, not the cancel
+        // time (a tick ran in between), so pin it to the placement window.
         assert!(
-            canceled.timestamp > 0,
-            "canceled order should carry a submission timestamp"
+            before_placement <= canceled.timestamp && canceled.timestamp <= after_placement,
+            "submission timestamp {} should fall within the placement window [{before_placement}, {after_placement}]",
+            canceled.timestamp,
         );
         assert_eq!(
-            canceled,
+            OrderRecord {
+                timestamp: 0,
+                ..canceled.clone()
+            },
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
@@ -388,7 +396,7 @@ mod cancel_limit_order {
                 status: OrderStatus::Canceled(CanceledOrderInfo {
                     remaining_quantity: Nat::from(2_000_000u64),
                 }),
-                timestamp: canceled.timestamp,
+                timestamp: 0,
             }
         );
 

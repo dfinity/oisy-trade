@@ -491,15 +491,16 @@ pub mod arbitrary {
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
             arb_order_status(),
+            any::<u64>(), // submission timestamp (nanos)
         )
             .prop_map(
-                move |(owner, side, price_ticks, qty_lots, status)| OrderRecord {
+                move |(owner, side, price_ticks, qty_lots, status, timestamp)| OrderRecord {
                     owner,
                     side,
                     price: Price::new(price_ticks * tick),
                     quantity: Quantity::from(qty_lots * lot),
                     status,
-                    timestamp: Timestamp::EPOCH,
+                    timestamp: Timestamp::new(timestamp),
                 },
             )
     }

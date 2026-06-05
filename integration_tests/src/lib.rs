@@ -211,6 +211,12 @@ impl Setup {
         self.env.as_ref().unwrap()
     }
 
+    /// Current replica time as nanoseconds since the Unix epoch, matching the
+    /// canister's `ic_cdk::api::time()` units.
+    pub async fn time_nanos(&self) -> u64 {
+        self.env().get_time().await.as_nanos_since_unix_epoch()
+    }
+
     pub async fn mint_base_tokens(&self, to: Principal, amount: impl Into<Nat>) -> Nat {
         self.base_token_ledger()
             .icrc1_transfer(

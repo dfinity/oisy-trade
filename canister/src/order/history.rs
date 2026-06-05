@@ -7,10 +7,12 @@ use std::borrow::Cow;
 
 /// Record of an order from submission through terminal state.
 ///
-/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`],
-/// so the CBOR layout is an upgrade-durable schema: removing or renumbering a
-/// field breaks decoding of records written by prior canister versions. New
-/// fields must be added with `#[cbor(n(N), default)]` or an `Option<T>` type.
+/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`].
+/// Once the canister is launched the CBOR layout becomes an upgrade-durable
+/// schema: removing or renumbering a field — or adding one without an
+/// `Option<T>` / `#[cbor(default)]` fallback — breaks decoding of records
+/// written by prior canister versions. Before launch there are no persisted
+/// records to preserve, so schema-breaking changes are acceptable.
 /// The trading pair is deliberately not stored — it is derivable from the
 /// `OrderBookId` embedded in the [`OrderId`] via the trading-pair registry.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]

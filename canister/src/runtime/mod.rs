@@ -8,17 +8,7 @@ pub const IC_RUNTIME: IcRuntime = IcRuntime;
 /// A point in time, in nanoseconds since the Unix epoch, as reported by the IC
 /// system API.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    minicbor::Encode,
-    minicbor::Decode,
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode,
 )]
 pub struct Timestamp(#[n(0)] u64);
 
