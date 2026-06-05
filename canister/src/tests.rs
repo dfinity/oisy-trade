@@ -361,9 +361,10 @@ mod add_limit_order {
 }
 
 mod cancel_limit_order {
+    use crate::Timestamp;
     use crate::order::OrderId;
     use crate::state::with_state_mut;
-    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{
         LOT_SIZE, fund_user, init_state_with_order_book, limit_order_request,
     };
@@ -414,10 +415,18 @@ mod cancel_limit_order {
         init_state_with_order_book();
         let owner = Principal::from_slice(&[0x01]);
         fund_user(owner);
-        let runtime = mock_runtime_for(owner);
-        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+        // Distinct placement and cancel times so the asserted timestamp can
+        // only be the submission time, not a re-stamp at cancel.
+        let order_id = add_limit_order(
+            limit_order_request(),
+            &mock_runtime_at(owner, Timestamp::new(111)),
+        )
+        .unwrap();
         assert_eq!(
-            cancel_limit_order(order_id.clone(), &runtime),
+            cancel_limit_order(
+                order_id.clone(),
+                &mock_runtime_at(owner, Timestamp::new(222))
+            ),
             Ok(dex_types::OrderRecord {
                 owner,
                 side: dex_types::Side::Buy,
@@ -426,10 +435,11 @@ mod cancel_limit_order {
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 }),
+                timestamp: 111,
             })
         );
 
-        let result = cancel_limit_order(order_id, &runtime);
+        let result = cancel_limit_order(order_id, &mock_runtime_at(owner, Timestamp::new(333)));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyCanceled));
     }
@@ -457,10 +467,18 @@ mod cancel_limit_order {
         init_state_with_order_book();
         let owner = Principal::from_slice(&[0x01]);
         fund_user(owner);
-        let runtime = mock_runtime_for(owner);
-        let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
+        // Distinct placement and cancel times so the asserted timestamp can
+        // only be the submission time, not a re-stamp at cancel.
+        let order_id = add_limit_order(
+            limit_order_request(),
+            &mock_runtime_at(owner, Timestamp::new(111)),
+        )
+        .unwrap();
 
-        let result = cancel_limit_order(order_id.clone(), &runtime);
+        let result = cancel_limit_order(
+            order_id.clone(),
+            &mock_runtime_at(owner, Timestamp::new(222)),
+        );
         assert_eq!(
             result,
             Ok(dex_types::OrderRecord {
@@ -471,6 +489,7 @@ mod cancel_limit_order {
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 }),
+                timestamp: 111,
             })
         );
         assert_eq!(
@@ -685,7 +704,7 @@ mod withdraw {
     fn mock_runtime_returning(responses: Vec<Response>) -> MockRuntime {
         let mut runtime = MockRuntime::new();
         runtime.expect_msg_caller().return_const(USER);
-        runtime.expect_time().return_const(0u64);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
 
         let mut seq = Sequence::new();
         for response in responses {

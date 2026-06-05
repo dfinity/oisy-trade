@@ -1,3 +1,4 @@
+use crate::Timestamp;
 use crate::order::{
     FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity,
     Side, TickSize, TokenId, TokenMetadata,
@@ -15,7 +16,7 @@ mod tests;
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct Event {
     #[n(0)]
-    pub timestamp: u64,
+    pub timestamp: Timestamp,
     #[n(1)]
     pub payload: EventType,
 }

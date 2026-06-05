@@ -225,7 +225,13 @@ fn place(
     };
     state.deposit(user, token, required, StableMemoryOptions::Write);
     let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    state.record_limit_order(
+        user,
+        order_id.book_id(),
+        order,
+        crate::Timestamp::EPOCH,
+        StableMemoryOptions::Write,
+    );
     order_id
 }
 

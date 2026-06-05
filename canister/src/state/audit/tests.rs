@@ -68,10 +68,10 @@ impl Scenario {
         }
     }
 
-    fn timestamp(&mut self) -> u64 {
+    fn timestamp(&mut self) -> crate::Timestamp {
         let ts = self.next_ts;
         self.next_ts += 1;
-        ts
+        crate::Timestamp::new(ts)
     }
 
     fn with_upgrade(mut self, mode: Option<Mode>) -> Self {
@@ -178,9 +178,14 @@ impl Scenario {
                 },
             )
             .unwrap();
-        self.state
-            .record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
         let timestamp = self.timestamp();
+        self.state.record_limit_order(
+            user,
+            order_id.book_id(),
+            order,
+            timestamp,
+            StableMemoryOptions::Write,
+        );
         self.events.push(Event {
             timestamp,
             payload: EventType::AddLimitOrder(AddLimitOrderEvent {

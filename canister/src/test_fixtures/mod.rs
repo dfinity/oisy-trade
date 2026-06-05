@@ -6,7 +6,7 @@ use crate::order::{
     Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
-use crate::{order, state};
+use crate::{Timestamp, order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use ic_stable_structures::{Memory, VectorMemory};
@@ -262,7 +262,13 @@ where
     let (order_id, order) = state
         .validate_limit_order(user, pair.clone(), pending)
         .expect("place_order: validate_limit_order failed");
-    state.record_limit_order(user, order_id.book_id(), order, StableMemoryOptions::Write);
+    state.record_limit_order(
+        user,
+        order_id.book_id(),
+        order,
+        Timestamp::EPOCH,
+        StableMemoryOptions::Write,
+    );
     order_id
 }
 
@@ -319,6 +325,7 @@ pub fn transfer_from_response(
 
 #[cfg(test)]
 pub mod arbitrary {
+    use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId,
@@ -484,14 +491,16 @@ pub mod arbitrary {
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
             arb_order_status(),
+            any::<u64>(), // submission timestamp (nanos)
         )
             .prop_map(
-                move |(owner, side, price_ticks, qty_lots, status)| OrderRecord {
+                move |(owner, side, price_ticks, qty_lots, status, timestamp)| OrderRecord {
                     owner,
                     side,
                     price: Price::new(price_ticks * tick),
                     quantity: Quantity::from(qty_lots * lot),
                     status,
+                    timestamp: Timestamp::new(timestamp),
                 },
             )
     }
@@ -744,23 +753,32 @@ pub mod arbitrary {
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {
-        (any::<u64>(), arb_event_type())
-            .prop_map(|(timestamp, payload)| Event { timestamp, payload })
+        (any::<u64>(), arb_event_type()).prop_map(|(timestamp, payload)| Event {
+            timestamp: Timestamp::new(timestamp),
+            payload,
+        })
     }
 }
 
 #[cfg(test)]
 pub mod mocks {
     use crate::Runtime;
+    use crate::Timestamp;
     use candid::Principal;
     use candid::utils::ArgumentEncoder;
     use ic_cdk::call::{CallFailed, Response};
     use mockall::mock;
 
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
+        mock_runtime_at(caller, Timestamp::EPOCH)
+    }
+
+    /// Like [`mock_runtime_for`] but with `time()` pinned to `now`, so a test
+    /// can give placement and cancellation distinct timestamps.
+    pub fn mock_runtime_at(caller: Principal, now: Timestamp) -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller().return_const(caller);
-        mock.expect_time().return_const(0u64);
+        mock.expect_time().return_const(now);
         mock.expect_instruction_counter().return_const(0u64);
         mock
     }
@@ -784,7 +802,7 @@ pub mod mocks {
             fn canister_self(&self) -> Principal;
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
-            fn time(&self) -> u64;
+            fn time(&self) -> Timestamp;
         }
     }
 
@@ -862,8 +880,8 @@ pub mod mocks {
             0
         }
 
-        fn time(&self) -> u64 {
-            0
+        fn time(&self) -> Timestamp {
+            Timestamp::EPOCH
         }
     }
 }

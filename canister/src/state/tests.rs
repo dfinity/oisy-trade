@@ -386,7 +386,7 @@ mod cancel_limit_order {
         expected_remaining: impl Into<Quantity>,
     ) {
         let mut runtime = MockRuntime::new();
-        runtime.expect_time().return_const(0u64);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
@@ -438,6 +438,65 @@ mod cancel_limit_order {
             FeeRates::default(),
         );
         state
+    }
+}
+
+mod record_limit_order {
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side};
+    use crate::state::{StableMemoryOptions, State};
+    use crate::test_fixtures::{
+        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            FeeRates::default(),
+        );
+        state
+    }
+
+    #[test]
+    fn stores_the_submission_timestamp_on_the_record() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        state.deposit(OWNER, pair.base, lot.into(), StableMemoryOptions::Write);
+        let (order_id, order) = state
+            .validate_limit_order(
+                OWNER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(100),
+                    quantity: lot.into(),
+                },
+            )
+            .unwrap();
+        let timestamp = crate::Timestamp::new(1_700_000_000_000_000_000);
+
+        state.record_limit_order(
+            OWNER,
+            order_id.book_id(),
+            order,
+            timestamp,
+            StableMemoryOptions::Write,
+        );
+
+        assert_eq!(
+            state.order_history.get(&order_id).unwrap().timestamp,
+            timestamp
+        );
     }
 }
 

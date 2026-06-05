@@ -5,6 +5,26 @@ use ic_cdk::call::{Call, CallFailed, Response};
 
 pub const IC_RUNTIME: IcRuntime = IcRuntime;
 
+/// A point in time, in nanoseconds since the Unix epoch, as reported by the IC
+/// system API.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode,
+)]
+pub struct Timestamp(#[n(0)] u64);
+
+impl Timestamp {
+    /// The Unix epoch (zero nanoseconds).
+    pub const EPOCH: Self = Self(0);
+
+    pub const fn new(nanos: u64) -> Self {
+        Self(nanos)
+    }
+
+    pub const fn as_nanos(self) -> u64 {
+        self.0
+    }
+}
+
 /// Abstract IC-specific methods that are only available when the canister is running on the IC.
 #[async_trait]
 pub trait Runtime {
@@ -30,7 +50,7 @@ pub trait Runtime {
     fn instruction_counter(&self) -> u64;
 
     /// Returns the current time in nanoseconds since the Unix epoch.
-    fn time(&self) -> u64;
+    fn time(&self) -> Timestamp;
 }
 
 #[derive(Copy, Clone)]
@@ -68,7 +88,7 @@ impl Runtime for IcRuntime {
         ic_cdk::api::instruction_counter()
     }
 
-    fn time(&self) -> u64 {
-        ic_cdk::api::time()
+    fn time(&self) -> Timestamp {
+        Timestamp::new(ic_cdk::api::time())
     }
 }

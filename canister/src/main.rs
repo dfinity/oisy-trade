@@ -198,7 +198,7 @@ fn get_events(
 
     fn map_event(event: Event) -> event::Event {
         event::Event {
-            timestamp: event.timestamp,
+            timestamp: event.timestamp.as_nanos(),
             payload: match event.payload {
                 EventType::Init(args) => event::EventType::Init(args),
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),

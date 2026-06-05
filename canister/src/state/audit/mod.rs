@@ -1,5 +1,4 @@
 use super::{StableMemoryOptions, State};
-use crate::Runtime;
 use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
@@ -7,6 +6,7 @@ use crate::state::event::{
     WithdrawEvent,
 };
 use crate::storage;
+use crate::{Runtime, Timestamp};
 use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
 use std::collections::VecDeque;
@@ -19,8 +19,9 @@ pub fn process_event<MH: Memory, MB: Memory>(
     payload: EventType,
     runtime: &impl Runtime,
 ) {
-    apply_state_transition(state, &payload, StableMemoryOptions::Write);
-    storage::record_event(runtime.time(), payload);
+    let timestamp = runtime.time();
+    apply_state_transition(state, &payload, timestamp, StableMemoryOptions::Write);
+    storage::record_event(timestamp, payload);
 }
 
 /// Append `payload` to the event log without applying it to `state`. Use this
@@ -29,6 +30,10 @@ pub fn process_event<MH: Memory, MB: Memory>(
 /// call for concurrency safety). Replaying the event through
 /// [`apply_state_transition`] reproduces the direct mutation, so replay
 /// equivalence is preserved.
+///
+/// Unlike [`process_event`], the timestamp is read inline rather than captured
+/// into a local: this path applies no state transition, so there is no
+/// shared-timestamp invariant between a mutation and its event-log entry.
 pub fn record_event(payload: EventType, runtime: &impl Runtime) {
     storage::record_event(runtime.time(), payload);
 }
@@ -36,6 +41,7 @@ pub fn record_event(payload: EventType, runtime: &impl Runtime) {
 fn apply_state_transition<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: &EventType,
+    timestamp: Timestamp,
     persistence: StableMemoryOptions,
 ) {
     use crate::order;
@@ -119,7 +125,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            state.record_limit_order(*user, book_id, order, persistence);
+            state.record_limit_order(*user, book_id, order, timestamp, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
             state.record_cancel_limit_order(*order_id, persistence);
@@ -152,7 +158,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
-        apply_state_transition(&mut state, &event.payload, persistence);
+        apply_state_transition(&mut state, &event.payload, event.timestamp, persistence);
     }
     // Replaying events accumulate pending settling events
     // that must have been already consumed when being written

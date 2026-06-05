@@ -1,4 +1,5 @@
 use super::{OrderId, OrderStatus, Price, Quantity, Side};
+use crate::Timestamp;
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
@@ -6,10 +7,12 @@ use std::borrow::Cow;
 
 /// Record of an order from submission through terminal state.
 ///
-/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`],
-/// so the CBOR layout is an upgrade-durable schema: removing or renumbering a
-/// field breaks decoding of records written by prior canister versions. New
-/// fields must be added with `#[cbor(n(N), default)]` or an `Option<T>` type.
+/// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`].
+/// Once the canister is launched the CBOR layout becomes an upgrade-durable
+/// schema: removing or renumbering a field — or adding one without an
+/// `Option<T>` / `#[cbor(default)]` fallback — breaks decoding of records
+/// written by prior canister versions. Before launch there are no persisted
+/// records to preserve, so schema-breaking changes are acceptable.
 /// The trading pair is deliberately not stored — it is derivable from the
 /// `OrderBookId` embedded in the [`OrderId`] via the trading-pair registry.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
@@ -24,6 +27,10 @@ pub struct OrderRecord {
     pub quantity: Quantity,
     #[n(4)]
     pub status: OrderStatus,
+    /// Submission time, taken from the add-limit-order event. Display-only —
+    /// no matching or ordering logic reads it.
+    #[n(5)]
+    pub timestamp: Timestamp,
 }
 
 impl From<OrderRecord> for dex_types::OrderRecord {
@@ -34,6 +41,7 @@ impl From<OrderRecord> for dex_types::OrderRecord {
             price: record.price.into(),
             quantity: record.quantity.into(),
             status: record.status.into(),
+            timestamp: record.timestamp.as_nanos(),
         }
     }
 }

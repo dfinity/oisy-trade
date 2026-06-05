@@ -1,3 +1,4 @@
+use crate::Timestamp;
 use crate::order::{
     FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
     TokenId, TokenMetadata,
@@ -13,7 +14,7 @@ use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
-        timestamp: 0,
+        timestamp: Timestamp::EPOCH,
         payload: EventType::Init(InitArg {
             mode,
             max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
@@ -28,7 +29,7 @@ pub fn upgrade_event(
     instruction_budget: Option<u64>,
 ) -> Event {
     Event {
-        timestamp: 1,
+        timestamp: Timestamp::new(1),
         payload: EventType::Upgrade(UpgradeArg {
             mode,
             max_orders_per_chunk,
@@ -39,7 +40,7 @@ pub fn upgrade_event(
 
 pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
     Event {
-        timestamp: 2,
+        timestamp: Timestamp::new(2),
         payload: EventType::AddTradingPair(AddTradingPairEvent {
             book_id: OrderBookId::ZERO,
             base: TokenId::new(base),
@@ -113,22 +114,22 @@ impl WorstCaseEvent {
 
     pub fn expected_memory_size(&self) -> usize {
         match self {
-            Self::Init => 342,
-            Self::Upgrade => 342,
-            Self::AddTradingPair => 145,
-            Self::Deposit => 95,
-            Self::Withdraw => 104,
-            Self::AddLimitOrder => 97,
-            Self::CancelLimitOrder => 35,
-            Self::Matching => 10_027,
-            Self::Settling => 127_327,
+            Self::Init => 343,
+            Self::Upgrade => 343,
+            Self::AddTradingPair => 146,
+            Self::Deposit => 96,
+            Self::Withdraw => 105,
+            Self::AddLimitOrder => 98,
+            Self::CancelLimitOrder => 36,
+            Self::Matching => 10_028,
+            Self::Settling => 127_328,
         }
     }
 }
 
 fn max_timestamp(payload: EventType) -> Event {
     Event {
-        timestamp: u64::MAX,
+        timestamp: Timestamp::new(u64::MAX),
         payload,
     }
 }
