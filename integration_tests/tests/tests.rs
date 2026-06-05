@@ -470,7 +470,7 @@ async fn should_return_empty_trading_pairs() {
                 id: setup.base_token_id(),
                 metadata: TokenMetadata {
                     symbol: "ckSOL".to_string(),
-                    decimals: 9,
+                    decimals: 0,
                 },
             },
             quote: Token {
@@ -846,7 +846,7 @@ async fn should_replay_events_on_upgrade() {
                 quote: setup.quote_token_id(),
                 tick_size: TICK_SIZE,
                 lot_size: LOT_SIZE,
-                base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
+                base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 0 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
             });
         });

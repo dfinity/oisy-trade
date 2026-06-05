@@ -139,6 +139,76 @@ mod add_trading_pair {
         assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
     }
 
+    #[test]
+    fn should_reject_indivisible_tick_lot_for_base_decimals() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let base = TokenId {
+            ledger_id: Principal::from_slice(&[0x12]),
+        };
+        let quote = TokenId {
+            ledger_id: Principal::from_slice(&[0x13]),
+        };
+        // The fixture's tick * lot = 10 * 1_000_000 = 10^7, which is not a
+        // multiple of 10^8, so an 8-decimal base would round at settlement.
+        let result = add_trading_pair(
+            trading_pair_request(
+                base,
+                TokenMetadata {
+                    symbol: "BASE".to_string(),
+                    decimals: 8,
+                },
+                quote,
+                TokenMetadata {
+                    symbol: "QUOTE".to_string(),
+                    decimals: 6,
+                },
+            ),
+            &runtime,
+        );
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
+                tick_size: 10,
+                lot_size: 1_000_000,
+                base_decimals: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_base_decimals_too_large() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let base = TokenId {
+            ledger_id: Principal::from_slice(&[0x14]),
+        };
+        let quote = TokenId {
+            ledger_id: Principal::from_slice(&[0x15]),
+        };
+        let result = add_trading_pair(
+            trading_pair_request(
+                base,
+                TokenMetadata {
+                    symbol: "BASE".to_string(),
+                    decimals: 20,
+                },
+                quote,
+                TokenMetadata {
+                    symbol: "QUOTE".to_string(),
+                    decimals: 6,
+                },
+            ),
+            &runtime,
+        );
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::BaseDecimalsTooLarge { decimals: 20 })
+        );
+    }
+
     fn controller_runtime() -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller()

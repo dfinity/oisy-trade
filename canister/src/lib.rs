@@ -382,6 +382,22 @@ pub fn add_trading_pair(
         let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
         s.check_token_metadata_consistency(pair.base, &base_metadata)?;
         s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
+        order::validate_pair_params(tick_size, lot_size, base_metadata.decimals).map_err(|e| {
+            match e {
+                order::InvalidPairParams::BaseDecimalsTooLarge { decimals } => {
+                    AddTradingPairError::BaseDecimalsTooLarge { decimals }
+                }
+                order::InvalidPairParams::IndivisibleTickLot {
+                    tick_size,
+                    lot_size,
+                    base_decimals,
+                } => AddTradingPairError::IndivisibleTickLotForBaseDecimals {
+                    tick_size,
+                    lot_size,
+                    base_decimals,
+                },
+            }
+        })?;
         let book_id = s.next_book_id();
         let event = state::event::AddTradingPairEvent {
             book_id,

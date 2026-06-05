@@ -466,4 +466,21 @@ pub enum AddTradingPairError {
         /// The metadata that was submitted.
         submitted: TokenMetadata,
     },
+    /// The base token has too many decimals for settlement to be representable:
+    /// `10^base_decimals` must fit a `u64`, i.e. `decimals <= 19`.
+    BaseDecimalsTooLarge {
+        /// The offending base-token decimals.
+        decimals: u8,
+    },
+    /// `tick_size × lot_size` is not a multiple of `10^base_decimals`, so some
+    /// fills could not settle to an exact quote amount. Choose a coarser
+    /// `tick_size` or `lot_size`.
+    IndivisibleTickLotForBaseDecimals {
+        /// The submitted tick size.
+        tick_size: u64,
+        /// The submitted lot size.
+        lot_size: u64,
+        /// The base token's decimals (the divisor exponent).
+        base_decimals: u8,
+    },
 }
