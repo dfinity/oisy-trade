@@ -1498,6 +1498,40 @@ mod get_balances {
     }
 }
 
+mod get_fee_balances {
+    use crate::get_fee_balances;
+    use crate::state::reset_state;
+    use crate::test_fixtures::arbitrary::arb_filter_tokens;
+    use crate::test_fixtures::init_state_with_order_book;
+    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
+
+    proptest! {
+        #[test]
+        fn should_enforce_filter_length_cap(
+            filter in arb_filter_tokens(0..=(MAX_FILTER_LEN as usize + 10)),
+        ) {
+            reset_state();
+            init_state_with_order_book();
+            let len = filter.len() as u32;
+
+            let result = get_fee_balances(Some(filter));
+
+            if len <= MAX_FILTER_LEN {
+                prop_assert!(result.is_ok());
+            } else {
+                prop_assert_eq!(
+                    result.unwrap_err(),
+                    GetBalancesRequestError::FilterTooLarge {
+                        len,
+                        max: MAX_FILTER_LEN,
+                    }
+                );
+            }
+        }
+    }
+}
+
 mod process_pending_orders {
     use crate::execute::ExecutionStatus;
     use crate::test_fixtures::init_state_with_order_book;

@@ -159,6 +159,19 @@ impl<R: Runtime> DexClient<R> {
             .unwrap()
     }
 
+    /// Query the canister-owned fee pool. Mirrors [`Self::get_balances`].
+    /// Each returned `Balance` carries the fee amount in `free`;
+    /// `reserved` is always zero.
+    pub async fn get_fee_balances(
+        &self,
+        filter: Option<Vec<FilterToken>>,
+    ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+        self.runtime
+            .call(self.dex_canister, "get_fee_balances", (filter,), 0)
+            .await
+            .unwrap()
+    }
+
     /// Client-side convenience: query the caller's balance for a single
     /// token via [`Self::get_balances`]. Returns `TokenNotSupported` when
     /// the DEX does not know the token.

@@ -161,6 +161,11 @@ impl<M: Memory> TokenBalance<M> {
         self.fee_balances.get(token).copied()
     }
 
+    /// Iterate the fee pool. Order is by `TokenId` (BTreeMap ordering).
+    pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
+        self.fee_balances.iter().map(|(k, v)| (*k, *v))
+    }
+
     /// Snapshot the heap-resident fee pool for pre-upgrade serialization.
     /// Stable user balances are excluded; they survive upgrades on their
     /// own via the underlying [`StableBTreeMap`].
