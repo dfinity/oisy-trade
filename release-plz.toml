@@ -41,8 +41,10 @@ release = false
 
 [[package]]
 name = "dex_types"
-# part of the dex_client public API; release/publish it alongside dex_client
-release = false
+# published to crates.io so dex_client can depend on the released version;
+# no separate GitHub release (the crates.io publish + git tag is enough)
+publish = true
+git_release_enable = false
 
 [[package]]
 name = "dex_types_internal"
