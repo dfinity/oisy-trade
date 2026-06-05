@@ -1,9 +1,11 @@
 pub mod deposit_flow;
 pub mod events;
+pub mod fee_fill;
 pub mod icrc_ledger;
 
 pub use deposit_flow::DepositFlow;
 pub use events::DexEventAssert;
+pub use fee_fill::{FeeFillOutcome, fill_one_cross_with_fees};
 pub use icrc_ledger::LedgerClient;
 
 use async_trait::async_trait;
