@@ -25,18 +25,6 @@ impl Timestamp {
     }
 }
 
-impl From<u64> for Timestamp {
-    fn from(nanos: u64) -> Self {
-        Self(nanos)
-    }
-}
-
-impl From<Timestamp> for u64 {
-    fn from(timestamp: Timestamp) -> Self {
-        timestamp.0
-    }
-}
-
 /// Abstract IC-specific methods that are only available when the canister is running on the IC.
 #[async_trait]
 pub trait Runtime {
