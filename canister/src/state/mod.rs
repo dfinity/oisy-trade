@@ -16,9 +16,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
-    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    self, CanceledOrderInfo, FeeRates, GlobalOrderSeq, LotSize, MatchOrderError, MatchingOutput,
+    Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
+    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::UserRegistry;
@@ -82,7 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// Monotonic counter assigning each placed order a canister-global
     /// insertion sequence, used as the ordering key in `order_history`'s
     /// per-user index. Carried in the upgrade snapshot.
-    next_order_seq: u64,
+    next_order_seq: GlobalOrderSeq,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -117,7 +118,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
-            next_order_seq: 0,
+            next_order_seq: GlobalOrderSeq::ZERO,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -242,7 +243,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
             let order_id = OrderId::new(book_id, order.id());
             let seq = self.next_order_seq;
-            self.next_order_seq += 1;
+            self.next_order_seq.increment();
             self.order_history.insert_once(
                 order_id,
                 seq,

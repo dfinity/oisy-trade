@@ -1,4 +1,4 @@
-use super::{OrderId, OrderStatus, Price, Quantity, Side};
+use super::{GlobalOrderSeq, OrderId, OrderStatus, Price, Quantity, Side};
 use crate::Timestamp;
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
@@ -70,12 +70,16 @@ impl Storable for OrderRecord {
 /// Record of every order from submission through terminal state, plus a
 /// secondary per-user index over it.
 ///
-/// Two stable maps that must stay in lockstep — so [`Self::insert_once`] writes
-/// both — kept together here rather than split across the caller:
+/// Two stable maps kept together here rather than split across the caller:
 /// - `orders`: the primary store, keyed by [`OrderId`].
 /// - `by_user`: a per-user index keyed by `(owner, u64::MAX - global_seq)`,
 ///   so a forward range scan over an owner's prefix yields that user's orders
 ///   newest-first. The value is the [`OrderId`], pointing back into `orders`.
+///
+/// The invariant is asymmetric: `by_user` mirrors **insertion only** — every
+/// [`Self::insert_once`] writes both maps, but `set_status` and cancel/fill
+/// update only `orders` and never touch `by_user` (its value is the immutable
+/// [`OrderId`], so status transitions don't affect it).
 pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, OrderRecord, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
@@ -90,6 +94,9 @@ impl<M: Memory> std::fmt::Debug for OrderHistory<M> {
 }
 
 impl<M: Memory> OrderHistory<M> {
+    /// `orders_memory` and `by_user_memory` **must be distinct memory regions**:
+    /// the two maps share no isolation beyond their backing memory, so passing
+    /// the same handle twice would let them overwrite each other.
     pub fn new(orders_memory: M, by_user_memory: M) -> Self {
         Self {
             orders: StableBTreeMap::init(orders_memory),
@@ -100,7 +107,7 @@ impl<M: Memory> OrderHistory<M> {
     /// Insert a new order record and index it under its owner with the given
     /// canister-global insertion `seq` (which orders the per-user index
     /// newest-first). Panics if the order ID is already present.
-    pub fn insert_once(&mut self, id: OrderId, seq: u64, record: OrderRecord) {
+    pub fn insert_once(&mut self, id: OrderId, seq: GlobalOrderSeq, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
         let owner = record.owner;
         assert_eq!(
@@ -111,7 +118,8 @@ impl<M: Memory> OrderHistory<M> {
         assert_eq!(
             self.by_user.insert(UserOrderKey::from_seq(owner, seq), id),
             None,
-            "BUG: duplicate user-order index entry for {owner} seq {seq}"
+            "BUG: duplicate user-order index entry for {owner} seq {}",
+            seq.get()
         );
     }
 
@@ -163,17 +171,39 @@ impl<M: Memory> OrderHistory<M> {
 /// canister-global insertion sequence. Encoded so byte order matches
 /// `(owner, newest-first)`, which is what [`OrderHistory::orders_by_user`]
 /// relies on for its forward range scan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// `Ord` is implemented by hand to match the [`Storable`] byte order
+/// (`StableBTreeMap` requires `K: Ord`). The derived field-wise ordering would
+/// *disagree* with the bytes — the length-prefix byte sorts before the
+/// principal bytes — so we mirror the encoding: length, then principal bytes,
+/// then `rev_seq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UserOrderKey {
     owner: Principal,
     rev_seq: u64,
 }
 
+impl Ord for UserOrderKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let (a, b) = (self.owner.as_slice(), other.owner.as_slice());
+        a.len()
+            .cmp(&b.len())
+            .then_with(|| a.cmp(b))
+            .then_with(|| self.rev_seq.cmp(&other.rev_seq))
+    }
+}
+
+impl PartialOrd for UserOrderKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl UserOrderKey {
-    fn from_seq(owner: Principal, seq: u64) -> Self {
+    fn from_seq(owner: Principal, seq: GlobalOrderSeq) -> Self {
         Self {
             owner,
-            rev_seq: u64::MAX - seq,
+            rev_seq: u64::MAX - seq.get(),
         }
     }
 
@@ -263,3 +293,33 @@ impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
 
 #[cfg(test)]
 impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `UserOrderKey`'s manual `Ord` must agree with its `Storable` byte order,
+    /// since `StableBTreeMap` relies on that consistency.
+    #[test]
+    fn user_order_key_ord_matches_storable_bytes() {
+        let keys = [
+            // `[2]` vs `[1, 0]`: derived field-wise `Ord` would disagree with
+            // the length-prefixed bytes here — the case this impl guards.
+            UserOrderKey::from_seq(Principal::from_slice(&[2]), GlobalOrderSeq::new(0)),
+            UserOrderKey::from_seq(Principal::from_slice(&[1, 0]), GlobalOrderSeq::new(0)),
+            UserOrderKey::from_seq(Principal::from_slice(&[1]), GlobalOrderSeq::new(5)),
+            UserOrderKey::from_seq(Principal::from_slice(&[1]), GlobalOrderSeq::new(9)),
+            UserOrderKey::newest(Principal::anonymous()),
+            UserOrderKey::oldest(Principal::anonymous()),
+        ];
+        for a in &keys {
+            for b in &keys {
+                assert_eq!(
+                    a.cmp(b),
+                    a.to_bytes().cmp(&b.to_bytes()),
+                    "Ord disagrees with Storable bytes for {a:?} vs {b:?}"
+                );
+            }
+        }
+    }
+}

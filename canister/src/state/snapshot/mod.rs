@@ -13,7 +13,8 @@
 use super::State;
 use crate::balance::{FeeEntry, TokenBalance};
 use crate::order::{
-    OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
+    GlobalOrderSeq, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId,
+    TokenMetadata, TradingPair,
 };
 use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
@@ -149,7 +150,7 @@ impl StateSnapshot {
                     Some(snapshot)
                 }
             },
-            next_order_seq: Some(*next_order_seq),
+            next_order_seq: Some(next_order_seq.get()),
         }
     }
 
@@ -230,7 +231,9 @@ impl StateSnapshot {
             user_registry,
             balances,
             order_history,
-            next_order_seq: self.next_order_seq.unwrap_or(0),
+            // Pre-launch: the `by_user` index starts empty in its fresh memory
+            // region; there are no prior orders to backfill into it.
+            next_order_seq: GlobalOrderSeq::new(self.next_order_seq.unwrap_or(0)),
             active_tasks: Default::default(),
             ledger_fee_cache,
             pending_settling_events,

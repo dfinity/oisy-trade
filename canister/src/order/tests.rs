@@ -1107,8 +1107,8 @@ mod remove_order {
 
 mod history {
     use crate::order::{
-        OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity,
-        Side,
+        GlobalOrderSeq, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
+        Price, Quantity, Side,
     };
     use crate::test_fixtures::arbitrary::arb_order_record;
     use candid::Principal;
@@ -1146,7 +1146,7 @@ mod history {
         let mut history = history();
         let id = test_id(0);
         let record = test_record();
-        history.insert_once(id, 0, record.clone());
+        history.insert_once(id, GlobalOrderSeq::new(0), record.clone());
 
         assert_eq!(history.get(&id), Some(record));
     }
@@ -1156,8 +1156,8 @@ mod history {
     fn insert_once_panics_on_duplicate() {
         let mut history = history();
         let id = test_id(0);
-        history.insert_once(id, 0, test_record());
-        history.insert_once(id, 1, test_record());
+        history.insert_once(id, GlobalOrderSeq::new(0), test_record());
+        history.insert_once(id, GlobalOrderSeq::new(1), test_record());
     }
 
     #[test]
@@ -1170,7 +1170,7 @@ mod history {
     fn set_status_updates_status() {
         let mut history = history();
         let id = test_id(0);
-        history.insert_once(id, 0, test_record());
+        history.insert_once(id, GlobalOrderSeq::new(0), test_record());
 
         assert_eq!(
             history.get(&id).map(|r| r.status),
@@ -1187,9 +1187,9 @@ mod history {
     fn orders_by_user_returns_newest_first() {
         let mut history = history();
         let owner = Principal::from_slice(&[7]);
-        history.insert_once(test_id(0), 0, record_owned_by(owner));
-        history.insert_once(test_id(1), 1, record_owned_by(owner));
-        history.insert_once(test_id(2), 2, record_owned_by(owner));
+        history.insert_once(test_id(0), GlobalOrderSeq::new(0), record_owned_by(owner));
+        history.insert_once(test_id(1), GlobalOrderSeq::new(1), record_owned_by(owner));
+        history.insert_once(test_id(2), GlobalOrderSeq::new(2), record_owned_by(owner));
 
         assert_eq!(
             history.orders_by_user(owner, 0, 10),
@@ -1202,7 +1202,11 @@ mod history {
         let mut history = history();
         let owner = Principal::from_slice(&[7]);
         for seq in 0..5 {
-            history.insert_once(test_id(seq), seq, record_owned_by(owner));
+            history.insert_once(
+                test_id(seq),
+                GlobalOrderSeq::new(seq),
+                record_owned_by(owner),
+            );
         }
         // Newest first: seq 4, 3, 2, 1, 0.
         assert_eq!(
@@ -1223,9 +1227,9 @@ mod history {
         let alice = Principal::from_slice(&[1]);
         let bob = Principal::from_slice(&[2]);
         // Interleaved global sequence: alice, bob, alice.
-        history.insert_once(test_id(0), 0, record_owned_by(alice));
-        history.insert_once(test_id(1), 1, record_owned_by(bob));
-        history.insert_once(test_id(2), 2, record_owned_by(alice));
+        history.insert_once(test_id(0), GlobalOrderSeq::new(0), record_owned_by(alice));
+        history.insert_once(test_id(1), GlobalOrderSeq::new(1), record_owned_by(bob));
+        history.insert_once(test_id(2), GlobalOrderSeq::new(2), record_owned_by(alice));
 
         assert_eq!(
             history.orders_by_user(alice, 0, 10),
@@ -1245,9 +1249,9 @@ mod history {
         let book0_first = OrderId::new(OrderBookId::ZERO, OrderSeq::new(5));
         let book1 = OrderId::new(OrderBookId::new(1), OrderSeq::new(0));
         let book0_second = OrderId::new(OrderBookId::ZERO, OrderSeq::new(6));
-        history.insert_once(book0_first, 0, record_owned_by(owner));
-        history.insert_once(book1, 1, record_owned_by(owner));
-        history.insert_once(book0_second, 2, record_owned_by(owner));
+        history.insert_once(book0_first, GlobalOrderSeq::new(0), record_owned_by(owner));
+        history.insert_once(book1, GlobalOrderSeq::new(1), record_owned_by(owner));
+        history.insert_once(book0_second, GlobalOrderSeq::new(2), record_owned_by(owner));
 
         assert_eq!(
             history.orders_by_user(owner, 0, 10),
