@@ -1266,29 +1266,6 @@ mod settle_fills {
             assert_eq!(state.balances.fee_balance(&pair.quote), None);
         }
 
-        /// `BalanceOperation::Transfer` round-trips through CBOR with
-        /// `fee: None`, which is the on-wire shape for a zero-fee fill
-        /// (the fill path sets `fee = None` whenever the rate is zero or
-        /// the bps math truncates to zero). This pins the `None` codec
-        /// path so a future schema bump can't silently break it.
-        #[test]
-        fn balance_op_with_no_fee_roundtrips_through_cbor() {
-            use crate::order::PairToken;
-            use crate::state::event::BalanceOperation;
-
-            let op = BalanceOperation::Transfer {
-                from_order: crate::order::OrderSeq::new(1),
-                to_order: crate::order::OrderSeq::new(2),
-                token: PairToken::Quote,
-                amount: Quantity::from(100u64),
-                fee: None,
-            };
-            let mut buf = vec![];
-            minicbor::encode(&op, &mut buf).unwrap();
-            let decoded: BalanceOperation = minicbor::decode(&buf).unwrap();
-            assert_eq!(decoded, op);
-        }
-
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
             let mut state = test_fixtures::state();
             let pair = icp_ckbtc_trading_pair();

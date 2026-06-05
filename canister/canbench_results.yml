@@ -197,7 +197,7 @@ benches:
   bench_process_pending_orders_1000_with_fees:
     total:
       calls: 1
-      instructions: 1096060495
+      instructions: 1095500973
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -253,7 +253,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 121307481
+        instructions: 120747959
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -273,7 +273,7 @@ benches:
         stable_memory_increase: 0
       qty:
         calls: 14288
-        instructions: 29747821
+        instructions: 29385163
         heap_increase: 0
         stable_memory_increase: 0
       qty::add:
@@ -288,7 +288,7 @@ benches:
         stable_memory_increase: 0
       qty::div_rem_u64:
         calls: 1538
-        instructions: 415260
+        instructions: 888046
         heap_increase: 0
         stable_memory_increase: 0
       qty::mul_u64:

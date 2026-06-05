@@ -668,6 +668,15 @@ impl Quantity {
         }
         let d = divisor as u128;
 
+        // Fast path for the common small-quantity case (`high == 0`): the
+        // value fits in a u128, so a single native `/` and `%` replace the
+        // three-chunk long division below. Real-world notionals/quantities
+        // are well under 2^128, so `mul_ceil` (the fee path) hits this on
+        // every production fill.
+        if self.high == 0 {
+            return Some((Self::from_u128(self.low / d), (self.low % d) as u64));
+        }
+
         // Step 1: divide the high limb. r1 < d ≤ u64::MAX < 2^64.
         let q1 = self.high / d;
         let r1 = self.high % d;
