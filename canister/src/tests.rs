@@ -139,6 +139,61 @@ mod add_trading_pair {
         assert_eq!(result, Err(AddTradingPairError::TradingPairAlreadyExists));
     }
 
+    #[test]
+    fn should_reject_maker_fee_bps_above_max() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+        let mut req = trading_pair_request(
+            icp_token_id(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            token_c,
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+        );
+        req.maker_fee_bps = 10_001;
+
+        let result = add_trading_pair(req, &runtime);
+
+        assert_eq!(result, Err(AddTradingPairError::InvalidBasisPoint(10_001)));
+    }
+
+    #[test]
+    fn should_reject_taker_fee_bps_above_max() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+        let mut req = trading_pair_request(
+            icp_token_id(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            token_c,
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+        );
+        req.taker_fee_bps = u16::MAX;
+
+        let result = add_trading_pair(req, &runtime);
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InvalidBasisPoint(u16::MAX))
+        );
+    }
+
     fn controller_runtime() -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller()
