@@ -330,18 +330,11 @@ pub fn get_balances(
     }))
 }
 
-/// Cap on `Option<Vec<FilterToken>>` length, shared by `get_balances`
-/// and `get_fee_balances`.
-fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {
-    if let Some(f) = filter
-        && (f.len() as u32) > MAX_FILTER_LEN
-    {
-        return Err(GetBalancesRequestError::FilterTooLarge {
-            len: f.len() as u32,
-            max: MAX_FILTER_LEN,
-        });
-    }
-    Ok(())
+pub fn get_fee_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    validate_filter_len(filter.as_deref())?;
+    Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
@@ -405,9 +398,14 @@ pub fn add_trading_pair(
     })
 }
 
-pub fn get_fee_balances(
-    filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
-    validate_filter_len(filter.as_deref())?;
-    Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
+fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {
+    if let Some(f) = filter
+        && (f.len() as u32) > MAX_FILTER_LEN
+    {
+        return Err(GetBalancesRequestError::FilterTooLarge {
+            len: f.len() as u32,
+            max: MAX_FILTER_LEN,
+        });
+    }
+    Ok(())
 }

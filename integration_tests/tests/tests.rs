@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
+use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
@@ -1687,10 +1687,10 @@ async fn should_expose_metrics() {
 /// units (raw amount ÷ 10^decimals) after a fee-charging fill.
 #[tokio::test]
 async fn should_expose_fee_balance_metric() {
-    let (fills, _setup) = fill_one_cross_with_fees().await;
+    let (fills, setup) = fill_one_cross_with_fees().await;
     // `assert_contains_metric_matching` runs `regex::Regex::new(...).is_match(line)`,
     // so the dot in the formatted float must be escaped.
-    _setup
+    setup
         .assert_metrics()
         .await
         .assert_contains_metric_matching(format!(
@@ -1702,135 +1702,20 @@ async fn should_expose_fee_balance_metric() {
             fills.quote_fee_whole().replace('.', r"\.")
         ));
 
-    _setup.drop().await;
-}
-
-/// Outputs of one fee-charging fill, used by both
-/// `should_expose_fee_balance_metric` and
-/// `get_fee_balances::should_report_accrued_fees_after_a_fill`.
-struct FeeFillOutcome {
-    base: dex_types::TokenId,
-    quote: dex_types::TokenId,
-    base_fee_raw: u64,
-    quote_fee_raw: u64,
-    base_decimals: u8,
-    quote_decimals: u8,
-}
-
-impl FeeFillOutcome {
-    fn base_fee_whole(&self) -> String {
-        format!(
-            "{}",
-            self.base_fee_raw as f64 / 10f64.powi(self.base_decimals as i32)
-        )
-    }
-
-    fn quote_fee_whole(&self) -> String {
-        format!(
-            "{}",
-            self.quote_fee_raw as f64 / 10f64.powi(self.quote_decimals as i32)
-        )
-    }
-}
-
-/// Stand up a trading pair with non-zero, non-trivial maker/taker fees
-/// (chosen so the fee math has a non-zero remainder — distinguishes
-/// `mul_ceil` from `mul_floor`), and run one cross so both sides accrue.
-/// Returns the expected fee outputs.
-async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
-    use candid::Principal;
-    use dex_types::AddTradingPairRequest;
-
-    let setup = Setup::new().await;
-    let request = AddTradingPairRequest {
-        // 10 bps maker, 23 bps taker — `qty * 23` is not a multiple of
-        // 10_000 below, so `mul_ceil` and `mul_floor` would disagree.
-        maker_fee_bps: 10,
-        taker_fee_bps: 23,
-        // lot_size=1 so the non-lot-aligned `qty` below validates.
-        lot_size: 1,
-        ..setup.add_trading_pair_request()
-    };
-    setup
-        .dex_client_with_caller(setup.controller())
-        .add_trading_pair(request)
-        .await
-        .unwrap();
-
-    let seller = Principal::from_slice(&[0x01]);
-    let buyer = Principal::from_slice(&[0x02]);
-    let base = setup.base_token_id();
-    let quote = setup.quote_token_id();
-    // qty not a multiple of 10_000 so `qty * taker_bps / 10_000` has a
-    // remainder, exposing `mul_ceil` vs `mul_floor`.
-    let qty = 1_000_001u64;
-    let price = 100u64;
-    let notional = price * qty;
-    setup
-        .deposit_flow(seller, base.clone())
-        .mint(qty + 2 * BASE_LEDGER_FEE)
-        .approve(qty + BASE_LEDGER_FEE)
-        .deposit(qty)
-        .execute()
-        .await;
-    setup
-        .deposit_flow(buyer, quote.clone())
-        .mint(notional + 2 * QUOTE_LEDGER_FEE)
-        .approve(notional + QUOTE_LEDGER_FEE)
-        .deposit(notional)
-        .execute()
-        .await;
-    setup
-        .dex_client_with_caller(seller)
-        .add_limit_order(LimitOrderRequest {
-            pair: setup.trading_pair(),
-            side: Side::Sell,
-            price,
-            quantity: qty.into(),
-        })
-        .await
-        .unwrap();
-    setup
-        .dex_client_with_caller(buyer)
-        .add_limit_order(LimitOrderRequest {
-            pair: setup.trading_pair(),
-            side: Side::Buy,
-            price,
-            quantity: qty.into(),
-        })
-        .await
-        .unwrap();
-    setup.env().tick().await;
-
-    // Buyer crossed → base (CKSOL) fee at taker rate, quote (CKBTC) at
-    // maker rate. Ceiling math per spec — `qty * 23` produces a
-    // non-zero remainder mod 10_000.
-    let base_fee_raw = (qty * 23).div_ceil(10_000);
-    let quote_fee_raw = (notional * 10).div_ceil(10_000);
-
-    let outcome = FeeFillOutcome {
-        base: base.clone(),
-        quote: quote.clone(),
-        base_fee_raw,
-        quote_fee_raw,
-        // Token symbol "ckSOL" (decimals 9) for base, "ckBTC" (decimals 8) for quote
-        // — see `integration_tests/src/lib.rs::add_trading_pair_request`.
-        base_decimals: 9,
-        quote_decimals: 8,
-    };
-    (outcome, setup)
+    setup.drop().await;
 }
 
 mod get_fee_balances {
     use candid::Nat;
-    use dex_types::FilterToken;
+    use dex_int_tests::fill_one_cross_with_fees;
+    use dex_types::{Balance, FilterToken, UserTokenBalance};
 
     /// Stand up a trading pair with non-zero maker/taker fees and run one
     /// cross so both sides accrue into the canister-owned fee pool. Asserts
     /// that `get_fee_balances` reports the accrued amounts.
     #[tokio::test]
     async fn should_report_accrued_fees_after_a_fill() {
-        let (fills, setup) = super::fill_one_cross_with_fees().await;
+        let (fills, setup) = fill_one_cross_with_fees().await;
 
         let no_filter = setup.dex_client().get_fee_balances(None).await.unwrap();
         assert_eq!(no_filter.len(), 2);
@@ -1838,24 +1723,30 @@ mod get_fee_balances {
         let with_filter = setup
             .dex_client()
             .get_fee_balances(Some(vec![
-                FilterToken::ById(fills.base.clone()),
-                FilterToken::ById(fills.quote.clone()),
+                FilterToken::ById(fills.base.id.clone()),
+                FilterToken::ById(fills.quote.id.clone()),
             ]))
             .await
             .unwrap();
-        assert_eq!(with_filter.len(), 2);
-        let base_entry = with_filter
-            .iter()
-            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == fills.base))
-            .expect("base fee entry");
-        assert_eq!(base_entry.balance.free, Nat::from(fills.base_fee_raw));
-        assert_eq!(base_entry.balance.reserved, Nat::from(0u64));
-        let quote_entry = with_filter
-            .iter()
-            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == fills.quote))
-            .expect("quote fee entry");
-        assert_eq!(quote_entry.balance.free, Nat::from(fills.quote_fee_raw));
-        assert_eq!(quote_entry.balance.reserved, Nat::from(0u64));
+        assert_eq!(
+            with_filter,
+            vec![
+                Ok(UserTokenBalance {
+                    token: fills.base.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.base_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+                Ok(UserTokenBalance {
+                    token: fills.quote.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.quote_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+            ],
+        );
 
         setup.drop().await;
     }
