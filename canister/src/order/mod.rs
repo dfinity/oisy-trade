@@ -428,6 +428,53 @@ impl From<LotSize> for u64 {
     }
 }
 
+/// Error from validating a trading pair's settlement parameters at creation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidPairParams {
+    /// `10^base_decimals` does not fit the `u64` settlement divisor
+    /// (`base_decimals >= 20`), so settlement could not be computed.
+    BaseDecimalsTooLarge { decimals: u8 },
+    /// `tick_size × lot_size` is not a multiple of `10^base_decimals`, so a fill
+    /// at the minimum price/quantity granularity could not settle to an exact
+    /// quote amount. Choose a coarser `tick_size` or `lot_size`.
+    IndivisibleTickLot {
+        tick_size: u64,
+        lot_size: u64,
+        base_decimals: u8,
+    },
+}
+
+/// Validate the exact-settlement invariant for a trading pair.
+///
+/// Settlement computes `quote = price × quantity / 10^base_decimals`. Every
+/// price is a multiple of `tick_size` and every fill quantity a multiple of
+/// `lot_size`, so the dividend is always a multiple of `tick_size × lot_size`.
+/// Requiring `10^base_decimals` to divide `tick_size × lot_size` therefore
+/// guarantees every fill settles to an exact quote amount (no rounding).
+pub fn validate_pair_params(
+    tick_size: TickSize,
+    lot_size: LotSize,
+    base_decimals: u8,
+) -> Result<(), InvalidPairParams> {
+    let base_scale =
+        10u64
+            .checked_pow(base_decimals as u32)
+            .ok_or(InvalidPairParams::BaseDecimalsTooLarge {
+                decimals: base_decimals,
+            })?;
+    // `tick_size` and `lot_size` are u64, so their product fits u128
+    // (`u64::MAX² < u128::MAX`); no overflow.
+    let product = tick_size.get() as u128 * lot_size.get() as u128;
+    if !product.is_multiple_of(base_scale as u128) {
+        return Err(InvalidPairParams::IndivisibleTickLot {
+            tick_size: tick_size.get(),
+            lot_size: lot_size.get(),
+            base_decimals,
+        });
+    }
+    Ok(())
+}
+
 impl From<u64> for Price {
     fn from(value: u64) -> Self {
         Self(value)
