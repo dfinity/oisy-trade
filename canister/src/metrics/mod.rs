@@ -83,14 +83,8 @@ where
 /// the real value lives in stable memory and is queried via Candid where
 /// the full `Nat` precision is preserved.
 fn amount_to_f64(q: crate::order::Quantity, decimals: u8) -> f64 {
-    let nat: candid::Nat = q.into();
-    // `candid::Nat`'s `Display` emits underscore separators (e.g.
-    // "1_000_000"); strip them so `f64::from_str` parses the digits.
-    let raw = nat
-        .to_string()
-        .replace('_', "")
-        .parse::<f64>()
-        .expect("Nat::to_string is digits-only after underscore strip");
+    const TWO_POW_128: f64 = (u128::MAX as f64) + 1.0;
+    let raw = q.high() as f64 * TWO_POW_128 + q.low() as f64;
     raw / 10f64.powi(decimals as i32)
 }
 
