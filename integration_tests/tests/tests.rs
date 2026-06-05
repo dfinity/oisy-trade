@@ -1708,7 +1708,7 @@ async fn should_expose_fee_balance_metric() {
 mod get_fee_balances {
     use candid::Nat;
     use dex_int_tests::fill_one_cross_with_fees;
-    use dex_types::FilterToken;
+    use dex_types::{Balance, FilterToken, UserTokenBalance};
 
     /// Stand up a trading pair with non-zero maker/taker fees and run one
     /// cross so both sides accrue into the canister-owned fee pool. Asserts
@@ -1723,24 +1723,30 @@ mod get_fee_balances {
         let with_filter = setup
             .dex_client()
             .get_fee_balances(Some(vec![
-                FilterToken::ById(fills.base.clone()),
-                FilterToken::ById(fills.quote.clone()),
+                FilterToken::ById(fills.base.id.clone()),
+                FilterToken::ById(fills.quote.id.clone()),
             ]))
             .await
             .unwrap();
-        assert_eq!(with_filter.len(), 2);
-        let base_entry = with_filter
-            .iter()
-            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == fills.base))
-            .expect("base fee entry");
-        assert_eq!(base_entry.balance.free, Nat::from(fills.base_fee_raw));
-        assert_eq!(base_entry.balance.reserved, Nat::from(0u64));
-        let quote_entry = with_filter
-            .iter()
-            .find_map(|r| r.as_ref().ok().filter(|e| e.token.id == fills.quote))
-            .expect("quote fee entry");
-        assert_eq!(quote_entry.balance.free, Nat::from(fills.quote_fee_raw));
-        assert_eq!(quote_entry.balance.reserved, Nat::from(0u64));
+        assert_eq!(
+            with_filter,
+            vec![
+                Ok(UserTokenBalance {
+                    token: fills.base.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.base_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+                Ok(UserTokenBalance {
+                    token: fills.quote.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.quote_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+            ],
+        );
 
         setup.drop().await;
     }

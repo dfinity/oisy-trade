@@ -1,31 +1,29 @@
 use crate::Setup;
 use crate::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use candid::Principal;
-use dex_types::{AddTradingPairRequest, LimitOrderRequest, Side, TokenId};
+use dex_types::{AddTradingPairRequest, LimitOrderRequest, Side, Token};
 
 /// Outputs of one fee-charging fill, used by tests covering both the
 /// `get_fee_balances` Candid query and the `/metrics` `fee_balance` gauge.
 pub struct FeeFillOutcome {
-    pub base: TokenId,
-    pub quote: TokenId,
+    pub base: Token,
+    pub quote: Token,
     pub base_fee_raw: u64,
     pub quote_fee_raw: u64,
-    base_decimals: u8,
-    quote_decimals: u8,
 }
 
 impl FeeFillOutcome {
     pub fn base_fee_whole(&self) -> String {
         format!(
             "{}",
-            self.base_fee_raw as f64 / 10f64.powi(self.base_decimals as i32)
+            self.base_fee_raw as f64 / 10f64.powi(self.base.metadata.decimals as i32)
         )
     }
 
     pub fn quote_fee_whole(&self) -> String {
         format!(
             "{}",
-            self.quote_fee_raw as f64 / 10f64.powi(self.quote_decimals as i32)
+            self.quote_fee_raw as f64 / 10f64.powi(self.quote.metadata.decimals as i32)
         )
     }
 }
@@ -45,6 +43,8 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         lot_size: 1,
         ..setup.add_trading_pair_request()
     };
+    let base = request.base.clone();
+    let quote = request.quote.clone();
     setup
         .dex_client_with_caller(setup.controller())
         .add_trading_pair(request)
@@ -53,22 +53,20 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
 
     let seller = Principal::from_slice(&[0x01]);
     let buyer = Principal::from_slice(&[0x02]);
-    let base = setup.base_token_id();
-    let quote = setup.quote_token_id();
     // qty not a multiple of 10_000 so `qty * taker_bps / 10_000` has a
     // remainder, exposing `mul_ceil` vs `mul_floor`.
     let qty = 1_000_001u64;
     let price = 100u64;
     let notional = price * qty;
     setup
-        .deposit_flow(seller, base.clone())
+        .deposit_flow(seller, base.id.clone())
         .mint(qty + 2 * BASE_LEDGER_FEE)
         .approve(qty + BASE_LEDGER_FEE)
         .deposit(qty)
         .execute()
         .await;
     setup
-        .deposit_flow(buyer, quote.clone())
+        .deposit_flow(buyer, quote.id.clone())
         .mint(notional + 2 * QUOTE_LEDGER_FEE)
         .approve(notional + QUOTE_LEDGER_FEE)
         .deposit(notional)
@@ -103,14 +101,10 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
     let quote_fee_raw = (notional * 10).div_ceil(10_000);
 
     let outcome = FeeFillOutcome {
-        base: base.clone(),
-        quote: quote.clone(),
+        base,
+        quote,
         base_fee_raw,
         quote_fee_raw,
-        // Token symbol "ckSOL" (decimals 9) for base, "ckBTC" (decimals 8) for quote
-        // — see `integration_tests/src/lib.rs::add_trading_pair_request`.
-        base_decimals: 9,
-        quote_decimals: 8,
     };
     (outcome, setup)
 }
