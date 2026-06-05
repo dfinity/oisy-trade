@@ -499,7 +499,7 @@ impl Fill {
     /// The amount of quote tokens exchanged (maker_price × quantity).
     pub fn quote_amount(&self) -> Quantity {
         self.quantity
-            .checked_mul_u64(self.maker_price.0)
+            .checked_mul_u128(self.maker_price.0)
             .expect("BUG: validation of order should prevent overflow")
     }
 

@@ -358,17 +358,17 @@ impl From<TradingPair> for dex_types::TradingPair {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
 )]
-pub struct Price(#[n(0)] u64);
+pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_codec")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
 
     pub fn new(value: u64) -> Self {
-        Self(value)
+        Self(value as u128)
     }
 
     pub fn get(self) -> u64 {
-        self.0
+        self.0 as u64
     }
 
     pub const fn is_zero(self) -> bool {
@@ -376,7 +376,7 @@ impl Price {
     }
 
     pub fn is_multiple_of(self, tick_size: TickSize) -> bool {
-        self.0.is_multiple_of(tick_size.get())
+        self.0.is_multiple_of(tick_size.get() as u128)
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
@@ -384,7 +384,7 @@ impl Price {
     }
 
     pub fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
-        quantity.checked_mul_u64(self.0)
+        quantity.checked_mul_u128(self.0)
     }
 }
 
@@ -430,13 +430,13 @@ impl From<LotSize> for u64 {
 
 impl From<u64> for Price {
     fn from(value: u64) -> Self {
-        Self(value)
+        Self(value as u128)
     }
 }
 
 impl From<Price> for u64 {
     fn from(price: Price) -> Self {
-        price.0
+        price.0 as u64
     }
 }
 
@@ -618,6 +618,51 @@ impl Quantity {
             .checked_add(prod_hi >> 64)? // upper bits of prod_hi that spilled past bit 128
             .checked_add(carry as u128)?; // carry from the low addition
         Some(Self { high, low })
+    }
+
+    /// Multiply this u256 by a `u128`, checked for overflow past 256 bits.
+    ///
+    /// Schoolbook multiplication on 64-bit limbs: `self` is four limbs
+    /// (`low`, `high` each split into two), `rhs` is two limbs. Every
+    /// partial-product accumulation `r[idx] + a[i]·b[j] + carry` stays within
+    /// `u128` because `(2^64−1)² + 2·(2^64−1) = 2^128 − 1`. Limbs 4 and 5 must
+    /// be zero for the result to fit in a u256.
+    pub fn checked_mul_u128(self, rhs: u128) -> Option<Self> {
+        bench_scopes!("qty", "qty::mul_u128");
+        const MASK: u128 = u64::MAX as u128;
+        let a = [
+            self.low & MASK,
+            self.low >> 64,
+            self.high & MASK,
+            self.high >> 64,
+        ];
+        let b = [rhs & MASK, rhs >> 64];
+        let mut r = [0u128; 6];
+        for i in 0..4 {
+            let mut carry = 0u128;
+            for j in 0..2 {
+                let cur = r[i + j] + a[i] * b[j] + carry;
+                r[i + j] = cur & MASK;
+                carry = cur >> 64;
+            }
+            let mut k = i + 2;
+            while carry != 0 {
+                if k >= 6 {
+                    return None;
+                }
+                let cur = r[k] + carry;
+                r[k] = cur & MASK;
+                carry = cur >> 64;
+                k += 1;
+            }
+        }
+        if r[4] != 0 || r[5] != 0 {
+            return None;
+        }
+        Some(Self {
+            high: r[2] | (r[3] << 64),
+            low: r[0] | (r[1] << 64),
+        })
     }
 
     /// Integer-divide `self` by a u64 divisor, returning `(quotient, remainder)`.
