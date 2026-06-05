@@ -176,11 +176,13 @@ fn get_events(
                 to_order,
                 token,
                 amount,
+                fee,
             } => event::BalanceOperation::Transfer {
                 from_order: from_order.get(),
                 to_order: to_order.get(),
                 token: map_pair_token(token),
                 amount: amount.into(),
+                fee: fee.map(Into::into),
             },
             dex_canister::state::event::BalanceOperation::Unreserve {
                 order,

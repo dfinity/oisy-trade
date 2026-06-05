@@ -682,20 +682,29 @@ pub mod arbitrary {
     }
 
     pub fn arb_balance_operation() -> impl Strategy<Value = BalanceOperation> {
+        // Mirror the fill path: derive `fee` from a basis point applied to
+        // `amount`, then collapse zero (mul_ceil's bps=0 / amount=0 case)
+        // to `None` per the `nonzero` helper in `compute_balance_operations`.
+        // This guarantees `Some(fee)` ⇒ `0 < fee ≤ amount`, the same
+        // invariant the production path produces.
         let transfer = (
             arb_order_seq(),
             arb_order_seq(),
             arb_pair_token(),
             arb_quantity(),
+            arb_basis_point(),
         )
-            .prop_map(
-                |(from_order, to_order, token, amount)| BalanceOperation::Transfer {
+            .prop_map(|(from_order, to_order, token, amount, bp)| {
+                let raw = bp.mul_ceil(amount);
+                let fee = if raw.is_zero() { None } else { Some(raw) };
+                BalanceOperation::Transfer {
                     from_order,
                     to_order,
                     token,
                     amount,
-                },
-            );
+                    fee,
+                }
+            });
         let unreserve = (arb_order_seq(), arb_pair_token(), arb_quantity()).prop_map(
             |(order, token, amount)| BalanceOperation::Unreserve {
                 order,

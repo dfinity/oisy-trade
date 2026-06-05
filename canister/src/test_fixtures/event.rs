@@ -121,7 +121,7 @@ impl WorstCaseEvent {
             Self::AddLimitOrder => 97,
             Self::CancelLimitOrder => 35,
             Self::Matching => 10_027,
-            Self::Settling => 91_327,
+            Self::Settling => 127_327,
         }
     }
 }
@@ -229,6 +229,7 @@ fn settling(order_count: usize) -> EventType {
             to_order: maker,
             token: PairToken::Quote,
             amount: max_quantity(),
+            fee: Some(max_quantity()),
         });
         balance_operations.push(BalanceOperation::Unreserve {
             order: taker,
@@ -240,6 +241,7 @@ fn settling(order_count: usize) -> EventType {
             to_order: taker,
             token: PairToken::Base,
             amount: max_quantity(),
+            fee: Some(max_quantity()),
         });
     }
     EventType::Settling(SettlingEvent {
