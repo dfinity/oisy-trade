@@ -49,7 +49,10 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>) -> std::io::Result<()> {
 }
 
 /// Per-token canister-owned fee pool. Emitted as a gauge (not a counter)
-/// because withdrawals can decrease the value.
+/// because withdrawals can decrease the value. The reported value is
+/// scaled into whole-token units (raw amount ÷ 10^decimals), both for
+/// human readability and to keep the f64 mantissa from overflowing on
+/// large-decimals tokens (e.g. 18-decimal ckETH).
 fn encode_fee_balances<MH, MB>(
     w: &mut MetricsEncoder<Vec<u8>>,
     state: &State<MH, MB>,
@@ -60,29 +63,35 @@ where
 {
     let mut metric = w.gauge_vec(
         "fee_balance",
-        "Per-token canister-owned fee pool balance, accrued from maker/taker fees on fills.",
+        "Per-token canister-owned fee pool balance in whole token units, accrued from maker/taker fees on fills.",
     )?;
-    for (token, amount) in state.iter_fee_balances() {
-        let symbol = state
+    for (token, amount) in state.iter_fee_balances().filter(|(_, q)| !q.is_zero()) {
+        let metadata = state
             .token_metadata(&token)
-            .map(format_token_symbol)
-            .unwrap_or_else(|| token.as_principal().to_text());
-        metric = metric.value(&[("token", &symbol)], amount_to_f64(amount))?;
+            .expect("BUG: fee pool entry for unregistered token");
+        let symbol = format_token_symbol(metadata);
+        metric = metric.value(
+            &[("token", &symbol)],
+            amount_to_f64(amount, metadata.decimals),
+        )?;
     }
     Ok(())
 }
 
-/// Lossy narrowing for metrics only. Real value lives in stable memory and
-/// is queried via Candid where the full `Nat` precision is preserved.
-fn amount_to_f64(q: crate::order::Quantity) -> f64 {
+/// Convert a raw `Quantity` (smallest-denomination integer) to whole-unit
+/// f64 by dividing by `10^decimals`. Lossy narrowing for metrics only —
+/// the real value lives in stable memory and is queried via Candid where
+/// the full `Nat` precision is preserved.
+fn amount_to_f64(q: crate::order::Quantity, decimals: u8) -> f64 {
     let nat: candid::Nat = q.into();
-    // `candid::Nat`'s `Display` impl emits underscore separators (e.g.
-    // "1_000_000") which `f64::from_str` rejects → NaN. Strip them so the
-    // metric carries the actual value.
-    nat.to_string()
+    // `candid::Nat`'s `Display` emits underscore separators (e.g.
+    // "1_000_000"); strip them so `f64::from_str` parses the digits.
+    let raw = nat
+        .to_string()
         .replace('_', "")
         .parse::<f64>()
-        .unwrap_or(f64::NAN)
+        .expect("Nat::to_string is digits-only after underscore strip");
+    raw / 10f64.powi(decimals as i32)
 }
 
 /// Returns the amount of heap memory in bytes that has been allocated.
