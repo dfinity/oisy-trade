@@ -482,31 +482,24 @@ impl Quantity {
     }
 
     pub fn is_multiple_of(&self, lot_size: LotSize) -> bool {
-        // Quantity is (high, low) pair of u128, representing (high * 2^128 + low).
-        // We want: (high * 2^128 + low) mod d == 0
-        let divisor = lot_size.get() as u128;
+        let divisor = lot_size.get();
+        // Fast path for the common small-quantity case (`high == 0`):
+        // a single `u128 % u64` is ~250 instructions cheaper than the
+        // long-division below, and validation paths place dense calls.
         if self.high == 0 {
-            self.low.is_multiple_of(divisor)
-        } else {
-            // Using the modular identity:
-            // (high * 2^128 + low) mod d = ((high mod d) * (2^128 mod d) + (low mod d)) mod d
-            let high_rem = self.high % divisor;
-            // 2^128 doesn't fit in u128, so compute it as (u128::MAX + 1) mod d.
-            let shift_rem = (u128::MAX % divisor + 1) % divisor;
-            // Cannot overflow: high_rem and shift_rem are both < divisor (a u64),
-            // so their product is at most (u64::MAX-1)^2, and self.low % divisor
-            // is at most u64::MAX-1, leaving plenty of room in u128.
-            let combined = (high_rem
-                .checked_mul(shift_rem)
-                .expect("high_rem and shift_rem are < d (a u64)")
-                + self.low % divisor)
-                % divisor;
-            combined == 0
+            return self.low.is_multiple_of(divisor as u128);
         }
+        let (_, remainder) = (*self)
+            .checked_div_rem_u64(divisor)
+            .expect("LotSize is NonZeroU64");
+        remainder == 0
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         bench_scopes!("qty", "qty::checked_sub");
+        if other.is_zero() {
+            return Some(self);
+        }
         let (low, borrow) = self.low.overflowing_sub(other.low);
         let high = self
             .high
@@ -625,6 +618,90 @@ impl Quantity {
             .checked_add(prod_hi >> 64)? // upper bits of prod_hi that spilled past bit 128
             .checked_add(carry as u128)?; // carry from the low addition
         Some(Self { high, low })
+    }
+
+    /// Integer-divide `self` by a u64 divisor, returning `(quotient, remainder)`.
+    /// Returns `None` if `divisor` is zero.
+    ///
+    /// Schoolbook long division on `self` split into three chunks:
+    /// the full `high` limb (top 128 bits) and the two 64-bit halves
+    /// of `low`. Write `self = high · 2^128 + low_hi · 2^64 + low_lo`
+    /// and divide chunk-by-chunk, carrying each remainder into the
+    /// next step.
+    ///
+    /// **Step 1.** Divide the high limb: `high = q1 · d + r1`.
+    /// Substituting back and grouping the settled term:
+    ///
+    /// ```text
+    /// self = q1 · d · 2^128  +  r1 · 2^128 + low_hi · 2^64 + low_lo
+    ///        └── settled ──┘    └────── still to divide ──────┘
+    /// ```
+    ///
+    /// **Step 2.** Factor a `2^64` out of the leftover's top two
+    /// terms (since `2^128 = 2^64 · 2^64`) — the leftover now has
+    /// the same shape as the original, one 64-bit digit shorter:
+    ///
+    /// ```text
+    /// r1 · 2^128 + low_hi · 2^64 + low_lo
+    ///     = (r1 · 2^64 + low_hi) · 2^64 + low_lo
+    /// ```
+    ///
+    /// The new leading 128-bit chunk `(r1 · 2^64 + low_hi)` is
+    /// step 2's dividend: `r1 · 2^64 + low_hi = q2 · d + r2`.
+    ///
+    /// **Step 3.** Same factoring again leaves `r2 · 2^64 + low_lo`
+    /// as the final dividend: `r2 · 2^64 + low_lo = q3 · d + r3`.
+    ///
+    /// ```text
+    /// quotient  = q1 · 2^128 + q2 · 2^64 + q3
+    /// remainder = r3
+    /// ```
+    ///
+    /// Every dividend fits in u128: each `rᵢ < d ≤ 2^64`, leaving
+    /// room for the `· 2^64` shift before the next 64-bit chunk is
+    /// OR'd in. The final remainder is `< divisor ≤ u64::MAX`, so
+    /// it always fits in u64.
+    pub fn checked_div_rem_u64(self, divisor: u64) -> Option<(Self, u64)> {
+        bench_scopes!("qty", "qty::div_rem_u64");
+        if divisor == 0 {
+            return None;
+        }
+        let d = divisor as u128;
+
+        // Fast path for the common small-quantity case (`high == 0`): the
+        // value fits in a u128, so a single native `/` and `%` replace the
+        // three-chunk long division below. Real-world notionals/quantities
+        // are well under 2^128, so `mul_ceil` (the fee path) hits this on
+        // every production fill.
+        if self.high == 0 {
+            return Some((Self::from_u128(self.low / d), (self.low % d) as u64));
+        }
+
+        // Step 1: divide the high limb. r1 < d ≤ u64::MAX < 2^64.
+        let q1 = self.high / d;
+        let r1 = self.high % d;
+
+        // Step 2: dividend is `r1 · 2^64 + low_hi`, fits in u128 since r1 < 2^64.
+        let low_hi = self.low >> 64;
+        let low_lo = self.low & 0xFFFF_FFFF_FFFF_FFFF;
+        let dividend2 = (r1 << 64) | low_hi;
+        let q2 = dividend2 / d;
+        let r2 = dividend2 % d;
+
+        // Step 3: dividend is `r2 · 2^64 + low_lo`. Same overflow argument.
+        let dividend3 = (r2 << 64) | low_lo;
+        let q3 = dividend3 / d;
+        let r3 = dividend3 % d;
+
+        // q2 < 2^64 and q3 < 2^64, so they combine into the low u128.
+        let low_out = (q2 << 64) | q3;
+        Some((
+            Self {
+                high: q1,
+                low: low_out,
+            },
+            r3 as u64,
+        ))
     }
 }
 

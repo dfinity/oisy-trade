@@ -203,6 +203,34 @@ mod quantity {
             prop_assert!(q.is_multiple_of(lot_size));
         }
 
+        /// For quantities that fit in u128 (`high == 0`), `checked_div_rem_u64`
+        /// must agree with plain u128 `/` and `%`.
+        #[test]
+        fn checked_div_rem_u64_matches_u128(value in any::<u128>(), divisor in 1u64..=u64::MAX) {
+            let q = Quantity::from_u128(value);
+            let d = divisor as u128;
+            let (quotient, remainder) = q.checked_div_rem_u64(divisor).unwrap();
+            prop_assert_eq!(quotient, Quantity::from_u128(value / d));
+            prop_assert_eq!(u128::from(remainder), value % d);
+        }
+
+        /// Fundamental div-mod identity: `q = quotient × divisor + remainder`
+        /// with `remainder < divisor`, for any quantity and any non-zero divisor.
+        #[test]
+        fn checked_div_rem_u64_satisfies_identity(
+            q in arb_quantity(),
+            divisor in 1u64..=u64::MAX,
+        ) {
+            let (quotient, remainder) = q.checked_div_rem_u64(divisor).unwrap();
+            prop_assert!(remainder < divisor);
+            let reconstructed = quotient
+                .checked_mul_u64(divisor)
+                .unwrap()
+                .checked_add(Quantity::from(remainder))
+                .unwrap();
+            prop_assert_eq!(reconstructed, q);
+        }
+
         #[test]
         fn is_zero_iff_default(high in any::<u128>(), low in any::<u128>()) {
             let q = Quantity::new(high, low);
@@ -1217,12 +1245,12 @@ mod levels_consistency {
 }
 
 mod basis_point {
-    use crate::order::{BasisPoint, InvalidBasisPoint};
-    use crate::test_fixtures::arbitrary::arb_basis_point;
-    use proptest::prelude::*;
+    use crate::order::{BasisPoint, InvalidBasisPoint, Quantity};
+    use crate::test_fixtures::arbitrary::{arb_basis_point, arb_quantity};
+    use proptest::prelude::any;
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     proptest! {
-        /// `BasisPoint::new` rejects every value above the `10_000` cap.
         #[test]
         fn should_reject_out_of_range(v in 10_001u16..=u16::MAX) {
             prop_assert_eq!(BasisPoint::new(v), Err(InvalidBasisPoint::OutOfRange(v)));
@@ -1235,6 +1263,45 @@ mod basis_point {
             let decoded: BasisPoint = minicbor::decode(&buf).unwrap();
             prop_assert_eq!(decoded, bp);
         }
+
+        /// `mul_ceil(amount, bps) <= amount` for any valid `bps` (≤ 10_000).
+        #[test]
+        fn mul_ceil_never_exceeds_amount(bp in arb_basis_point(), amount in arb_quantity()) {
+            prop_assert!(bp.mul_ceil(amount) <= amount);
+        }
+
+        /// `ZERO × amount = 0` and `bp × ZERO = 0` for any inputs.
+        #[test]
+        fn mul_ceil_zero_inputs(bp in arb_basis_point(), amount in arb_quantity()) {
+            prop_assert_eq!(BasisPoint::ZERO.mul_ceil(amount), Quantity::ZERO);
+            prop_assert_eq!(bp.mul_ceil(Quantity::ZERO), Quantity::ZERO);
+        }
+
+        /// `MAX × amount = amount` — the upper edge of the invariant.
+        /// Guards the `amount - fee` underflow safety relied on by `transfer`.
+        #[test]
+        fn mul_ceil_max_returns_input(amount in arb_quantity()) {
+            prop_assert_eq!(BasisPoint::MAX.mul_ceil(amount), amount);
+        }
+
+        #[test]
+        fn mul_ceil_matches_naive_u128_div_ceil(bps in 0u16..=10_000, amount in any::<u64>()) {
+            let expected = Quantity::from_u128(
+                (u128::from(amount) * u128::from(bps)).div_ceil(10_000),
+            );
+            prop_assert_eq!(
+                BasisPoint::new(bps).unwrap().mul_ceil(Quantity::from(amount)),
+                expected,
+            );
+        }
+    }
+
+    /// `mul_ceil` with the largest representable amount and the largest
+    /// valid rate must not trap — a naive `amount × bps` implementation
+    /// would overflow u256 on any amount in the top 1/10_000 of u256.
+    #[test]
+    fn mul_ceil_does_not_trap_on_max_amount() {
+        assert_eq!(BasisPoint::MAX.mul_ceil(Quantity::MAX), Quantity::MAX);
     }
 }
 

@@ -461,6 +461,9 @@ type BalanceOperation = variant {
         to_order : nat64;
         token : PairToken;
         amount : nat;
+        // Fee withheld from the credited transfer for the per-token fee
+        // pool.
+        fee : opt nat;
     };
     Unreserve : record {
         order : nat64;

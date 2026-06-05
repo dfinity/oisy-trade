@@ -993,12 +993,14 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
+                        fee: None,
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
+                        fee: None,
                     },
                 ],
             });

@@ -144,9 +144,9 @@ impl<M: Memory> TokenBalance<M> {
         let net = gross
             .checked_sub(fee)
             .expect("BUG: fee <= gross checked above");
-        // Self-transfer: debtor and creditor are the same user, so the credit
-        // must land on the just-updated balance — re-read before depositing
-        // to avoid clobbering the debit we just persisted.
+        // Self-transfer: debtor and creditor are the same user, so the
+        // credit must land on the just-updated balance — `update` re-reads
+        // before depositing to avoid clobbering the debit.
         self.update(*creditor, *token, |b| b.deposit(net));
 
         if !fee.is_zero() {
