@@ -30,6 +30,10 @@ pub fn process_event<MH: Memory, MB: Memory>(
 /// call for concurrency safety). Replaying the event through
 /// [`apply_state_transition`] reproduces the direct mutation, so replay
 /// equivalence is preserved.
+///
+/// Unlike [`process_event`], the timestamp is read inline rather than captured
+/// into a local: this path applies no state transition, so there is no
+/// shared-timestamp invariant between a mutation and its event-log entry.
 pub fn record_event(payload: EventType, runtime: &impl Runtime) {
     storage::record_event(runtime.time(), payload);
 }

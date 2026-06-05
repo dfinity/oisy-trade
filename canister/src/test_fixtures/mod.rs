@@ -761,9 +761,15 @@ pub mod mocks {
     use mockall::mock;
 
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
+        mock_runtime_at(caller, Timestamp::EPOCH)
+    }
+
+    /// Like [`mock_runtime_for`] but with `time()` pinned to `now`, so a test
+    /// can give placement and cancellation distinct timestamps.
+    pub fn mock_runtime_at(caller: Principal, now: Timestamp) -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller().return_const(caller);
-        mock.expect_time().return_const(Timestamp::EPOCH);
+        mock.expect_time().return_const(now);
         mock.expect_instruction_counter().return_const(0u64);
         mock
     }

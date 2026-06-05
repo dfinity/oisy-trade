@@ -27,8 +27,8 @@ pub struct OrderRecord {
     pub quantity: Quantity,
     #[n(4)]
     pub status: OrderStatus,
-    /// Submission time, taken from the add-limit-order event. Display-only;
-    /// ordering uses the per-user index.
+    /// Submission time, taken from the add-limit-order event. Display-only —
+    /// no matching or ordering logic reads it.
     #[n(5)]
     pub timestamp: Timestamp,
 }
