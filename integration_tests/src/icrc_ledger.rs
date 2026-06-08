@@ -135,7 +135,7 @@ pub fn cksol_init_args(controller: Principal) -> InitArgs {
         },
         fee_collector_account: None,
         transfer_fee: Nat::from(BASE_LEDGER_FEE),
-        decimals: Some(0),
+        decimals: Some(9),
         max_memo_length: Some(256),
         token_symbol: "ckSOL".to_string(),
         token_name: "ckSOL".to_string(),

@@ -23,7 +23,7 @@ use pocket_ic::{
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 
-pub const TICK_SIZE: u64 = 10;
+pub const TICK_SIZE: u64 = 1000;
 pub const LOT_SIZE: u64 = 1_000_000;
 
 pub struct Setup {
@@ -122,11 +122,7 @@ impl Setup {
                 },
                 metadata: TokenMetadata {
                     symbol: "ckSOL".to_string(),
-                    // 0 decimals keeps the default pair's settlement equal to
-                    // `price × quantity` (divisor 10^0 = 1), so the suite's
-                    // amount assertions are unaffected by the pair-creation
-                    // exactness rule.
-                    decimals: 0,
+                    decimals: 9,
                 },
             },
             quote: Token {
