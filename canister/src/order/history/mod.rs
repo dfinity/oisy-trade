@@ -68,6 +68,41 @@ impl Storable for OrderRecord {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+/// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
+/// with the canister-global insertion sequence assigned when it was first
+/// inserted. The sequence orders the per-user index newest-first and lets
+/// `get_my_orders` resolve an `OrderId` cursor back to its index position. It's
+/// an index bookkeeping concern, so it lives in this wrapper rather than as a
+/// field on the domain `OrderRecord`.
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+struct SeqEntry {
+    #[n(0)]
+    seq: u64,
+    #[n(1)]
+    record: OrderRecord,
+}
+
+impl Storable for SeqEntry {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("seq entry encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf).expect("seq entry encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode seq entry bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
 /// Record of every order from submission through terminal state, plus a
 /// secondary per-user index over it.
 ///
@@ -82,7 +117,7 @@ impl Storable for OrderRecord {
 /// update only `orders` and never touch `by_user` (its value is the immutable
 /// [`OrderId`], so status transitions don't affect it).
 pub struct OrderHistory<M: Memory> {
-    orders: StableBTreeMap<OrderId, OrderRecord, M>,
+    orders: StableBTreeMap<OrderId, SeqEntry, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
 }
 
@@ -108,13 +143,13 @@ impl<M: Memory> OrderHistory<M> {
     /// Insert a new order record and index it under `user`. The order's
     /// canister-global insertion sequence — which orders the per-user index
     /// newest-first — is the current order count: the index is insert-only, so
-    /// the count is a dense, monotonic sequence (the same trick the user
-    /// registry uses to assign `UserId`s). Panics if the order ID is present.
+    /// the count is a dense, monotonic sequence.
+    /// Panics if the order ID is present.
     pub fn insert_once(&mut self, id: OrderId, user: UserId, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
         let seq = self.orders.len();
         assert_eq!(
-            self.orders.insert(id, record),
+            self.orders.insert(id, SeqEntry { seq, record }),
             None,
             "BUG: duplicate order ID {id}"
         );
@@ -128,34 +163,50 @@ impl<M: Memory> OrderHistory<M> {
     /// Returns a copy of the record for the given order, or `None` if absent.
     pub fn get(&self, id: &OrderId) -> Option<OrderRecord> {
         bench_scopes!("order_history", "order_history::get");
-        self.orders.get(id)
+        self.orders.get(id).map(|entry| entry.record)
     }
 
     /// Updates the status of an existing order. Panics if the order is unknown.
     pub fn set_status(&mut self, id: &OrderId, status: OrderStatus) {
         bench_scopes!("order_history", "order_history::set_status");
-        let mut record = self
+        let mut entry = self
             .orders
             .get(id)
             .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-        record.status = status;
-        self.orders.insert(*id, record);
+        entry.record.status = status;
+        self.orders.insert(*id, entry);
     }
 
-    /// Returns up to `length` of `user`'s orders, newest first, after skipping
-    /// the first `start`.
-    pub fn orders_by_user(&self, user: UserId, start: usize, length: usize) -> Vec<OrderId> {
-        bench_scopes!("order_history", "order_history::orders_by_user");
+    /// Returns up to `length` of `user`'s orders, newest first, resuming
+    /// strictly after the `after` order (a cursor from a prior page) — or from
+    /// the newest when `after` is `None`. An `after` naming an unknown order
+    /// yields an empty page. Each page is an `O(length)` range scan from the
+    /// cursor (no offset to re-walk), so retrieving a whole history is linear
+    /// in its size.
+    pub fn orders_after(
+        &self,
+        user: UserId,
+        after: Option<OrderId>,
+        length: usize,
+    ) -> Vec<OrderId> {
+        bench_scopes!("order_history", "order_history::orders_after");
+        use std::ops::Bound;
+        let lower = match after {
+            None => Bound::Included(UserOrderKey::newest(user)),
+            Some(cursor) => match self.orders.get(&cursor) {
+                Some(entry) => Bound::Excluded(UserOrderKey::from_seq(user, entry.seq)),
+                None => return Vec::new(),
+            },
+        };
         self.by_user
-            .range(UserOrderKey::newest(user)..=UserOrderKey::oldest(user))
-            .skip(start)
+            .range((lower, Bound::Included(UserOrderKey::oldest(user))))
             .take(length)
             .map(|entry| entry.value())
             .collect()
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (OrderId, SeqEntry)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
@@ -245,8 +296,8 @@ impl Clone for OrderHistory<ic_stable_structures::VectorMemory> {
             ic_stable_structures::VectorMemory::default(),
             ic_stable_structures::VectorMemory::default(),
         );
-        for (id, record) in self.iter() {
-            assert_eq!(fresh.orders.insert(id, record), None);
+        for (id, entry) in self.iter() {
+            assert_eq!(fresh.orders.insert(id, entry), None);
         }
         for (key, id) in self.user_index_iter() {
             assert_eq!(fresh.by_user.insert(key, id), None);
@@ -266,34 +317,4 @@ impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
 impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
-    /// since `StableBTreeMap` relies on that consistency for range scans.
-    #[test]
-    fn user_order_key_ord_matches_storable_bytes() {
-        let keys = [
-            UserOrderKey::from_seq(UserId::new(2), 0),
-            UserOrderKey::from_seq(UserId::new(1), 0),
-            UserOrderKey::from_seq(UserId::new(1), 5),
-            UserOrderKey::from_seq(UserId::new(1), 9),
-            UserOrderKey::newest(UserId::new(0)),
-            UserOrderKey::oldest(UserId::new(0)),
-        ];
-        for a in &keys {
-            for b in &keys {
-                assert_eq!(
-                    a.cmp(b),
-                    a.to_bytes().cmp(&b.to_bytes()),
-                    "Ord disagrees with Storable bytes for {a:?} vs {b:?}"
-                );
-            }
-            assert_eq!(
-                UserOrderKey::from_bytes(a.to_bytes()),
-                *a,
-                "Storable round-trip mismatch for {a:?}"
-            );
-        }
-    }
-}
+mod tests;

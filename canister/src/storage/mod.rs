@@ -78,9 +78,9 @@ pub fn user_registry_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_REGISTRY_MEMORY_ID))
 }
 
-/// Returns the virtual memory slice dedicated to the per-user order index.
-/// Used to construct the production `UserOrders<VMem>` on canister
-/// `init` / `post_upgrade`.
+/// Returns the virtual memory slice that backs `OrderHistory`'s per-user
+/// order index (the second region passed to `OrderHistory::new`). Distinct
+/// from [`order_history_memory`], which backs the primary order store.
 pub fn user_orders_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
 }

@@ -1178,7 +1178,7 @@ mod history {
     }
 
     #[test]
-    fn orders_by_user_returns_newest_first() {
+    fn orders_after_returns_newest_first() {
         let mut history = history();
         let owner = UserId::new(7);
         history.insert_once(test_id(0), owner, test_record());
@@ -1186,33 +1186,52 @@ mod history {
         history.insert_once(test_id(2), owner, test_record());
 
         assert_eq!(
-            history.orders_by_user(owner, 0, 10),
+            history.orders_after(owner, None, 10),
             vec![test_id(2), test_id(1), test_id(0)]
         );
     }
 
     #[test]
-    fn orders_by_user_paginates() {
+    fn orders_after_paginates_by_cursor() {
         let mut history = history();
         let owner = UserId::new(7);
         for seq in 0..5 {
             history.insert_once(test_id(seq), owner, test_record());
         }
-        // Newest first: seq 4, 3, 2, 1, 0.
+        // Newest first: seq 4, 3, 2, 1, 0. The cursor is the previous page's
+        // last order.
         assert_eq!(
-            history.orders_by_user(owner, 0, 2),
+            history.orders_after(owner, None, 2),
             vec![test_id(4), test_id(3)]
         );
         assert_eq!(
-            history.orders_by_user(owner, 2, 2),
+            history.orders_after(owner, Some(test_id(3)), 2),
             vec![test_id(2), test_id(1)]
         );
-        assert_eq!(history.orders_by_user(owner, 4, 2), vec![test_id(0)]);
-        assert_eq!(history.orders_by_user(owner, 5, 2), Vec::<OrderId>::new());
+        assert_eq!(
+            history.orders_after(owner, Some(test_id(1)), 2),
+            vec![test_id(0)]
+        );
+        assert_eq!(
+            history.orders_after(owner, Some(test_id(0)), 2),
+            Vec::<OrderId>::new()
+        );
     }
 
     #[test]
-    fn orders_by_user_isolates_owners() {
+    fn orders_after_unknown_cursor_yields_empty() {
+        let mut history = history();
+        let owner = UserId::new(7);
+        history.insert_once(test_id(0), owner, test_record());
+
+        assert_eq!(
+            history.orders_after(owner, Some(test_id(99)), 10),
+            Vec::<OrderId>::new()
+        );
+    }
+
+    #[test]
+    fn orders_after_isolates_owners() {
         let mut history = history();
         let alice = UserId::new(1);
         let bob = UserId::new(2);
@@ -1222,18 +1241,18 @@ mod history {
         history.insert_once(test_id(2), alice, test_record());
 
         assert_eq!(
-            history.orders_by_user(alice, 0, 10),
+            history.orders_after(alice, None, 10),
             vec![test_id(2), test_id(0)]
         );
-        assert_eq!(history.orders_by_user(bob, 0, 10), vec![test_id(1)]);
+        assert_eq!(history.orders_after(bob, None, 10), vec![test_id(1)]);
         assert_eq!(
-            history.orders_by_user(UserId::new(3), 0, 10),
+            history.orders_after(UserId::new(3), None, 10),
             Vec::<OrderId>::new()
         );
     }
 
     #[test]
-    fn orders_by_user_orders_across_books_by_global_seq() {
+    fn orders_after_orders_across_books_by_global_seq() {
         let mut history = history();
         let owner = UserId::new(1);
         let book0_first = OrderId::new(OrderBookId::ZERO, OrderSeq::new(5));
@@ -1244,7 +1263,7 @@ mod history {
         history.insert_once(book0_second, owner, test_record());
 
         assert_eq!(
-            history.orders_by_user(owner, 0, 10),
+            history.orders_after(owner, None, 10),
             vec![book0_second, book1, book0_first]
         );
     }

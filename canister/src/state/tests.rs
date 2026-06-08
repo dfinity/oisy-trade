@@ -515,7 +515,7 @@ mod record_limit_order {
 
         let owner_id = state.user_registry.lookup(OWNER).unwrap();
         assert_eq!(
-            state.order_history.orders_by_user(owner_id, 0, 10),
+            state.order_history.orders_after(owner_id, None, 10),
             vec![second, first]
         );
     }
