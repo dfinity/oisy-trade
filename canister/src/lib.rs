@@ -382,22 +382,25 @@ pub fn add_trading_pair(
         let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
         s.check_token_metadata_consistency(pair.base, &base_metadata)?;
         s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
-        order::validate_pair_params(tick_size, lot_size, base_metadata.decimals).map_err(|e| {
-            match e {
-                order::InvalidPairParams::BaseDecimalsTooLarge { decimals } => {
-                    AddTradingPairError::BaseDecimalsTooLarge { decimals }
-                }
-                order::InvalidPairParams::IndivisibleTickLot {
-                    tick_size,
-                    lot_size,
-                    base_decimals,
-                } => AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                    tick_size,
-                    lot_size,
-                    base_decimals,
-                },
-            }
-        })?;
+        // Exact-settlement invariant: a fill settles as
+        // `price × quantity / 10^base_decimals`, and prices/quantities are
+        // multiples of tick/lot, so `tick_size × lot_size` must be a multiple of
+        // `10^base_decimals` for that division to be exact (no rounding).
+        let base_decimals = base_metadata.decimals;
+        let base_scale = 10u64.checked_pow(base_decimals as u32).ok_or(
+            AddTradingPairError::BaseDecimalsTooLarge {
+                decimals: base_decimals,
+            },
+        )?;
+        // `tick_size` and `lot_size` are u64, so their product fits u128.
+        let tick_lot = tick_size.get() as u128 * lot_size.get() as u128;
+        if !tick_lot.is_multiple_of(base_scale as u128) {
+            return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
+                tick_size: tick_size.get(),
+                lot_size: lot_size.get(),
+                base_decimals,
+            });
+        }
         let book_id = s.next_book_id();
         let event = state::event::AddTradingPairEvent {
             book_id,

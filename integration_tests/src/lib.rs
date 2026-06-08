@@ -123,9 +123,9 @@ impl Setup {
                 metadata: TokenMetadata {
                     symbol: "ckSOL".to_string(),
                     // 0 decimals keeps the default pair's settlement equal to
-                    // `price × quantity` (divisor 10^0 = 1) so the suite's
-                    // amount assertions are unaffected; decimal-scaled
-                    // settlement is covered by a dedicated ckETH/ckUSDC test.
+                    // `price × quantity` (divisor 10^0 = 1), so the suite's
+                    // amount assertions are unaffected by the pair-creation
+                    // exactness rule.
                     decimals: 0,
                 },
             },

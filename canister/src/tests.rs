@@ -1,7 +1,8 @@
 mod add_trading_pair {
     use crate::test_fixtures::{
         ckbtc_token_id, icp_ckbtc_trading_pair, icp_token_id, init_state_with_order_book,
-        mocks::MockRuntime, trading_pair_request,
+        mocks::{MockRuntime, mock_runtime_for},
+        trading_pair_request,
     };
     use crate::{add_trading_pair, state};
     use candid::Principal;
@@ -207,6 +208,107 @@ mod add_trading_pair {
             result,
             Err(AddTradingPairError::BaseDecimalsTooLarge { decimals: 20 })
         );
+    }
+
+    /// Builds a request with explicit decimals/tick/lot and unique token ids.
+    fn pair_request(
+        base: TokenId,
+        base_decimals: u8,
+        quote: TokenId,
+        quote_decimals: u8,
+        tick_size: u64,
+        lot_size: u64,
+    ) -> dex_types::AddTradingPairRequest {
+        dex_types::AddTradingPairRequest {
+            base: dex_types::Token {
+                id: base,
+                metadata: TokenMetadata {
+                    symbol: "BASE".to_string(),
+                    decimals: base_decimals,
+                },
+            },
+            quote: dex_types::Token {
+                id: quote,
+                metadata: TokenMetadata {
+                    symbol: "QUOTE".to_string(),
+                    decimals: quote_decimals,
+                },
+            },
+            tick_size,
+            lot_size,
+            maker_fee_bps: 0,
+            taker_fee_bps: 0,
+        }
+    }
+
+    /// The pairs selected for initial listing are accepted under their intended
+    /// parameters, where `tick_size = price_increment × 10^quote_decimals` and
+    /// `lot_size = quantity_increment × 10^base_decimals`.
+    #[test]
+    fn should_accept_selected_trading_pairs() {
+        init_state_with_order_book();
+        let mut runtime = mock_runtime_for(Principal::anonymous());
+        runtime.expect_is_controller().return_const(true);
+        // (pair, base_decimals, quote_decimals, tick_size, lot_size)
+        let pairs = [
+            ("ckBTC/ckUSDT", 8u8, 6u8, 10_000u64, 10_000u64),
+            ("ckETH/ckUSDT", 18, 6, 10_000, 100_000_000_000_000),
+            ("ckUSDC/ckUSDT", 6, 6, 100, 10_000),
+            ("ICP/ckUSDT", 8, 6, 1_000, 1_000_000),
+            ("VCHF/ckUSDT", 8, 6, 100, 1_000_000),
+            ("ICP/ckBTC", 8, 8, 10, 10_000_000),
+            ("ICP/VCHF", 8, 8, 100_000, 1_000_000),
+        ];
+        for (i, &(pair, base_decimals, quote_decimals, tick_size, lot_size)) in
+            pairs.iter().enumerate()
+        {
+            let base = TokenId {
+                ledger_id: Principal::from_slice(&[0x20, i as u8]),
+            };
+            let quote = TokenId {
+                ledger_id: Principal::from_slice(&[0x21, i as u8]),
+            };
+            let result = add_trading_pair(
+                pair_request(
+                    base,
+                    base_decimals,
+                    quote,
+                    quote_decimals,
+                    tick_size,
+                    lot_size,
+                ),
+                &runtime,
+            );
+            assert_eq!(result, Ok(()), "{pair} should be accepted");
+        }
+    }
+
+    #[test]
+    fn should_accept_boundary_base_decimals() {
+        init_state_with_order_book();
+        let mut runtime = mock_runtime_for(Principal::anonymous());
+        runtime.expect_is_controller().return_const(true);
+        // base_decimals = 0 (divisor 1) accepts any tick/lot; 19 is the largest
+        // base_decimals whose 10^base_decimals still fits the u64 divisor.
+        for (base_decimals, tick_size, lot_size) in
+            [(0u8, 7u64, 13u64), (19, 1, 10_000_000_000_000_000_000)]
+        {
+            let base = TokenId {
+                ledger_id: Principal::from_slice(&[0x30, base_decimals]),
+            };
+            let quote = TokenId {
+                ledger_id: Principal::from_slice(&[0x31, base_decimals]),
+            };
+            let result = add_trading_pair(
+                pair_request(base, base_decimals, quote, 6, tick_size, lot_size),
+                &runtime,
+            );
+            assert_eq!(
+                result,
+                Ok(()),
+                "base_decimals {base_decimals} should be accepted"
+            );
+        }
     }
 
     fn controller_runtime() -> MockRuntime {
