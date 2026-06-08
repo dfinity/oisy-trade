@@ -268,7 +268,7 @@ The alternative would have been to co-locate them with user balances in the cani
 
 * **Heap (chosen).**
     * Per-fill cost is a heap-map insert + integer add (~hundreds of instructions), so the hot path stays cheap. The cost is paid once per upgrade as CBOR (de)serialization, and its magnitude is bounded by the number of listed tokens, not by any user-driven dimension.
-    * Even at Binance's ~400 spot tokens — a realistic upper bound for any single venue — the heap footprint is on the order of tens of KB, negligible against the 4 GiB Wasm heap, and the corresponding (de)serialization cost is small.
+    * Realistic upper bound: Binance lists ~400 spot tokens. Each fee-pool entry stores a `TokenId` (a `Principal`, up to 29 bytes) and a `Quantity` (u256, 32 bytes), plus `BTreeMap` node overhead. At ~125 bytes per entry on heap, 400 tokens occupy **≤ 50 KB** — negligible against the 4 GiB Wasm heap. The CBOR-serialized form encoded into stable memory at each upgrade is even smaller (~30 KB worst case), with serialization cost ≤ a few hundred thousand instructions.
 
 #### References
 

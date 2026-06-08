@@ -324,17 +324,17 @@ pub fn get_balances(
     filter: Option<Vec<FilterToken>>,
     caller: candid::Principal,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
-    if let Some(ref f) = filter
-        && (f.len() as u32) > MAX_FILTER_LEN
-    {
-        return Err(GetBalancesRequestError::FilterTooLarge {
-            len: f.len() as u32,
-            max: MAX_FILTER_LEN,
-        });
-    }
+    validate_filter_len(filter.as_deref())?;
     Ok(state::with_state(|s| {
         s.get_balances(&caller, filter.as_deref())
     }))
+}
+
+pub fn get_fee_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    validate_filter_len(filter.as_deref())?;
+    Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
@@ -382,10 +382,12 @@ pub fn add_trading_pair(
         let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
         s.check_token_metadata_consistency(pair.base, &base_metadata)?;
         s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
-        // Exact-settlement invariant: a fill settles as
-        // `price × quantity / 10^base_decimals`, and prices/quantities are
-        // multiples of tick/lot, so `tick_size × lot_size` must be a multiple of
-        // `10^base_decimals` for that division to be exact (no rounding).
+        // Enforce the settlement-exactness invariant ahead of the upcoming
+        // change to settle a fill as `price × quantity / 10^base_decimals`:
+        // prices are multiples of the tick and quantities multiples of the lot,
+        // so requiring `tick_size × lot_size` to be a multiple of
+        // `10^base_decimals` guarantees that division will be exact (no
+        // rounding).
         let base_decimals = base_metadata.decimals;
         let base_scale = 10u64.checked_pow(base_decimals as u32).ok_or(
             AddTradingPairError::BaseDecimalsTooLarge {
@@ -415,4 +417,16 @@ pub fn add_trading_pair(
         state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
         Ok(())
     })
+}
+
+fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {
+    if let Some(f) = filter
+        && (f.len() as u32) > MAX_FILTER_LEN
+    {
+        return Err(GetBalancesRequestError::FilterTooLarge {
+            len: f.len() as u32,
+            max: MAX_FILTER_LEN,
+        });
+    }
+    Ok(())
 }

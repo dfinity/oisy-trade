@@ -1,0 +1,128 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # Tag and create the (draft) GitHub releases for any crates whose version was
+  # bumped by a merged release-plz PR. A no-op on ordinary pushes to main.
+  release:
+    name: Release-plz tag & release
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+      id-token: write # required for crates.io trusted publishing (OIDC)
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    outputs:
+      releases: ${{ steps.release-plz.outputs.releases }}
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: 'Authenticate with crates.io'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1
+      - name: 'Run release-plz'
+        id: release-plz
+        uses: release-plz/action@bbd1afc9813d25602e002b29e96e0aacebab1160 # v0.5.105
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # Build the canister wasm fresh from the released commit and finalize its
+  # GitHub release with the wasm.gz, its SHA-256, the candid interface, and the
+  # deployment-status table.
+  publish-canister:
+    name: Publish canister artifacts
+    needs: release
+    if: needs.release.outputs.releases_created == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: 'Resolve dex_canister release'
+        id: meta
+        env:
+          RELEASES: ${{ needs.release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          tag=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "dex_canister") | .tag')
+          version=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "dex_canister") | .version')
+          if [[ -z "$tag" || "$tag" == "null" ]]; then
+            echo "dex_canister was not released in this run; skipping artifact publish."
+            echo "has_canister=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_canister=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Checkout released tag'
+        if: steps.meta.outputs.has_canister == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Build from the exact tagged commit, not main HEAD, so the asset
+          # provably corresponds to the release tag even if main advances.
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - name: Setup mise
+        if: steps.meta.outputs.has_canister == 'true'
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          # Disable cache to avoid issues with wasm32 target
+          # See https://github.com/jdx/mise-action/issues/215
+          cache: false
+
+      - name: 'Docker build'
+        if: steps.meta.outputs.has_canister == 'true'
+        run: just docker-build
+
+      - name: 'SHA256 of release asset'
+        if: steps.meta.outputs.has_canister == 'true'
+        run: |
+          set -euo pipefail
+          SHA256=$(sha256sum ./wasms/dex_canister.wasm.gz | cut -d ' ' -f1)
+          echo "SHA256 of dex_canister.wasm.gz: $SHA256"
+          echo "DEX_CANISTER_WASM_GZ_SHA256=$SHA256" >> "$GITHUB_ENV"
+
+      - name: 'Install parse-changelog'
+        if: steps.meta.outputs.has_canister == 'true'
+        uses: taiki-e/install-action@eb170ab528b4949b44322b05ed3a64beb7bc52f2 # parse-changelog
+        with:
+          tool: parse-changelog
+
+      - name: 'Generate GitHub release body'
+        if: steps.meta.outputs.has_canister == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes=$(parse-changelog canister/CHANGELOG.md "$RELEASE_VERSION")
+          # Restrict substitution to our known placeholders so stray `$VAR`
+          # sequences in the changelog text are left untouched.
+          CHANGELOG="$notes" RELEASE_TAG="$RELEASE_TAG" \
+            DEX_CANISTER_WASM_GZ_SHA256="$DEX_CANISTER_WASM_GZ_SHA256" \
+            envsubst '$DEX_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
+            < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
+
+      - name: 'Publish GitHub release'
+        if: steps.meta.outputs.has_canister == 'true'
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          draft: false
+          tag_name: ${{ steps.meta.outputs.tag }}
+          body_path: ${{ github.workspace }}-RELEASE.txt
+          files: |
+            wasms/dex_canister.wasm.gz
+            canister/dex.did

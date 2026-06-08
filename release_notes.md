@@ -1,0 +1,22 @@
+- SHA-256 hash: `${DEX_CANISTER_WASM_GZ_SHA256}`
+
+## Reproducible build
+
+The attached `dex_canister.wasm.gz` is built reproducibly. To verify the hash matches:
+
+```bash
+git checkout ${RELEASE_TAG}
+just docker-build
+sha256sum wasms/dex_canister.wasm.gz
+```
+
+## Deployments
+
+| Type                | Canister ID                                                                                                  | Deployed? |
+|---------------------|--------------------------------------------------------------------------------------------------------------|-----------|
+| :rocket: Production | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | :x:       |
+| :test_tube: Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | :x:       |
+
+## What's Changed
+
+${CHANGELOG}

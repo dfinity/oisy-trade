@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE};
+use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
@@ -1708,6 +1708,75 @@ async fn should_expose_metrics() {
         .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
 
     setup.drop().await;
+}
+
+/// `/metrics` exposes a `fee_balance` gauge per token in whole token
+/// units (raw amount ÷ 10^decimals) after a fee-charging fill.
+#[tokio::test]
+async fn should_expose_fee_balance_metric() {
+    let (fills, setup) = fill_one_cross_with_fees().await;
+    // `assert_contains_metric_matching` runs `regex::Regex::new(...).is_match(line)`,
+    // so the dot in the formatted float must be escaped.
+    setup
+        .assert_metrics()
+        .await
+        .assert_contains_metric_matching(format!(
+            r#"fee_balance\{{token="CKSOL"\}} {}"#,
+            fills.base_fee_whole().replace('.', r"\.")
+        ))
+        .assert_contains_metric_matching(format!(
+            r#"fee_balance\{{token="CKBTC"\}} {}"#,
+            fills.quote_fee_whole().replace('.', r"\.")
+        ));
+
+    setup.drop().await;
+}
+
+mod get_fee_balances {
+    use candid::Nat;
+    use dex_int_tests::fill_one_cross_with_fees;
+    use dex_types::{Balance, FilterToken, UserTokenBalance};
+
+    /// Stand up a trading pair with non-zero maker/taker fees and run one
+    /// cross so both sides accrue into the canister-owned fee pool. Asserts
+    /// that `get_fee_balances` reports the accrued amounts.
+    #[tokio::test]
+    async fn should_report_accrued_fees_after_a_fill() {
+        let (fills, setup) = fill_one_cross_with_fees().await;
+
+        let no_filter = setup.dex_client().get_fee_balances(None).await.unwrap();
+        assert_eq!(no_filter.len(), 2);
+
+        let with_filter = setup
+            .dex_client()
+            .get_fee_balances(Some(vec![
+                FilterToken::ById(fills.base.id.clone()),
+                FilterToken::ById(fills.quote.id.clone()),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(
+            with_filter,
+            vec![
+                Ok(UserTokenBalance {
+                    token: fills.base.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.base_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+                Ok(UserTokenBalance {
+                    token: fills.quote.clone(),
+                    balance: Balance {
+                        free: Nat::from(fills.quote_fee_raw),
+                        reserved: Nat::from(0u64),
+                    },
+                }),
+            ],
+        );
+
+        setup.drop().await;
+    }
 }
 
 mod list_supported_tokens {

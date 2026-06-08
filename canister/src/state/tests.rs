@@ -1618,7 +1618,7 @@ mod execution_policy {
 }
 
 mod get_balances {
-    use crate::order::{FeeRates, OrderBookId, Quantity, TokenId, TradingPair};
+    use crate::order::{Quantity, TokenId};
     use crate::state::StableMemoryOptions;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
@@ -1628,13 +1628,13 @@ mod get_balances {
 
     #[test]
     fn should_return_empty_for_user_without_balances_and_no_filter() {
-        let (state, _, _) = setup_two_token_state();
+        let (state, _, _) = test_fixtures::two_token_state();
         assert_eq!(state.get_balances(&USER, None), vec![]);
     }
 
     #[test]
     fn should_return_zero_entry_for_registered_token_in_filter() {
-        let (state, a_id, _) = setup_two_token_state();
+        let (state, a_id, _) = test_fixtures::two_token_state();
         let filter = vec![FilterToken::ById(a_id.into())];
 
         assert_eq!(
@@ -1645,7 +1645,7 @@ mod get_balances {
 
     #[test]
     fn should_return_non_zero_entries_without_filter() {
-        let (mut state, a_id, b_id) = setup_two_token_state();
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1667,7 +1667,7 @@ mod get_balances {
 
     #[test]
     fn should_include_zero_entries_for_filtered_tokens_user_does_not_hold() {
-        let (mut state, a_id, b_id) = setup_two_token_state();
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1690,7 +1690,7 @@ mod get_balances {
 
     #[test]
     fn should_skip_existing_zero_entries_without_filter() {
-        let (mut state, a_id, b_id) = setup_two_token_state();
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1710,7 +1710,7 @@ mod get_balances {
 
     #[test]
     fn should_return_token_not_supported_for_unknown_filter_entry() {
-        let (state, _, _) = setup_two_token_state();
+        let (state, _, _) = test_fixtures::two_token_state();
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
         let filter = vec![FilterToken::ById(unknown.into())];
 
@@ -1724,7 +1724,7 @@ mod get_balances {
 
     #[test]
     fn should_mix_ok_and_err_entries_in_filter_order() {
-        let (mut state, a_id, _) = setup_two_token_state();
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1750,7 +1750,7 @@ mod get_balances {
 
     #[test]
     fn should_dedup_filter_entries() {
-        let (mut state, a_id, b_id) = setup_two_token_state();
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1781,7 +1781,7 @@ mod get_balances {
 
     #[test]
     fn should_return_empty_for_empty_filter() {
-        let (mut state, a_id, _) = setup_two_token_state();
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
         state.deposit(
             USER,
             a_id,
@@ -1790,29 +1790,6 @@ mod get_balances {
         );
 
         assert_eq!(state.get_balances(&USER, Some(&[])), vec![]);
-    }
-
-    fn setup_two_token_state() -> (
-        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
-        TokenId,
-        TokenId,
-    ) {
-        let mut state = test_fixtures::state();
-        let a_id = test_fixtures::ckbtc_token_id();
-        let b_id = test_fixtures::icp_token_id();
-        state.record_trading_pair(
-            OrderBookId::ZERO,
-            TradingPair {
-                base: a_id,
-                quote: b_id,
-            },
-            test_fixtures::ckbtc_metadata(),
-            test_fixtures::icp_metadata(),
-            test_fixtures::TICK_SIZE,
-            test_fixtures::LOT_SIZE,
-            FeeRates::default(),
-        );
-        (state, a_id, b_id)
     }
 
     fn ok_balance(
@@ -1829,6 +1806,118 @@ mod get_balances {
             balance: Balance {
                 free: Nat::from(free),
                 reserved: Nat::from(reserved),
+            },
+        })
+    }
+}
+
+mod get_fee_balances {
+    use crate::order::TokenId;
+    use crate::test_fixtures;
+    use candid::{Nat, Principal};
+    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+
+    #[test]
+    fn should_return_empty_when_no_fees_accrued_and_no_filter() {
+        let (state, _, _) = test_fixtures::two_token_state();
+        assert_eq!(state.get_fee_balances(None), vec![]);
+    }
+
+    #[test]
+    fn should_return_zero_entry_for_registered_token_in_filter() {
+        let (state, a_id, _) = test_fixtures::two_token_state();
+        let filter = vec![FilterToken::ById(a_id.into())];
+
+        assert_eq!(
+            state.get_fee_balances(Some(&filter)),
+            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 0)],
+        );
+    }
+
+    #[test]
+    fn should_return_non_zero_entries_without_filter() {
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
+        test_fixtures::accrue_fee(&mut state.balances, b_id, 3);
+
+        let mut got = state.get_fee_balances(None);
+        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut want = vec![
+            ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+            ok_fee_balance(b_id, test_fixtures::icp_metadata(), 3),
+        ];
+        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn should_include_zero_entries_for_filtered_tokens_with_no_accrual() {
+        let (mut state, a_id, b_id) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(b_id.into()),
+        ];
+
+        assert_eq!(
+            state.get_fee_balances(Some(&filter)),
+            vec![
+                ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+                ok_fee_balance(b_id, test_fixtures::icp_metadata(), 0),
+            ],
+        );
+    }
+
+    #[test]
+    fn should_return_token_not_supported_for_unknown_filter_entry() {
+        let (state, _, _) = test_fixtures::two_token_state();
+        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
+        let filter = vec![FilterToken::ById(unknown.into())];
+
+        assert_eq!(
+            state.get_fee_balances(Some(&filter)),
+            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+                unknown.into()
+            )))],
+        );
+    }
+
+    #[test]
+    fn should_collapse_duplicate_filter_entries() {
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 5);
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(a_id.into()),
+        ];
+
+        assert_eq!(
+            state.get_fee_balances(Some(&filter)),
+            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 5)],
+        );
+    }
+
+    #[test]
+    fn should_return_empty_for_empty_filter() {
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 5);
+
+        assert_eq!(state.get_fee_balances(Some(&[])), vec![]);
+    }
+
+    fn ok_fee_balance(
+        token_id: TokenId,
+        metadata: crate::order::TokenMetadata,
+        amount: u64,
+    ) -> Result<UserTokenBalance, GetBalancesError> {
+        Ok(UserTokenBalance {
+            token: dex_types::Token {
+                id: token_id.into(),
+                metadata: metadata.into(),
+            },
+            balance: Balance {
+                free: Nat::from(amount),
+                reserved: Nat::from(0u64),
             },
         })
     }

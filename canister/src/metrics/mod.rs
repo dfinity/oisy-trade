@@ -42,8 +42,50 @@ pub fn encode_metrics(w: &mut MetricsEncoder<Vec<u8>>) -> std::io::Result<()> {
         let order_book_metrics = OrderBookMetrics::from_state(s);
         encode_order_book_metrics(w, &order_book_metrics)?;
 
+        encode_fee_balances(w, s)?;
+
         Ok(())
     })
+}
+
+/// Per-token canister-owned fee pool. Emitted as a gauge (not a counter)
+/// because withdrawals can decrease the value. The reported value is
+/// scaled into whole-token units (raw amount ÷ 10^decimals), both for
+/// human readability and to keep the f64 mantissa from overflowing on
+/// large-decimals tokens (e.g. 18-decimal ckETH).
+fn encode_fee_balances<MH, MB>(
+    w: &mut MetricsEncoder<Vec<u8>>,
+    state: &State<MH, MB>,
+) -> std::io::Result<()>
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    let mut metric = w.gauge_vec(
+        "fee_balance",
+        "Per-token canister-owned fee pool balance in whole token units, accrued from maker/taker fees on fills.",
+    )?;
+    for (token, amount) in state.iter_fee_balances().filter(|(_, q)| !q.is_zero()) {
+        let metadata = state
+            .token_metadata(&token)
+            .expect("BUG: fee pool entry for unregistered token");
+        let symbol = format_token_symbol(metadata);
+        metric = metric.value(
+            &[("token", &symbol)],
+            amount_to_f64(amount, metadata.decimals),
+        )?;
+    }
+    Ok(())
+}
+
+/// Convert a raw `Quantity` (smallest-denomination integer) to whole-unit
+/// f64 by dividing by `10^decimals`. Lossy narrowing for metrics only —
+/// the real value lives in stable memory and is queried via Candid where
+/// the full `Nat` precision is preserved.
+fn amount_to_f64(q: crate::order::Quantity, decimals: u8) -> f64 {
+    const TWO_POW_128: f64 = (u128::MAX as f64) + 1.0;
+    let raw = q.high() as f64 * TWO_POW_128 + q.low() as f64;
+    raw / 10f64.powi(decimals as i32)
 }
 
 /// Returns the amount of heap memory in bytes that has been allocated.
