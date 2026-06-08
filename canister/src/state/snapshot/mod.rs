@@ -148,7 +148,8 @@ impl StateSnapshot {
     }
 
     /// Reconstruct a [`State`] from the decoded snapshot and the stable-memory
-    /// structures that survived the upgrade independently.
+    /// structures that survived the upgrade independently — the order history,
+    /// the balances ledger, and the user registry.
     pub fn into_state<MH: Memory, MB: Memory>(
         self,
         order_history: OrderHistory<MH>,

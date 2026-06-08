@@ -84,7 +84,6 @@ pub fn user_registry_memory() -> VMem {
 pub fn user_orders_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
 }
-
 pub mod state_snapshot {
     use super::STATE_SNAPSHOT;
     use crate::state::StateSnapshot;

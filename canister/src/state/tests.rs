@@ -1463,6 +1463,31 @@ mod get_balances {
         assert_eq!(state.get_balances(&USER, None), vec![]);
     }
 
+    /// Read paths resolve identities with `lookup`, never `get_or_register`, so
+    /// querying a never-seen principal must not create a registry entry.
+    #[test]
+    fn reads_do_not_register_unseen_principals() {
+        let (state, a_id, _) = test_fixtures::two_token_state();
+        let registry_before = state.user_registry.clone();
+        let stranger = Principal::from_slice(&[0xEE]);
+
+        assert_eq!(state.get_balances(&stranger, None), vec![]);
+        let filter = vec![FilterToken::ById(a_id.into())];
+        assert_eq!(
+            state.get_balances(&stranger, Some(&filter)),
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+        );
+        assert_eq!(
+            state.get_balance(&stranger, &a_id),
+            crate::balance::Balance::zero()
+        );
+
+        assert_eq!(
+            state.user_registry, registry_before,
+            "read paths must not register an unseen principal"
+        );
+    }
+
     #[test]
     fn should_return_zero_entry_for_registered_token_in_filter() {
         let (state, a_id, _) = test_fixtures::two_token_state();

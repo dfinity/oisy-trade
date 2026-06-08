@@ -1,0 +1,55 @@
+[workspace]
+# path of the git-cliff configuration
+changelog_config = "cliff.toml"
+
+# enable changelog updates
+changelog_update = true
+
+# update dependencies with `cargo update`
+dependencies_update = true
+
+# Enable git releases for all packages by default
+git_release_enable = true
+
+# Enable git tags for all packages by default
+git_tag_enable = true
+
+# creates the git release as draft
+git_release_draft = true
+
+# the release PR is created ready-to-review (not a draft) so it can be merged directly
+pr_draft = false
+
+# labels for the release PR
+pr_labels = ["release"]
+
+# disallow updating repositories with uncommitted changes
+allow_dirty = false
+
+# disallow packaging with uncommitted changes
+publish_allow_dirty = false
+
+[[package]]
+name = "dex_canister"
+semver_check = false # binary canister, no public Rust API to guard
+publish = false # the canister is released as a wasm asset, never to crates.io
+
+[[package]]
+name = "dex_client"
+# not released yet; set `release = true` + `publish = true` to start publishing to crates.io
+release = false
+
+[[package]]
+name = "dex_types"
+# published to crates.io so dex_client can depend on the released version;
+# no separate GitHub release (the crates.io publish + git tag is enough)
+publish = true
+git_release_enable = false
+
+[[package]]
+name = "dex_types_internal"
+release = false # internal init-arg types, not released
+
+[[package]]
+name = "dex_int_tests"
+release = false # test crate, not released

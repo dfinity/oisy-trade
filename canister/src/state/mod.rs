@@ -21,7 +21,7 @@ use crate::order::{
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
-use crate::user::UserRegistry;
+use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
 use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
@@ -405,14 +405,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: unknown trading pair in SettlingEvent");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("settling");
-        // Resolve each distinct `OrderSeq` referenced by the operations to
-        // its owning `Principal` once, then reuse from the map in the
-        // loop. A 1000-fill round can reference ~2000 distinct seqs over
-        // ~3000 operations, so caching cuts stable-memory reads by ~35%.
-        let owner_cache = resolve_op_owners(
+        // Resolve each distinct `OrderSeq` referenced by the operations to its
+        // owner's `UserId` once (one `order_history` read + one registry lookup
+        // per seq), then reuse from the map in the loop. A 1000-fill round can
+        // reference ~2000 distinct seqs over ~3000 operations, so caching keeps
+        // both stable maps out of the per-op hot path.
+        let user_cache = resolve_op_users(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
+            &self.user_registry,
         );
         for op in &event.balance_operations {
             let token = pair.token(match op {
@@ -427,28 +429,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     fee,
                     ..
                 } => {
-                    let from_user = self
-                        .user_registry
-                        .lookup(owner_cache[from_order])
-                        .expect("BUG: order owner not registered");
-                    let to_user = self
-                        .user_registry
-                        .lookup(owner_cache[to_order])
-                        .expect("BUG: order owner not registered");
                     self.balances.transfer(
-                        from_user,
-                        to_user,
+                        user_cache[from_order],
+                        user_cache[to_order],
                         &token,
                         *amount,
                         fee.unwrap_or(Quantity::ZERO),
                     );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    let user = self
-                        .user_registry
-                        .lookup(owner_cache[order])
-                        .expect("BUG: order owner not registered");
-                    self.balances.unreserve(user, &token, *amount);
+                    self.balances.unreserve(user_cache[order], &token, *amount);
                 }
             }
         }
@@ -745,11 +735,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 /// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
 /// `ops`. Each `get` hits stable memory; callers can then look owners up in
 /// the returned `BTreeMap` in O(log n) heap-only time.
-fn resolve_op_owners<M: Memory>(
+fn resolve_op_users<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
-    history: &OrderHistory<M>,
-) -> BTreeMap<OrderSeq, Principal> {
+    history: &OrderHistory<MH>,
+    registry: &UserRegistry<MB>,
+) -> BTreeMap<OrderSeq, UserId> {
     let mut seqs = BTreeSet::new();
     for op in ops {
         match op {
@@ -772,7 +763,10 @@ fn resolve_op_owners<M: Memory>(
                 .get(&OrderId::new(*book_id, seq))
                 .expect("BUG: missing order_history entry for BalanceOperation")
                 .owner;
-            (seq, owner)
+            let user = registry
+                .lookup(owner)
+                .expect("BUG: order owner not registered");
+            (seq, user)
         })
         .collect()
 }
