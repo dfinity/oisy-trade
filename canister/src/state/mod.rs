@@ -16,10 +16,9 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, GlobalOrderSeq, LotSize, MatchOrderError, MatchingOutput,
-    Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
-    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::UserRegistry;
@@ -80,10 +79,6 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
-    /// Monotonic counter assigning each placed order a canister-global
-    /// insertion sequence, used as the ordering key in `order_history`'s
-    /// per-user index. Carried in the upgrade snapshot.
-    next_order_seq: GlobalOrderSeq,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -118,7 +113,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
-            next_order_seq: GlobalOrderSeq::ZERO,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -242,12 +236,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 .expect("BUG: insufficient balance for validated order");
 
             let order_id = OrderId::new(book_id, order.id());
-            let seq = self.next_order_seq;
-            self.next_order_seq.increment();
             self.order_history.insert_once(
                 order_id,
                 user_id,
-                seq,
                 OrderRecord {
                     owner: user,
                     side: order.side(),
@@ -893,7 +884,6 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
-            next_order_seq,
             pending_settling_events,
             in_flight_user_ops,
         } = self;
@@ -909,7 +899,6 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
-            next_order_seq: *next_order_seq,
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
         }
@@ -931,7 +920,6 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
-            next_order_seq,
             pending_settling_events,
             in_flight_user_ops,
         } = self;
@@ -947,7 +935,6 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
-            next_order_seq: other_next_order_seq,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
         } = other;
@@ -962,7 +949,6 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
-            && next_order_seq == other_next_order_seq
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
     }

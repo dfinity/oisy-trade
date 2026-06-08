@@ -1,4 +1,4 @@
-use super::{GlobalOrderSeq, OrderId, OrderStatus, Price, Quantity, Side};
+use super::{OrderId, OrderStatus, Price, Quantity, Side};
 use crate::Timestamp;
 use crate::user::UserId;
 use candid::Principal;
@@ -105,17 +105,14 @@ impl<M: Memory> OrderHistory<M> {
         }
     }
 
-    /// Insert a new order record and index it under `user` with the given
-    /// canister-global insertion `seq` (which orders the per-user index
-    /// newest-first). Panics if the order ID is already present.
-    pub fn insert_once(
-        &mut self,
-        id: OrderId,
-        user: UserId,
-        seq: GlobalOrderSeq,
-        record: OrderRecord,
-    ) {
+    /// Insert a new order record and index it under `user`. The order's
+    /// canister-global insertion sequence — which orders the per-user index
+    /// newest-first — is the current order count: the index is insert-only, so
+    /// the count is a dense, monotonic sequence (the same trick the user
+    /// registry uses to assign `UserId`s). Panics if the order ID is present.
+    pub fn insert_once(&mut self, id: OrderId, user: UserId, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
+        let seq = self.orders.len();
         assert_eq!(
             self.orders.insert(id, record),
             None,
@@ -124,8 +121,7 @@ impl<M: Memory> OrderHistory<M> {
         assert_eq!(
             self.by_user.insert(UserOrderKey::from_seq(user, seq), id),
             None,
-            "BUG: duplicate user-order index entry for {user:?} seq {}",
-            seq.get()
+            "BUG: duplicate user-order index entry for {user:?} seq {seq}"
         );
     }
 
@@ -186,10 +182,10 @@ struct UserOrderKey {
 }
 
 impl UserOrderKey {
-    fn from_seq(user: UserId, seq: GlobalOrderSeq) -> Self {
+    fn from_seq(user: UserId, seq: u64) -> Self {
         Self {
             user,
-            rev_seq: u64::MAX - seq.get(),
+            rev_seq: u64::MAX - seq,
         }
     }
 
@@ -278,10 +274,10 @@ mod tests {
     #[test]
     fn user_order_key_ord_matches_storable_bytes() {
         let keys = [
-            UserOrderKey::from_seq(UserId::new(2), GlobalOrderSeq::new(0)),
-            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(0)),
-            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(5)),
-            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(9)),
+            UserOrderKey::from_seq(UserId::new(2), 0),
+            UserOrderKey::from_seq(UserId::new(1), 0),
+            UserOrderKey::from_seq(UserId::new(1), 5),
+            UserOrderKey::from_seq(UserId::new(1), 9),
             UserOrderKey::newest(UserId::new(0)),
             UserOrderKey::oldest(UserId::new(0)),
         ];

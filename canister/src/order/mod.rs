@@ -165,28 +165,6 @@ impl OrderSeq {
     }
 }
 
-/// Canister-global, monotonically increasing sequence assigned to each order as
-/// it is placed — the insertion order across *all* books. Distinct from
-/// [`OrderSeq`], which is per-book; this orders the per-user index newest-first.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GlobalOrderSeq(u64);
-
-impl GlobalOrderSeq {
-    pub const ZERO: Self = Self(0);
-
-    pub const fn new(seq: u64) -> Self {
-        Self(seq)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-
-    pub fn increment(&mut self) {
-        self.0 = self.0.checked_add(1).expect("GlobalOrderSeq overflow");
-    }
-}
-
 /// Unique order identifier encoding the order book ID and a per-book sequence number.
 ///
 /// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.

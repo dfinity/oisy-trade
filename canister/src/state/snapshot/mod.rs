@@ -13,8 +13,7 @@
 use super::State;
 use crate::balance::{FeeEntry, TokenBalance};
 use crate::order::{
-    GlobalOrderSeq, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId,
-    TokenMetadata, TradingPair,
+    OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
@@ -56,10 +55,6 @@ pub struct StateSnapshot {
     /// when the pool is empty.
     #[n(9)]
     pub fee_pool: Option<Vec<FeeEntry>>,
-    /// Global order-insertion counter backing the per-user index. `Option` so
-    /// snapshots written before this field decode to `None` (→ 0).
-    #[n(10)]
-    pub next_order_seq: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -102,7 +97,6 @@ impl StateSnapshot {
             balances,
             // ignored: live in stable memory,
             order_history: _,
-            next_order_seq,
             // ignored: timers are reset upon upgrades
             active_tasks: _,
             ledger_fee_cache,
@@ -150,7 +144,6 @@ impl StateSnapshot {
                     Some(snapshot)
                 }
             },
-            next_order_seq: Some(next_order_seq.get()),
         }
     }
 
@@ -231,9 +224,6 @@ impl StateSnapshot {
             user_registry,
             balances,
             order_history,
-            // Pre-launch: the `by_user` index starts empty in its fresh memory
-            // region; there are no prior orders to backfill into it.
-            next_order_seq: GlobalOrderSeq::new(self.next_order_seq.unwrap_or(0)),
             active_tasks: Default::default(),
             ledger_fee_cache,
             pending_settling_events,
