@@ -311,6 +311,61 @@ mod add_trading_pair {
         }
     }
 
+    #[test]
+    fn should_reject_maker_fee_bps_above_max() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+        let mut req = trading_pair_request(
+            icp_token_id(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            token_c,
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+        );
+        req.maker_fee_bps = 10_001;
+
+        let result = add_trading_pair(req, &runtime);
+
+        assert_eq!(result, Err(AddTradingPairError::InvalidBasisPoint(10_001)));
+    }
+
+    #[test]
+    fn should_reject_taker_fee_bps_above_max() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let token_c = TokenId {
+            ledger_id: Principal::from_slice(&[0x03]),
+        };
+        let mut req = trading_pair_request(
+            icp_token_id(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            token_c,
+            TokenMetadata {
+                symbol: "ckETH".to_string(),
+                decimals: 18,
+            },
+        );
+        req.taker_fee_bps = u16::MAX;
+
+        let result = add_trading_pair(req, &runtime);
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InvalidBasisPoint(u16::MAX))
+        );
+    }
+
     fn controller_runtime() -> MockRuntime {
         let mut mock = MockRuntime::new();
         mock.expect_msg_caller()
@@ -1654,6 +1709,40 @@ mod get_balances {
             let len = filter.len() as u32;
 
             let result = get_balances(Some(filter), USER);
+
+            if len <= MAX_FILTER_LEN {
+                prop_assert!(result.is_ok());
+            } else {
+                prop_assert_eq!(
+                    result.unwrap_err(),
+                    GetBalancesRequestError::FilterTooLarge {
+                        len,
+                        max: MAX_FILTER_LEN,
+                    }
+                );
+            }
+        }
+    }
+}
+
+mod get_fee_balances {
+    use crate::get_fee_balances;
+    use crate::state::reset_state;
+    use crate::test_fixtures::arbitrary::arb_filter_tokens;
+    use crate::test_fixtures::init_state_with_order_book;
+    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
+
+    proptest! {
+        #[test]
+        fn should_enforce_filter_length_cap(
+            filter in arb_filter_tokens(0..=(MAX_FILTER_LEN as usize + 10)),
+        ) {
+            reset_state();
+            init_state_with_order_book();
+            let len = filter.len() as u32;
+
+            let result = get_fee_balances(Some(filter));
 
             if len <= MAX_FILTER_LEN {
                 prop_assert!(result.is_ok());

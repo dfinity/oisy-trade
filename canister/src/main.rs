@@ -141,6 +141,13 @@ fn get_balances(
 }
 
 #[ic_cdk::query]
+fn get_fee_balances(
+    filter: Option<Vec<FilterToken>>,
+) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    dex_canister::get_fee_balances(filter)
+}
+
+#[ic_cdk::query]
 fn list_supported_tokens() -> Vec<Token> {
     dex_canister::list_supported_tokens()
 }

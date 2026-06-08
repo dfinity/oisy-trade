@@ -176,6 +176,49 @@ pub fn all_order_types(
     once(buy(1, price, quantity)).chain(once(sell(2, price, quantity)))
 }
 
+/// Builds a fresh `State` with one trading pair (ICP/ckBTC, zero fees)
+/// already registered. Used by tests that need a stage with two known
+/// `TokenId`s but no balance setup. Returns the state and `(base, quote)`
+/// `TokenId`s.
+pub fn two_token_state() -> (state::State<VectorMemory, VectorMemory>, TokenId, TokenId) {
+    let mut state = state();
+    let a_id = ckbtc_token_id();
+    let b_id = icp_token_id();
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        TradingPair {
+            base: a_id,
+            quote: b_id,
+        },
+        ckbtc_metadata(),
+        icp_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+        FeeRates::default(),
+    );
+    (state, a_id, b_id)
+}
+
+/// Accrue `fee` units of `token` into the canister-owned fee pool by
+/// running one reserved-balance `transfer` with a non-zero fee. Generic
+/// over the balance memory so tests can use either in-memory or
+/// production stable memory.
+pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, fee: u64) {
+    let alice = Principal::from_slice(&[0x01]);
+    let bob = Principal::from_slice(&[0x02]);
+    balances.deposit(alice, token, Quantity::from(100u64));
+    balances
+        .reserve(&alice, &token, Quantity::from(100u64))
+        .unwrap();
+    balances.transfer(
+        &alice,
+        &bob,
+        &token,
+        Quantity::from(100u64),
+        Quantity::from(fee),
+    );
+}
+
 pub fn init_state_with_order_book() {
     let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
