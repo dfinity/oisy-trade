@@ -3,7 +3,7 @@ mod token;
 pub use token::{FeeEntry, TokenBalance};
 
 use crate::order::{Quantity, TokenId};
-use candid::Principal;
+use crate::user::UserId;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use std::borrow::Cow;
@@ -169,21 +169,21 @@ impl Storable for Balance {
 pub struct BalanceKey {
     #[n(0)]
     token: TokenId,
-    #[cbor(n(1), with = "icrc_cbor::principal")]
-    owner: Principal,
+    #[n(1)]
+    user: UserId,
 }
 
 impl BalanceKey {
-    pub fn new(token: TokenId, owner: Principal) -> Self {
-        Self { token, owner }
+    pub fn new(token: TokenId, user: UserId) -> Self {
+        Self { token, user }
     }
 
     pub fn token(&self) -> &TokenId {
         &self.token
     }
 
-    pub fn owner(&self) -> &Principal {
-        &self.owner
+    pub fn user(&self) -> &UserId {
+        &self.user
     }
 }
 

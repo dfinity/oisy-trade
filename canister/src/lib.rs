@@ -33,6 +33,7 @@ pub mod order;
 pub mod runtime;
 pub mod state;
 pub mod storage;
+pub mod user;
 
 #[cfg(feature = "canbench-rs")]
 mod benchmarks;

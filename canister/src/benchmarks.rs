@@ -300,6 +300,7 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         OrderHistory::new(storage::order_history_memory()),
+        crate::user::UserRegistry::new(storage::user_registry_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),
     )
     .unwrap();

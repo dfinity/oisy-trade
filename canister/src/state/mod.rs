@@ -21,6 +21,7 @@ use crate::order::{
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
+use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
 use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
@@ -75,7 +76,7 @@ pub struct State<MH: Memory, MB: Memory> {
     tokens: BTreeMap<TokenId, TokenMetadata>,
     trading_pairs: TradingPairMap,
     order_books: BTreeMap<OrderBookId, OrderBook>,
-    // TODO(DEFI-2746): Add support for subaccounts.
+    user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
@@ -97,6 +98,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
+        user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
         let execution_policy =
@@ -108,6 +110,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             tokens: BTreeMap::default(),
             trading_pairs: TradingPairMap::default(),
             order_books: BTreeMap::default(),
+            user_registry,
             balances,
             order_history,
             active_tasks: BTreeSet::default(),
@@ -175,8 +178,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Sell => (pair.base, pending.quantity),
         };
         let free = self
-            .balances
-            .get_balance(&user, &token)
+            .user_registry
+            .lookup(user)
+            .and_then(|u| self.balances.get_balance(u, &token))
             .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
         if free < required {
@@ -223,8 +227,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // Balances and order_history both live in stable memory; replay
         // must skip both or it would double-reserve and re-insert.
         if matches!(persistence, StableMemoryOptions::Write) {
+            let user_id = self
+                .user_registry
+                .lookup(user)
+                .expect("BUG: order owner not registered — deposit registers every user");
             self.balances
-                .reserve(&user, &token, required)
+                .reserve(user_id, &token, required)
                 .expect("BUG: insufficient balance for validated order");
 
             let order_id = OrderId::new(book_id, order.id());
@@ -396,14 +404,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: unknown trading pair in SettlingEvent");
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("settling");
-        // Resolve each distinct `OrderSeq` referenced by the operations to
-        // its owning `Principal` once, then reuse from the map in the
-        // loop. A 1000-fill round can reference ~2000 distinct seqs over
-        // ~3000 operations, so caching cuts stable-memory reads by ~35%.
-        let owner_cache = resolve_op_owners(
+        // Resolve each distinct `OrderSeq` referenced by the operations to its
+        // owner's `UserId` once (one `order_history` read + one registry lookup
+        // per seq), then reuse from the map in the loop. A 1000-fill round can
+        // reference ~2000 distinct seqs over ~3000 operations, so caching keeps
+        // both stable maps out of the per-op hot path.
+        let user_cache = resolve_op_users(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
+            &self.user_registry,
         );
         for op in &event.balance_operations {
             let token = pair.token(match op {
@@ -418,19 +428,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     fee,
                     ..
                 } => {
-                    let from_owner = owner_cache[from_order];
-                    let to_owner = owner_cache[to_order];
                     self.balances.transfer(
-                        &from_owner,
-                        &to_owner,
+                        user_cache[from_order],
+                        user_cache[to_order],
                         &token,
                         *amount,
                         fee.unwrap_or(Quantity::ZERO),
                     );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    let owner = owner_cache[order];
-                    self.balances.unreserve(&owner, &token, *amount);
+                    self.balances.unreserve(user_cache[order], &token, *amount);
                 }
             }
         }
@@ -522,7 +529,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         token_id: TokenId,
         amount: Quantity,
     ) -> Result<(), crate::balance::InsufficientBalanceError> {
-        self.balances.withdraw(&user, &token_id, amount)
+        // A user with no interned id has never deposited, so has no balance.
+        let user_id =
+            self.user_registry
+                .lookup(user)
+                .ok_or(crate::balance::InsufficientBalanceError {
+                    available: Quantity::ZERO,
+                    required: amount,
+                })?;
+        self.balances.withdraw(user_id, &token_id, amount)
     }
 
     pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
@@ -608,7 +623,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.balances.deposit(user, token_id, amount);
+            let user_id = self.user_registry.get_or_register(user);
+            self.balances.deposit(user_id, token_id, amount);
         }
     }
 
@@ -624,8 +640,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
-        self.balances
-            .get_balance(user, token_id)
+        self.user_registry
+            .lookup(*user)
+            .and_then(|u| self.balances.get_balance(u, token_id))
             .unwrap_or_default()
     }
 
@@ -634,31 +651,38 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: &Principal,
         filter: Option<&[dex_types::FilterToken]>,
     ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        // `lookup` (not `intern`) so mere queriers don't pollute the registry.
+        // `None` ⇒ the user has never held a balance, so every balance is zero.
+        let user_id = self.user_registry.lookup(*user);
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
-                self.balances
-                    .get_balance(user, t)
+                user_id
+                    .and_then(|u| self.balances.get_balance(u, t))
                     .unwrap_or_default()
                     .into()
             }),
-            None => self
-                .tokens
-                .iter()
-                .filter_map(|(t, metadata)| {
-                    self.balances
-                        .get_balance(user, t)
-                        .filter(|b| !b.is_zero())
-                        .map(|b| {
-                            Ok(dex_types::UserTokenBalance {
-                                token: dex_types::Token {
-                                    id: (*t).into(),
-                                    metadata: metadata.clone().into(),
-                                },
-                                balance: b.into(),
+            None => {
+                let Some(user_id) = user_id else {
+                    return Vec::new();
+                };
+                self.tokens
+                    .iter()
+                    .filter_map(|(t, metadata)| {
+                        self.balances
+                            .get_balance(user_id, t)
+                            .filter(|b| !b.is_zero())
+                            .map(|b| {
+                                Ok(dex_types::UserTokenBalance {
+                                    token: dex_types::Token {
+                                        id: (*t).into(),
+                                        metadata: metadata.clone().into(),
+                                    },
+                                    balance: b.into(),
+                                })
                             })
-                        })
-                })
-                .collect(),
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -710,11 +734,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 /// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
 /// `ops`. Each `get` hits stable memory; callers can then look owners up in
 /// the returned `BTreeMap` in O(log n) heap-only time.
-fn resolve_op_owners<M: Memory>(
+fn resolve_op_users<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
-    history: &OrderHistory<M>,
-) -> BTreeMap<OrderSeq, Principal> {
+    history: &OrderHistory<MH>,
+    registry: &UserRegistry<MB>,
+) -> BTreeMap<OrderSeq, UserId> {
     let mut seqs = BTreeSet::new();
     for op in ops {
         match op {
@@ -737,7 +762,10 @@ fn resolve_op_owners<M: Memory>(
                 .get(&OrderId::new(*book_id, seq))
                 .expect("BUG: missing order_history entry for BalanceOperation")
                 .owner;
-            (seq, owner)
+            let user = registry
+                .lookup(owner)
+                .expect("BUG: order owner not registered");
+            (seq, user)
         })
         .collect()
 }
@@ -844,6 +872,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             tokens,
             trading_pairs,
             order_books,
+            user_registry,
             balances,
             active_tasks,
             ledger_fee_cache,
@@ -858,6 +887,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             tokens: tokens.clone(),
             trading_pairs: trading_pairs.clone(),
             order_books: order_books.clone(),
+            user_registry: user_registry.clone(),
             balances: balances.clone(),
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
@@ -878,6 +908,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             tokens,
             trading_pairs,
             order_books,
+            user_registry,
             balances,
             active_tasks,
             ledger_fee_cache,
@@ -892,6 +923,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             tokens: other_tokens,
             trading_pairs: other_trading_pairs,
             order_books: other_order_books,
+            user_registry: other_user_registry,
             balances: other_balances,
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
@@ -905,6 +937,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && tokens == other_tokens
             && trading_pairs == other_trading_pairs
             && order_books == other_order_books
+            && user_registry == other_user_registry
             && balances == other_balances
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache

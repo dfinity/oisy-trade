@@ -58,6 +58,7 @@ mod assert_caller_is_allowed {
                 instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
@@ -390,14 +391,14 @@ mod cancel_limit_order {
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
-        let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
+        let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
         let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
         assert!(
             matches!(order.status, OrderStatus::Canceled( info ) if info.remaining_quantity == expected_remaining )
         );
 
-        let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
+        let (base_after, quote_after) = balances_pair(state, &user, &pair);
         assert_eq!(
             state.get_order_status(order_id),
             Some(OrderStatus::Canceled(CanceledOrderInfo {
@@ -1415,6 +1416,7 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default()),
+            crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();
@@ -1439,6 +1441,31 @@ mod get_balances {
     fn should_return_empty_for_user_without_balances_and_no_filter() {
         let (state, _, _) = test_fixtures::two_token_state();
         assert_eq!(state.get_balances(&USER, None), vec![]);
+    }
+
+    /// Read paths resolve identities with `lookup`, never `get_or_register`, so
+    /// querying a never-seen principal must not create a registry entry.
+    #[test]
+    fn reads_do_not_register_unseen_principals() {
+        let (state, a_id, _) = test_fixtures::two_token_state();
+        let registry_before = state.user_registry.clone();
+        let stranger = Principal::from_slice(&[0xEE]);
+
+        assert_eq!(state.get_balances(&stranger, None), vec![]);
+        let filter = vec![FilterToken::ById(a_id.into())];
+        assert_eq!(
+            state.get_balances(&stranger, Some(&filter)),
+            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+        );
+        assert_eq!(
+            state.get_balance(&stranger, &a_id),
+            crate::balance::Balance::zero()
+        );
+
+        assert_eq!(
+            state.user_registry, registry_before,
+            "read paths must not register an unseen principal"
+        );
     }
 
     #[test]
