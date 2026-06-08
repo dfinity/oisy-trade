@@ -18,6 +18,7 @@ use crate::order::{
 use crate::state::ExecutionPolicy;
 use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
+use crate::user::UserRegistry;
 use candid::Nat;
 use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
@@ -89,6 +90,8 @@ impl StateSnapshot {
             tokens,
             trading_pairs,
             order_books,
+            // ignored: lives in stable memory, survives upgrades on its own
+            user_registry: _,
             // only the heap fee pool is snapshotted below; user balances
             // live in stable memory and survive upgrades on their own.
             balances,
@@ -150,6 +153,7 @@ impl StateSnapshot {
         self,
         order_history: OrderHistory<MH>,
         mut balances: TokenBalance<MB>,
+        user_registry: UserRegistry<MB>,
     ) -> State<MH, MB> {
         let mut tokens = BTreeMap::new();
         for entry in self.tokens {
@@ -217,6 +221,7 @@ impl StateSnapshot {
             tokens,
             trading_pairs,
             order_books,
+            user_registry,
             balances,
             order_history,
             active_tasks: Default::default(),

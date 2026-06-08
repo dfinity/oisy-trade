@@ -58,6 +58,7 @@ mod assert_caller_is_allowed {
                 instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
@@ -390,14 +391,14 @@ mod cancel_limit_order {
         let expected_amount = expected_amount.into();
         let expected_remaining = expected_remaining.into();
         let pair = icp_ckbtc_trading_pair();
-        let (base_before, quote_before) = balances_pair(&state.balances, &user, &pair);
+        let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
         let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
         assert!(
             matches!(order.status, OrderStatus::Canceled( info ) if info.remaining_quantity == expected_remaining )
         );
 
-        let (base_after, quote_after) = balances_pair(&state.balances, &user, &pair);
+        let (base_after, quote_after) = balances_pair(state, &user, &pair);
         assert_eq!(
             state.get_order_status(order_id),
             Some(OrderStatus::Canceled(CanceledOrderInfo {
@@ -1415,6 +1416,7 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default()),
+            crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();

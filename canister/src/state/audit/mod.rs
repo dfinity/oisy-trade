@@ -6,6 +6,7 @@ use crate::state::event::{
     WithdrawEvent,
 };
 use crate::storage;
+use crate::user::UserRegistry;
 use crate::{Runtime, Timestamp};
 use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
@@ -142,6 +143,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
 pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
     order_history: OrderHistory<MH>,
+    user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     persistence: StableMemoryOptions,
 ) -> State<MH, MB> {
@@ -153,7 +155,7 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history, balances)
+        } => State::new(init_arg, order_history, user_registry, balances)
             .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };

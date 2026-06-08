@@ -10,6 +10,7 @@ const EVENT_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
 const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 const STATE_SNAPSHOT_MEMORY_ID: MemoryId = MemoryId::new(4);
+const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -67,6 +68,13 @@ pub fn order_history_memory() -> VMem {
 /// `init` / `post_upgrade`.
 pub fn balances_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(BALANCES_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice dedicated to the user registry.
+/// Used to construct the production `UserRegistry<VMem>` on canister
+/// `init` / `post_upgrade`.
+pub fn user_registry_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(USER_REGISTRY_MEMORY_ID))
 }
 
 pub mod state_snapshot {

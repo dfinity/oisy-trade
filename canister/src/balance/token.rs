@@ -1,6 +1,6 @@
 use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
-use candid::Principal;
+use crate::user::UserId;
 use ic_stable_structures::{Memory, StableBTreeMap};
 use std::collections::BTreeMap;
 
@@ -49,14 +49,14 @@ impl<M: Memory> TokenBalance<M> {
     }
 
     /// Read a user's full balance for a given token.
-    pub fn get_balance(&self, user: &Principal, token: &TokenId) -> Option<Balance> {
+    pub fn get_balance(&self, user: UserId, token: &TokenId) -> Option<Balance> {
         bench_scopes!("balances", "balances::get_balance");
-        self.balances.get(&BalanceKey::new(*token, *user))
+        self.balances.get(&BalanceKey::new(*token, user))
     }
 
     /// Deposit `amount` into a user's free balance for the given token.
     /// Creates the entry if absent.
-    pub fn deposit(&mut self, user: Principal, token: TokenId, amount: Quantity) {
+    pub fn deposit(&mut self, user: UserId, token: TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::deposit");
         self.update(user, token, |b| b.deposit(amount));
     }
@@ -66,12 +66,12 @@ impl<M: Memory> TokenBalance<M> {
     /// insufficient; on error the stored balance is untouched.
     pub fn withdraw(
         &mut self,
-        user: &Principal,
+        user: UserId,
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
         bench_scopes!("balances", "balances::withdraw");
-        self.try_update(*user, *token, |b| b.withdraw(amount))
+        self.try_update(user, *token, |b| b.withdraw(amount))
     }
 
     /// Reserve `amount` from a user's free balance for the given token.
@@ -80,12 +80,12 @@ impl<M: Memory> TokenBalance<M> {
     /// untouched.
     pub fn reserve(
         &mut self,
-        user: &Principal,
+        user: UserId,
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
         bench_scopes!("balances", "balances::reserve");
-        self.try_update(*user, *token, |b| b.reserve(amount))
+        self.try_update(user, *token, |b| b.reserve(amount))
     }
 
     /// Move `amount` from a user's reserved back to their free balance for
@@ -95,9 +95,9 @@ impl<M: Memory> TokenBalance<M> {
     ///
     /// Panics if the user has no balance entry for the token, or if the
     /// reserved balance is insufficient.
-    pub fn unreserve(&mut self, user: &Principal, token: &TokenId, amount: Quantity) {
+    pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::unreserve");
-        let key = BalanceKey::new(*token, *user);
+        let key = BalanceKey::new(*token, user);
         let mut balance = self
             .balances
             .get(&key)
@@ -122,8 +122,8 @@ impl<M: Memory> TokenBalance<M> {
     ///   reserved balance.
     pub fn transfer(
         &mut self,
-        debtor: &Principal,
-        creditor: &Principal,
+        debtor: UserId,
+        creditor: UserId,
         token: &TokenId,
         gross: Quantity,
         fee: Quantity,
@@ -133,7 +133,7 @@ impl<M: Memory> TokenBalance<M> {
             fee <= gross,
             "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
         );
-        let debtor_key = BalanceKey::new(*token, *debtor);
+        let debtor_key = BalanceKey::new(*token, debtor);
         let mut debtor_balance = self
             .balances
             .get(&debtor_key)
@@ -147,7 +147,7 @@ impl<M: Memory> TokenBalance<M> {
         // Self-transfer: debtor and creditor are the same user, so the
         // credit must land on the just-updated balance — `update` re-reads
         // before depositing to avoid clobbering the debit.
-        self.update(*creditor, *token, |b| b.deposit(net));
+        self.update(creditor, *token, |b| b.deposit(net));
 
         if !fee.is_zero() {
             let entry = self.fee_balances.entry(*token).or_default();
@@ -199,7 +199,7 @@ impl<M: Memory> TokenBalance<M> {
     /// absent. Skips the write when the mutation left the balance at the
     /// default and no entry existed, so no-op closures (e.g. `deposit(ZERO)`)
     /// don't materialise empty `(0, 0)` rows.
-    fn update<F: FnOnce(&mut Balance)>(&mut self, user: Principal, token: TokenId, f: F) {
+    fn update<F: FnOnce(&mut Balance)>(&mut self, user: UserId, token: TokenId, f: F) {
         let key = BalanceKey::new(token, user);
         let prev = self.balances.get(&key);
         let existed = prev.is_some();
@@ -212,7 +212,7 @@ impl<M: Memory> TokenBalance<M> {
 
     /// Read-modify-write for a fallible mutation. On `Err(_)` the stored
     /// entry is left untouched; on `Ok(_)` the updated value is persisted.
-    fn try_update<F, T, E>(&mut self, user: Principal, token: TokenId, f: F) -> Result<T, E>
+    fn try_update<F, T, E>(&mut self, user: UserId, token: TokenId, f: F) -> Result<T, E>
     where
         F: FnOnce(&mut Balance) -> Result<T, E>,
     {

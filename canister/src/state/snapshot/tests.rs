@@ -258,7 +258,11 @@ fn should_roundtrip_state_through_snapshot() {
     // `balances` and `order_history` live in stable memory; the snapshot
     // intentionally doesn't copy them. Hand the post-mutation instances to
     // `into_state` to reconstruct a state that compares equal.
-    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
 
     assert_eq!(state, restored);
 }
@@ -287,13 +291,15 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         Quantity::from(1_000u64),
         StableMemoryOptions::Write,
     );
+    let buyer_id = state.user_registry.get_or_register(buyer);
+    let seller_id = state.user_registry.get_or_register(seller);
     state
         .balances
-        .reserve(&buyer, &pair.quote, Quantity::from(500u64))
+        .reserve(buyer_id, &pair.quote, Quantity::from(500u64))
         .unwrap();
     state.balances.transfer(
-        &buyer,
-        &seller,
+        buyer_id,
+        seller_id,
         &pair.quote,
         Quantity::from(100u64),
         Quantity::from(7u64),
@@ -303,7 +309,11 @@ fn should_roundtrip_fee_pool_through_snapshot() {
     let mut buf = vec![];
     minicbor::encode(&snapshot, &mut buf).unwrap();
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
-    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
 
     assert_eq!(
         restored.balances.fee_balance(&pair.quote),
@@ -330,7 +340,11 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     let mut buf = vec![];
     minicbor::encode(&snapshot, &mut buf).unwrap();
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
-    let restored = decoded.into_state(state.order_history.clone(), state.balances.clone());
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
 
     assert!(
         restored.active_tasks().is_empty(),

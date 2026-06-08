@@ -107,6 +107,7 @@ mod balance {
 mod token_balance {
     use crate::balance::{Balance, InsufficientBalanceError, TokenBalance};
     use crate::order::{Quantity, TokenId};
+    use crate::user::UserId;
     use candid::Principal;
 
     #[test]
@@ -115,7 +116,7 @@ mod token_balance {
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(100u64, 0u64))
         );
     }
@@ -123,7 +124,7 @@ mod token_balance {
     #[test]
     fn should_return_none_for_unknown_balance() {
         let tb = TokenBalance::default();
-        assert_eq!(tb.get_balance(&alice(), &token_a()), None);
+        assert_eq!(tb.get_balance(alice(), &token_a()), None);
     }
 
     #[test]
@@ -131,11 +132,11 @@ mod token_balance {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
 
-        tb.reserve(&alice(), &token_a(), Quantity::from(40u64))
+        tb.reserve(alice(), &token_a(), Quantity::from(40u64))
             .unwrap();
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(60u64, 40u64))
         );
     }
@@ -147,11 +148,11 @@ mod token_balance {
         tb.deposit(alice(), token_b(), Quantity::from(200u64));
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(100u64, 0u64))
         );
         assert_eq!(
-            tb.get_balance(&alice(), &token_b()),
+            tb.get_balance(alice(), &token_b()),
             Some(Balance::new(200u64, 0u64))
         );
     }
@@ -161,11 +162,11 @@ mod token_balance {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
 
-        tb.withdraw(&alice(), &token_a(), Quantity::from(40u64))
+        tb.withdraw(alice(), &token_a(), Quantity::from(40u64))
             .unwrap();
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(60u64, 0u64))
         );
     }
@@ -175,7 +176,7 @@ mod token_balance {
         let mut tb = TokenBalance::default();
 
         let err = tb
-            .withdraw(&alice(), &token_a(), Quantity::from(10u64))
+            .withdraw(alice(), &token_a(), Quantity::from(10u64))
             .unwrap_err();
 
         assert_eq!(
@@ -192,7 +193,7 @@ mod token_balance {
         let mut tb = TokenBalance::default();
 
         let err = tb
-            .reserve(&alice(), &token_a(), Quantity::from(10u64))
+            .reserve(alice(), &token_a(), Quantity::from(10u64))
             .unwrap_err();
 
         assert_eq!(
@@ -206,26 +207,26 @@ mod token_balance {
 
     #[test]
     fn should_transfer_between_users() {
-        let bob = Principal::from_slice(&[0x02]);
+        let bob = UserId::new(2);
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
-        tb.reserve(&alice(), &token_a(), Quantity::from(100u64))
+        tb.reserve(alice(), &token_a(), Quantity::from(100u64))
             .unwrap();
 
         tb.transfer(
-            &alice(),
-            &bob,
+            alice(),
+            bob,
             &token_a(),
             Quantity::from(100u64),
             Quantity::ZERO,
         );
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(0u64, 0u64))
         );
         assert_eq!(
-            tb.get_balance(&bob, &token_a()),
+            tb.get_balance(bob, &token_a()),
             Some(Balance::new(100u64, 0u64))
         );
     }
@@ -234,19 +235,19 @@ mod token_balance {
     fn should_transfer_self_trade_preserves_free_and_clears_reserved() {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
-        tb.reserve(&alice(), &token_a(), Quantity::from(60u64))
+        tb.reserve(alice(), &token_a(), Quantity::from(60u64))
             .unwrap();
 
         tb.transfer(
-            &alice(),
-            &alice(),
+            alice(),
+            alice(),
             &token_a(),
             Quantity::from(60u64),
             Quantity::ZERO,
         );
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(100u64, 0u64))
         );
     }
@@ -254,11 +255,11 @@ mod token_balance {
     #[test]
     #[should_panic(expected = "BUG: debtor balance missing")]
     fn should_panic_transfer_missing_debtor() {
-        let bob = Principal::from_slice(&[0x02]);
+        let bob = UserId::new(2);
         let mut tb = TokenBalance::default();
         tb.transfer(
-            &alice(),
-            &bob,
+            alice(),
+            bob,
             &token_a(),
             Quantity::from(10u64),
             Quantity::ZERO,
@@ -269,13 +270,13 @@ mod token_balance {
     fn should_unreserve_back_to_free() {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
-        tb.reserve(&alice(), &token_a(), Quantity::from(80u64))
+        tb.reserve(alice(), &token_a(), Quantity::from(80u64))
             .unwrap();
 
-        tb.unreserve(&alice(), &token_a(), Quantity::from(30u64));
+        tb.unreserve(alice(), &token_a(), Quantity::from(30u64));
 
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(50u64, 50u64))
         );
     }
@@ -284,11 +285,11 @@ mod token_balance {
     #[should_panic(expected = "BUG: user balance missing for unreserve")]
     fn should_panic_unreserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        tb.unreserve(&alice(), &token_a(), Quantity::from(10u64));
+        tb.unreserve(alice(), &token_a(), Quantity::from(10u64));
     }
 
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
+    fn alice() -> UserId {
+        UserId::new(1)
     }
 
     fn token_a() -> TokenId {
@@ -303,6 +304,7 @@ mod token_balance {
 mod fee_pool {
     use crate::balance::{Balance, FeeEntry, TokenBalance};
     use crate::order::{Quantity, TokenId};
+    use crate::user::UserId;
     use candid::Principal;
 
     #[test]
@@ -316,8 +318,8 @@ mod fee_pool {
         let mut tb = setup_alice_reserve(100);
 
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(3u64),
@@ -325,12 +327,12 @@ mod fee_pool {
 
         // Debtor's reserved is debited by the full gross.
         assert_eq!(
-            tb.get_balance(&alice(), &token_a()),
+            tb.get_balance(alice(), &token_a()),
             Some(Balance::new(0u64, 60u64))
         );
         // Creditor receives gross − fee.
         assert_eq!(
-            tb.get_balance(&bob(), &token_a()),
+            tb.get_balance(bob(), &token_a()),
             Some(Balance::new(37u64, 0u64))
         );
         assert_eq!(tb.fee_balance(&token_a()), Some(Quantity::from(3u64)));
@@ -340,15 +342,15 @@ mod fee_pool {
     fn multiple_accruals_sum_per_token() {
         let mut tb = setup_alice_reserve(100);
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(3u64),
         );
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(20u64),
             Quantity::from(1u64),
@@ -367,23 +369,23 @@ mod fee_pool {
 
         // Several operations against token_a:
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(2u64),
         );
-        tb.reserve(&bob(), &token_a(), Quantity::from(10u64))
+        tb.reserve(bob(), &token_a(), Quantity::from(10u64))
             .unwrap();
-        tb.unreserve(&bob(), &token_a(), Quantity::from(5u64));
+        tb.unreserve(bob(), &token_a(), Quantity::from(5u64));
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(10u64),
             Quantity::from(1u64),
         );
-        tb.withdraw(&bob(), &token_a(), Quantity::from(7u64))
+        tb.withdraw(bob(), &token_a(), Quantity::from(7u64))
             .unwrap();
 
         let total_a = sum_users(&tb, &token_a())
@@ -402,8 +404,8 @@ mod fee_pool {
     fn should_panic_when_fee_exceeds_gross() {
         let mut tb = setup_alice_reserve(100);
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(10u64),
             Quantity::from(11u64),
@@ -414,18 +416,18 @@ mod fee_pool {
     fn snapshot_roundtrips_through_save_and_restore() {
         let mut tb = setup_alice_reserve(100);
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(3u64),
         );
         tb.deposit(alice(), token_b(), Quantity::from(50u64));
-        tb.reserve(&alice(), &token_b(), Quantity::from(20u64))
+        tb.reserve(alice(), &token_b(), Quantity::from(20u64))
             .unwrap();
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_b(),
             Quantity::from(20u64),
             Quantity::from(2u64),
@@ -449,8 +451,8 @@ mod fee_pool {
     fn restore_replaces_any_existing_pool() {
         let mut tb = setup_alice_reserve(100);
         tb.transfer(
-            &alice(),
-            &bob(),
+            alice(),
+            bob(),
             &token_a(),
             Quantity::from(20u64),
             Quantity::from(5u64),
@@ -485,7 +487,7 @@ mod fee_pool {
     fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(amount));
-        tb.reserve(&alice(), &token_a(), Quantity::from(amount))
+        tb.reserve(alice(), &token_a(), Quantity::from(amount))
             .unwrap();
         tb
     }
@@ -507,12 +509,12 @@ mod fee_pool {
         acc
     }
 
-    fn alice() -> Principal {
-        Principal::from_slice(&[0x01])
+    fn alice() -> UserId {
+        UserId::new(1)
     }
 
-    fn bob() -> Principal {
-        Principal::from_slice(&[0x02])
+    fn bob() -> UserId {
+        UserId::new(2)
     }
 
     fn token_a() -> TokenId {
