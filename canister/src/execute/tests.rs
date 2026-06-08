@@ -37,8 +37,9 @@ fn should_complete_in_one_run_when_budget_covers_all() {
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 10000000000, lot);
+    let sell_id =
+        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 10000000000, lot);
 
     let status = EXECUTOR.run_once(&mut state, &runtime);
 
@@ -57,7 +58,7 @@ fn should_signal_more_work_until_all_orders_are_drained() {
         .map(|i| {
             let side = if i % 2 == 0 { Side::Buy } else { Side::Sell };
             let user = if i % 2 == 0 { BUYER } else { SELLER };
-            test_fixtures::place_order(&mut state, user, &pair, side, 100, lot)
+            test_fixtures::place_order(&mut state, user, &pair, side, 10000000000, lot)
         })
         .collect();
 
@@ -125,10 +126,10 @@ fn should_process_book_with_more_pending_first_under_tight_chunk_budget() {
     let lot = u64::from(LOT_SIZE);
 
     // Book A has 3 pending orders; book B has 1.
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 110, lot);
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 120, lot);
-    test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 11000000000, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 12000000000, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 10000000000, lot);
 
     set_chunk_policy(&mut state, 2);
 
@@ -163,11 +164,24 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
     let lot = u64::from(LOT_SIZE);
 
     // Book 0: 2 pending.
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 110, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 11000000000, lot);
     // Book 1: 5 pending.
-    for price in [100, 110, 120, 130, 140] {
-        test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, price, lot);
+    for price in [
+        10000000000,
+        11000000000,
+        12000000000,
+        13000000000,
+        14000000000,
+    ] {
+        test_fixtures::place_order(
+            &mut state,
+            BUYER,
+            &pair_b,
+            Side::Buy,
+            price * 100_000_000,
+            lot,
+        );
     }
 
     set_chunk_policy(&mut state, 5);
@@ -205,8 +219,8 @@ fn should_drain_leftover_settling_events_before_running_matching() {
     // Stage a settling event without draining it by calling
     // record_matching_event directly — that's the producer side of the
     // pending_settling_events queue.
-    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-    test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 10000000000, lot);
     let pending: Vec<_> = state
         .order_book(&OrderBookId::ZERO)
         .unwrap()
@@ -241,10 +255,10 @@ fn should_settle_each_book_before_advancing_to_the_next() {
     let lot = u64::from(LOT_SIZE);
 
     // Both books have a crossing pair that will produce a SettlingEvent.
-    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
-    test_fixtures::place_order(&mut state, SELLER, &pair_a, Side::Sell, 100, lot);
-    test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
-    test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair_a, Side::Sell, 10000000000, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 10000000000, lot);
 
     set_unlimited_policy(&mut state);
     let status = EXECUTOR.run_once(&mut state, &runtime());
@@ -262,7 +276,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     let mut state = setup_one_book();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 10000000000, lot);
 
     // Minimum budget; mock returns a counter already past it.
     state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
@@ -338,9 +352,9 @@ fn setup_two_books() -> TestState {
 
 fn place_workload(state: &mut TestState, pair: &TradingPair, lot: u64) {
     // A mix that exercises partial fills, full fills, and resting orders.
-    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 100, lot);
-    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 110, lot);
-    test_fixtures::place_order(state, SELLER, pair, Side::Sell, 100, lot);
-    test_fixtures::place_order(state, SELLER, pair, Side::Sell, 110, lot * 2);
-    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 110, lot);
+    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 10000000000, lot);
+    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 11000000000, lot);
+    test_fixtures::place_order(state, SELLER, pair, Side::Sell, 10000000000, lot);
+    test_fixtures::place_order(state, SELLER, pair, Side::Sell, 11000000000, lot * 2);
+    test_fixtures::place_order(state, BUYER, pair, Side::Buy, 11000000000, lot);
 }

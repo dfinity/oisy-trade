@@ -102,11 +102,17 @@ fn should_render_per_pair_metadata() {
     let dl_text = text(&dom, "section.pair dl");
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
-    assert!(dl_text.contains("100"), "best bid 100 in: {dl_text}");
-    assert!(dl_text.contains("110"), "best ask 110 in: {dl_text}");
     assert!(
-        dl_text.contains(&format!("{}", 110u64 - 100u64)),
-        "spread 10 in: {dl_text}"
+        dl_text.contains("10000000000"),
+        "best bid 10000000000 in: {dl_text}"
+    );
+    assert!(
+        dl_text.contains("11000000000"),
+        "best ask 11000000000 in: {dl_text}"
+    );
+    assert!(
+        dl_text.contains(&format!("{}", 11000000000u64 - 10000000000u64)),
+        "spread 1000000000 in: {dl_text}"
     );
 }
 
@@ -121,9 +127,9 @@ fn should_render_depth_chart_for_resting_orders() {
     let dom = render(&state, 0);
 
     let bid_prices = column(&dom, "table.depth-bids td.price");
-    assert_eq!(bid_prices, vec!["100"]);
+    assert_eq!(bid_prices, vec!["10000000000"]);
     let ask_prices = column(&dom, "table.depth-asks td.price");
-    assert_eq!(ask_prices, vec!["110"]);
+    assert_eq!(ask_prices, vec!["11000000000"]);
     let bid_qtys = column(&dom, "table.depth-bids tbody tr td:nth-child(2)");
     assert_eq!(bid_qtys, vec![candid::Nat::from(lot(1)).to_string()]);
 
@@ -210,7 +216,7 @@ fn place(
     let pair: TradingPair = icp_ckbtc_trading_pair();
     let pending = PendingOrder {
         side,
-        price: Price::new(price),
+        price: Price::new(price * 100_000_000),
         quantity: Quantity::from(quantity),
     };
     let (token, required) = match pending.side {

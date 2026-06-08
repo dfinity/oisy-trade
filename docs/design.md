@@ -89,14 +89,22 @@ This separation means the matching engine never waits on async inter-canister ca
 
 ### Trading Pairs
 
-A trading pair consists of a base token and a quote token, each identified by their ICRC-2 ledger canister principal. Prices are expressed in quote token units per base token unit.
+A trading pair consists of a base token and a quote token, each identified by their ICRC-2 ledger canister principal. A price is expressed in **quote token smallest units per one _whole_ base token** (i.e. per `10^base_decimals` base units). A fill of `quantity` base units (smallest denomination) at `price` settles to
 
 ```
-Example: ICP/ckBTC
-  base  = ICP ledger principal
-  quote = ckBTC ledger principal
-  price = ckBTC per ICP
+quote = price × quantity / 10^base_decimals
 ```
+
+quote token smallest units. This lets pairs with very different decimals (e.g. ckETH(18)/ckUSDC(6)) express realistic rates that would otherwise round to zero.
+
+```
+Example: ckETH/ckUSDC  (base ckETH = 18 decimals, quote ckUSDC = 6 decimals)
+  price = 3_000_500_000  (= 3000.50 USDC per whole ETH, scaled by 10^6)
+  buy 0.5 ETH (quantity = 5×10^17 wei):
+    quote = 3_000_500_000 × 5×10^17 / 10^18 = 1_500_250_000  (= 1500.25 USDC) — exact
+```
+
+For that division to be exact for every order and fill (no rounding, no dust), a pair is rejected at creation unless `tick_size × lot_size` is a multiple of `10^base_decimals`. Since every price is a multiple of the tick and every fill quantity a multiple of the lot, `price × quantity` is then always a multiple of `10^base_decimals`.
 
 #### Pair Management
 

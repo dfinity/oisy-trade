@@ -371,7 +371,7 @@ fn should_replay_add_limit_order() {
         .with_limit_order(
             user_1(),
             Side::Buy,
-            Price::new(price),
+            Price::new(price * 100_000_000),
             Quantity::from(quantity),
         );
     scenario.assert_replay_matches();
@@ -396,13 +396,13 @@ fn should_replay_matching() {
         .with_limit_order(
             buyer,
             Side::Buy,
-            Price::new(price),
+            Price::new(price * 100_000_000),
             Quantity::from(quantity),
         );
     let (scenario, sell_id) = scenario.with_limit_order(
         seller,
         Side::Sell,
-        Price::new(price),
+        Price::new(price * 100_000_000),
         Quantity::from(quantity),
     );
 
@@ -471,13 +471,13 @@ fn should_replay_matching_with_price_improvement() {
         .with_limit_order(
             seller,
             Side::Sell,
-            Price::new(maker_price),
+            Price::new(maker_price * 100_000_000),
             Quantity::from(quantity),
         );
     let (scenario, buy_id) = scenario.with_limit_order(
         buyer,
         Side::Buy,
-        Price::new(taker_price),
+        Price::new(taker_price * 100_000_000),
         Quantity::from(quantity),
     );
 
@@ -541,7 +541,7 @@ fn should_replay_cancel_pending_order() {
         .with_limit_order(
             user_1(),
             Side::Buy,
-            Price::new(price),
+            Price::new(price * 100_000_000),
             Quantity::from(quantity),
         );
 
@@ -580,13 +580,13 @@ fn should_replay_cancel_partially_filled_order() {
         .with_limit_order(
             seller,
             Side::Sell,
-            Price::new(price),
+            Price::new(price * 100_000_000),
             Quantity::from(quantity),
         );
     let (scenario, buy_id) = scenario.with_limit_order(
         buyer,
         Side::Buy,
-        Price::new(price),
+        Price::new(price * 100_000_000),
         Quantity::from(3 * quantity),
     );
 

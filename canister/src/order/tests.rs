@@ -392,8 +392,14 @@ mod order_book {
         #[test]
         fn should_rest_buy_when_no_cross() {
             let orders = vec![
-                (sell(1u64, 110u64, LOT_SIZE), buy(2u64, 100u64, LOT_SIZE)),
-                (buy(1u64, 90u64, LOT_SIZE), sell(2u64, 100u64, LOT_SIZE)),
+                (
+                    sell(1u64, 11000000000u64, LOT_SIZE),
+                    buy(2u64, 10000000000u64, LOT_SIZE),
+                ),
+                (
+                    buy(1u64, 9000000000u64, LOT_SIZE),
+                    sell(2u64, 10000000000u64, LOT_SIZE),
+                ),
             ];
             for (first_order, resting_order) in orders {
                 let mut book = order_book();
@@ -415,22 +421,22 @@ mod order_book {
                 // Asks: inserted out of order, best (lowest) matched first
                 (
                     vec![
-                        sell(1u64, 120u64, LOT_SIZE),
-                        sell(2u64, 100u64, LOT_SIZE),
-                        sell(3u64, 110u64, LOT_SIZE),
+                        sell(1u64, 12000000000u64, LOT_SIZE),
+                        sell(2u64, 10000000000u64, LOT_SIZE),
+                        sell(3u64, 11000000000u64, LOT_SIZE),
                     ],
-                    buy(4u64, 120u64, 3 * u64::from(LOT_SIZE)),
-                    vec![100, 110, 120],
+                    buy(4u64, 12000000000u64, 3 * u64::from(LOT_SIZE)),
+                    vec![10000000000, 11000000000, 12000000000],
                 ),
                 // Bids: inserted out of order, best (highest) matched first
                 (
                     vec![
-                        buy(1u64, 80u64, LOT_SIZE),
-                        buy(2u64, 100u64, LOT_SIZE),
-                        buy(3u64, 90u64, LOT_SIZE),
+                        buy(1u64, 8000000000u64, LOT_SIZE),
+                        buy(2u64, 10000000000u64, LOT_SIZE),
+                        buy(3u64, 9000000000u64, LOT_SIZE),
                     ],
-                    sell(4u64, 80u64, 3 * u64::from(LOT_SIZE)),
-                    vec![100, 90, 80],
+                    sell(4u64, 8000000000u64, 3 * u64::from(LOT_SIZE)),
+                    vec![10000000000, 9000000000, 8000000000],
                 ),
             ];
             for (makers, taker, expected_prices) in cases {
@@ -453,20 +459,20 @@ mod order_book {
                 // Three asks, then a buy — should match the first ask
                 (
                     vec![
-                        sell(1u64, 100u64, LOT_SIZE),
-                        sell(2u64, 100u64, LOT_SIZE),
-                        sell(3u64, 100u64, LOT_SIZE),
+                        sell(1u64, 10000000000u64, LOT_SIZE),
+                        sell(2u64, 10000000000u64, LOT_SIZE),
+                        sell(3u64, 10000000000u64, LOT_SIZE),
                     ],
-                    buy(4u64, 100u64, LOT_SIZE),
+                    buy(4u64, 10000000000u64, LOT_SIZE),
                 ),
                 // Three bids, then a sell — should match the first bid
                 (
                     vec![
-                        buy(1u64, 100u64, LOT_SIZE),
-                        buy(2u64, 100u64, LOT_SIZE),
-                        buy(3u64, 100u64, LOT_SIZE),
+                        buy(1u64, 10000000000u64, LOT_SIZE),
+                        buy(2u64, 10000000000u64, LOT_SIZE),
+                        buy(3u64, 10000000000u64, LOT_SIZE),
                     ],
-                    sell(4u64, 100u64, LOT_SIZE),
+                    sell(4u64, 10000000000u64, LOT_SIZE),
                 ),
             ];
             for (makers, taker) in cases {
@@ -486,12 +492,12 @@ mod order_book {
         fn should_fully_fill_against_equal_opposite() {
             let cases = vec![
                 (
-                    sell(1u64, 100u64, 2 * u64::from(LOT_SIZE)),
-                    buy(2u64, 100u64, 2 * u64::from(LOT_SIZE)),
+                    sell(1u64, 10000000000u64, 2 * u64::from(LOT_SIZE)),
+                    buy(2u64, 10000000000u64, 2 * u64::from(LOT_SIZE)),
                 ),
                 (
-                    buy(1u64, 100u64, 2 * u64::from(LOT_SIZE)),
-                    sell(2u64, 100u64, 2 * u64::from(LOT_SIZE)),
+                    buy(1u64, 10000000000u64, 2 * u64::from(LOT_SIZE)),
+                    sell(2u64, 10000000000u64, 2 * u64::from(LOT_SIZE)),
                 ),
             ];
             for (maker, taker) in cases {
@@ -507,7 +513,7 @@ mod order_book {
                         fills: vec![fill(
                             &taker,
                             maker_order_seq,
-                            100u64,
+                            10000000000u64,
                             2 * u64::from(LOT_SIZE)
                         )],
                     }
@@ -521,15 +527,15 @@ mod order_book {
             let cases = vec![
                 // Ask at 90, buy at 100 — fills at maker's 90
                 (
-                    sell(1u64, 90u64, LOT_SIZE),
-                    buy(2u64, 100u64, LOT_SIZE),
-                    90u64,
+                    sell(1u64, 9000000000u64, LOT_SIZE),
+                    buy(2u64, 10000000000u64, LOT_SIZE),
+                    9000000000u64,
                 ),
                 // Bid at 110, sell at 100 — fills at maker's 110
                 (
-                    buy(1u64, 110u64, LOT_SIZE),
-                    sell(2u64, 100u64, LOT_SIZE),
-                    110,
+                    buy(1u64, 11000000000u64, LOT_SIZE),
+                    sell(2u64, 10000000000u64, LOT_SIZE),
+                    11000000000,
                 ),
             ];
             for (maker, taker, expected_price) in cases {
@@ -557,15 +563,21 @@ mod order_book {
         #[test]
         fn should_partially_fill_and_rest_remainder() {
             let mut book = order_book();
-            book.match_order(sell(1u64, 100u64, LOT_SIZE)).unwrap();
+            book.match_order(sell(1u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
 
-            let taker = buy(2u64, 100u64, 3 * u64::from(LOT_SIZE));
+            let taker = buy(2u64, 10000000000u64, 3 * u64::from(LOT_SIZE));
             let result = book.match_order(taker.clone()).unwrap();
 
             assert_eq!(
                 result,
                 MatchResult::PartiallyFilled {
-                    fills: vec![fill(&taker, OrderSeq::ONE, 100u64, u64::from(LOT_SIZE))],
+                    fills: vec![fill(
+                        &taker,
+                        OrderSeq::ONE,
+                        10000000000u64,
+                        u64::from(LOT_SIZE)
+                    )],
                     resting_order_seq: OrderSeq::new(2),
                 }
             );
@@ -582,19 +594,19 @@ mod order_book {
             let cases = vec![
                 // Same price level: two asks at 100
                 (
-                    sell(1u64, 100u64, LOT_SIZE),
-                    sell(2u64, 100u64, LOT_SIZE),
-                    buy(3u64, 100u64, 2 * u64::from(LOT_SIZE)),
-                    100u64,
-                    100u64,
+                    sell(1u64, 10000000000u64, LOT_SIZE),
+                    sell(2u64, 10000000000u64, LOT_SIZE),
+                    buy(3u64, 10000000000u64, 2 * u64::from(LOT_SIZE)),
+                    10000000000u64,
+                    10000000000u64,
                 ),
                 // Across price levels: asks at 100 and 110
                 (
-                    sell(1u64, 100u64, LOT_SIZE),
-                    sell(2u64, 110u64, LOT_SIZE),
-                    buy(3u64, 110u64, 2 * u64::from(LOT_SIZE)),
-                    100u64,
-                    110u64,
+                    sell(1u64, 10000000000u64, LOT_SIZE),
+                    sell(2u64, 11000000000u64, LOT_SIZE),
+                    buy(3u64, 11000000000u64, 2 * u64::from(LOT_SIZE)),
+                    10000000000u64,
+                    11000000000u64,
                 ),
             ];
             for (maker1, maker2, taker, price_fill_1, price_fill_2) in cases {
@@ -622,18 +634,23 @@ mod order_book {
         #[test]
         fn should_partially_fill_resting_order() {
             let mut book = order_book();
-            book.match_order(sell(1u64, 100u64, 3 * u64::from(LOT_SIZE)))
+            book.match_order(sell(1u64, 10000000000u64, 3 * u64::from(LOT_SIZE)))
                 .unwrap();
-            let taker1 = buy(2u64, 100u64, LOT_SIZE);
+            let taker1 = buy(2u64, 10000000000u64, LOT_SIZE);
             let result = book.match_order(taker1.clone()).unwrap();
             assert_eq!(
                 result,
                 MatchResult::Filled {
-                    fills: vec![fill(&taker1, OrderSeq::ONE, 100u64, u64::from(LOT_SIZE))],
+                    fills: vec![fill(
+                        &taker1,
+                        OrderSeq::ONE,
+                        10000000000u64,
+                        u64::from(LOT_SIZE)
+                    )],
                 }
             );
             // The remaining 2 lots should still be matchable
-            let taker2 = buy(3u64, 100u64, 2 * u64::from(LOT_SIZE));
+            let taker2 = buy(3u64, 10000000000u64, 2 * u64::from(LOT_SIZE));
             let result = book.match_order(taker2.clone()).unwrap();
             assert_eq!(
                 result,
@@ -641,7 +658,7 @@ mod order_book {
                     fills: vec![fill(
                         &taker2,
                         OrderSeq::ONE,
-                        100u64,
+                        10000000000u64,
                         2 * u64::from(LOT_SIZE)
                     )],
                 }
@@ -663,30 +680,37 @@ mod order_book {
         #[test]
         fn should_return_highest_bid() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 80u64, LOT_SIZE)).unwrap();
-            book.match_order(buy(2u64, 100u64, LOT_SIZE)).unwrap();
-            book.match_order(buy(3u64, 90u64, LOT_SIZE)).unwrap();
+            book.match_order(buy(1u64, 8000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(buy(2u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(buy(3u64, 9000000000u64, LOT_SIZE))
+                .unwrap();
             let best = book.best_bid().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
-            assert_eq!(best.price(), Price::new(100));
+            assert_eq!(best.price(), Price::new(10000000000));
         }
 
         #[test]
         fn should_return_lowest_ask() {
             let mut book = order_book();
-            book.match_order(sell(1u64, 120u64, LOT_SIZE)).unwrap();
-            book.match_order(sell(2u64, 100u64, LOT_SIZE)).unwrap();
-            book.match_order(sell(3u64, 110u64, LOT_SIZE)).unwrap();
+            book.match_order(sell(1u64, 12000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(sell(2u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(sell(3u64, 11000000000u64, LOT_SIZE))
+                .unwrap();
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
-            assert_eq!(best.price(), Price::new(100));
+            assert_eq!(best.price(), Price::new(10000000000));
         }
 
         #[test]
         fn should_return_fifo_first_at_best_price() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 100u64, LOT_SIZE)).unwrap();
-            book.match_order(buy(2u64, 100u64, 2 * u64::from(LOT_SIZE)))
+            book.match_order(buy(1u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(buy(2u64, 10000000000u64, 2 * u64::from(LOT_SIZE)))
                 .unwrap();
             let best = book.best_bid().unwrap();
             assert_eq!(best.id(), OrderSeq::ONE);
@@ -695,18 +719,21 @@ mod order_book {
         #[test]
         fn should_update_after_full_fill() {
             let mut book = order_book();
-            book.match_order(sell(1u64, 100u64, LOT_SIZE)).unwrap();
-            book.match_order(sell(2u64, 110u64, LOT_SIZE)).unwrap();
+            book.match_order(sell(1u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
+            book.match_order(sell(2u64, 11000000000u64, LOT_SIZE))
+                .unwrap();
 
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::ONE);
-            assert_eq!(best.price(), Price::new(100));
+            assert_eq!(best.price(), Price::new(10000000000));
 
             // Fill the best ask
-            book.match_order(buy(3u64, 100u64, LOT_SIZE)).unwrap();
+            book.match_order(buy(3u64, 10000000000u64, LOT_SIZE))
+                .unwrap();
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
-            assert_eq!(best.price(), Price::new(110));
+            assert_eq!(best.price(), Price::new(11000000000));
         }
     }
 
@@ -727,25 +754,27 @@ mod order_book {
         #[test]
         fn should_aggregate_single_order_per_level() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
-            book.match_order(buy(2u64, 90u64, lot(2))).unwrap();
-            book.match_order(sell(3u64, 110u64, lot(3))).unwrap();
-            book.match_order(sell(4u64, 120u64, lot(4))).unwrap();
+            book.match_order(buy(1u64, 10000000000u64, lot(1))).unwrap();
+            book.match_order(buy(2u64, 9000000000u64, lot(2))).unwrap();
+            book.match_order(sell(3u64, 11000000000u64, lot(3)))
+                .unwrap();
+            book.match_order(sell(4u64, 12000000000u64, lot(4)))
+                .unwrap();
 
             let bids: Vec<_> = book.bid_levels(10).collect();
             assert_eq!(
                 bids,
                 vec![
-                    (Price::new(100), Quantity::from(lot(1))),
-                    (Price::new(90), Quantity::from(lot(2))),
+                    (Price::new(10000000000), Quantity::from(lot(1))),
+                    (Price::new(9000000000), Quantity::from(lot(2))),
                 ]
             );
             let asks: Vec<_> = book.ask_levels(10).collect();
             assert_eq!(
                 asks,
                 vec![
-                    (Price::new(110), Quantity::from(lot(3))),
-                    (Price::new(120), Quantity::from(lot(4))),
+                    (Price::new(11000000000), Quantity::from(lot(3))),
+                    (Price::new(12000000000), Quantity::from(lot(4))),
                 ]
             );
         }
@@ -753,38 +782,55 @@ mod order_book {
         #[test]
         fn should_sum_quantities_across_orders_at_the_same_price() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
-            book.match_order(buy(2u64, 100u64, lot(3))).unwrap();
-            book.match_order(sell(3u64, 110u64, lot(2))).unwrap();
-            book.match_order(sell(4u64, 110u64, lot(5))).unwrap();
+            book.match_order(buy(1u64, 10000000000u64, lot(1))).unwrap();
+            book.match_order(buy(2u64, 10000000000u64, lot(3))).unwrap();
+            book.match_order(sell(3u64, 11000000000u64, lot(2)))
+                .unwrap();
+            book.match_order(sell(4u64, 11000000000u64, lot(5)))
+                .unwrap();
 
             let bids: Vec<_> = book.bid_levels(10).collect();
-            assert_eq!(bids, vec![(Price::new(100), Quantity::from(lot(4)))]);
+            assert_eq!(
+                bids,
+                vec![(Price::new(10000000000), Quantity::from(lot(4)))]
+            );
             let asks: Vec<_> = book.ask_levels(10).collect();
-            assert_eq!(asks, vec![(Price::new(110), Quantity::from(lot(7)))]);
+            assert_eq!(
+                asks,
+                vec![(Price::new(11000000000), Quantity::from(lot(7)))]
+            );
         }
 
         #[test]
         fn should_truncate_to_limit() {
             let mut book = order_book();
-            for (seq, price) in [(1u64, 100u64), (2u64, 90u64), (3u64, 80u64)] {
+            for (seq, price) in [
+                (1u64, 10000000000u64),
+                (2u64, 9000000000u64),
+                (3u64, 8000000000u64),
+            ] {
                 book.match_order(buy(seq, price, lot(1))).unwrap();
             }
-            for (seq, price) in [(4u64, 110u64), (5u64, 120u64), (6u64, 130u64)] {
+            for (seq, price) in [
+                (4u64, 11000000000u64),
+                (5u64, 12000000000u64),
+                (6u64, 13000000000u64),
+            ] {
                 book.match_order(sell(seq, price, lot(1))).unwrap();
             }
 
             let bid_prices: Vec<_> = book.bid_levels(2).map(|(p, _)| p.get()).collect();
-            assert_eq!(bid_prices, vec![100, 90]);
+            assert_eq!(bid_prices, vec![10000000000, 9000000000]);
             let ask_prices: Vec<_> = book.ask_levels(2).map(|(p, _)| p.get()).collect();
-            assert_eq!(ask_prices, vec![110, 120]);
+            assert_eq!(ask_prices, vec![11000000000, 12000000000]);
         }
 
         #[test]
         fn should_return_all_levels_when_limit_exceeds_depth() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
-            book.match_order(sell(2u64, 110u64, lot(1))).unwrap();
+            book.match_order(buy(1u64, 10000000000u64, lot(1))).unwrap();
+            book.match_order(sell(2u64, 11000000000u64, lot(1)))
+                .unwrap();
 
             assert_eq!(book.bid_levels(usize::MAX).count(), 1);
             assert_eq!(book.ask_levels(usize::MAX).count(), 1);
@@ -793,8 +839,9 @@ mod order_book {
         #[test]
         fn should_return_empty_iterators_when_limit_is_zero() {
             let mut book = order_book();
-            book.match_order(buy(1u64, 100u64, lot(1))).unwrap();
-            book.match_order(sell(2u64, 110u64, lot(1))).unwrap();
+            book.match_order(buy(1u64, 10000000000u64, lot(1))).unwrap();
+            book.match_order(sell(2u64, 11000000000u64, lot(1)))
+                .unwrap();
 
             assert_eq!(book.bid_levels(0).count(), 0);
             assert_eq!(book.ask_levels(0).count(), 0);
@@ -803,8 +850,8 @@ mod order_book {
         #[test]
         fn should_exclude_pending_orders() {
             let mut book = order_book();
-            book.add_pending_order(buy(0u64, 100u64, lot(1)));
-            book.add_pending_order(sell(1u64, 110u64, lot(1)));
+            book.add_pending_order(buy(0u64, 10000000000u64, lot(1)));
+            book.add_pending_order(sell(1u64, 11000000000u64, lot(1)));
 
             assert_eq!(book.bid_levels(10).count(), 0);
             assert_eq!(book.ask_levels(10).count(), 0);
@@ -874,7 +921,7 @@ mod process_pending_orders {
     fn should_report_resting_order_when_no_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(buy(0, 100, lot));
+        book.add_pending_order(buy(0, 10000000000, lot));
 
         let output = process_all_pending_orders(&mut book);
 
@@ -887,8 +934,8 @@ mod process_pending_orders {
     fn should_report_filled_orders_after_exact_match() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(sell(0, 100, lot));
-        book.add_pending_order(buy(1, 100, lot));
+        book.add_pending_order(sell(0, 10000000000, lot));
+        book.add_pending_order(buy(1, 10000000000, lot));
 
         let output = process_all_pending_orders(&mut book);
 
@@ -903,8 +950,8 @@ mod process_pending_orders {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         // Sell 1 lot (maker), buy 3 lots (taker) -> taker partially fills, rests with 2
-        book.add_pending_order(sell(0, 100, lot));
-        book.add_pending_order(buy(1, 100, 3 * lot));
+        book.add_pending_order(sell(0, 10000000000, lot));
+        book.add_pending_order(buy(1, 10000000000, 3 * lot));
 
         let output = process_all_pending_orders(&mut book);
 
@@ -918,8 +965,8 @@ mod process_pending_orders {
     fn should_drain_filled_orders_between_rounds() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.add_pending_order(sell(0, 100, lot));
-        book.add_pending_order(buy(1, 100, lot));
+        book.add_pending_order(sell(0, 10000000000, lot));
+        book.add_pending_order(buy(1, 10000000000, lot));
 
         let first = process_all_pending_orders(&mut book);
         assert!(!first.filled_orders.is_empty());
@@ -1029,36 +1076,37 @@ mod remove_order {
     fn should_delete_empty_price_level_when_last_resting_removed() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.match_order(sell(0u64, 100u64, lot)).unwrap();
-        book.match_order(sell(1u64, 110u64, 2 * lot)).unwrap();
-        book.match_order(buy(2u64, 90u64, lot)).unwrap();
-        book.match_order(buy(3u64, 80u64, 3 * lot)).unwrap();
+        book.match_order(sell(0u64, 10000000000u64, lot)).unwrap();
+        book.match_order(sell(1u64, 11000000000u64, 2 * lot))
+            .unwrap();
+        book.match_order(buy(2u64, 9000000000u64, lot)).unwrap();
+        book.match_order(buy(3u64, 8000000000u64, 3 * lot)).unwrap();
 
         assert_eq!(
             book.remove_order(OrderSeq::ZERO).unwrap(),
             RemovedOrder {
                 side: Side::Sell,
-                price: Price::new(100),
+                price: Price::new(10000000000),
                 remaining_quantity: Quantity::from(lot),
             }
         );
         assert_eq!(book.asks_len(), 1);
         assert_eq!(book.resting_orders_len(), 3);
-        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
-        assert_eq!(book.best_bid().unwrap().price(), Price::new(90));
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(11000000000));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(9000000000));
 
         assert_eq!(
             book.remove_order(OrderSeq::new(2)).unwrap(),
             RemovedOrder {
                 side: Side::Buy,
-                price: Price::new(90),
+                price: Price::new(9000000000),
                 remaining_quantity: Quantity::from(lot),
             }
         );
         assert_eq!(book.bids_len(), 1);
         assert_eq!(book.resting_orders_len(), 2);
-        assert_eq!(book.best_ask().unwrap().price(), Price::new(110));
-        assert_eq!(book.best_bid().unwrap().price(), Price::new(80));
+        assert_eq!(book.best_ask().unwrap().price(), Price::new(11000000000));
+        assert_eq!(book.best_bid().unwrap().price(), Price::new(8000000000));
     }
 
     #[test]
@@ -1066,8 +1114,9 @@ mod remove_order {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         // Rest a 3-lot sell; cross with a 1-lot buy to partially fill.
-        book.match_order(sell(0u64, 100u64, 3 * lot)).unwrap();
-        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+        book.match_order(sell(0u64, 10000000000u64, 3 * lot))
+            .unwrap();
+        book.match_order(buy(1u64, 10000000000u64, lot)).unwrap();
 
         let removed = book.remove_order(OrderSeq::ZERO).unwrap();
 
@@ -1075,7 +1124,7 @@ mod remove_order {
             removed,
             RemovedOrder {
                 side: Side::Sell,
-                price: Price::new(100),
+                price: Price::new(10000000000),
                 remaining_quantity: Quantity::from(2 * lot),
             }
         );
@@ -1087,8 +1136,8 @@ mod remove_order {
     fn should_return_none_for_fully_filled_order() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.match_order(sell(0u64, 100u64, lot)).unwrap();
-        book.match_order(buy(1u64, 100u64, lot)).unwrap();
+        book.match_order(sell(0u64, 10000000000u64, lot)).unwrap();
+        book.match_order(buy(1u64, 10000000000u64, lot)).unwrap();
 
         // Both orders are fully filled; removing either must be a no-op.
         assert_eq!(book.remove_order(OrderSeq::ZERO), None);
@@ -1127,7 +1176,7 @@ mod history {
         OrderRecord {
             owner: Principal::anonymous(),
             side: Side::Buy,
-            price: Price::new(100),
+            price: Price::new(10000000000),
             quantity: Quantity::from(1_000_000u64),
             status: OrderStatus::Pending,
             timestamp: crate::Timestamp::EPOCH,

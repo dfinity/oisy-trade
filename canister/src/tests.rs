@@ -150,23 +150,9 @@ mod add_trading_pair {
         let quote = TokenId {
             ledger_id: Principal::from_slice(&[0x13]),
         };
-        // The fixture's tick * lot = 10 * 1_000_000 = 10^7, which is not a
-        // multiple of 10^8, so an 8-decimal base would round at settlement.
-        let result = add_trading_pair(
-            trading_pair_request(
-                base,
-                TokenMetadata {
-                    symbol: "BASE".to_string(),
-                    decimals: 8,
-                },
-                quote,
-                TokenMetadata {
-                    symbol: "QUOTE".to_string(),
-                    decimals: 6,
-                },
-            ),
-            &runtime,
-        );
+        // tick * lot = 10 * 1_000_000 = 10^7, which is not a multiple of 10^8,
+        // so an 8-decimal base would round at settlement.
+        let result = add_trading_pair(pair_request(base, 8, quote, 6, 10, 1_000_000), &runtime);
 
         assert_eq!(
             result,
@@ -382,7 +368,7 @@ mod add_limit_order {
                 result,
                 Err(dex_types::AddLimitOrderError::InvalidPrice {
                     price,
-                    tick_size: 10,
+                    tick_size: 1_000_000_000,
                 }),
                 "case: {name}"
             );
@@ -466,7 +452,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Buy,
-            price,
+            price: price * 100_000_000,
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
@@ -503,7 +489,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Sell,
-            price: 10,
+            price: 1_000_000_000,
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
@@ -602,7 +588,7 @@ mod cancel_limit_order {
             Ok(dex_types::OrderRecord {
                 owner,
                 side: dex_types::Side::Buy,
-                price: 100,
+                price: 10_000_000_000,
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
@@ -656,7 +642,7 @@ mod cancel_limit_order {
             Ok(dex_types::OrderRecord {
                 owner,
                 side: dex_types::Side::Buy,
-                price: 100,
+                price: 10_000_000_000,
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
@@ -1422,21 +1408,21 @@ mod get_order_book_ticker {
 
         let lot = u64::from(LOT_SIZE);
         // Two buys at 100, one at 90; one sell at 110. None cross.
-        place_limit_order(u1, Side::Buy, 100, lot);
-        place_limit_order(u2, Side::Buy, 100, 3 * lot);
-        place_limit_order(u3, Side::Buy, 90, 2 * lot);
-        place_limit_order(u1, Side::Sell, 110, 5 * lot);
+        place_limit_order(u1, Side::Buy, 10000000000, lot);
+        place_limit_order(u2, Side::Buy, 10000000000, 3 * lot);
+        place_limit_order(u3, Side::Buy, 9000000000, 2 * lot);
+        place_limit_order(u1, Side::Sell, 11000000000, 5 * lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(
             get_order_book_ticker(icp_ckbtc_trading_pair().into()),
             Ok(OrderBookTicker {
                 bid: Some(PriceLevel {
-                    price: 100,
+                    price: 10_000_000_000,
                     quantity: Nat::from(4 * lot),
                 }),
                 ask: Some(PriceLevel {
-                    price: 110,
+                    price: 11_000_000_000,
                     quantity: Nat::from(5 * lot),
                 }),
             }),
@@ -1508,17 +1494,17 @@ mod get_order_book_depth {
         fund_user(u4);
 
         let lot = u64::from(LOT_SIZE);
-        place_limit_order(u1, Side::Buy, 100, lot);
-        place_limit_order(u2, Side::Buy, 100, 3 * lot);
-        place_limit_order(u3, Side::Buy, 90, 2 * lot);
-        place_limit_order(u4, Side::Sell, 110, 5 * lot);
+        place_limit_order(u1, Side::Buy, 10000000000, lot);
+        place_limit_order(u2, Side::Buy, 10000000000, 3 * lot);
+        place_limit_order(u3, Side::Buy, 9000000000, 2 * lot);
+        place_limit_order(u4, Side::Sell, 11000000000, 5 * lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(
             get_order_book_depth(request(icp_ckbtc_trading_pair().into(), None)),
             Ok(OrderBookDepth {
-                bids: vec![level(100, 4 * lot), level(90, 2 * lot)],
-                asks: vec![level(110, 5 * lot)],
+                bids: vec![level(10000000000, 4 * lot), level(9000000000, 2 * lot)],
+                asks: vec![level(11000000000, 5 * lot)],
             }),
         );
     }
@@ -1531,14 +1517,17 @@ mod get_order_book_depth {
             fund_user(*u);
         }
         let lot = u64::from(LOT_SIZE);
-        place_limit_order(users[0], Side::Buy, 100, lot);
-        place_limit_order(users[1], Side::Buy, 90, lot);
-        place_limit_order(users[2], Side::Buy, 80, lot);
+        place_limit_order(users[0], Side::Buy, 10000000000, lot);
+        place_limit_order(users[1], Side::Buy, 9000000000, lot);
+        place_limit_order(users[2], Side::Buy, 8000000000, lot);
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let depth =
             get_order_book_depth(request(icp_ckbtc_trading_pair().into(), Some(2))).unwrap();
-        assert_eq!(depth.bids, vec![level(100, lot), level(90, lot)]);
+        assert_eq!(
+            depth.bids,
+            vec![level(10000000000, lot), level(9000000000, lot)]
+        );
         assert_eq!(depth.asks, vec![]);
     }
 
@@ -1577,7 +1566,7 @@ mod get_order_book_depth {
         init_state_with_order_book();
         let user = Principal::from_slice(&[0x01]);
         fund_user(user);
-        place_limit_order(user, Side::Buy, 100, u64::from(LOT_SIZE));
+        place_limit_order(user, Side::Buy, 10000000000, u64::from(LOT_SIZE));
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         let depth =

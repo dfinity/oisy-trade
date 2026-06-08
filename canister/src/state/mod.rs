@@ -26,6 +26,7 @@ use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::num::NonZeroU64;
 
 thread_local! {
     static STATE: RefCell<Option<State<VMem, VMem>>> = RefCell::default();
@@ -162,12 +163,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         book.validate_order(pending.price, &pending.quantity)
             .map_err(AddLimitOrderError::InvalidOrder)?;
 
-        // Settlement computes `maker_price × fill.quantity` regardless of the
-        // maker's side (see `Fill::quote_amount`), so both Buy and Sell must
-        // satisfy `price × quantity ≤ u256::MAX`.
+        // Settlement computes `maker_price × fill.quantity / 10^base_decimals`
+        // regardless of the maker's side (see `Fill::quote_amount`), so both Buy
+        // and Sell must satisfy `price × quantity ≤ u256::MAX`.
         let amount = pending
             .price
-            .checked_mul_quantity(&pending.quantity)
+            .checked_quote(&pending.quantity, self.base_scale(&pair.base))
             .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
 
         let (token, required) = match pending.side {
@@ -204,6 +205,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .trading_pairs
             .get_pair(&book_id)
             .expect("BUG: unknown trading pair");
+        let (quote_token, base_token) = (pair.quote, pair.base);
+        let base_scale = self.base_scale(&base_token);
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -211,13 +214,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
         let (token, required) = match order.side() {
             Side::Buy => (
-                pair.quote,
+                quote_token,
                 order
                     .price()
-                    .checked_mul_quantity(order.remaining_quantity())
+                    .checked_quote(order.remaining_quantity(), base_scale)
                     .expect("BUG: price * quantity overflow — already validated in validate_limit_order"),
             ),
-            Side::Sell => (pair.base, *order.remaining_quantity()),
+            Side::Sell => (base_token, *order.remaining_quantity()),
         };
 
         // Balances and order_history both live in stable memory; replay
@@ -302,6 +305,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) {
         let (book_id, seq) = order_id.into_parts();
+        let base_token = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair for canceled order")
+            .base;
+        let base_scale = self.base_scale(&base_token);
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -317,7 +326,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Buy => (
                 PairToken::Quote,
                 price
-                    .checked_mul_quantity(&remaining_quantity)
+                    .checked_quote(&remaining_quantity, base_scale)
                     .expect("BUG: price * remaining overflow — validated at placement"),
             ),
             Side::Sell => (PairToken::Base, remaining_quantity),
@@ -352,6 +361,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("matching");
+        let base_token = self
+            .trading_pairs
+            .get_pair(&event.book_id)
+            .expect("BUG: trading pair registered but order book missing")
+            .base;
+        let base_scale = self.base_scale(&base_token);
         let book = self
             .order_books
             .get_mut(&event.book_id)
@@ -366,7 +381,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 self.order_history.set_status(&order_id, transition.status);
             }
         }
-        let balance_operations = compute_balance_operations(&output, fee_rates);
+        let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
         if !balance_operations.is_empty() {
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
@@ -514,6 +529,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn token_metadata(&self, token_id: &TokenId) -> Option<&TokenMetadata> {
         self.tokens.get(token_id)
+    }
+
+    /// `10^base_decimals` for the pair's base token — the divisor in
+    /// `quote = price × quantity / base_scale`. Always ≥ 1 and ≤ 10^19 (the
+    /// pair-creation invariant rejects larger base decimals), so it fits a
+    /// `NonZeroU64`.
+    pub(crate) fn base_scale(&self, base: &TokenId) -> NonZeroU64 {
+        let decimals = self
+            .token_metadata(base)
+            .expect("BUG: trading pair registered but base token metadata missing")
+            .decimals;
+        NonZeroU64::new(10u64.pow(decimals as u32))
+            .expect("BUG: 10^base_decimals is non-zero and fits u64 (enforced at pair creation)")
     }
 
     pub fn withdraw(
@@ -691,6 +719,7 @@ fn resolve_op_owners<M: Memory>(
 fn compute_balance_operations(
     output: &MatchingOutput,
     fee_rates: FeeRates,
+    base_scale: NonZeroU64,
 ) -> Vec<event::BalanceOperation> {
     let mut ops = Vec::with_capacity(output.fills.len() * 3);
     for fill in &output.fills {
@@ -705,7 +734,7 @@ fn compute_balance_operations(
             Side::Buy => (fee_rates.taker, fee_rates.maker),
             Side::Sell => (fee_rates.maker, fee_rates.taker),
         };
-        let notional = fill.quote_amount();
+        let notional = fill.quote_amount(base_scale);
         let quote_fee = seller_rate.mul_ceil(notional);
         let base_fee = buyer_rate.mul_ceil(fill.quantity);
 
@@ -721,7 +750,7 @@ fn compute_balance_operations(
             && !diff.is_zero()
         {
             let surplus = diff
-                .checked_mul_quantity(&fill.quantity)
+                .checked_quote(&fill.quantity, base_scale)
                 .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
             ops.push(event::BalanceOperation::Unreserve {
                 order: fill.taker_order_seq,
