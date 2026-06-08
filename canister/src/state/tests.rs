@@ -513,8 +513,9 @@ mod record_limit_order {
         let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
         let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
 
+        let owner_id = state.user_registry.lookup(OWNER).unwrap();
         assert_eq!(
-            state.order_history.orders_by_user(OWNER, 0, 10),
+            state.order_history.orders_by_user(owner_id, 0, 10),
             vec![second, first]
         );
     }

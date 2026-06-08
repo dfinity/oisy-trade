@@ -1,5 +1,6 @@
 use super::{GlobalOrderSeq, OrderId, OrderStatus, Price, Quantity, Side};
 use crate::Timestamp;
+use crate::user::UserId;
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
@@ -72,8 +73,8 @@ impl Storable for OrderRecord {
 ///
 /// Two stable maps kept together here rather than split across the caller:
 /// - `orders`: the primary store, keyed by [`OrderId`].
-/// - `by_user`: a per-user index keyed by `(owner, u64::MAX - global_seq)`,
-///   so a forward range scan over an owner's prefix yields that user's orders
+/// - `by_user`: a per-user index keyed by `(user, u64::MAX - global_seq)`,
+///   so a forward range scan over a user's prefix yields that user's orders
 ///   newest-first. The value is the [`OrderId`], pointing back into `orders`.
 ///
 /// The invariant is asymmetric: `by_user` mirrors **insertion only** — every
@@ -104,21 +105,26 @@ impl<M: Memory> OrderHistory<M> {
         }
     }
 
-    /// Insert a new order record and index it under its owner with the given
+    /// Insert a new order record and index it under `user` with the given
     /// canister-global insertion `seq` (which orders the per-user index
     /// newest-first). Panics if the order ID is already present.
-    pub fn insert_once(&mut self, id: OrderId, seq: GlobalOrderSeq, record: OrderRecord) {
+    pub fn insert_once(
+        &mut self,
+        id: OrderId,
+        user: UserId,
+        seq: GlobalOrderSeq,
+        record: OrderRecord,
+    ) {
         bench_scopes!("order_history", "order_history::insert_once");
-        let owner = record.owner;
         assert_eq!(
             self.orders.insert(id, record),
             None,
             "BUG: duplicate order ID {id}"
         );
         assert_eq!(
-            self.by_user.insert(UserOrderKey::from_seq(owner, seq), id),
+            self.by_user.insert(UserOrderKey::from_seq(user, seq), id),
             None,
-            "BUG: duplicate user-order index entry for {owner} seq {}",
+            "BUG: duplicate user-order index entry for {user:?} seq {}",
             seq.get()
         );
     }
@@ -140,12 +146,12 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.insert(*id, record);
     }
 
-    /// Returns up to `length` of `owner`'s orders, newest first, after skipping
+    /// Returns up to `length` of `user`'s orders, newest first, after skipping
     /// the first `start`.
-    pub fn orders_by_user(&self, owner: Principal, start: usize, length: usize) -> Vec<OrderId> {
+    pub fn orders_by_user(&self, user: UserId, start: usize, length: usize) -> Vec<OrderId> {
         bench_scopes!("order_history", "order_history::orders_by_user");
         self.by_user
-            .range(UserOrderKey::newest(owner)..=UserOrderKey::oldest(owner))
+            .range(UserOrderKey::newest(user)..=UserOrderKey::oldest(user))
             .skip(start)
             .take(length)
             .map(|entry| entry.value())
@@ -167,72 +173,48 @@ impl<M: Memory> OrderHistory<M> {
     }
 }
 
-/// Key into the per-user index: `owner` followed by the complement of the
-/// canister-global insertion sequence. Encoded so byte order matches
-/// `(owner, newest-first)`, which is what [`OrderHistory::orders_by_user`]
-/// relies on for its forward range scan.
+/// Key into the per-user index: the interned [`UserId`] followed by the
+/// complement of the canister-global insertion sequence, so a forward range
+/// scan over a user's prefix yields their orders newest-first.
 ///
-/// `Ord` is implemented by hand to match the [`Storable`] byte order
-/// (`StableBTreeMap` requires `K: Ord`). The derived field-wise ordering would
-/// *disagree* with the bytes — the length-prefix byte sorts before the
-/// principal bytes — so we mirror the encoding: length, then principal bytes,
-/// then `rev_seq`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
+/// already matches the [`Storable`] byte order that `StableBTreeMap` relies on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct UserOrderKey {
-    owner: Principal,
+    user: UserId,
     rev_seq: u64,
 }
 
-impl Ord for UserOrderKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let (a, b) = (self.owner.as_slice(), other.owner.as_slice());
-        a.len()
-            .cmp(&b.len())
-            .then_with(|| a.cmp(b))
-            .then_with(|| self.rev_seq.cmp(&other.rev_seq))
-    }
-}
-
-impl PartialOrd for UserOrderKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl UserOrderKey {
-    fn from_seq(owner: Principal, seq: GlobalOrderSeq) -> Self {
+    fn from_seq(user: UserId, seq: GlobalOrderSeq) -> Self {
         Self {
-            owner,
+            user,
             rev_seq: u64::MAX - seq.get(),
         }
     }
 
-    /// Lower bound of `owner`'s range — the newest possible order.
-    fn newest(owner: Principal) -> Self {
-        Self { owner, rev_seq: 0 }
+    /// Lower bound of `user`'s range — the newest possible order.
+    fn newest(user: UserId) -> Self {
+        Self { user, rev_seq: 0 }
     }
 
-    /// Upper bound of `owner`'s range — the oldest possible order.
-    fn oldest(owner: Principal) -> Self {
+    /// Upper bound of `user`'s range — the oldest possible order.
+    fn oldest(user: UserId) -> Self {
         Self {
-            owner,
+            user,
             rev_seq: u64::MAX,
         }
     }
 }
 
-/// Principals are at most 29 bytes.
-const PRINCIPAL_MAX_LEN: usize = 29;
-/// 1 length byte + the (zero-padded) principal + 8 bytes of `rev_seq`.
-const USER_ORDER_KEY_LEN: usize = 1 + PRINCIPAL_MAX_LEN + 8;
+/// 8 bytes of `UserId` + 8 bytes of `rev_seq`, both big-endian.
+const USER_ORDER_KEY_LEN: usize = 8 + 8;
 
 impl Storable for UserOrderKey {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let principal = self.owner.as_slice();
         let mut buf = [0u8; USER_ORDER_KEY_LEN];
-        buf[0] = principal.len() as u8;
-        buf[1..1 + principal.len()].copy_from_slice(principal);
-        buf[1 + PRINCIPAL_MAX_LEN..].copy_from_slice(&self.rev_seq.to_be_bytes());
+        buf[..8].copy_from_slice(&self.user.get().to_be_bytes());
+        buf[8..].copy_from_slice(&self.rev_seq.to_be_bytes());
         Cow::Owned(buf.to_vec())
     }
 
@@ -247,18 +229,11 @@ impl Storable for UserOrderKey {
             USER_ORDER_KEY_LEN,
             "UserOrderKey must decode from exactly {USER_ORDER_KEY_LEN} bytes"
         );
-        let len = bytes[0] as usize;
-        assert!(
-            len <= PRINCIPAL_MAX_LEN,
-            "UserOrderKey principal length {len} exceeds {PRINCIPAL_MAX_LEN}"
-        );
-        let owner = Principal::from_slice(&bytes[1..1 + len]);
-        let rev_seq = u64::from_be_bytes(
-            bytes[1 + PRINCIPAL_MAX_LEN..]
-                .try_into()
-                .expect("8-byte slice"),
-        );
-        Self { owner, rev_seq }
+        let user = UserId::new(u64::from_be_bytes(
+            bytes[..8].try_into().expect("8-byte slice"),
+        ));
+        let rev_seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
+        Self { user, rev_seq }
     }
 
     const BOUND: Bound = Bound::Bounded {
@@ -298,19 +273,17 @@ impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
 mod tests {
     use super::*;
 
-    /// `UserOrderKey`'s manual `Ord` must agree with its `Storable` byte order,
-    /// since `StableBTreeMap` relies on that consistency.
+    /// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
+    /// since `StableBTreeMap` relies on that consistency for range scans.
     #[test]
     fn user_order_key_ord_matches_storable_bytes() {
         let keys = [
-            // `[2]` vs `[1, 0]`: derived field-wise `Ord` would disagree with
-            // the length-prefixed bytes here — the case this impl guards.
-            UserOrderKey::from_seq(Principal::from_slice(&[2]), GlobalOrderSeq::new(0)),
-            UserOrderKey::from_seq(Principal::from_slice(&[1, 0]), GlobalOrderSeq::new(0)),
-            UserOrderKey::from_seq(Principal::from_slice(&[1]), GlobalOrderSeq::new(5)),
-            UserOrderKey::from_seq(Principal::from_slice(&[1]), GlobalOrderSeq::new(9)),
-            UserOrderKey::newest(Principal::anonymous()),
-            UserOrderKey::oldest(Principal::anonymous()),
+            UserOrderKey::from_seq(UserId::new(2), GlobalOrderSeq::new(0)),
+            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(0)),
+            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(5)),
+            UserOrderKey::from_seq(UserId::new(1), GlobalOrderSeq::new(9)),
+            UserOrderKey::newest(UserId::new(0)),
+            UserOrderKey::oldest(UserId::new(0)),
         ];
         for a in &keys {
             for b in &keys {
@@ -320,6 +293,11 @@ mod tests {
                     "Ord disagrees with Storable bytes for {a:?} vs {b:?}"
                 );
             }
+            assert_eq!(
+                UserOrderKey::from_bytes(a.to_bytes()),
+                *a,
+                "Storable round-trip mismatch for {a:?}"
+            );
         }
     }
 }

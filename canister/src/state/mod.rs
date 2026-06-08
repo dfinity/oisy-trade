@@ -246,6 +246,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             self.next_order_seq.increment();
             self.order_history.insert_once(
                 order_id,
+                user_id,
                 seq,
                 OrderRecord {
                     owner: user,
