@@ -103,8 +103,7 @@ impl Storable for SeqEntry {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-/// Record of every order from submission through terminal state, plus a
-/// secondary per-user index over it.
+/// Record of every order from submission through terminal state.
 ///
 /// Two stable maps kept together here rather than split across the caller:
 /// - `orders`: the primary store, keyed by [`OrderId`].
@@ -112,10 +111,9 @@ impl Storable for SeqEntry {
 ///   so a forward range scan over a user's prefix yields that user's orders
 ///   newest-first. The value is the [`OrderId`], pointing back into `orders`.
 ///
-/// The invariant is asymmetric: `by_user` mirrors **insertion only** — every
-/// [`Self::insert_once`] writes both maps, but `set_status` and cancel/fill
-/// update only `orders` and never touch `by_user` (its value is the immutable
-/// [`OrderId`], so status transitions don't affect it).
+/// Interior mutability is as follows:
+/// * `by_user` is inserted once, then the entry is immutable,
+/// * `orders` is inserted once and values may be updated, e.g. `set_status` and cancel/fill.
 pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, SeqEntry, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
