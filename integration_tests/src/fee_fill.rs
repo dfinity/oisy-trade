@@ -1,5 +1,5 @@
-use crate::Setup;
 use crate::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+use crate::{LOT_SIZE, Setup, TICK_SIZE};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Side, Token};
 
@@ -28,19 +28,15 @@ impl FeeFillOutcome {
     }
 }
 
-/// Stand up a trading pair with non-zero, non-trivial maker/taker fees
-/// (chosen so the fee math has a non-zero remainder — distinguishes
-/// `mul_ceil` from `mul_floor`), and run one cross so both sides accrue.
+/// Stand up a trading pair with non-zero maker/taker fees and run one cross
+/// so both sides accrue. Uses the default, invariant-satisfying tick/lot;
+/// the `mul_ceil` rounding itself is covered by `BasisPoint` unit tests.
 /// Returns the expected fee outputs and the `Setup`.
 pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
     let setup = Setup::new().await;
     let request = AddTradingPairRequest {
-        // 10 bps maker, 23 bps taker — `qty * 23` is not a multiple of
-        // 10_000 below, so `mul_ceil` and `mul_floor` would disagree.
         maker_fee_bps: 10,
         taker_fee_bps: 23,
-        // lot_size=1 so the non-lot-aligned `qty` below validates.
-        lot_size: 1,
         ..setup.add_trading_pair_request()
     };
     let base = request.base.clone();
@@ -53,10 +49,8 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
 
     let seller = Principal::from_slice(&[0x01]);
     let buyer = Principal::from_slice(&[0x02]);
-    // qty not a multiple of 10_000 so `qty * taker_bps / 10_000` has a
-    // remainder, exposing `mul_ceil` vs `mul_floor`.
-    let qty = 1_000_001u64;
-    let price = 100u64;
+    let qty = LOT_SIZE; // one lot of the base token
+    let price = TICK_SIZE; // one tick
     let notional = price * qty;
     setup
         .deposit_flow(seller, base.id.clone())
@@ -94,9 +88,8 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         .unwrap();
     setup.env().tick().await;
 
-    // Buyer crossed → base (CKSOL) fee at taker rate, quote (CKBTC) at
-    // maker rate. Ceiling math per spec — `qty * 23` produces a
-    // non-zero remainder mod 10_000.
+    // Buyer crossed → base (CKSOL) fee at the taker rate, quote (CKBTC) at
+    // the maker rate (`mul_ceil`, matching production).
     let base_fee_raw = (qty * 23).div_ceil(10_000);
     let quote_fee_raw = (notional * 10).div_ceil(10_000);
 

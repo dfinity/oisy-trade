@@ -25,7 +25,7 @@ use pocket_ic::{
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 
-pub const TICK_SIZE: u64 = 10;
+pub const TICK_SIZE: u64 = 1000;
 pub const LOT_SIZE: u64 = 1_000_000;
 
 pub struct Setup {

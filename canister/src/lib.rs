@@ -383,6 +383,27 @@ pub fn add_trading_pair(
         let quote_metadata = order::TokenMetadata::from(request.quote.metadata);
         s.check_token_metadata_consistency(pair.base, &base_metadata)?;
         s.check_token_metadata_consistency(pair.quote, &quote_metadata)?;
+        // Enforce the settlement-exactness invariant ahead of the upcoming
+        // change to settle a fill as `price × quantity / 10^base_decimals`:
+        // prices are multiples of the tick and quantities multiples of the lot,
+        // so requiring `tick_size × lot_size` to be a multiple of
+        // `10^base_decimals` guarantees that division will be exact (no
+        // rounding).
+        let base_decimals = base_metadata.decimals;
+        let base_scale = 10u64.checked_pow(base_decimals as u32).ok_or(
+            AddTradingPairError::BaseDecimalsTooLarge {
+                decimals: base_decimals,
+            },
+        )?;
+        // `tick_size` and `lot_size` are u64, so their product fits u128.
+        let tick_lot = tick_size.get() as u128 * lot_size.get() as u128;
+        if !tick_lot.is_multiple_of(base_scale as u128) {
+            return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
+                tick_size: tick_size.get(),
+                lot_size: lot_size.get(),
+                base_decimals,
+            });
+        }
         let book_id = s.next_book_id();
         let event = state::event::AddTradingPairEvent {
             book_id,
