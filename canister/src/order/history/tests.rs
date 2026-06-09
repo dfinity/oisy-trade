@@ -27,15 +27,6 @@ fn test_record() -> OrderRecord {
     }
 }
 
-fn arb_user_order_key() -> impl Strategy<Value = UserOrderKey> {
-    (any::<u64>(), any::<u64>())
-        .prop_map(|(user, seq)| UserOrderKey::from_seq(UserId::new(user), seq))
-}
-
-fn arb_seq_order_record() -> impl Strategy<Value = SeqOrderRecord> {
-    (any::<u64>(), arb_order_record()).prop_map(|(seq, record)| SeqOrderRecord { seq, record })
-}
-
 #[test]
 fn insert_once_and_get() {
     let mut history = history();
@@ -174,7 +165,7 @@ proptest! {
     /// since `StableBTreeMap` relies on that consistency for range scans.
     #[test]
     fn user_order_key_ord_matches_storable_bytes(
-        keys in prop::collection::vec(arb_user_order_key(), 0..16),
+        keys in prop::collection::vec(arb_user_order_key(), 0..100),
     ) {
         for a in &keys {
             for b in &keys {
@@ -203,4 +194,13 @@ proptest! {
     fn seq_order_record_roundtrips_through_storable(entry in arb_seq_order_record()) {
         prop_assert_eq!(SeqOrderRecord::from_bytes(entry.to_bytes()), entry);
     }
+}
+
+fn arb_user_order_key() -> impl Strategy<Value = UserOrderKey> {
+    (any::<u64>(), any::<u64>())
+        .prop_map(|(user, seq)| UserOrderKey::from_seq(UserId::new(user), seq))
+}
+
+fn arb_seq_order_record() -> impl Strategy<Value = SeqOrderRecord> {
+    (any::<u64>(), arb_order_record()).prop_map(|(seq, record)| SeqOrderRecord { seq, record })
 }

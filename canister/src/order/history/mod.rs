@@ -6,6 +6,9 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
 
+#[cfg(test)]
+mod tests;
+
 /// Record of an order from submission through terminal state.
 ///
 /// Persisted in a [`ic_stable_structures::StableBTreeMap`] keyed by [`OrderId`].
@@ -313,6 +316,3 @@ impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
 
 #[cfg(test)]
 impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
-
-#[cfg(test)]
-mod tests;
