@@ -2520,3 +2520,369 @@ mod global_halt {
         setup.drop().await;
     }
 }
+
+mod pair_halt {
+    use assert_matches::assert_matches;
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        AddLimitOrderError, LimitOrderRequest, OrderStatus, PairStatus, SetPairStatusError, Side,
+        TradingPair,
+    };
+
+    /// With two pairs, halting pair A: orders on A are rejected with
+    /// `PairHalted`, orders on B still succeed and match, and a resting order
+    /// on A can still be canceled.
+    #[tokio::test]
+    async fn should_block_orders_on_halted_pair_only() {
+        let setup = Setup::new()
+            .await
+            .with_trading_pair()
+            .await
+            .with_second_trading_pair()
+            .await;
+        let pair_a = setup.trading_pair();
+        let pair_b = setup.second_trading_pair();
+        let user = setup.user();
+        let client = setup.dex_client();
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+
+        // A Buy on pair A reserves quote (ckBTC); a Buy on pair B reserves
+        // quote (ckSOL). Fund both, with extra for the resting A order.
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(2 * order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(2 * order_cost + QUOTE_LEDGER_FEE)
+            .deposit(2 * order_cost)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(user, setup.base_token_id())
+            .mint(order_cost + 2 * BASE_LEDGER_FEE)
+            .approve(order_cost + BASE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        // Place a resting buy on pair A before the halt.
+        let resting_a = client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_a,
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        // Halt pair A.
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair_a, PairStatus::Halted)
+                .await,
+            Ok(())
+        );
+
+        // New orders on pair A are rejected.
+        assert_eq!(
+            client
+                .add_limit_order(LimitOrderRequest {
+                    pair: pair_a,
+                    side: Side::Buy,
+                    price,
+                    quantity: Nat::from(quantity),
+                })
+                .await,
+            Err(AddLimitOrderError::PairHalted)
+        );
+
+        // Orders on pair B still succeed.
+        let order_b = client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_b,
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+        assert_eq!(
+            client.get_order_status(order_b).await,
+            OrderStatus::Open,
+            "orders on the unaffected pair are accepted and rest in the book"
+        );
+
+        // The resting order on pair A can still be canceled.
+        let canceled = client.cancel_limit_order(resting_a).await.unwrap();
+        assert_matches!(canceled.status, OrderStatus::Canceled(_));
+
+        setup.drop().await;
+    }
+
+    /// Resting crossable orders on a halted pair do not fill after the timer
+    /// ticks; unhalting lets them fill; meanwhile a cross on the other pair
+    /// fills throughout.
+    #[tokio::test]
+    async fn should_stop_matching_on_halted_pair_only() {
+        let setup = Setup::new()
+            .await
+            .with_trading_pair()
+            .await
+            .with_second_trading_pair()
+            .await;
+        let pair_a = setup.trading_pair();
+        let pair_b = setup.second_trading_pair();
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.dex_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.dex_client_with_caller(seller);
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let required_quote = price * quantity;
+        let required_base = quantity;
+
+        // Pair A (base ckSOL, quote ckBTC): buy reserves ckBTC, sell reserves
+        // ckSOL. Pair B is the swapped pair (base ckBTC, quote ckSOL): buy
+        // reserves ckSOL, sell reserves ckBTC. So the buyer needs a quote-worth
+        // of *each* token, and the seller needs a base-worth of *each* token.
+        // `quote_token_id()` is ckBTC; `base_token_id()` is ckSOL.
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote + QUOTE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(buyer, setup.base_token_id())
+            .mint(required_quote + 2 * BASE_LEDGER_FEE)
+            .approve(required_quote + BASE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(required_base + 2 * BASE_LEDGER_FEE)
+            .approve(required_base + BASE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(seller, setup.quote_token_id())
+            .mint(required_base + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_base + QUOTE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+
+        // Halt pair A first.
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair_a, PairStatus::Halted)
+                .await,
+            Ok(())
+        );
+
+        // Pair B cross (matches freely).
+        let buy_b = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_b,
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        let sell_b = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_b,
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+
+        // Pair A cross: orders are rejected while halted, so resume A just long
+        // enough to place both, then halt again before ticking.
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair_a, PairStatus::Active)
+                .await,
+            Ok(())
+        );
+        let buy_a = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_a,
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        let sell_a = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: pair_a,
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair_a, PairStatus::Halted)
+                .await,
+            Ok(())
+        );
+
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+
+        // Pair A's cross has not filled; pair B's has.
+        assert_ne!(
+            setup.dex_client().get_order_status(buy_a.clone()).await,
+            OrderStatus::Filled,
+            "halted pair's buy must not fill"
+        );
+        assert_ne!(
+            setup.dex_client().get_order_status(sell_a.clone()).await,
+            OrderStatus::Filled,
+            "halted pair's sell must not fill"
+        );
+        assert_eq!(
+            setup.dex_client().get_order_status(buy_b).await,
+            OrderStatus::Filled,
+            "unaffected pair's buy must fill"
+        );
+        assert_eq!(
+            setup.dex_client().get_order_status(sell_b).await,
+            OrderStatus::Filled,
+            "unaffected pair's sell must fill"
+        );
+
+        // Unhalt pair A and let the timer fire: its cross now fills.
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair_a, PairStatus::Active)
+                .await,
+            Ok(())
+        );
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+        assert_eq!(
+            setup.dex_client().get_order_status(buy_a).await,
+            OrderStatus::Filled
+        );
+        assert_eq!(
+            setup.dex_client().get_order_status(sell_a).await,
+            OrderStatus::Filled
+        );
+
+        setup.drop().await;
+    }
+
+    /// `set_pair_status` rejects non-controller callers with `NotController`
+    /// and returns `UnknownTradingPair` for an unregistered pair.
+    #[tokio::test]
+    async fn should_reject_non_controller_and_unknown_pair() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let pair = setup.trading_pair();
+        let user_client = setup.dex_client_with_caller(Principal::from_slice(&[0x01]));
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+
+        // Non-controller is rejected before the pair is even resolved.
+        assert_eq!(
+            user_client.set_pair_status(pair, PairStatus::Halted).await,
+            Err(SetPairStatusError::NotController)
+        );
+
+        // A controller targeting an unregistered pair gets UnknownTradingPair.
+        let unknown = TradingPair {
+            base: Principal::from_slice(&[0xAA]),
+            quote: Principal::from_slice(&[0xBB]),
+        };
+        assert_eq!(
+            controller_client
+                .set_pair_status(unknown, PairStatus::Halted)
+                .await,
+            Err(SetPairStatusError::UnknownTradingPair)
+        );
+
+        setup.drop().await;
+    }
+
+    /// The per-pair halt set is part of the upgrade snapshot: after halting a
+    /// pair and upgrading, new orders on it remain rejected until it is resumed.
+    #[tokio::test]
+    async fn should_preserve_pair_halt_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let pair = setup.trading_pair();
+        let user = setup.user();
+        let client = setup.dex_client();
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair, PairStatus::Halted)
+                .await,
+            Ok(())
+        );
+        setup.upgrade(None).await;
+
+        let order = LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price,
+            quantity: Nat::from(quantity),
+        };
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::PairHalted),
+            "pair halt must survive the upgrade"
+        );
+
+        assert_eq!(
+            controller_client
+                .set_pair_status(pair, PairStatus::Active)
+                .await,
+            Ok(())
+        );
+        client
+            .add_limit_order(order)
+            .await
+            .expect("orders accepted after the pair is resumed");
+
+        setup.drop().await;
+    }
+}
