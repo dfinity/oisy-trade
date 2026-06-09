@@ -139,6 +139,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);
         }
+        EventType::SetGlobalHalt(halted) => {
+            state.permissions_mut().set_trading_halted(*halted);
+        }
     }
 }
 

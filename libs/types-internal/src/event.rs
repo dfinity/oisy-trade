@@ -20,6 +20,7 @@ pub enum EventType {
     Settling(SettlingEvent),
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
+    SetGlobalHalt(bool),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

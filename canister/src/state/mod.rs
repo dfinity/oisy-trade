@@ -141,6 +141,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self.permissions
     }
 
+    pub fn permissions_mut(&mut self) -> &mut Permissions {
+        &mut self.permissions
+    }
+
     pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
         if let Mode::RestrictedTo(ref allowed) = self.mode {
             let caller = runtime.msg_caller();
@@ -1050,6 +1054,7 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+    TradingHalted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1071,6 +1076,15 @@ impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
             CancelLimitOrderError::OrderAlreadyCanceled => {
                 dex_types::CancelLimitOrderError::OrderAlreadyCanceled
             }
+        }
+    }
+}
+
+impl From<permissions::UnauthorizedError> for AddLimitOrderError {
+    fn from(err: permissions::UnauthorizedError) -> Self {
+        match err {
+            permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
+            other => panic!("BUG: permit_trading returned unexpected error: {other:?}"),
         }
     }
 }
@@ -1107,6 +1121,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 available: available.into(),
                 required: required.into(),
             },
+            AddLimitOrderError::TradingHalted => dex_types::AddLimitOrderError::TradingHalted,
         }
     }
 }

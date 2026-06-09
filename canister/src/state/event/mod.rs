@@ -41,6 +41,8 @@ pub enum EventType {
     Withdraw(#[n(0)] WithdrawEvent),
     #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
+    #[n(9)]
+    SetGlobalHalt(#[n(0)] bool),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

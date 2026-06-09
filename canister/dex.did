@@ -50,6 +50,8 @@ type AddLimitOrderError = variant {
     // For a `Sell`, `token` is the base and `required` is `quantity`.
     // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
+    // Trading is globally halted; no new orders are accepted.
+    TradingHalted;
 };
 
 /// Error returned when canceling a limit order fails.
@@ -387,6 +389,21 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
+// Error returned by controller-gated endpoints when the caller is not
+// authorized to perform the requested action.
+type UnauthorizedError = variant {
+    // Trading is globally halted.
+    TradingHalted;
+    // The trading pair is halted.
+    PairHalted;
+    // The account is frozen.
+    AccountFrozen;
+    // The caller is not a controller of the canister.
+    NotController;
+};
+
+type UnauthorizedResult = variant { Ok : null; Err : UnauthorizedError };
+
 // Controls who may call update endpoints on the DEX canister.
 type Mode = variant {
     // Anyone may call update endpoints.
@@ -514,6 +531,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
+    SetGlobalHalt : bool;
 };
 
 // A canister event with a timestamp.
@@ -621,6 +639,16 @@ service : (DexArg) -> {
 
     // Add a new trading pair to the DEX. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
+
+    // Globally halt trading: reject all new orders and stop the matching
+    // engine. Cancels and withdrawals remain open. Only callable by a
+    // controller. Idempotent — halting an already-halted DEX succeeds.
+    halt_trading : () -> (UnauthorizedResult);
+
+    // Resume trading after a global halt: re-enable new orders and matching.
+    // Only callable by a controller. Idempotent — resuming an already-active
+    // DEX succeeds.
+    resume_trading : () -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

@@ -59,6 +59,10 @@ impl Executor {
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) -> ExecutionStatus {
+        if state.permissions().trading_halted() {
+            return ExecutionStatus::Complete;
+        }
+
         let policy = state.execution_policy();
         let max_orders_per_chunk = policy.max_orders_per_chunk() as usize;
         let instruction_budget = policy.instruction_budget();
@@ -91,8 +95,7 @@ impl Executor {
             let permit = state
                 .permissions()
                 .permit_matching(book_id)
-                // TODO(DEFI-2849): convert to a proper error return when this gate goes live (PRs 2–4)
-                .expect("BUG: matching is never gated in this build");
+                .expect("BUG: matching halt is checked at run_once entry");
             audit::process_event(
                 state,
                 EventType::Matching(MatchingEvent {

@@ -73,6 +73,8 @@ pub enum AddLimitOrderError {
         /// The balance required to place the order.
         required: Nat,
     },
+    /// Trading is globally halted; no new orders are accepted.
+    TradingHalted,
 }
 
 /// Error returned when canceling a limit order fails.
@@ -86,6 +88,20 @@ pub enum CancelLimitOrderError {
     OrderAlreadyFilled,
     /// The order has already been canceled.
     OrderAlreadyCanceled,
+}
+
+/// Error returned by controller-gated endpoints when the caller is not
+/// authorized to perform the requested action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum UnauthorizedError {
+    /// Trading is globally halted.
+    TradingHalted,
+    /// The trading pair is halted.
+    PairHalted,
+    /// The account is frozen.
+    AccountFrozen,
+    /// The caller is not a controller of the canister.
+    NotController,
 }
 
 /// Information about a listed trading pair.

@@ -4,7 +4,8 @@ use dex_types::{
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
     OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
-    TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -168,6 +169,16 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
     dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
 }
 
+#[ic_cdk::update]
+fn halt_trading() -> Result<(), UnauthorizedError> {
+    dex_canister::halt_trading(&dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::update]
+fn resume_trading() -> Result<(), UnauthorizedError> {
+    dex_canister::resume_trading(&dex_canister::IC_RUNTIME)
+}
+
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
 #[ic_cdk::query]
 fn get_events(
@@ -301,6 +312,7 @@ fn get_events(
                         .map(map_balance_operation)
                         .collect(),
                 }),
+                EventType::SetGlobalHalt(halted) => event::EventType::SetGlobalHalt(halted),
             },
         }
     }

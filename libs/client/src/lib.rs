@@ -11,8 +11,8 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UnauthorizedError,
+    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -206,6 +206,22 @@ impl<R: Runtime> DexClient<R> {
     ) -> Result<(), AddTradingPairError> {
         self.runtime
             .call(self.dex_canister, "add_trading_pair", (request,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Globally halt trading on the DEX canister. Only callable by a controller.
+    pub async fn halt_trading(&self) -> Result<(), UnauthorizedError> {
+        self.runtime
+            .call(self.dex_canister, "halt_trading", (), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Resume trading after a global halt. Only callable by a controller.
+    pub async fn resume_trading(&self) -> Result<(), UnauthorizedError> {
+        self.runtime
+            .call(self.dex_canister, "resume_trading", (), 0)
             .await
             .unwrap()
     }
