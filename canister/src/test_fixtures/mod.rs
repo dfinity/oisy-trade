@@ -6,6 +6,7 @@ use crate::order::{
     Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
+use crate::user::{UserId, UserRegistry};
 use crate::{Timestamp, order, state};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
@@ -62,6 +63,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
+        user_registry(),
         balances(),
     )
     .unwrap()
@@ -77,6 +79,7 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order::OrderHistory::new(crate::storage::order_history_memory()),
+        UserRegistry::new(crate::storage::user_registry_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
     )
     .unwrap()
@@ -206,15 +209,15 @@ pub fn two_token_state() -> (state::State<VectorMemory, VectorMemory>, TokenId, 
 /// over the balance memory so tests can use either in-memory or
 /// production stable memory.
 pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, fee: u64) {
-    let alice = Principal::from_slice(&[0x01]);
-    let bob = Principal::from_slice(&[0x02]);
+    let alice = UserId::new(1);
+    let bob = UserId::new(2);
     balances.deposit(alice, token, Quantity::from(100u64));
     balances
-        .reserve(&alice, &token, Quantity::from(100u64))
+        .reserve(alice, &token, Quantity::from(100u64))
         .unwrap();
     balances.transfer(
-        &alice,
-        &bob,
+        alice,
+        bob,
         &token,
         Quantity::from(100u64),
         Quantity::from(fee),
@@ -223,6 +226,7 @@ pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, f
 
 pub fn init_state_with_order_book() {
     let order_history = order::OrderHistory::new(crate::storage::order_history_memory());
+    let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
@@ -232,6 +236,7 @@ pub fn init_state_with_order_book() {
                 instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
+            user_registry,
             balances,
         )
         .unwrap(),
@@ -249,14 +254,14 @@ pub fn init_state_with_order_book() {
     });
 }
 
-pub fn balances_pair<MB: Memory>(
-    balances: &TokenBalance<MB>,
+pub fn balances_pair<MH: Memory, MB: Memory>(
+    state: &state::State<MH, MB>,
     user: &Principal,
     pair: &TradingPair,
 ) -> (Balance, Balance) {
     (
-        balances.get_balance(user, &pair.base).unwrap_or_default(),
-        balances.get_balance(user, &pair.quote).unwrap_or_default(),
+        state.get_balance(user, &pair.base),
+        state.get_balance(user, &pair.quote),
     )
 }
 
@@ -339,6 +344,15 @@ pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }
 
+pub fn user_registry() -> UserRegistry<VectorMemory> {
+    UserRegistry::new(VectorMemory::default())
+}
+
+/// A deterministic test principal seeded by a single byte.
+pub fn principal(seed: u8) -> Principal {
+    Principal::from_slice(&[seed])
+}
+
 /// Construct a [`ic_cdk::call::Response`] from Candid-encoded bytes.
 ///
 /// `Response` has a private field, but is a newtype over `Vec<u8>` with
@@ -382,6 +396,7 @@ pub mod arbitrary {
         DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent,
         WithdrawEvent,
     };
+    use crate::user::UserId;
     use candid::Principal;
     use dex_types::FilterToken;
     use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -492,9 +507,13 @@ pub mod arbitrary {
         vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
     }
 
+    pub fn arb_user_id() -> impl Strategy<Value = UserId> {
+        any::<u64>().prop_map(UserId::new)
+    }
+
     pub fn arb_balance_key() -> impl Strategy<Value = BalanceKey> {
-        (arb_principal(), arb_principal())
-            .prop_map(|(token, owner)| BalanceKey::new(TokenId::new(token), owner))
+        (arb_principal(), arb_user_id())
+            .prop_map(|(token, user)| BalanceKey::new(TokenId::new(token), user))
     }
 
     pub fn arb_side() -> impl Strategy<Value = Side> {
