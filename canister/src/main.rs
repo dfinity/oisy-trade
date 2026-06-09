@@ -319,6 +319,12 @@ fn get_events(
                         .collect(),
                 }),
                 EventType::SetGlobalHalt(halted) => event::EventType::SetGlobalHalt(halted),
+                EventType::SetPairStatus(e) => {
+                    event::EventType::SetPairStatus(event::SetPairStatusEvent {
+                        book_id: e.book_id.get(),
+                        halted: e.halted,
+                    })
+                }
             },
         }
     }

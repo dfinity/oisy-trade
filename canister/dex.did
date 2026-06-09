@@ -483,6 +483,12 @@ type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
 };
 
+// Event payload recording a per-pair halt status change.
+type SetPairStatusEvent = record {
+    book_id : nat64;
+    halted : bool;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -532,6 +538,7 @@ type EventType = variant {
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
     SetGlobalHalt : bool;
+    SetPairStatus : SetPairStatusEvent;
 };
 
 // A canister event with a timestamp.

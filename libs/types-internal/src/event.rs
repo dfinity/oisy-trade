@@ -21,6 +21,7 @@ pub enum EventType {
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
     SetGlobalHalt(bool),
+    SetPairStatus(SetPairStatusEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -63,6 +64,12 @@ pub struct AddLimitOrderEvent {
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct CancelLimitOrderEvent {
     pub order_id: OrderId,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SetPairStatusEvent {
+    pub book_id: u64,
+    pub halted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
