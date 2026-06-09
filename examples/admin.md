@@ -5,6 +5,7 @@ Administrative operations that require the caller to be a **controller** of the 
 1. Upgrade the canister to a new WASM
 2. Add a new trading pair
 3. Halt and resume trading
+4. Halt and resume a single trading pair
 
 Calls will fail when run from a non-controller identity.
 
@@ -234,6 +235,63 @@ icp canister call oisy_trade halt_trading '()' \
 
 ```bash
 icp canister call oisy_trade resume_trading '()' \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
+
+## 4. Halt and resume a single trading pair
+
+A per-pair halt stops new orders and matching on a single trading pair while
+every other pair keeps trading normally.
+
+### Mechanism
+
+While a pair is halted:
+
+- `add_limit_order` on the halted pair is rejected with `PairHalted`.
+- The matching engine skips the halted pair: its resting orders are left
+  untouched and no crossing fills occur on it, while other pairs continue to
+  match.
+
+What stays open for the halted pair:
+
+- `cancel_limit_order` — users can always cancel resting orders on the pair.
+- `withdraw` and `deposit` — balances are never tied to a single pair and stay
+  movable.
+
+Halted pairs are tracked as a set of order-book identifiers. Each status change
+is recorded as a `SetPairStatus` event in the audit log, so it is reproduced
+exactly on replay, and the set is included in the upgrade snapshot, so it
+survives canister upgrades.
+
+`set_pair_status` is controller-gated; non-controller callers are rejected with
+`NotController`. It returns `UnknownTradingPair` for a pair that is not
+registered, and is idempotent: setting a pair to its current status is a no-op
+success that still emits an event for the audit trail.
+
+### When to use it
+
+Use a per-pair halt when a problem is confined to one market rather than the
+whole exchange — for example, a **compromised or suspect ledger** backing one
+pair's token. Halt just that pair so trading on every other pair continues
+uninterrupted, investigate, and resume the pair once it is safe. Because cancels
+and withdrawals stay open, users holding orders on the halted pair can still
+exit.
+
+### Halt a pair
+
+```bash
+icp canister call oisy_trade set_pair_status \
+    "(record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" }, variant { Halted })" \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
+
+### Resume a pair
+
+```bash
+icp canister call oisy_trade set_pair_status \
+    "(record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" }, variant { Active })" \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```
