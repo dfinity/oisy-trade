@@ -177,12 +177,14 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.insert(*id, entry);
     }
 
-    /// Returns up to `length` of `user`'s orders, newest first, resuming
-    /// strictly after the `after` order (a cursor from a prior page) — or from
-    /// the newest when `after` is `None`. An `after` that names an unknown order
-    /// — or one that does not belong to `user` — yields an empty page. Each page
-    /// is an `O(length)` range scan from the cursor (no offset to re-walk), so
-    /// retrieving a whole history is linear in its size.
+    /// Returns up to `length` of `user`'s orders in newest-first order. With
+    /// `after: None` the page starts at the newest order; otherwise `after` is
+    /// a cursor — the last order of the previous page — and the page continues
+    /// with the next-older order (the one right after the cursor in that
+    /// newest-first walk, not a newer one). An `after` that names an unknown
+    /// order — or one that does not belong to `user` — yields an empty page.
+    /// Each page is an `O(length)` range scan from the cursor (no offset to
+    /// re-walk), so retrieving a whole history is linear in its size.
     pub fn orders_after(
         &self,
         user: UserId,
