@@ -190,7 +190,16 @@ fn set_pair_status(
     pair: dex_types::TradingPair,
     status: dex_types::PairStatus,
 ) -> Result<(), dex_types::SetPairStatusError> {
-    dex_canister::set_pair_status(pair, status, &dex_canister::IC_RUNTIME)
+    dex_canister::set_pair_status(pair, status, &dex_canister::IC_RUNTIME)?;
+    // Re-arm matching on unhalt: a halted book reports no matchable work, so
+    // the executor has settled to `Complete` and stopped rescheduling; the
+    // previously-halted book's resting crossable orders need a fresh kick.
+    if matches!(status, dex_types::PairStatus::Active) {
+        ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+            dex_canister::drive_matching();
+        });
+    }
+    Ok(())
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
