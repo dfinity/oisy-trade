@@ -94,7 +94,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
-        price: 10_000_000_000,
+        price: 100 * PRICE_SCALE,
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
