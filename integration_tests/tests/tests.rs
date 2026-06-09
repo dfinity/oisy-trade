@@ -2185,6 +2185,7 @@ mod global_halt {
         for _ in 0..3 {
             setup.env().tick().await;
         }
+        // Neither order has filled: their statuses are still not `Filled` ...
         assert_ne!(
             setup.dex_client().get_order_status(buy_id.clone()).await,
             OrderStatus::Filled,
@@ -2194,6 +2195,54 @@ mod global_halt {
             setup.dex_client().get_order_status(sell_id.clone()).await,
             OrderStatus::Filled,
             "sell must not fill while halted"
+        );
+        // ... and, since `OrderStatus` cannot express a partial fill, pin the
+        // exact balances: every committed token is still fully reserved and no
+        // fill proceeds have been credited. This fails on a regression that
+        // matches even partially under halt.
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_quote.into()
+            },
+            "buy's quote stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "buyer received no base (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_base.into()
+            },
+            "sell's base stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "seller received no quote (no partial fill) while halted"
         );
 
         // Resume and let the periodic matching timer fire: the cross now fills.
