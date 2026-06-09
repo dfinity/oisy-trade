@@ -1098,6 +1098,7 @@ pub enum AddLimitOrderError {
         max: Option<Quantity>,
     },
     TradingHalted,
+    PairHalted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1131,6 +1132,7 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
     fn from(err: permissions::UnauthorizedError) -> Self {
         match err {
             permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
+            permissions::UnauthorizedError::PairHalted => AddLimitOrderError::PairHalted,
             permissions::UnauthorizedError::NotController => {
                 unreachable!("permit_trading is not controller-gated")
             }
@@ -1180,6 +1182,7 @@ impl From<AddLimitOrderError> for oisy_trade_types::AddLimitOrderError {
             AddLimitOrderError::TradingHalted => {
                 oisy_trade_types::AddLimitOrderError::TradingHalted
             }
+            AddLimitOrderError::PairHalted => oisy_trade_types::AddLimitOrderError::PairHalted,
         }
     }
 }

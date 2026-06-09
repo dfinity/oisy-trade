@@ -172,6 +172,86 @@ fn should_drain_leftover_settling_events_under_global_halt() {
     assert_eq!(state.get_balance(&BUYER, &pair.base).free(), &lot.into());
 }
 
+/// Under global halt with crossable resting orders and no leftover settling,
+/// the executor must do no matching and report `Complete` so the rescheduler
+/// stops — it must not busy-spin re-arming the timer on the halted book's
+/// still-pending orders.
+#[test]
+fn should_not_busy_spin_under_global_halt() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    state.permissions_mut().set_trading_halted(true);
+    assert!(!state.has_pending_settling_events());
+
+    // Drive the actual reschedule decision: keep running while the executor
+    // claims more work. Under halt with no leftover settling there is none,
+    // so the very first run must report `Complete`.
+    let mut runs = 0;
+    let mut status = EXECUTOR.run_once(&mut state, &runtime);
+    while status == ExecutionStatus::MoreWork {
+        runs += 1;
+        assert!(runs <= 10, "executor busy-spun under global halt");
+        status = EXECUTOR.run_once(&mut state, &runtime);
+    }
+
+    assert_eq!(status, ExecutionStatus::Complete);
+    // No matching ran: the crossable orders are still pending.
+    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Pending));
+    assert!(state.has_pending_orders());
+}
+
+/// A per-pair halt must skip only the halted book: its crossable orders stay
+/// pending while every other book keeps matching. Because the halted book's
+/// pending orders are not matchable, the executor reports `Complete` rather
+/// than busy-spinning on them; unhalting lets the book fill.
+#[test]
+fn should_skip_halted_book_while_matching_others() {
+    let mut state = setup_two_books();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair_a = icp_ckbtc_trading_pair();
+    let pair_b = pair_b();
+    let lot = u64::from(LOT_SIZE);
+
+    // A crossable pair on each book.
+    let buy_a = test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
+    let sell_a = test_fixtures::place_order(&mut state, SELLER, &pair_a, Side::Sell, 100, lot);
+    let buy_b = test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
+    let sell_b = test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
+
+    // Halt book A only.
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::ZERO, true);
+
+    // The halted book's pending orders are not matchable, so with no leftover
+    // settling the run reports `Complete` and never busy-spins on them.
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+
+    // Book A's orders are left untouched; book B's cross fills.
+    assert_eq!(state.get_order_status(buy_a), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(sell_a), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(buy_b), Some(OrderStatus::Filled));
+    assert_eq!(state.get_order_status(sell_b), Some(OrderStatus::Filled));
+
+    // Unhalting lets book A's cross fill.
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::ZERO, false);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(state.get_order_status(buy_a), Some(OrderStatus::Filled));
+    assert_eq!(state.get_order_status(sell_a), Some(OrderStatus::Filled));
+}
+
 /// Driving the same workload through a single unlimited [`Executor`] run and
 /// through many chunk-size-1 runs must end in the same canister state.
 #[test]
