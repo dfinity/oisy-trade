@@ -231,8 +231,9 @@ fn should_skip_halted_book_while_matching_others() {
         .permissions_mut()
         .set_pair_halted(OrderBookId::ZERO, true);
 
-    // The halted book's pending orders are not matchable, so with no leftover
-    // settling the run reports `Complete` and never busy-spins on them.
+    // The halted book keeps its pending orders, but they are not matchable,
+    // so once book B drains the run reports `Complete` — no matching happens
+    // on the halted book and the matching timer can stop instead of spinning.
     let status = EXECUTOR.run_once(&mut state, &runtime);
     assert_eq!(status, ExecutionStatus::Complete);
 
@@ -250,6 +251,49 @@ fn should_skip_halted_book_while_matching_others() {
     assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(state.get_order_status(buy_a), Some(OrderStatus::Filled));
     assert_eq!(state.get_order_status(sell_a), Some(OrderStatus::Filled));
+}
+
+/// Drives the actual `drive_matching` reschedule decision (loop while
+/// `run_once` reports `MoreWork`) rather than a single direct call. While a
+/// pair is halted and only its book holds pending orders, the loop must
+/// terminate at `Complete` with no forward progress — otherwise the
+/// zero-delay self-reschedule chain busy-spins for the whole halt. After
+/// unhalting, a fresh drive must fill the previously-halted book's resting
+/// cross.
+#[test]
+fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
+    let mut state = setup_one_book();
+    set_chunk_policy(&mut state, 1);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+
+    let buy = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    // Halt the only book before any matching runs.
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::ZERO, true);
+
+    // Mirror `drive_matching`: keep running while the run reports `MoreWork`.
+    // With the halted book reporting no matchable work this must terminate
+    // immediately; a busy-spin would never reach `Complete`.
+    let runs = drive_to_completion(&mut state, &runtime);
+    assert_eq!(
+        runs, 1,
+        "halted-only state must settle in one run, not spin"
+    );
+    assert_eq!(state.get_order_status(buy), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(sell), Some(OrderStatus::Pending));
+
+    // Unhalt and drive again: the resting cross now fills.
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::ZERO, false);
+    drive_to_completion(&mut state, &runtime);
+    assert_eq!(state.get_order_status(buy), Some(OrderStatus::Filled));
+    assert_eq!(state.get_order_status(sell), Some(OrderStatus::Filled));
 }
 
 /// Driving the same workload through a single unlimited [`Executor`] run and
@@ -528,6 +572,21 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     assert!(state.has_pending_orders());
     // No matching event was emitted, so no settling was queued either.
     assert!(!state.has_pending_settling_events());
+}
+
+/// Mirror `drive_matching`'s reschedule loop: keep running while the run
+/// reports `MoreWork`, exactly as the zero-delay timer chain would. Returns
+/// the number of runs; bounded so a non-terminating busy-spin fails the test
+/// instead of hanging.
+fn drive_to_completion(state: &mut TestState, runtime: &MockRuntime) -> usize {
+    let mut runs = 0;
+    loop {
+        runs += 1;
+        assert!(runs <= 100, "executor busy-spun without reaching Complete");
+        if EXECUTOR.run_once(state, runtime) != ExecutionStatus::MoreWork {
+            return runs;
+        }
+    }
 }
 
 fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
