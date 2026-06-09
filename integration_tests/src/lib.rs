@@ -27,6 +27,9 @@ use std::path::PathBuf;
 
 pub const TICK_SIZE: u64 = 1000;
 pub const LOT_SIZE: u64 = 1_000_000;
+/// Scales a whole-quote-per-whole-base price into the on-book representation
+/// (quote smallest units per whole base token): `10^quote_decimals` (ckBTC = 8).
+pub const PRICE_SCALE: u64 = 100_000_000;
 
 pub struct Setup {
     env: Option<PocketIc>,

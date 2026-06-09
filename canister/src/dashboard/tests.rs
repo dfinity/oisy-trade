@@ -227,7 +227,7 @@ fn place(
             pair.quote,
             pending
                 .price
-                .checked_quote(&pending.quantity, state.base_scale(&pair.base))
+                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
                 .unwrap(),
         ),
         Side::Sell => (pair.base, pending.quantity),

@@ -17,10 +17,10 @@ use std::num::NonZeroU64;
 /// Tick/lot for the ICP/ckBTC-like test pair (both tokens 8 decimals).
 ///
 /// Price is denominated in quote smallest units per **whole** base token, and a
-/// fill settles to `price × quantity / 10^base_decimals`. `tick × lot = 10^9 ×
-/// 10^6 = 10^15` is a multiple of `10^base_decimals = 10^8`, so every fill
+/// fill settles to `price × quantity / 10^base_decimals`. `tick × lot = 100 ×
+/// 10^6 = 10^8` is a multiple of `10^base_decimals = 10^8`, so every fill
 /// settles to an exact quote amount.
-pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(1_000_000_000).unwrap());
+pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
@@ -308,7 +308,7 @@ where
             pair.quote,
             pending
                 .price
-                .checked_quote(&pending.quantity, state.base_scale(&pair.base))
+                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
                 .expect("place_order: price × quantity overflow"),
         ),
         Side::Sell => (pair.base, pending.quantity),

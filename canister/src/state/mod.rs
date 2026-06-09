@@ -171,7 +171,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // and Sell must satisfy `price × quantity ≤ u256::MAX`.
         let amount = pending
             .price
-            .checked_quote(&pending.quantity, self.base_scale(&pair.base))
+            .checked_mul_quantity_scaled(&pending.quantity, self.base_scale(&pair.base))
             .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
 
         let (token, required) = match pending.side {
@@ -221,7 +221,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 quote_token,
                 order
                     .price()
-                    .checked_quote(order.remaining_quantity(), base_scale)
+                    .checked_mul_quantity_scaled(order.remaining_quantity(), base_scale)
                     .expect("BUG: price * quantity overflow — already validated in validate_limit_order"),
             ),
             Side::Sell => (base_token, *order.remaining_quantity()),
@@ -313,12 +313,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) {
         let (book_id, seq) = order_id.into_parts();
-        let base_token = self
-            .trading_pairs
-            .get_pair(&book_id)
-            .expect("BUG: unknown trading pair for canceled order")
-            .base;
-        let base_scale = self.base_scale(&base_token);
+        let base_scale = self.base_scale_for_book(book_id);
         let book = self
             .order_books
             .get_mut(&book_id)
@@ -334,7 +329,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Buy => (
                 PairToken::Quote,
                 price
-                    .checked_quote(&remaining_quantity, base_scale)
+                    .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
                     .expect("BUG: price * remaining overflow — validated at placement"),
             ),
             Side::Sell => (PairToken::Base, remaining_quantity),
@@ -369,12 +364,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("matching");
-        let base_token = self
-            .trading_pairs
-            .get_pair(&event.book_id)
-            .expect("BUG: trading pair registered but order book missing")
-            .base;
-        let base_scale = self.base_scale(&base_token);
+        let base_scale = self.base_scale_for_book(event.book_id);
         let book = self
             .order_books
             .get_mut(&event.book_id)
@@ -551,6 +541,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             "BUG: 10^base_decimals fits u64 (base decimals ≤ 19 enforced at pair creation)",
         );
         NonZeroU64::new(scale).expect("BUG: 10^base_decimals is non-zero")
+    }
+
+    /// [`Self::base_scale`] for the base token of the pair behind `book_id`.
+    pub(crate) fn base_scale_for_book(&self, book_id: OrderBookId) -> NonZeroU64 {
+        let base_token = self
+            .trading_pairs
+            .get_pair(&book_id)
+            .expect("BUG: unknown trading pair")
+            .base;
+        self.base_scale(&base_token)
     }
 
     pub fn withdraw(
@@ -834,7 +834,7 @@ fn compute_balance_operations(
             && !diff.is_zero()
         {
             let surplus = diff
-                .checked_quote(&fill.quantity, base_scale)
+                .checked_mul_quantity_scaled(&fill.quantity, base_scale)
                 .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
             ops.push(event::BalanceOperation::Unreserve {
                 order: fill.taker_order_seq,

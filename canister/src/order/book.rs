@@ -501,7 +501,7 @@ impl Fill {
     /// `maker_price × quantity / base_scale` (`base_scale = 10^base_decimals`).
     pub fn quote_amount(&self, base_scale: NonZeroU64) -> Quantity {
         self.maker_price
-            .checked_quote(&self.quantity, base_scale)
+            .checked_mul_quantity_scaled(&self.quantity, base_scale)
             .expect("BUG: validation of order should prevent overflow")
     }
 

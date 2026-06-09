@@ -53,7 +53,7 @@ benches:
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 993413251
+      instructions: 993413270
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -109,7 +109,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 110549841
+        instructions: 110549852
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -165,7 +165,7 @@ benches:
   bench_process_pending_orders_1000_no_fills:
     total:
       calls: 1
-      instructions: 81798439
+      instructions: 81798458
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -181,7 +181,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 81265984
+        instructions: 81265995
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -202,7 +202,7 @@ benches:
   bench_process_pending_orders_1000_with_fees:
     total:
       calls: 1
-      instructions: 1012727702
+      instructions: 1012727721
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -258,7 +258,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 126706556
+        instructions: 126706567
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -314,7 +314,7 @@ benches:
   bench_process_pending_orders_1_large:
     total:
       calls: 1
-      instructions: 789112071
+      instructions: 789112090
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -360,7 +360,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 73705414
+        instructions: 73705425
         heap_increase: 0
         stable_memory_increase: 0
       order_history:

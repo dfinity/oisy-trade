@@ -383,7 +383,7 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
+    pub(crate) fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
         quantity.checked_mul_u64(self.0)
     }
 
@@ -394,7 +394,11 @@ impl Price {
     /// multiple of the tick, `quantity` a multiple of the lot, and
     /// `tick × lot` a multiple of `base_scale`. Returns `None` only if the
     /// intermediate `price × quantity` overflows 256 bits.
-    pub fn checked_quote(self, quantity: &Quantity, base_scale: NonZeroU64) -> Option<Quantity> {
+    pub fn checked_mul_quantity_scaled(
+        self,
+        quantity: &Quantity,
+        base_scale: NonZeroU64,
+    ) -> Option<Quantity> {
         let (quote, remainder) = self
             .checked_mul_quantity(quantity)?
             .checked_div_rem_u64(base_scale.get())?;
