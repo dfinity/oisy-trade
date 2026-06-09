@@ -554,6 +554,24 @@ pub enum LedgerTransferError {
     InternalError(String),
 }
 
+/// Status of a trading pair at the candid boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum PairStatus {
+    /// The pair accepts new orders and is matched by the engine.
+    Active,
+    /// The pair rejects new orders and is skipped by the matching engine.
+    Halted,
+}
+
+/// Error returned by the `set_pair_status` endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum SetPairStatusError {
+    /// The caller is not a controller of the canister.
+    NotController,
+    /// The requested trading pair is not registered.
+    UnknownTradingPair,
+}
+
 /// Error returned by the `add_trading_pair` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub enum AddTradingPairError {
