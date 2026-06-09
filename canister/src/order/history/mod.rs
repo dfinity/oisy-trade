@@ -143,7 +143,7 @@ impl<M: Memory> OrderHistory<M> {
     /// newest-first — is the current order count: the index is insert-only, so
     /// the count is a dense, monotonic sequence.
     /// Panics if the order ID is present.
-    pub fn insert_once(&mut self, id: OrderId, user: UserId, record: OrderRecord) {
+    pub fn insert_once(&mut self, user: UserId, id: OrderId, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
         let seq = self.orders.len();
         assert_eq!(

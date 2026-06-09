@@ -1,4 +1,4 @@
-use super::UserOrderKey;
+use super::{SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
 use crate::order::{
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
 };
@@ -6,7 +6,7 @@ use crate::test_fixtures::arbitrary::arb_order_record;
 use crate::user::UserId;
 use candid::Principal;
 use ic_stable_structures::{Storable, VectorMemory};
-use proptest::{prop_assert_eq, proptest};
+use proptest::prelude::*;
 
 fn history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
@@ -27,12 +27,21 @@ fn test_record() -> OrderRecord {
     }
 }
 
+fn arb_user_order_key() -> impl Strategy<Value = UserOrderKey> {
+    (any::<u64>(), any::<u64>())
+        .prop_map(|(user, seq)| UserOrderKey::from_seq(UserId::new(user), seq))
+}
+
+fn arb_seq_order_record() -> impl Strategy<Value = SeqOrderRecord> {
+    (any::<u64>(), arb_order_record()).prop_map(|(seq, record)| SeqOrderRecord { seq, record })
+}
+
 #[test]
 fn insert_once_and_get() {
     let mut history = history();
     let id = order_id(0);
     let record = test_record();
-    history.insert_once(id, UserId::new(0), record.clone());
+    history.insert_once(UserId::new(0), id, record.clone());
 
     assert_eq!(history.get(&id), Some(record));
 }
@@ -42,8 +51,8 @@ fn insert_once_and_get() {
 fn insert_once_panics_on_duplicate() {
     let mut history = history();
     let id = order_id(0);
-    history.insert_once(id, UserId::new(0), test_record());
-    history.insert_once(id, UserId::new(0), test_record());
+    history.insert_once(UserId::new(0), id, test_record());
+    history.insert_once(UserId::new(0), id, test_record());
 }
 
 #[test]
@@ -56,7 +65,7 @@ fn get_returns_none_for_missing() {
 fn set_status_updates_status() {
     let mut history = history();
     let id = order_id(0);
-    history.insert_once(id, UserId::new(0), test_record());
+    history.insert_once(UserId::new(0), id, test_record());
 
     assert_eq!(
         history.get(&id).map(|r| r.status),
@@ -73,9 +82,9 @@ fn set_status_updates_status() {
 fn orders_after_returns_newest_first() {
     let mut history = history();
     let owner = UserId::new(7);
-    history.insert_once(order_id(0), owner, test_record());
-    history.insert_once(order_id(1), owner, test_record());
-    history.insert_once(order_id(2), owner, test_record());
+    history.insert_once(owner, order_id(0), test_record());
+    history.insert_once(owner, order_id(1), test_record());
+    history.insert_once(owner, order_id(2), test_record());
 
     assert_eq!(
         history.orders_after(owner, None, 10),
@@ -88,7 +97,7 @@ fn orders_after_paginates_by_cursor() {
     let mut history = history();
     let owner = UserId::new(7);
     for seq in 0..5 {
-        history.insert_once(order_id(seq), owner, test_record());
+        history.insert_once(owner, order_id(seq), test_record());
     }
     // Newest first: seq 4, 3, 2, 1, 0. The cursor is the previous page's
     // last order.
@@ -114,7 +123,7 @@ fn orders_after_paginates_by_cursor() {
 fn orders_after_unknown_cursor_yields_empty() {
     let mut history = history();
     let owner = UserId::new(7);
-    history.insert_once(order_id(0), owner, test_record());
+    history.insert_once(owner, order_id(0), test_record());
 
     assert_eq!(
         history.orders_after(owner, Some(order_id(99)), 10),
@@ -128,9 +137,9 @@ fn orders_after_isolates_owners() {
     let alice = UserId::new(1);
     let bob = UserId::new(2);
     // Interleaved global sequence: alice, bob, alice.
-    history.insert_once(order_id(0), alice, test_record());
-    history.insert_once(order_id(1), bob, test_record());
-    history.insert_once(order_id(2), alice, test_record());
+    history.insert_once(alice, order_id(0), test_record());
+    history.insert_once(bob, order_id(1), test_record());
+    history.insert_once(alice, order_id(2), test_record());
 
     assert_eq!(
         history.orders_after(alice, None, 10),
@@ -150,9 +159,9 @@ fn orders_after_orders_across_books_by_global_seq() {
     let book0_first = OrderId::new(OrderBookId::ZERO, OrderSeq::new(5));
     let book1 = OrderId::new(OrderBookId::new(1), OrderSeq::new(0));
     let book0_second = OrderId::new(OrderBookId::ZERO, OrderSeq::new(6));
-    history.insert_once(book0_first, owner, test_record());
-    history.insert_once(book1, owner, test_record());
-    history.insert_once(book0_second, owner, test_record());
+    history.insert_once(owner, book0_first, test_record());
+    history.insert_once(owner, book1, test_record());
+    history.insert_once(owner, book0_second, test_record());
 
     assert_eq!(
         history.orders_after(owner, None, 10),
@@ -160,41 +169,38 @@ fn orders_after_orders_across_books_by_global_seq() {
     );
 }
 
-/// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
-/// since `StableBTreeMap` relies on that consistency for range scans.
-#[test]
-fn user_order_key_ord_matches_storable_bytes() {
-    let keys = [
-        UserOrderKey::from_seq(UserId::new(2), 0),
-        UserOrderKey::from_seq(UserId::new(1), 0),
-        UserOrderKey::from_seq(UserId::new(1), 5),
-        UserOrderKey::from_seq(UserId::new(1), 9),
-        UserOrderKey::newest(UserId::new(0)),
-        UserOrderKey::oldest(UserId::new(0)),
-    ];
-    for a in &keys {
-        for b in &keys {
-            assert_eq!(
-                a.cmp(b),
-                a.to_bytes().cmp(&b.to_bytes()),
-                "Ord disagrees with Storable bytes for {a:?} vs {b:?}"
-            );
-        }
-        assert_eq!(
-            UserOrderKey::from_bytes(a.to_bytes()),
-            *a,
-            "Storable round-trip mismatch for {a:?}"
-        );
-    }
-}
-
 proptest! {
+    /// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
+    /// since `StableBTreeMap` relies on that consistency for range scans.
     #[test]
-    fn should_store_order_record(
-        record in arb_order_record(),
+    fn user_order_key_ord_matches_storable_bytes(
+        keys in prop::collection::vec(arb_user_order_key(), 0..16),
     ) {
-        let bytes = record.to_bytes();
-        let decoded = OrderRecord::from_bytes(bytes);
-        prop_assert_eq!(decoded, record);
+        for a in &keys {
+            for b in &keys {
+                prop_assert_eq!(
+                    a.cmp(b),
+                    a.to_bytes().cmp(&b.to_bytes()),
+                    "Ord disagrees with Storable bytes for {:?} vs {:?}",
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn user_order_key_roundtrips_through_storable(key in arb_user_order_key()) {
+        prop_assert_eq!(UserOrderKey::from_bytes(key.to_bytes()), key);
+    }
+
+    #[test]
+    fn user_order_key_encodes_to_fixed_len(key in arb_user_order_key()) {
+        prop_assert_eq!(key.to_bytes().len(), USER_ORDER_KEY_LEN);
+    }
+
+    #[test]
+    fn seq_order_record_roundtrips_through_storable(entry in arb_seq_order_record()) {
+        prop_assert_eq!(SeqOrderRecord::from_bytes(entry.to_bytes()), entry);
     }
 }
