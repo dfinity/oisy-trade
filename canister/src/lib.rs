@@ -62,6 +62,10 @@ pub fn add_limit_order(
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_trading(caller, order_id.book_id())
+            .expect("BUG: trading is never gated in this build");
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
@@ -69,7 +73,12 @@ pub fn add_limit_order(
             price: order.price(),
             quantity: *order.remaining_quantity(),
         };
-        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddLimitOrder(event),
+            permit.into(),
+            runtime,
+        );
     });
     Ok(order_id.to_string())
 }
@@ -239,7 +248,16 @@ pub async fn deposit(
         amount,
     };
     state::with_state_mut(|s| {
-        state::audit::process_event(s, state::event::EventType::Deposit(event), runtime)
+        let permit = s
+            .permissions()
+            .permit_deposit(caller)
+            .expect("BUG: deposit is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::Deposit(event),
+            permit.into(),
+            runtime,
+        )
     });
 
     Ok(deposit_response)
@@ -301,7 +319,16 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            let permit = state::with_state(|s| {
+                s.permissions()
+                    .permit_withdraw(caller)
+                    .expect("BUG: withdraw is never gated in this build")
+            });
+            state::audit::record_event(
+                state::event::EventType::Withdraw(event),
+                permit.into(),
+                runtime,
+            );
             Ok(response)
         }
         Err(e) => {
@@ -394,7 +421,16 @@ pub fn add_trading_pair(
             quote_metadata,
             fee_rates,
         };
-        state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
+        let permit = s
+            .permissions()
+            .permit_add_trading_pair()
+            .expect("BUG: add_trading_pair is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddTradingPair(event),
+            permit.into(),
+            runtime,
+        );
         Ok(())
     })
 }

@@ -83,7 +83,11 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
         }
         Some(DexArg::Upgrade(Some(upgrade_arg))) => {
             state::with_state_mut(|s| {
-                audit::process_event(s, EventType::Upgrade(upgrade_arg), runtime)
+                let permit = s
+                    .permissions()
+                    .permit_admin()
+                    .expect("BUG: admin events are never gated in this build");
+                audit::process_event(s, EventType::Upgrade(upgrade_arg), permit.into(), runtime)
             });
         }
         Some(DexArg::Upgrade(None)) | None => {}
