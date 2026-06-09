@@ -89,13 +89,13 @@ This separation means the matching engine never waits on async inter-canister ca
 
 ### Trading Pairs
 
-A trading pair consists of a base token and a quote token, each identified by their ICRC-2 ledger canister principal. A price is expressed in **quote token smallest units per one _whole_ base token** (i.e. per `10^base_decimals` base units). A fill of `quantity` base units (smallest denomination) at `price` settles to
+A trading pair consists of a base token and a quote token, each identified by their ICRC-2 ledger canister principal. A price is expressed in **quote token smallest units per one _whole_ base token** (i.e. per `10^base_decimals` base units). A fill of `quantity` base units (smallest denomination) at `price` settles to the following amount of quote token smallest units:
 
 ```
 quote = price × quantity / 10^base_decimals
 ```
 
-quote token smallest units. This lets pairs with very different decimals (e.g. ckETH(18)/ckUSDC(6)) express realistic rates that would otherwise round to zero.
+This lets pairs with very different decimals (e.g. ckETH(18)/ckUSDC(6)) express realistic rates that would otherwise round to zero.
 
 ```
 Example: ckETH/ckUSDC  (base ckETH = 18 decimals, quote ckUSDC = 6 decimals)

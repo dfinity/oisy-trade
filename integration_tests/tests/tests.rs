@@ -1418,7 +1418,8 @@ mod order_book {
     async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
         // Settlement is `price × quantity / 10^base_decimals` (ckSOL base = 9
         // decimals). Compute in u128 to avoid overflow at the scaled prices.
-        let required = (price as u128 * quantity as u128 / 1_000_000_000) as u64;
+        let required = u64::try_from(price as u128 * quantity as u128 / 1_000_000_000)
+            .expect("required quote amount exceeds u64");
         setup
             .deposit_flow(user, setup.quote_token_id())
             .mint(required + 2 * QUOTE_LEDGER_FEE)

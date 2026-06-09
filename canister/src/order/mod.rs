@@ -398,7 +398,7 @@ impl Price {
         let (quote, remainder) = self
             .checked_mul_quantity(quantity)?
             .checked_div_rem_u64(base_scale.get())?;
-        debug_assert_eq!(
+        assert_eq!(
             remainder, 0,
             "BUG: settlement not exact — pair invariant violated"
         );

@@ -5,7 +5,7 @@ use crate::order::{
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
+    self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
     icp_metadata, icp_token_id,
 };
 use askama::Template;
@@ -216,7 +216,7 @@ fn place(
     let pair: TradingPair = icp_ckbtc_trading_pair();
     let pending = PendingOrder {
         side,
-        price: Price::new(price * 100_000_000),
+        price: Price::new(price * PRICE_SCALE),
         quantity: Quantity::from(quantity),
     };
     let (token, required) = match pending.side {
@@ -224,7 +224,7 @@ fn place(
             pair.quote,
             pending
                 .price
-                .checked_mul_quantity(&pending.quantity)
+                .checked_quote(&pending.quantity, state.base_scale(&pair.base))
                 .unwrap(),
         ),
         Side::Sell => (pair.base, pending.quantity),

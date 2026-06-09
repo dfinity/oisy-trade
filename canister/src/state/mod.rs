@@ -547,8 +547,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .token_metadata(base)
             .expect("BUG: trading pair registered but base token metadata missing")
             .decimals;
-        NonZeroU64::new(10u64.pow(decimals as u32))
-            .expect("BUG: 10^base_decimals is non-zero and fits u64 (enforced at pair creation)")
+        let scale = 10u64.checked_pow(decimals as u32).expect(
+            "BUG: 10^base_decimals fits u64 (base decimals ≤ 19 enforced at pair creation)",
+        );
+        NonZeroU64::new(scale).expect("BUG: 10^base_decimals is non-zero")
     }
 
     pub fn withdraw(

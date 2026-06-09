@@ -24,6 +24,11 @@ pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(1_000_000_000).unw
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
+/// Scales a whole-quote-per-whole-base price into the on-book representation
+/// (quote smallest units per whole base token) for the 8-decimal test pair:
+/// `10^quote_decimals`.
+pub const PRICE_SCALE: u64 = 100_000_000;
+
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
 

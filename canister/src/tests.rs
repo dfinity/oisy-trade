@@ -364,7 +364,8 @@ mod add_trading_pair {
 mod add_limit_order {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        fund_user, icp_ckbtc_trading_pair, init_state_with_order_book, limit_order_request,
+        PRICE_SCALE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+        limit_order_request,
     };
     use crate::{add_limit_order, get_balances, state};
     use candid::Principal;
@@ -507,7 +508,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Buy,
-            price: price * 100_000_000,
+            price: price * PRICE_SCALE,
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000

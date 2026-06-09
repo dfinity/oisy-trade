@@ -584,7 +584,7 @@ mod settle_fills {
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -608,7 +608,7 @@ mod settle_fills {
             BUYER,
             &pair,
             Side::Buy,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -616,7 +616,7 @@ mod settle_fills {
             SELLER,
             &pair,
             Side::Sell,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
@@ -971,7 +971,7 @@ mod settle_fills {
             BUYER,
             &pair,
             Side::Buy,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             quantity,
         );
         test_fixtures::place_order(
@@ -979,7 +979,7 @@ mod settle_fills {
             SELLER,
             &pair,
             Side::Sell,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             quantity,
         );
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
@@ -1056,7 +1056,7 @@ mod settle_fills {
             buyer_a,
             &pair_a,
             Side::Buy,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1064,7 +1064,7 @@ mod settle_fills {
             seller_a,
             &pair_a,
             Side::Sell,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1072,7 +1072,7 @@ mod settle_fills {
             buyer_b,
             &pair_b,
             Side::Buy,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1080,7 +1080,7 @@ mod settle_fills {
             seller_b,
             &pair_b,
             Side::Sell,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
 
@@ -1341,7 +1341,7 @@ mod settle_fills {
                 first_user,
                 &pair,
                 first_side,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1349,7 +1349,7 @@ mod settle_fills {
                 second_user,
                 &pair,
                 second_side,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1406,7 +1406,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1414,7 +1414,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1478,7 +1478,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1486,7 +1486,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1495,7 +1495,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1503,7 +1503,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * 100_000_000,
+                price * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));

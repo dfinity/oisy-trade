@@ -7,7 +7,7 @@ use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
 use crate::test_fixtures;
 use crate::test_fixtures::mocks::MockRuntime;
 use crate::test_fixtures::{
-    LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
 };
 use candid::Principal;
 use ic_stable_structures::VectorMemory;
@@ -179,7 +179,7 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
             BUYER,
             &pair_b,
             Side::Buy,
-            price * 100_000_000,
+            price * PRICE_SCALE,
             lot,
         );
     }
