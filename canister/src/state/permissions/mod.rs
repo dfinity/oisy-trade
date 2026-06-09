@@ -1,5 +1,6 @@
 use crate::order::OrderBookId;
 use candid::Principal;
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 mod tests;
@@ -7,6 +8,7 @@ mod tests;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Permissions {
     trading_halted: bool,
+    halted_pairs: BTreeSet<OrderBookId>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -105,13 +107,32 @@ impl Permissions {
         self.trading_halted
     }
 
+    pub fn set_pair_halted(&mut self, book: OrderBookId, halted: bool) {
+        if halted {
+            self.halted_pairs.insert(book);
+        } else {
+            self.halted_pairs.remove(&book);
+        }
+    }
+
+    pub fn is_pair_halted(&self, book: &OrderBookId) -> bool {
+        self.halted_pairs.contains(book)
+    }
+
+    pub fn halted_pairs(&self) -> impl Iterator<Item = &OrderBookId> {
+        self.halted_pairs.iter()
+    }
+
     pub fn permit_trading(
         &self,
         _caller: Principal,
-        _book: OrderBookId,
+        book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
         if self.trading_halted {
             return Err(UnauthorizedError::TradingHalted);
+        }
+        if self.is_pair_halted(&book) {
+            return Err(UnauthorizedError::PairHalted);
         }
         Ok(SyncPermit(()))
     }
