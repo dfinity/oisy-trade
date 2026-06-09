@@ -86,8 +86,13 @@ fn should_reject_trading_on_halted_pair_only() {
         Err(UnauthorizedError::PairHalted)
     ));
     assert!(permissions.permit_trading(caller, other).is_ok());
-    // A per-pair halt does not stop the matching engine globally.
-    assert!(permissions.permit_matching().is_ok());
+    // The per-pair halt gates matching on the halted book only; every other
+    // book keeps matching.
+    assert!(matches!(
+        permissions.permit_matching(halted),
+        Err(UnauthorizedError::PairHalted)
+    ));
+    assert!(permissions.permit_matching(other).is_ok());
 }
 
 #[test]

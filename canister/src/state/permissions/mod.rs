@@ -150,9 +150,12 @@ impl Permissions {
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_matching(&self, _book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
+    pub fn permit_matching(&self, book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
         if self.trading_halted {
             return Err(UnauthorizedError::TradingHalted);
+        }
+        if self.is_pair_halted(&book) {
+            return Err(UnauthorizedError::PairHalted);
         }
         Ok(SyncPermit(()))
     }

@@ -52,6 +52,8 @@ type AddLimitOrderError = variant {
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
     // Trading is globally halted; no new orders are accepted.
     TradingHalted;
+    // The trading pair is halted; no new orders are accepted on it.
+    PairHalted;
 };
 
 /// Error returned when canceling a limit order fails.

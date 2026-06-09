@@ -75,6 +75,8 @@ pub enum AddLimitOrderError {
     },
     /// Trading is globally halted; no new orders are accepted.
     TradingHalted,
+    /// The trading pair is halted; no new orders are accepted on it.
+    PairHalted,
 }
 
 /// Error returned when canceling a limit order fails.

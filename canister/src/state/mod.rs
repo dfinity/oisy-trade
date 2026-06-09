@@ -1055,6 +1055,7 @@ pub enum AddLimitOrderError {
         required: Quantity,
     },
     TradingHalted,
+    PairHalted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1084,6 +1085,7 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
     fn from(err: permissions::UnauthorizedError) -> Self {
         match err {
             permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
+            permissions::UnauthorizedError::PairHalted => AddLimitOrderError::PairHalted,
             other => panic!("BUG: permit_trading returned unexpected error: {other:?}"),
         }
     }
@@ -1122,6 +1124,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 required: required.into(),
             },
             AddLimitOrderError::TradingHalted => dex_types::AddLimitOrderError::TradingHalted,
+            AddLimitOrderError::PairHalted => dex_types::AddLimitOrderError::PairHalted,
         }
     }
 }
