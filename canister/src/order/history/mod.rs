@@ -141,3 +141,6 @@ impl PartialEq for OrderHistory<ic_stable_structures::VectorMemory> {
 
 #[cfg(test)]
 impl Eq for OrderHistory<ic_stable_structures::VectorMemory> {}
+
+#[cfg(test)]
+mod tests;
