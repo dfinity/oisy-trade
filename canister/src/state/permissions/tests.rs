@@ -72,6 +72,52 @@ fn should_keep_ungated_permits_ok_when_globally_halted() {
 }
 
 #[test]
+fn should_reject_trading_on_halted_pair_only() {
+    let mut permissions = Permissions::default();
+    let caller = Principal::from_slice(&[1]);
+    let halted = OrderBookId::new(0);
+    let other = OrderBookId::new(1);
+    permissions.set_pair_halted(halted, true);
+
+    assert!(permissions.is_pair_halted(&halted));
+    assert!(!permissions.is_pair_halted(&other));
+    assert!(matches!(
+        permissions.permit_trading(caller, halted),
+        Err(UnauthorizedError::PairHalted)
+    ));
+    assert!(permissions.permit_trading(caller, other).is_ok());
+    // A per-pair halt does not stop the matching engine globally.
+    assert!(permissions.permit_matching().is_ok());
+}
+
+#[test]
+fn should_re_enable_trading_after_unhalting_pair() {
+    let mut permissions = Permissions::default();
+    let caller = Principal::from_slice(&[1]);
+    let book = OrderBookId::new(0);
+
+    permissions.set_pair_halted(book, true);
+    permissions.set_pair_halted(book, false);
+
+    assert!(!permissions.is_pair_halted(&book));
+    assert!(permissions.permit_trading(caller, book).is_ok());
+}
+
+#[test]
+fn should_keep_ungated_permits_ok_when_pair_halted() {
+    let mut permissions = Permissions::default();
+    let caller = Principal::from_slice(&[1]);
+    permissions.set_pair_halted(OrderBookId::new(0), true);
+
+    assert!(permissions.permit_deposit(caller).is_ok());
+    assert!(permissions.permit_withdraw(caller).is_ok());
+    assert!(permissions.permit_cancel().is_ok());
+    assert!(permissions.permit_settling().is_ok());
+    assert!(permissions.permit_add_trading_pair().is_ok());
+    assert!(permissions.permit_admin().is_ok());
+}
+
+#[test]
 fn should_re_enable_trading_after_resuming() {
     let mut permissions = Permissions::default();
     let caller = Principal::from_slice(&[1]);
