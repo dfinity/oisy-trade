@@ -66,6 +66,8 @@ pub struct StateSnapshot {
 pub struct PermissionsSnapshot {
     #[n(0)]
     pub trading_halted: bool,
+    #[n(1)]
+    pub halted_pairs: Vec<OrderBookId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -161,6 +163,7 @@ impl StateSnapshot {
             } else {
                 Some(PermissionsSnapshot {
                     trading_halted: permissions.trading_halted(),
+                    halted_pairs: permissions.halted_pairs().copied().collect(),
                 })
             },
         }
@@ -259,6 +262,9 @@ impl From<PermissionsSnapshot> for Permissions {
     fn from(snapshot: PermissionsSnapshot) -> Self {
         let mut permissions = Permissions::default();
         permissions.set_trading_halted(snapshot.trading_halted);
+        for book_id in snapshot.halted_pairs {
+            permissions.set_pair_halted(book_id, true);
+        }
         permissions
     }
 }

@@ -411,6 +411,36 @@ fn should_roundtrip_global_halt_through_snapshot() {
     assert_eq!(state, restored);
 }
 
+/// A non-default `Permissions` with a per-pair halt set round-trips through
+/// the snapshot, and the restored state compares equal to the original.
+#[test]
+fn should_roundtrip_pair_halt_through_snapshot() {
+    let mut state = fresh_state();
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::new(3), true);
+    state
+        .permissions_mut()
+        .set_pair_halted(OrderBookId::new(7), true);
+
+    let snapshot = StateSnapshot::from_state(&state);
+    assert!(snapshot.permissions.is_some());
+
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    assert!(restored.permissions().is_pair_halted(&OrderBookId::new(3)));
+    assert!(restored.permissions().is_pair_halted(&OrderBookId::new(7)));
+    assert!(!restored.permissions().is_pair_halted(&OrderBookId::new(0)));
+    assert_eq!(state, restored);
+}
+
 /// A snapshot written before the `permissions` field existed (the `#[n(10)]`
 /// slot absent) decodes into a snapshot whose `permissions` is `None`, which
 /// rebuilds the default `Permissions` on `into_state`.
