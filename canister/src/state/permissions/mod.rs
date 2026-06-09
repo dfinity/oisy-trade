@@ -5,7 +5,9 @@ use candid::Principal;
 mod tests;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Permissions {}
+pub struct Permissions {
+    trading_halted: bool,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum UnauthorizedError {
@@ -13,6 +15,17 @@ pub enum UnauthorizedError {
     PairHalted,
     AccountFrozen,
     NotController,
+}
+
+impl From<UnauthorizedError> for oisy_trade_types::UnauthorizedError {
+    fn from(err: UnauthorizedError) -> Self {
+        match err {
+            UnauthorizedError::TradingHalted => oisy_trade_types::UnauthorizedError::TradingHalted,
+            UnauthorizedError::PairHalted => oisy_trade_types::UnauthorizedError::PairHalted,
+            UnauthorizedError::AccountFrozen => oisy_trade_types::UnauthorizedError::AccountFrozen,
+            UnauthorizedError::NotController => oisy_trade_types::UnauthorizedError::NotController,
+        }
+    }
 }
 
 /// Proof that a synchronous admission check ran and passed.
@@ -97,15 +110,29 @@ impl PreAsyncPermit {
 }
 
 impl Permissions {
+    pub fn set_trading_halted(&mut self, halted: bool) {
+        self.trading_halted = halted;
+    }
+
+    pub fn trading_halted(&self) -> bool {
+        self.trading_halted
+    }
+
     pub fn permit_trading(
         &self,
         _caller: Principal,
         _book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
+        if self.trading_halted {
+            return Err(UnauthorizedError::TradingHalted);
+        }
         Ok(SyncPermit(()))
     }
 
     pub fn permit_matching(&self, _book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
+        if self.trading_halted {
+            return Err(UnauthorizedError::TradingHalted);
+        }
         Ok(SyncPermit(()))
     }
 

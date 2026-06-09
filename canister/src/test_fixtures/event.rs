@@ -69,6 +69,7 @@ pub enum WorstCaseEvent {
     CancelLimitOrder,
     Matching,
     Settling,
+    SetGlobalHalt,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -83,6 +84,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::CancelLimitOrder(_) => Self::CancelLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
+            EventType::SetGlobalHalt(_) => Self::SetGlobalHalt,
         }
     }
 }
@@ -105,6 +107,7 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => cancel_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
+            Self::SetGlobalHalt => EventType::SetGlobalHalt(true),
         })
     }
 
@@ -125,6 +128,7 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => 36,
             Self::Matching => 10_028,
             Self::Settling => 127_328,
+            Self::SetGlobalHalt => 15,
         }
     }
 }

@@ -4,8 +4,9 @@ use oisy_trade_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
+    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -165,6 +166,16 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
     oisy_trade_canister::add_trading_pair(request, &oisy_trade_canister::IC_RUNTIME)
 }
 
+#[ic_cdk::update]
+fn halt_trading() -> Result<(), UnauthorizedError> {
+    oisy_trade_canister::halt_trading(&oisy_trade_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::update]
+fn resume_trading() -> Result<(), UnauthorizedError> {
+    oisy_trade_canister::resume_trading(&oisy_trade_canister::IC_RUNTIME)
+}
+
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
 #[ic_cdk::query]
 fn get_events(
@@ -306,6 +317,7 @@ fn get_events(
                         .map(map_balance_operation)
                         .collect(),
                 }),
+                EventType::SetGlobalHalt(halted) => event::EventType::SetGlobalHalt(halted),
             },
         }
     }

@@ -103,6 +103,34 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
+#[test]
+fn should_be_a_no_op_when_globally_halted() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    state.permissions_mut().set_trading_halted(true);
+
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+
+    // Crossable orders are left untouched: no matching, no settling.
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Pending));
+    assert!(state.has_pending_orders());
+
+    // Resuming lets the same orders fill.
+    state.permissions_mut().set_trading_halted(false);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
+    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+}
+
 /// Driving the same workload through a single unlimited [`Executor`] run and
 /// through many chunk-size-1 runs must end in the same canister state.
 #[test]
