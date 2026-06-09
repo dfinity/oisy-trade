@@ -404,8 +404,8 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent,
-        WithdrawEvent,
+        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SetPairStatusEvent,
+        SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
@@ -820,6 +820,13 @@ pub mod arbitrary {
         )
     }
 
+    pub fn arb_set_pair_status_event() -> impl Strategy<Value = SetPairStatusEvent> {
+        (any::<u64>(), any::<bool>()).prop_map(|(book_id, halted)| SetPairStatusEvent {
+            book_id: order::OrderBookId::new(book_id),
+            halted,
+        })
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_arg().prop_map(EventType::Init),
@@ -831,6 +838,8 @@ pub mod arbitrary {
             arb_cancel_limit_order_event().prop_map(EventType::CancelLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
+            any::<bool>().prop_map(EventType::SetGlobalHalt),
+            arb_set_pair_status_event().prop_map(EventType::SetPairStatus),
         ]
     }
 
