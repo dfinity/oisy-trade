@@ -238,6 +238,22 @@ impl<R: Runtime> DexClient<R> {
             .await
             .unwrap()
     }
+
+    /// Freeze a single account on the DEX canister. Only callable by a controller.
+    pub async fn freeze_account(&self, account: Principal) -> Result<(), UnauthorizedError> {
+        self.runtime
+            .call(self.dex_canister, "freeze_account", (account,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Unfreeze a single account on the DEX canister. Only callable by a controller.
+    pub async fn unfreeze_account(&self, account: Principal) -> Result<(), UnauthorizedError> {
+        self.runtime
+            .call(self.dex_canister, "unfreeze_account", (account,), 0)
+            .await
+            .unwrap()
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

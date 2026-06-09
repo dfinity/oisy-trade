@@ -89,6 +89,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             DepositError::AmountExceedsMaximum
             | DepositError::UnsupportedToken { .. }
             | DepositError::OperationInProgress
+            | DepositError::AccountFrozen
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
             | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
                 ..
@@ -125,7 +126,8 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             | WithdrawError::UnsupportedToken { .. }
             | WithdrawError::InsufficientBalance { .. }
             | WithdrawError::AmountTooSmall { .. }
-            | WithdrawError::OperationInProgress => {
+            | WithdrawError::OperationInProgress
+            | WithdrawError::AccountFrozen => {
                 // do not log errors due to user actions
             }
         },
@@ -200,6 +202,16 @@ fn set_pair_status(
         });
     }
     Ok(())
+}
+
+#[ic_cdk::update]
+fn freeze_account(account: candid::Principal) -> Result<(), UnauthorizedError> {
+    dex_canister::freeze_account(account, &dex_canister::IC_RUNTIME)
+}
+
+#[ic_cdk::update]
+fn unfreeze_account(account: candid::Principal) -> Result<(), UnauthorizedError> {
+    dex_canister::unfreeze_account(account, &dex_canister::IC_RUNTIME)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
@@ -340,6 +352,12 @@ fn get_events(
                     event::EventType::SetPairStatus(event::SetPairStatusEvent {
                         book_id: e.book_id.get(),
                         halted: e.halted,
+                    })
+                }
+                EventType::SetAccountFrozen(e) => {
+                    event::EventType::SetAccountFrozen(event::SetAccountFrozenEvent {
+                        account: e.account,
+                        frozen: e.frozen,
                     })
                 }
             },

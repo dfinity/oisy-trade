@@ -21,6 +21,7 @@ use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use crate::user::UserRegistry;
 use candid::Nat;
+use candid::Principal;
 use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
@@ -68,7 +69,12 @@ pub struct PermissionsSnapshot {
     pub trading_halted: bool,
     #[n(1)]
     pub halted_pairs: Vec<OrderBookId>,
+    #[n(2)]
+    pub frozen_accounts: Vec<FrozenAccountEntry>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct FrozenAccountEntry(#[cbor(n(0), with = "icrc_cbor::principal")] pub Principal);
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct TokenEntry {
@@ -164,6 +170,10 @@ impl StateSnapshot {
                 Some(PermissionsSnapshot {
                     trading_halted: permissions.trading_halted(),
                     halted_pairs: permissions.halted_pairs().copied().collect(),
+                    frozen_accounts: permissions
+                        .frozen_accounts()
+                        .map(|account| FrozenAccountEntry(*account))
+                        .collect(),
                 })
             },
         }
@@ -264,6 +274,9 @@ impl From<PermissionsSnapshot> for Permissions {
         permissions.set_trading_halted(snapshot.trading_halted);
         for book_id in snapshot.halted_pairs {
             permissions.set_pair_halted(book_id, true);
+        }
+        for FrozenAccountEntry(account) in snapshot.frozen_accounts {
+            permissions.set_account_frozen(account, true);
         }
         permissions
     }

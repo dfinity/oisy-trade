@@ -87,3 +87,57 @@ pair's token. Halt just that pair so trading on every other pair continues
 uninterrupted, investigate, and resume the pair once it is safe. Because
 cancels and withdrawals stay open, users holding orders on the halted pair can
 still exit.
+
+## Per-account freeze
+
+### Mechanism
+
+A per-account freeze blocks a single principal's caller-facing actions while
+leaving every other account untouched:
+
+- `add_limit_order` is rejected with `AccountFrozen`.
+- `deposit` and `withdraw` are rejected with `AccountFrozen`.
+
+What stays open for the frozen account:
+
+- `cancel_limit_order` — the account can always cancel its own resting orders.
+- All read endpoints (e.g. `get_balances`, `get_order_status`).
+
+The freeze deliberately does **not** touch matching: a frozen account's
+existing resting orders keep filling for counterparties. Proceeds from those
+fills land in the frozen account's balance and are visible via `get_balances`,
+but stay non-withdrawable until the account is unfrozen. This keeps the order
+book honest — a counterparty's incoming order never silently fails to match
+against resting liquidity just because the resting account was frozen.
+
+Because `deposit` and `withdraw` cross an asynchronous ledger call, the freeze
+is checked twice: once before the ledger call (which rejects the operation
+outright) and once after it returns. If a freeze lands while a deposit or
+withdrawal is mid-flight, the post-call re-check cannot undo the committed
+ledger transfer — the operation completes, but the race is recorded in the
+canister logs for visibility.
+
+Frozen accounts are tracked as a set of principals. Each change is recorded as
+a `SetAccountFrozen` event in the audit log, so it is reproduced exactly on
+replay, and the set is included in the upgrade snapshot, so it survives
+canister upgrades.
+
+### Who may invoke it
+
+Only a **canister controller**. Non-controller callers are rejected with
+`NotController`.
+
+- `freeze_account(principal)` — freeze one account.
+- `unfreeze_account(principal)` — restore one account's full access.
+
+Both endpoints are idempotent: freezing an already-frozen account (or
+unfreezing one that is not frozen) is a no-op success that still emits an event
+for the audit trail.
+
+### When to use it
+
+Use a per-account freeze to contain a single principal rather than a market or
+the whole exchange — for example, an account flagged by **compliance** or one
+identified as an **attacker**. Freeze the account to stop it opening new orders
+and moving funds in or out, while its resting liquidity keeps honouring
+counterparties. Investigate, then `unfreeze_account` once it is cleared.

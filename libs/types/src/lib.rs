@@ -77,6 +77,8 @@ pub enum AddLimitOrderError {
     TradingHalted,
     /// The trading pair is halted; no new orders are accepted on it.
     PairHalted,
+    /// The caller's account is frozen; no new orders are accepted.
+    AccountFrozen,
 }
 
 /// Error returned when canceling a limit order fails.
@@ -328,6 +330,8 @@ pub enum DepositError {
     },
     /// The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError(LedgerTransferFromError),
+    /// The caller's account is frozen; deposits are rejected.
+    AccountFrozen,
 }
 
 /// Errors that can be returned by the ICRC-2 `transfer_from` endpoint on a ledger canister.
@@ -474,6 +478,8 @@ pub enum WithdrawError {
     },
     /// The icrc1_transfer call to the token ledger returned an error.
     LedgerError(LedgerTransferError),
+    /// The caller's account is frozen; withdrawals are rejected.
+    AccountFrozen,
 }
 
 /// Errors that can be returned by the ICRC-1 `transfer` endpoint on a ledger canister.

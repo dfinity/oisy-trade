@@ -1056,6 +1056,7 @@ pub enum AddLimitOrderError {
     },
     TradingHalted,
     PairHalted,
+    AccountFrozen,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1086,7 +1087,10 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
         match err {
             permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
             permissions::UnauthorizedError::PairHalted => AddLimitOrderError::PairHalted,
-            other => panic!("BUG: permit_trading returned unexpected error: {other:?}"),
+            permissions::UnauthorizedError::AccountFrozen => AddLimitOrderError::AccountFrozen,
+            permissions::UnauthorizedError::NotController => {
+                panic!("BUG: permit_trading never returns NotController")
+            }
         }
     }
 }
@@ -1125,6 +1129,7 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
             },
             AddLimitOrderError::TradingHalted => dex_types::AddLimitOrderError::TradingHalted,
             AddLimitOrderError::PairHalted => dex_types::AddLimitOrderError::PairHalted,
+            AddLimitOrderError::AccountFrozen => dex_types::AddLimitOrderError::AccountFrozen,
         }
     }
 }

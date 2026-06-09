@@ -22,6 +22,7 @@ pub enum EventType {
     Withdraw(WithdrawEvent),
     SetGlobalHalt(bool),
     SetPairStatus(SetPairStatusEvent),
+    SetAccountFrozen(SetAccountFrozenEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -70,6 +71,12 @@ pub struct CancelLimitOrderEvent {
 pub struct SetPairStatusEvent {
     pub book_id: u64,
     pub halted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SetAccountFrozenEvent {
+    pub account: Principal,
+    pub frozen: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

@@ -248,7 +248,7 @@ pub async fn deposit(
     }
 
     let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
-        .expect("BUG: deposit is never gated in this build");
+        .map_err(|_| DepositError::AccountFrozen)?;
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -302,7 +302,7 @@ pub async fn withdraw(
     })?;
 
     let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
-        .expect("BUG: withdraw is never gated in this build");
+        .map_err(|_| WithdrawError::AccountFrozen)?;
 
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
@@ -538,6 +538,44 @@ pub fn set_pair_status(
         );
         Ok(())
     })
+}
+
+pub fn freeze_account(
+    account: candid::Principal,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    set_account_frozen(account, true, runtime)
+}
+
+pub fn unfreeze_account(
+    account: candid::Principal,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    set_account_frozen(account, false, runtime)
+}
+
+fn set_account_frozen(
+    account: candid::Principal,
+    frozen: bool,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
+        return Err(state::permissions::UnauthorizedError::NotController.into());
+    }
+    state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_admin()
+            .expect("BUG: admin is never gated in this build");
+        let event = state::event::SetAccountFrozenEvent { account, frozen };
+        state::audit::process_event(
+            s,
+            state::event::EventType::SetAccountFrozen(event),
+            permit.into(),
+            runtime,
+        );
+    });
+    Ok(())
 }
 
 fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {

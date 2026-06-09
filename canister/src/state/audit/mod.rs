@@ -3,9 +3,9 @@ use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    SetPairStatusEvent, WithdrawEvent,
+    SetAccountFrozenEvent, SetPairStatusEvent, WithdrawEvent,
 };
-use crate::state::permissions::Permit;
+use crate::state::permissions::{Permit, Reconciliation};
 use crate::storage;
 use crate::user::UserRegistry;
 use crate::{Runtime, Timestamp};
@@ -19,9 +19,10 @@ mod tests;
 pub fn process_event<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: EventType,
-    _permit: Permit,
+    permit: Permit,
     runtime: &impl Runtime,
 ) {
+    log_if_raced(&permit, &payload);
     let timestamp = runtime.time();
     apply_state_transition(state, &payload, timestamp, StableMemoryOptions::Write);
     storage::record_event(timestamp, payload);
@@ -37,8 +38,25 @@ pub fn process_event<MH: Memory, MB: Memory>(
 /// Unlike [`process_event`], the timestamp is read inline rather than captured
 /// into a local: this path applies no state transition, so there is no
 /// shared-timestamp invariant between a mutation and its event-log entry.
-pub fn record_event(payload: EventType, _permit: Permit, runtime: &impl Runtime) {
+pub fn record_event(payload: EventType, permit: Permit, runtime: &impl Runtime) {
+    log_if_raced(&permit, &payload);
     storage::record_event(runtime.time(), payload);
+}
+
+/// Observability hook for async ops that committed their ledger effect while a
+/// freeze landed mid-await. `Permit::Async(Raced)` means the deposit/withdraw
+/// completed for an account that is now frozen; this never blocks (the effect
+/// is irreversible) but is logged so the race is visible. Keeping the policy
+/// here, rather than per-endpoint, concentrates it in one place.
+fn log_if_raced(permit: &Permit, payload: &EventType) {
+    if let Permit::Async(post) = permit
+        && matches!(post.verdict(), Reconciliation::Raced)
+    {
+        canlog::log!(
+            dex_types_internal::log::Priority::Info,
+            "[freeze]: async op completed for an account frozen mid-await: {payload:?}"
+        );
+    }
 }
 
 fn apply_state_transition<MH: Memory, MB: Memory>(
@@ -144,6 +162,11 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::SetPairStatus(SetPairStatusEvent { book_id, halted }) => {
             state.permissions_mut().set_pair_halted(*book_id, *halted);
+        }
+        EventType::SetAccountFrozen(SetAccountFrozenEvent { account, frozen }) => {
+            state
+                .permissions_mut()
+                .set_account_frozen(*account, *frozen);
         }
     }
 }

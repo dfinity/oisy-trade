@@ -309,6 +309,23 @@ impl Scenario {
         self
     }
 
+    /// Applies a `SetAccountFrozen` mutation on the primary path and records
+    /// the matching `SetAccountFrozen` event as the expected replay payload.
+    fn with_set_account_frozen(mut self, account: Principal, frozen: bool) -> Self {
+        self.state
+            .permissions_mut()
+            .set_account_frozen(account, frozen);
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::SetAccountFrozen(crate::state::event::SetAccountFrozenEvent {
+                account,
+                frozen,
+            }),
+        });
+        self
+    }
+
     fn assert_replay_matches(self) {
         // Replay into *fresh* stable structures (not clones of `normal`'s) so
         // the assertion also validates that replay reconstructs stable memory,
@@ -712,6 +729,25 @@ fn should_apply_unhalt_after_pair_halt() {
             .permissions()
             .is_pair_halted(&OrderBookId::ZERO)
     );
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_set_account_frozen() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_account_frozen(user_1(), true);
+    assert!(scenario.state.permissions().is_frozen(&user_1()));
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_unfreeze_after_freeze() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_account_frozen(user_1(), true)
+        .with_set_account_frozen(user_1(), false);
+    assert!(!scenario.state.permissions().is_frozen(&user_1()));
     scenario.assert_replay_matches();
 }
 

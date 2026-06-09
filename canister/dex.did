@@ -54,6 +54,8 @@ type AddLimitOrderError = variant {
     TradingHalted;
     // The trading pair is halted; no new orders are accepted on it.
     PairHalted;
+    // The caller's account is frozen; no new orders are accepted.
+    AccountFrozen;
 };
 
 /// Error returned when canceling a limit order fails.
@@ -238,6 +240,8 @@ type DepositError = variant {
     CallFailed : record { ledger : principal; method : text; reason : text };
     // The icrc2_transfer_from call to the token ledger returned an error.
     LedgerError : LedgerTransferFromError;
+    // The caller's account is frozen; deposits are rejected.
+    AccountFrozen;
 };
 
 // Request to deposit tokens into the DEX.
@@ -302,6 +306,8 @@ type WithdrawError = variant {
     CallFailed : record { ledger : principal; method : text; reason : text };
     // The icrc1_transfer call to the token ledger returned an error.
     LedgerError : LedgerTransferError;
+    // The caller's account is frozen; withdrawals are rejected.
+    AccountFrozen;
 };
 
 type WithdrawResult = variant { Ok : WithdrawResponse; Err : WithdrawError };
@@ -509,6 +515,12 @@ type SetPairStatusEvent = record {
     halted : bool;
 };
 
+// Event payload recording a per-account freeze status change.
+type SetAccountFrozenEvent = record {
+    account : principal;
+    frozen : bool;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -559,6 +571,7 @@ type EventType = variant {
     Withdraw : WithdrawEvent;
     SetGlobalHalt : bool;
     SetPairStatus : SetPairStatusEvent;
+    SetAccountFrozen : SetAccountFrozenEvent;
 };
 
 // A canister event with a timestamp.
@@ -682,6 +695,18 @@ service : (DexArg) -> {
     // unaffected. Cancels remain open. Only callable by a controller.
     // Idempotent — setting a pair to its current status is a no-op success.
     set_pair_status : (TradingPair, PairStatus) -> (SetPairStatusResult);
+
+    // Freeze a single account: block its add_limit_order, deposit, and
+    // withdraw. Its cancel_limit_order and reads stay open, and its resting
+    // orders keep filling for counterparties (proceeds land in the frozen,
+    // non-withdrawable balance). Only callable by a controller. Idempotent —
+    // freezing an already-frozen account is a no-op success.
+    freeze_account : (principal) -> (UnauthorizedResult);
+
+    // Unfreeze a previously frozen account, restoring its full access. Only
+    // callable by a controller. Idempotent — unfreezing an account that is not
+    // frozen is a no-op success.
+    unfreeze_account : (principal) -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

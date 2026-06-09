@@ -5,7 +5,8 @@ use crate::order::{
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
-    Event, EventType, MatchingEvent, SetPairStatusEvent, SettlingEvent, WithdrawEvent,
+    Event, EventType, MatchingEvent, SetAccountFrozenEvent, SetPairStatusEvent, SettlingEvent,
+    WithdrawEvent,
 };
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
@@ -69,6 +70,7 @@ pub enum WorstCaseEvent {
     Settling,
     SetGlobalHalt,
     SetPairStatus,
+    SetAccountFrozen,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -85,6 +87,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Settling(_) => Self::Settling,
             EventType::SetGlobalHalt(_) => Self::SetGlobalHalt,
             EventType::SetPairStatus(_) => Self::SetPairStatus,
+            EventType::SetAccountFrozen(_) => Self::SetAccountFrozen,
         }
     }
 }
@@ -112,6 +115,10 @@ impl WorstCaseEvent {
                 book_id: OrderBookId::new(u64::MAX),
                 halted: true,
             }),
+            Self::SetAccountFrozen => EventType::SetAccountFrozen(SetAccountFrozenEvent {
+                account: max_principal(0),
+                frozen: true,
+            }),
         })
     }
 
@@ -134,6 +141,7 @@ impl WorstCaseEvent {
             Self::Settling => 127_328,
             Self::SetGlobalHalt => 15,
             Self::SetPairStatus => 26,
+            Self::SetAccountFrozen => 47,
         }
     }
 }

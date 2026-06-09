@@ -9,6 +9,7 @@ mod tests;
 pub struct Permissions {
     trading_halted: bool,
     halted_pairs: BTreeSet<OrderBookId>,
+    frozen_accounts: BTreeSet<Principal>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,11 +51,7 @@ pub struct SyncPermit(());
 /// is to ask [`Permissions`] via `permit_deposit` / `permit_withdraw`.
 #[must_use]
 pub struct PreAsyncPermit {
-    // TODO(DEFI-2849): `reconcile` reads these to re-check the freeze once the
-    // freeze check lands (PR 4); unused while reconcile is always `Clean`.
-    #[allow(dead_code)]
     caller: Principal,
-    #[allow(dead_code)]
     kind: AsyncKind,
 }
 
@@ -64,12 +61,10 @@ pub struct PreAsyncPermit {
 /// persist a deposit/withdraw. Carries the reconciliation verdict so the policy
 /// for a mid-await permission change lives in one place (the recorder).
 pub struct PostAsyncPermit {
-    // TODO(DEFI-2849): the recorder reads this verdict to emit the `Raced`
-    // observability log once the freeze check lands (PR 4); always `Clean` here.
-    #[allow(dead_code)]
     verdict: Reconciliation,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum AsyncKind {
     Deposit,
     Withdraw,
@@ -78,9 +73,35 @@ pub enum AsyncKind {
 /// Whether the permission state changed across the `await`. `Raced` means the
 /// caller was frozen mid-await; the external effect already committed, so it is
 /// flagged, never reverted.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Reconciliation {
     Clean,
     Raced,
+}
+
+impl PreAsyncPermit {
+    pub fn kind(&self) -> &AsyncKind {
+        &self.kind
+    }
+
+    /// Re-checks the caller's permission after the `await`. Observational only:
+    /// the ledger effect already committed, so it never denies — it can only
+    /// flag a mid-await permission change as [`Reconciliation::Raced`]: `Raced`
+    /// iff the caller is now frozen, `Clean` otherwise.
+    pub fn reconcile(self, permissions: &Permissions) -> PostAsyncPermit {
+        let verdict = if permissions.is_frozen(&self.caller) {
+            Reconciliation::Raced
+        } else {
+            Reconciliation::Clean
+        };
+        PostAsyncPermit { verdict }
+    }
+}
+
+impl PostAsyncPermit {
+    pub fn verdict(&self) -> &Reconciliation {
+        &self.verdict
+    }
 }
 
 pub enum Permit {
@@ -97,17 +118,6 @@ impl From<SyncPermit> for Permit {
 impl From<PostAsyncPermit> for Permit {
     fn from(permit: PostAsyncPermit) -> Self {
         Permit::Async(permit)
-    }
-}
-
-impl PreAsyncPermit {
-    /// Re-checks the caller's permission after the `await`. Observational only:
-    /// the ledger effect already committed, so it never denies — it can only
-    /// flag a mid-await permission change as [`Reconciliation::Raced`].
-    pub fn reconcile(self, _permissions: &Permissions) -> PostAsyncPermit {
-        PostAsyncPermit {
-            verdict: Reconciliation::Clean,
-        }
     }
 }
 
@@ -136,11 +146,30 @@ impl Permissions {
         self.halted_pairs.iter()
     }
 
+    pub fn set_account_frozen(&mut self, account: Principal, frozen: bool) {
+        if frozen {
+            self.frozen_accounts.insert(account);
+        } else {
+            self.frozen_accounts.remove(&account);
+        }
+    }
+
+    pub fn is_frozen(&self, caller: &Principal) -> bool {
+        self.frozen_accounts.contains(caller)
+    }
+
+    pub fn frozen_accounts(&self) -> impl Iterator<Item = &Principal> {
+        self.frozen_accounts.iter()
+    }
+
     pub fn permit_trading(
         &self,
-        _caller: Principal,
+        caller: Principal,
         book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
+        if self.is_frozen(&caller) {
+            return Err(UnauthorizedError::AccountFrozen);
+        }
         if self.trading_halted {
             return Err(UnauthorizedError::TradingHalted);
         }
@@ -161,6 +190,9 @@ impl Permissions {
     }
 
     pub fn permit_deposit(&self, caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
+        if self.is_frozen(&caller) {
+            return Err(UnauthorizedError::AccountFrozen);
+        }
         Ok(PreAsyncPermit {
             caller,
             kind: AsyncKind::Deposit,
@@ -168,6 +200,9 @@ impl Permissions {
     }
 
     pub fn permit_withdraw(&self, caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
+        if self.is_frozen(&caller) {
+            return Err(UnauthorizedError::AccountFrozen);
+        }
         Ok(PreAsyncPermit {
             caller,
             kind: AsyncKind::Withdraw,

@@ -45,6 +45,8 @@ pub enum EventType {
     SetGlobalHalt(#[n(0)] bool),
     #[n(10)]
     SetPairStatus(#[n(0)] SetPairStatusEvent),
+    #[n(11)]
+    SetAccountFrozen(#[n(0)] SetAccountFrozenEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -186,6 +188,14 @@ pub struct SetPairStatusEvent {
     pub book_id: OrderBookId,
     #[n(1)]
     pub halted: bool,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct SetAccountFrozenEvent {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    pub account: Principal,
+    #[n(1)]
+    pub frozen: bool,
 }
 
 impl Storable for Event {

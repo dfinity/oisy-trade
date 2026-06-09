@@ -2812,3 +2812,275 @@ mod pair_halt {
         setup.drop().await;
     }
 }
+
+mod account_freeze {
+    use assert_matches::assert_matches;
+    use candid::{Nat, Principal};
+    use dex_int_tests::Setup;
+    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_types::{
+        AddLimitOrderError, Balance, DepositError, DepositRequest, LimitOrderRequest, OrderStatus,
+        Side, UnauthorizedError, WithdrawError, WithdrawRequest,
+    };
+
+    /// A frozen account's `add_limit_order`, `withdraw`, and `deposit` (ICRC-2
+    /// pull) all fail with `AccountFrozen`, while its `cancel_limit_order` and
+    /// read endpoints stay open.
+    #[tokio::test]
+    async fn should_block_frozen_account_but_keep_cancel_and_reads_open() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.dex_client();
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        // Fund enough for a resting order, a second order attempt while frozen
+        // (so the freeze check is reached *after* balance validation), and a
+        // free balance left over to attempt a withdrawal.
+        let free_extra = 5_000_000u64;
+        let deposit_amount = 2 * order_cost + free_extra;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(deposit_amount + 4 * QUOTE_LEDGER_FEE)
+            .approve(deposit_amount + 2 * QUOTE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price,
+            quantity: Nat::from(quantity),
+        };
+
+        // Place a resting order before the freeze so we can cancel it after.
+        let resting_id = client.add_limit_order(order.clone()).await.unwrap();
+        setup.env().tick().await;
+
+        // Freeze the user.
+        assert_eq!(controller_client.freeze_account(user).await, Ok(()));
+
+        // New orders are rejected.
+        assert_eq!(
+            client.add_limit_order(order).await,
+            Err(AddLimitOrderError::AccountFrozen)
+        );
+
+        // Withdrawals are rejected.
+        assert_eq!(
+            client
+                .withdraw(WithdrawRequest {
+                    token_id: quote.clone(),
+                    amount: Nat::from(free_extra),
+                })
+                .await,
+            Err(WithdrawError::AccountFrozen)
+        );
+
+        // Deposits (ICRC-2 pull) are rejected pre-await. The user still has an
+        // approved allowance from the funding step.
+        assert_eq!(
+            client
+                .deposit(DepositRequest {
+                    token_id: quote.clone(),
+                    amount: Nat::from(QUOTE_LEDGER_FEE),
+                })
+                .await,
+            Err(DepositError::AccountFrozen)
+        );
+
+        // Cancels stay open.
+        let canceled = client.cancel_limit_order(resting_id).await.unwrap();
+        assert_matches!(canceled.status, OrderStatus::Canceled(_));
+
+        // Reads stay open.
+        assert!(client.get_balance(quote).await.is_ok());
+
+        // Unfreezing restores access.
+        assert_eq!(controller_client.unfreeze_account(user).await, Ok(()));
+        client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .expect("orders accepted again after unfreeze");
+
+        setup.drop().await;
+    }
+
+    /// A frozen account's resting order is still matched by another user's
+    /// incoming order; the proceeds land in the frozen account's balance
+    /// (visible via `get_balances`) but stay non-withdrawable.
+    #[tokio::test]
+    async fn should_keep_frozen_account_resting_orders_matchable() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let frozen = Principal::from_slice(&[0x01]);
+        let frozen_client = setup.dex_client_with_caller(frozen);
+        let counterparty = Principal::from_slice(&[0x02]);
+        let counterparty_client = setup.dex_client_with_caller(counterparty);
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let required_quote = price * quantity;
+        let required_base = quantity;
+
+        // The to-be-frozen user rests a buy (reserves quote); the counterparty
+        // sells (reserves base) to match it.
+        setup
+            .deposit_flow(frozen, setup.quote_token_id())
+            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote + QUOTE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        setup
+            .deposit_flow(counterparty, setup.base_token_id())
+            .mint(required_base + 2 * BASE_LEDGER_FEE)
+            .approve(required_base + BASE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+
+        // Place the resting buy, then freeze the account.
+        let buy_id = frozen_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+        assert_eq!(controller_client.freeze_account(frozen).await, Ok(()));
+
+        // The counterparty's sell crosses the frozen account's resting buy.
+        let sell_id = counterparty_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price,
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+
+        // Both orders filled despite the freeze.
+        assert_eq!(
+            setup.dex_client().get_order_status(buy_id).await,
+            OrderStatus::Filled,
+            "the frozen account's resting order must still fill"
+        );
+        assert_eq!(
+            setup.dex_client().get_order_status(sell_id).await,
+            OrderStatus::Filled
+        );
+
+        // Proceeds (base) landed in the frozen account's balance.
+        assert_eq!(
+            frozen_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required_base.into(),
+                reserved: 0u64.into()
+            },
+            "fill proceeds land in the frozen account's free balance"
+        );
+
+        // But they remain non-withdrawable while frozen.
+        assert_eq!(
+            frozen_client
+                .withdraw(WithdrawRequest {
+                    token_id: setup.base_token_id(),
+                    amount: Nat::from(required_base),
+                })
+                .await,
+            Err(WithdrawError::AccountFrozen),
+            "proceeds remain non-withdrawable while frozen"
+        );
+
+        setup.drop().await;
+    }
+
+    /// `freeze_account` and `unfreeze_account` reject non-controller callers
+    /// with `NotController`.
+    #[tokio::test]
+    async fn should_reject_non_controller_callers() {
+        let setup = Setup::new().await;
+        let target = Principal::from_slice(&[0x02]);
+        let user_client = setup.dex_client_with_caller(Principal::from_slice(&[0x01]));
+
+        assert_eq!(
+            user_client.freeze_account(target).await,
+            Err(UnauthorizedError::NotController)
+        );
+        assert_eq!(
+            user_client.unfreeze_account(target).await,
+            Err(UnauthorizedError::NotController)
+        );
+
+        setup.drop().await;
+    }
+
+    /// The frozen-accounts set is part of the upgrade snapshot: after freezing
+    /// an account and upgrading, its orders stay rejected until it is unfrozen.
+    #[tokio::test]
+    async fn should_preserve_freeze_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.dex_client();
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        let price = 100u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        assert_eq!(controller_client.freeze_account(user).await, Ok(()));
+        setup.upgrade(None).await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price,
+            quantity: Nat::from(quantity),
+        };
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::AccountFrozen),
+            "freeze must survive the upgrade"
+        );
+
+        assert_eq!(controller_client.unfreeze_account(user).await, Ok(()));
+        client
+            .add_limit_order(order)
+            .await
+            .expect("orders accepted after unfreeze");
+
+        setup.drop().await;
+    }
+}
