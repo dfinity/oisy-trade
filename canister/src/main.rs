@@ -185,6 +185,14 @@ fn resume_trading() -> Result<(), UnauthorizedError> {
     Ok(())
 }
 
+#[ic_cdk::update]
+fn set_pair_status(
+    pair: dex_types::TradingPair,
+    status: dex_types::PairStatus,
+) -> Result<(), dex_types::SetPairStatusError> {
+    dex_canister::set_pair_status(pair, status, &dex_canister::IC_RUNTIME)
+}
+
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
 #[ic_cdk::query]
 fn get_events(

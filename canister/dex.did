@@ -391,6 +391,24 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
+// Status of a trading pair.
+type PairStatus = variant {
+    // The pair accepts new orders and is matched by the engine.
+    Active;
+    // The pair rejects new orders and is skipped by the matching engine.
+    Halted;
+};
+
+// Error returned by the set_pair_status endpoint.
+type SetPairStatusError = variant {
+    // The caller is not a controller of the canister.
+    NotController;
+    // The requested trading pair is not registered.
+    UnknownTradingPair;
+};
+
+type SetPairStatusResult = variant { Ok : null; Err : SetPairStatusError };
+
 // Error returned by controller-gated endpoints when the caller is not
 // authorized to perform the requested action.
 type UnauthorizedError = variant {
@@ -658,6 +676,12 @@ service : (DexArg) -> {
     // Only callable by a controller. Idempotent — resuming an already-active
     // DEX succeeds.
     resume_trading : () -> (UnauthorizedResult);
+
+    // Set the halt status of a single trading pair: a halted pair rejects new
+    // orders and is skipped by the matching engine, while other pairs are
+    // unaffected. Cancels remain open. Only callable by a controller.
+    // Idempotent — setting a pair to its current status is a no-op success.
+    set_pair_status : (TradingPair, PairStatus) -> (SetPairStatusResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

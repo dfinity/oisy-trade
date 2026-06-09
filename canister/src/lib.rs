@@ -4,8 +4,9 @@ use dex_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderStatus, PairStatus, PriceLevel, SetPairStatusError, Token, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -507,6 +508,36 @@ pub fn halt_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
 
 pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
     set_global_halt(false, runtime)
+}
+
+pub fn set_pair_status(
+    pair: TradingPair,
+    status: PairStatus,
+    runtime: &impl Runtime,
+) -> Result<(), SetPairStatusError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
+        return Err(SetPairStatusError::NotController);
+    }
+    let internal_pair = order::TradingPair::from(pair);
+    let halted = matches!(status, PairStatus::Halted);
+    state::with_state_mut(|s| {
+        let book_id = *s
+            .trading_pairs()
+            .get_book_id(&internal_pair)
+            .ok_or(SetPairStatusError::UnknownTradingPair)?;
+        let permit = s
+            .permissions()
+            .permit_admin()
+            .expect("BUG: admin is never gated in this build");
+        let event = state::event::SetPairStatusEvent { book_id, halted };
+        state::audit::process_event(
+            s,
+            state::event::EventType::SetPairStatus(event),
+            permit.into(),
+            runtime,
+        );
+        Ok(())
+    })
 }
 
 fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {

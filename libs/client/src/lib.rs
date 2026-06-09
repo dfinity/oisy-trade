@@ -11,8 +11,9 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderRecord, OrderStatus, PairStatus, SetPairStatusError, Token, TokenId, TradingPair,
+    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -222,6 +223,18 @@ impl<R: Runtime> DexClient<R> {
     pub async fn resume_trading(&self) -> Result<(), UnauthorizedError> {
         self.runtime
             .call(self.dex_canister, "resume_trading", (), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Set the halt status of a single trading pair. Only callable by a controller.
+    pub async fn set_pair_status(
+        &self,
+        pair: TradingPair,
+        status: PairStatus,
+    ) -> Result<(), SetPairStatusError> {
+        self.runtime
+            .call(self.dex_canister, "set_pair_status", (pair, status), 0)
             .await
             .unwrap()
     }
