@@ -519,6 +519,38 @@ mod record_limit_order {
             vec![second, first]
         );
     }
+
+    #[test]
+    fn get_user_orders_joins_pair_and_record_newest_first() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let stranger = Principal::from_slice(&[0x02]);
+
+        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+
+        let orders = state.get_user_orders(&OWNER, None, 10);
+        let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, vec![second, first], "newest first");
+        for (_, joined_pair, record) in &orders {
+            assert_eq!(*joined_pair, pair, "each entry carries its trading pair");
+            assert_eq!(record.owner, OWNER, "each record is owned by the caller");
+        }
+
+        // Cursor pagination: resume after the newest → the older order.
+        assert_eq!(
+            state
+                .get_user_orders(&OWNER, Some(second), 10)
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect::<Vec<_>>(),
+            vec![first]
+        );
+        // Caller isolation, and an unknown cursor yields nothing.
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
+        assert!(state.get_user_orders(&OWNER, Some(first), 10).is_empty());
+    }
 }
 
 mod validate_overflow_invariant {

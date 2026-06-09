@@ -56,7 +56,9 @@ mod add_limit_order {
     use candid::{Encode, Principal};
     use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side};
+    use dex_types::{
+        AddLimitOrderError, Balance, GetMyOrdersArgs, LimitOrderRequest, OrderStatus, Side,
+    };
     use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
@@ -103,6 +105,81 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_my_orders_newest_first_paginated() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.dex_client();
+
+        // Fund enough quote for three resting buys of 1M @ 100 (100M each).
+        let per_order = 100_000_000u64;
+        let total = 3 * per_order;
+        setup
+            .deposit_flow(setup.user(), setup.quote_token_id())
+            .mint(total + 2 * QUOTE_LEDGER_FEE)
+            .approve(total + QUOTE_LEDGER_FEE)
+            .deposit(total)
+            .execute()
+            .await;
+
+        let mut ids = vec![];
+        for _ in 0..3 {
+            ids.push(
+                client
+                    .add_limit_order(LimitOrderRequest {
+                        pair: setup.trading_pair(),
+                        side: Side::Buy,
+                        price: 100,
+                        quantity: 1_000_000u64.into(),
+                    })
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        // Newest first.
+        let orders = client
+            .get_my_orders(GetMyOrdersArgs {
+                after: None,
+                length: 10,
+            })
+            .await;
+        assert_eq!(
+            orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![ids[2].clone(), ids[1].clone(), ids[0].clone()]
+        );
+        for o in &orders {
+            assert_eq!(o.pair, setup.trading_pair());
+            assert_eq!(o.order.owner, setup.user());
+            assert_eq!(o.order.side, Side::Buy);
+            assert_eq!(o.order.price, 100);
+            assert!(o.order.timestamp > 0, "carries a submission timestamp");
+        }
+
+        // Cursor pagination: resume after the newest, take one → the next order.
+        let page = client
+            .get_my_orders(GetMyOrdersArgs {
+                after: Some(ids[2].clone()),
+                length: 1,
+            })
+            .await;
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, ids[1]);
+
+        // A different caller sees none of these orders.
+        let stranger = setup.dex_client_with_caller(Principal::from_slice(&[0xAB]));
+        assert!(
+            stranger
+                .get_my_orders(GetMyOrdersArgs {
+                    after: None,
+                    length: 10,
+                })
+                .await
+                .is_empty()
+        );
 
         setup.drop().await;
     }

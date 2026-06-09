@@ -9,10 +9,10 @@ use candid::{CandidType, Principal};
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -92,6 +92,14 @@ impl<R: Runtime> DexClient<R> {
     pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
         self.runtime
             .call(self.dex_canister, "get_order_status", (order_id,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the caller's orders, newest first, paginated.
+    pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
+        self.runtime
+            .call(self.dex_canister, "get_my_orders", (args,), 0)
             .await
             .unwrap()
     }

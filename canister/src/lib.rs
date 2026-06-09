@@ -1,10 +1,11 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token, TradingPair,
-    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
+    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -336,6 +337,23 @@ pub fn get_fee_balances(
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
     validate_filter_len(filter.as_deref())?;
     Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
+}
+
+pub fn get_my_orders(args: GetMyOrdersArgs, caller: candid::Principal) -> Vec<UserOrder> {
+    let after = args.after.map(|id| {
+        id.parse::<order::OrderId>()
+            .unwrap_or_else(|e| panic!("ERROR: invalid cursor order id: {e}"))
+    });
+    let length = usize::try_from(args.length.min(MAX_ORDERS_PER_RESPONSE))
+        .expect("BUG: length exceeds usize::MAX");
+    state::with_state(|s| s.get_user_orders(&caller, after, length))
+        .into_iter()
+        .map(|(id, pair, record)| UserOrder {
+            id: id.into(),
+            pair: pair.into(),
+            order: record.into(),
+        })
+        .collect()
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
