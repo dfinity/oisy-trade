@@ -75,14 +75,14 @@ impl Storable for OrderRecord {
 /// an index bookkeeping concern, so it lives in this wrapper rather than as a
 /// field on the domain `OrderRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-struct SeqEntry {
+struct SeqOrderRecord {
     #[n(0)]
     seq: u64,
     #[n(1)]
     record: OrderRecord,
 }
 
-impl Storable for SeqEntry {
+impl Storable for SeqOrderRecord {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         minicbor::encode(self, &mut buf).expect("seq entry encoding should always succeed");
@@ -115,7 +115,7 @@ impl Storable for SeqEntry {
 /// * `by_user` is inserted once, then the entry is immutable,
 /// * `orders` is inserted once and values may be updated, e.g. `set_status` and cancel/fill.
 pub struct OrderHistory<M: Memory> {
-    orders: StableBTreeMap<OrderId, SeqEntry, M>,
+    orders: StableBTreeMap<OrderId, SeqOrderRecord, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
 }
 
@@ -147,7 +147,7 @@ impl<M: Memory> OrderHistory<M> {
         bench_scopes!("order_history", "order_history::insert_once");
         let seq = self.orders.len();
         assert_eq!(
-            self.orders.insert(id, SeqEntry { seq, record }),
+            self.orders.insert(id, SeqOrderRecord { seq, record }),
             None,
             "BUG: duplicate order ID {id}"
         );
@@ -204,7 +204,7 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (OrderId, SeqEntry)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (OrderId, SeqOrderRecord)> + '_ {
         self.orders
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
