@@ -180,10 +180,10 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Returns up to `length` of `user`'s orders, newest first, resuming
     /// strictly after the `after` order (a cursor from a prior page) — or from
-    /// the newest when `after` is `None`. An `after` naming an unknown order
-    /// yields an empty page. Each page is an `O(length)` range scan from the
-    /// cursor (no offset to re-walk), so retrieving a whole history is linear
-    /// in its size.
+    /// the newest when `after` is `None`. An `after` that names an unknown order
+    /// — or one that does not belong to `user` — yields an empty page. Each page
+    /// is an `O(length)` range scan from the cursor (no offset to re-walk), so
+    /// retrieving a whole history is linear in its size.
     pub fn orders_after(
         &self,
         user: UserId,
@@ -194,10 +194,21 @@ impl<M: Memory> OrderHistory<M> {
         use std::ops::Bound;
         let lower = match after {
             None => Bound::Included(UserOrderKey::newest(user)),
-            Some(cursor) => match self.orders.get(&cursor) {
-                Some(entry) => Bound::Excluded(UserOrderKey::from_seq(user, entry.seq)),
-                None => return Vec::new(),
-            },
+            Some(cursor) => {
+                let Some(entry) = self.orders.get(&cursor) else {
+                    return Vec::new();
+                };
+                let key = UserOrderKey::from_seq(user, entry.seq);
+                // The cursor must be one of `user`'s own orders: its key must
+                // map back to it in the index. A cursor from another user (or a
+                // forged id) resolves to a seq whose `(user, seq)` key isn't in
+                // the index — reject it rather than scan from a bogus position,
+                // which would silently skip part of the user's own history.
+                if self.by_user.get(&key) != Some(cursor) {
+                    return Vec::new();
+                }
+                Bound::Excluded(key)
+            }
         };
         self.by_user
             .range((lower, Bound::Included(UserOrderKey::oldest(user))))

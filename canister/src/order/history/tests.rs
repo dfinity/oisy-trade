@@ -123,6 +123,23 @@ fn orders_after_unknown_cursor_yields_empty() {
 }
 
 #[test]
+fn orders_after_foreign_cursor_yields_empty() {
+    let mut history = history();
+    let alice = UserId::new(1);
+    let bob = UserId::new(2);
+    history.insert_once(alice, order_id(0), test_record());
+    history.insert_once(bob, order_id(1), test_record());
+    history.insert_once(alice, order_id(2), test_record());
+
+    // bob's order is a real, known `OrderId`, but it isn't alice's — paging
+    // alice's history after it must not skip into the middle of her orders.
+    assert_eq!(
+        history.orders_after(alice, Some(order_id(1)), 10),
+        Vec::<OrderId>::new()
+    );
+}
+
+#[test]
 fn orders_after_isolates_owners() {
     let mut history = history();
     let alice = UserId::new(1);
