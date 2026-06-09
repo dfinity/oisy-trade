@@ -43,6 +43,8 @@ pub enum EventType {
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
     #[n(9)]
     SetGlobalHalt(#[n(0)] bool),
+    #[n(10)]
+    SetPairStatus(#[n(0)] SetPairStatusEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -172,6 +174,14 @@ pub enum BalanceOperation {
 pub struct CancelLimitOrderEvent {
     #[n(0)]
     pub order_id: OrderId,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct SetPairStatusEvent {
+    #[n(0)]
+    pub book_id: OrderBookId,
+    #[n(1)]
+    pub halted: bool,
 }
 
 impl Storable for Event {

@@ -313,6 +313,23 @@ impl Scenario {
         self
     }
 
+    /// Applies a `SetPairStatus` mutation on the primary path and records the
+    /// matching `SetPairStatus` event as the expected replay payload.
+    fn with_set_pair_status(mut self, book_id: OrderBookId, halted: bool) -> Self {
+        self.state
+            .permissions_mut()
+            .set_pair_halted(book_id, halted);
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::SetPairStatus(crate::state::event::SetPairStatusEvent {
+                book_id,
+                halted,
+            }),
+        });
+        self
+    }
+
     fn assert_replay_matches(self) {
         // Replay into *fresh* stable structures (not clones of `normal`'s) so
         // the assertion also validates that replay reconstructs stable memory,
@@ -683,6 +700,35 @@ fn should_apply_resume_after_halt() {
         .with_set_global_halt(true)
         .with_set_global_halt(false);
     assert!(!scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_set_pair_status() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_pair_status(OrderBookId::ZERO, true);
+    assert!(
+        scenario
+            .state
+            .permissions()
+            .is_pair_halted(&OrderBookId::ZERO)
+    );
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_unhalt_after_pair_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_pair_status(OrderBookId::ZERO, true)
+        .with_set_pair_status(OrderBookId::ZERO, false);
+    assert!(
+        !scenario
+            .state
+            .permissions()
+            .is_pair_halted(&OrderBookId::ZERO)
+    );
     scenario.assert_replay_matches();
 }
 

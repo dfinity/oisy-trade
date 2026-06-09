@@ -3,7 +3,7 @@ use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    WithdrawEvent,
+    SetPairStatusEvent, WithdrawEvent,
 };
 use crate::state::permissions::Permit;
 use crate::storage;
@@ -145,6 +145,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::SetGlobalHalt(halted) => {
             state.permissions_mut().set_trading_halted(*halted);
+        }
+        EventType::SetPairStatus(SetPairStatusEvent { book_id, halted }) => {
+            state.permissions_mut().set_pair_halted(*book_id, *halted);
         }
     }
 }
