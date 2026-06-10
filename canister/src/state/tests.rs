@@ -543,12 +543,11 @@ mod validate_overflow_invariant {
     use crate::test_fixtures;
     use crate::test_fixtures::arbitrary::arb_side;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
     use proptest::prelude::{Strategy, any};
     use proptest::{prop_assert_eq, proptest};
-    use std::num::NonZeroU64;
 
     fn arb_tick_aligned_price() -> impl Strategy<Value = Price> {
         let tick = TICK_SIZE.get();
@@ -590,7 +589,9 @@ mod validate_overflow_invariant {
                 FeeRates::default(),
             );
 
-            let fits = price.checked_mul_quantity_scaled(&quantity, NonZeroU64::new(PRICE_SCALE).unwrap()).is_some();
+            let fits = price
+                .checked_mul_quantity_scaled(&quantity, state.base_scale(&pair.base))
+                .is_some();
 
             let result = state.validate_limit_order(
                 Principal::from_slice(&[0x01]),
