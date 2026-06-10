@@ -538,22 +538,31 @@ mod record_limit_order {
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{
-        FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
-    };
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
-    use crate::test_fixtures::{ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata};
+    use crate::test_fixtures::arbitrary::arb_side;
+    use crate::test_fixtures::{
+        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
     use candid::Principal;
-    use proptest::prelude::*;
+    use proptest::prelude::{Strategy, any};
+    use proptest::{prop_assert_eq, proptest};
     use std::num::NonZeroU64;
 
-    fn arb_quantity() -> impl Strategy<Value = Quantity> {
-        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+    fn arb_tick_aligned_price() -> impl Strategy<Value = Price> {
+        let tick = TICK_SIZE.get();
+        (1u64..=u64::MAX / tick).prop_map(move |ticks| Price::new(ticks * tick))
     }
 
-    fn arb_side() -> impl Strategy<Value = Side> {
-        prop_oneof![Just(Side::Buy), Just(Side::Sell)]
+    fn arb_lot_aligned_quantity() -> impl Strategy<Value = Quantity> {
+        let lot = LOT_SIZE.get();
+        (any::<u128>(), any::<u128>()).prop_map(move |(high, low)| {
+            let raw = Quantity::new(high, low);
+            let (_, remainder) = raw.checked_div_rem_u64(lot).unwrap();
+            raw.checked_sub(Quantity::from_u128(remainder as u128))
+                .unwrap()
+        })
     }
 
     proptest! {
@@ -565,15 +574,10 @@ mod validate_overflow_invariant {
         // `AmountExceedsMaximum` exactly when the multiplication would overflow.
         #[test]
         fn validate_rejects_iff_price_times_quantity_overflows(
-            price_raw in 1u64..=u64::MAX,
-            quantity in arb_quantity(),
+            price in arb_tick_aligned_price(),
+            quantity in arb_lot_aligned_quantity(),
             side in arb_side(),
         ) {
-            // tick=lot=1 so tick/lot checks accept any non-zero price/quantity,
-            // leaving `AmountExceedsMaximum` as the only overflow-driven rejection.
-            let tick = TickSize::new(NonZeroU64::new(1).unwrap());
-            let lot = LotSize::new(NonZeroU64::new(1).unwrap());
-
             let mut state = test_fixtures::state();
             let pair = icp_ckbtc_trading_pair();
             state.record_trading_pair(
@@ -581,13 +585,12 @@ mod validate_overflow_invariant {
                 pair.clone(),
                 icp_metadata(),
                 ckbtc_metadata(),
-                tick,
-                lot,
+                TICK_SIZE,
+                LOT_SIZE,
                 FeeRates::default(),
             );
 
-            let price = Price::new(price_raw);
-            let fits = price.checked_mul_quantity(&quantity).is_some();
+            let fits = price.checked_mul_quantity_scaled(&quantity, NonZeroU64::new(PRICE_SCALE).unwrap()).is_some();
 
             let result = state.validate_limit_order(
                 Principal::from_slice(&[0x01]),
@@ -626,6 +629,7 @@ mod settle_fills {
     use ic_stable_structures::VectorMemory;
     use proptest::prelude::*;
     use std::collections::BTreeMap;
+    use std::num::NonZeroU64;
 
     type TestState = State<VectorMemory, VectorMemory>;
 
@@ -1073,32 +1077,20 @@ mod settle_fills {
     fn should_settle_trade_with_quantity_exceeding_u64_max() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let price = 100u64;
+        let price = 100u64 * PRICE_SCALE;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
         let quantity = Quantity::from(u64::from(LOT_SIZE))
             .checked_mul_u64(u64::MAX)
             .unwrap();
 
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            price * PRICE_SCALE,
-            quantity,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            price * PRICE_SCALE,
-            quantity,
-        );
+        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
+        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, quantity);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-        let quote_total = Price::new(price).checked_mul_quantity(&quantity).unwrap();
+        let quote_total = Price::new(price)
+            .checked_mul_quantity_scaled(&quantity, NonZeroU64::new(PRICE_SCALE).unwrap())
+            .unwrap();
 
         // Buyer received all base tokens
         let buyer_base = state.get_balance(&BUYER, &pair.base);
