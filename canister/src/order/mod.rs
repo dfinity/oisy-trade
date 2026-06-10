@@ -19,7 +19,7 @@ use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::fmt;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 use std::str::FromStr;
 
 /// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
@@ -358,16 +358,16 @@ impl From<TradingPair> for dex_types::TradingPair {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
 )]
-pub struct Price(#[n(0)] u64);
+pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_codec")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
 
-    pub fn new(value: u64) -> Self {
+    pub fn new(value: u128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0
     }
 
@@ -383,6 +383,10 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
+    pub(crate) fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
+        quantity.checked_mul_u128(self.0)
+    }
+
     /// Quote-token amount owed for `quantity` base units at this price:
     /// `price × quantity / base_scale`, where `base_scale = 10^base_decimals`.
     ///
@@ -395,8 +399,8 @@ impl Price {
         quantity: &Quantity,
         base_scale: NonZeroU64,
     ) -> Option<Quantity> {
-        let (quote, remainder) = quantity
-            .checked_mul_u64(self.0)?
+        let (quote, remainder) = self
+            .checked_mul_quantity(quantity)?
             .checked_div_rem_u64(base_scale.get())?;
         assert_eq!(
             remainder, 0,
@@ -408,19 +412,19 @@ impl Price {
 
 /// Minimum price increment for a trading pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
-pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
+pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u128")] NonZeroU128);
 
 impl TickSize {
-    pub const fn new(value: NonZeroU64) -> Self {
+    pub const fn new(value: NonZeroU128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0.get()
     }
 }
 
-impl From<TickSize> for u64 {
+impl From<TickSize> for u128 {
     fn from(tick_size: TickSize) -> Self {
         tick_size.get()
     }
@@ -446,13 +450,13 @@ impl From<LotSize> for u64 {
     }
 }
 
-impl From<u64> for Price {
-    fn from(value: u64) -> Self {
+impl From<u128> for Price {
+    fn from(value: u128) -> Self {
         Self(value)
     }
 }
 
-impl From<Price> for u64 {
+impl From<Price> for u128 {
     fn from(price: Price) -> Self {
         price.0
     }
@@ -615,6 +619,50 @@ impl Quantity {
             .checked_add(rhs.high)?
             .checked_add(carry as u128)?;
         Some(Self { high, low })
+    }
+
+    /// Multiply this u256 by a `u128`, checked for overflow past 256 bits.
+    ///
+    /// Schoolbook multiplication on 64-bit limbs (`self` = four limbs, `rhs` =
+    /// two). Each accumulation `r[i+j] + a[i]·b[j] + carry` stays within `u128`
+    /// because `(2^64−1)² + 2·(2^64−1) = 2^128 − 1`. Limbs 4 and 5 must be zero
+    /// for the product to fit a u256.
+    pub fn checked_mul_u128(self, rhs: u128) -> Option<Self> {
+        bench_scopes!("qty", "qty::mul_u128");
+        const MASK: u128 = u64::MAX as u128;
+        let a = [
+            self.low & MASK,
+            self.low >> 64,
+            self.high & MASK,
+            self.high >> 64,
+        ];
+        let b = [rhs & MASK, rhs >> 64];
+        let mut r = [0u128; 6];
+        for i in 0..4 {
+            let mut carry = 0u128;
+            for j in 0..2 {
+                let cur = r[i + j] + a[i] * b[j] + carry;
+                r[i + j] = cur & MASK;
+                carry = cur >> 64;
+            }
+            let mut k = i + 2;
+            while carry != 0 {
+                if k >= 6 {
+                    return None;
+                }
+                let cur = r[k] + carry;
+                r[k] = cur & MASK;
+                carry = cur >> 64;
+                k += 1;
+            }
+        }
+        if r[4] != 0 || r[5] != 0 {
+            return None;
+        }
+        Some(Self {
+            high: r[2] | (r[3] << 64),
+            low: r[0] | (r[1] << 64),
+        })
     }
 
     pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
@@ -782,7 +830,9 @@ impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
     fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
         Ok(Self {
             side: Side::from(request.side),
-            price: Price::from(request.price),
+            price: Price::from(
+                u128::try_from(&request.price.0).map_err(|_| QuantityOverflowError)?,
+            ),
             quantity: Quantity::try_from(request.quantity)?,
         })
     }

@@ -74,7 +74,7 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price,
+            price: candid::Nat::from(price),
             quantity: qty.into(),
         })
         .await
@@ -84,7 +84,7 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: candid::Nat::from(price),
             quantity: qty.into(),
         })
         .await

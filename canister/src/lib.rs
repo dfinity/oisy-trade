@@ -6,7 +6,10 @@ use dex_types::{
     OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token, TradingPair,
     TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
-use std::{num::NonZeroU64, time::Duration};
+use std::{
+    num::{NonZeroU64, NonZeroU128},
+    time::Duration,
+};
 
 pub use execute::EXECUTOR;
 pub use runtime::{IC_RUNTIME, Runtime, Timestamp};
@@ -169,7 +172,7 @@ pub fn get_order_book_depth(
 
 fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLevel {
     PriceLevel {
-        price: price.get(),
+        price: candid::Nat::from(price.get()),
         quantity: quantity.into(),
     }
 }
@@ -197,7 +200,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                         id: dex_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
                     },
-                    tick_size: book.tick_size().get(),
+                    tick_size: candid::Nat::from(book.tick_size().get()),
                     lot_size: book.lot_size().get(),
                 }
             })
@@ -360,8 +363,10 @@ pub fn add_trading_pair(
     if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
+    let tick_size_u128 =
+        u128::try_from(&request.tick_size.0).map_err(|_| AddTradingPairError::InvalidTickSize)?;
     let tick_size = order::TickSize::new(
-        NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
+        NonZeroU128::new(tick_size_u128).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
     let lot_size = order::LotSize::new(
         NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
@@ -395,11 +400,17 @@ pub fn add_trading_pair(
                 decimals: base_decimals,
             },
         )?;
-        // `tick_size` and `lot_size` are u64, so their product fits u128.
-        let tick_lot = tick_size.get() as u128 * lot_size.get() as u128;
-        if !tick_lot.is_multiple_of(base_scale as u128) {
+        // `tick_size` is u128 and `lot_size` is u64; their product is computed
+        // as a u256 to avoid overflow before checking divisibility.
+        let tick_lot = order::Quantity::from_u128(tick_size.get())
+            .checked_mul_u64(lot_size.get())
+            .expect("BUG: u128 × u64 always fits u256");
+        let (_, remainder) = tick_lot
+            .checked_div_rem_u64(base_scale)
+            .expect("base_scale is a nonzero power of ten");
+        if remainder != 0 {
             return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                tick_size: tick_size.get(),
+                tick_size: candid::Nat::from(tick_size.get()),
                 lot_size: lot_size.get(),
                 base_decimals,
             });

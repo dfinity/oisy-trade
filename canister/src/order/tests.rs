@@ -315,7 +315,7 @@ mod order_book {
         fn should_reject_invalid_orders_without_modifying_book() {
             let cases: Vec<(u64, u64, MatchOrderError)> = vec![
                 (
-                    TICK_SIZE.get() / 2,
+                    TICK_SIZE.get() as u64 / 2,
                     LOT_SIZE.get(),
                     MatchOrderError::InvalidTickSize {
                         price: Price::new(TICK_SIZE.get() / 2),
@@ -331,7 +331,7 @@ mod order_book {
                     },
                 ),
                 (
-                    TICK_SIZE.get(),
+                    TICK_SIZE.get() as u64,
                     LOT_SIZE.get() / 2,
                     MatchOrderError::InvalidLotSize {
                         quantity: Quantity::from(LOT_SIZE.get() / 2),
@@ -339,7 +339,7 @@ mod order_book {
                     },
                 ),
                 (
-                    TICK_SIZE.get(),
+                    TICK_SIZE.get() as u64,
                     0,
                     MatchOrderError::InvalidLotSize {
                         quantity: Quantity::ZERO,
@@ -363,7 +363,7 @@ mod order_book {
         #[test]
         fn should_accept_valid_order() {
             let mut book = order_book();
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get() as u64, LOT_SIZE) {
                 let result = book.match_order(order);
                 assert!(result.is_ok());
             }
@@ -376,7 +376,7 @@ mod order_book {
 
         #[test]
         fn should_rest_in_empty_book() {
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get() as u64, LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
                 let result = book.match_order(order).unwrap();
@@ -447,7 +447,8 @@ mod order_book {
 
                 let result = book.match_order(taker).unwrap();
 
-                let prices: Vec<u64> = result.fills().iter().map(|f| f.maker_price.get()).collect();
+                let prices: Vec<u128> =
+                    result.fills().iter().map(|f| f.maker_price.get()).collect();
                 assert_eq!(prices, expected_prices);
                 assert!(book.is_empty());
             }
@@ -868,13 +869,13 @@ mod order_book {
             use crate::order::{
                 FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
             };
-            use std::num::NonZeroU64;
+            use std::num::{NonZeroU64, NonZeroU128};
 
             // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
             // wouldn't be multiples of the default LOT_SIZE).
             let mut book = OrderBook::new(
                 OrderBookId::ZERO,
-                TickSize::new(NonZeroU64::new(1).unwrap()),
+                TickSize::new(NonZeroU128::new(1).unwrap()),
                 LotSize::new(NonZeroU64::new(1).unwrap()),
                 FeeRates::default(),
             );
@@ -900,11 +901,11 @@ mod process_pending_orders {
     use crate::test_fixtures::{LOT_SIZE, PRICE_SCALE, order_book};
     use std::collections::BTreeSet;
 
-    fn buy(seq: u64, price: u64, quantity: u64) -> Order {
+    fn buy(seq: u64, price: u128, quantity: u64) -> Order {
         crate::test_fixtures::buy(seq, price, quantity)
     }
 
-    fn sell(seq: u64, price: u64, quantity: u64) -> Order {
+    fn sell(seq: u64, price: u128, quantity: u64) -> Order {
         crate::test_fixtures::sell(seq, price, quantity)
     }
 

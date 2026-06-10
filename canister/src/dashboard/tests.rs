@@ -219,7 +219,7 @@ fn place(
     let pair: TradingPair = icp_ckbtc_trading_pair();
     let pending = PendingOrder {
         side,
-        price: Price::new(price * PRICE_SCALE),
+        price: Price::new(price as u128 * PRICE_SCALE),
         quantity: Quantity::from(quantity),
     };
     let (token, required) = match pending.side {

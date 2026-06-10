@@ -38,7 +38,7 @@ pub struct LimitOrderRequest {
     /// Whether this is a buy or sell order.
     pub side: Side,
     /// Limit price in quote token units per base token unit.
-    pub price: u64,
+    pub price: Nat,
     /// Order quantity in base token units.
     pub quantity: Nat,
 }
@@ -53,9 +53,9 @@ pub enum AddLimitOrderError {
     /// The price is not a positive multiple of the tick size.
     InvalidPrice {
         /// The rejected price.
-        price: u64,
+        price: Nat,
         /// The required tick size.
-        tick_size: u64,
+        tick_size: Nat,
     },
     /// The quantity is not a positive multiple of the lot size.
     InvalidQuantity {
@@ -96,7 +96,7 @@ pub struct TradingPairInfo {
     /// The quote token.
     pub quote: Token,
     /// Minimum price increment.
-    pub tick_size: u64,
+    pub tick_size: Nat,
     /// Minimum order quantity.
     pub lot_size: u64,
 }
@@ -105,7 +105,7 @@ pub struct TradingPairInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct PriceLevel {
     /// Price in quote token units per base token unit.
-    pub price: u64,
+    pub price: Nat,
     /// Total quantity in base token units across all resting orders at this price.
     pub quantity: Nat,
 }
@@ -210,7 +210,7 @@ pub struct OrderRecord {
     /// Whether the order is a buy or a sell.
     pub side: Side,
     /// Limit price in quote units per base unit, as originally placed.
-    pub price: u64,
+    pub price: Nat,
     /// Quantity originally placed, in base token units.
     pub quantity: Nat,
     /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
@@ -364,7 +364,7 @@ pub struct AddTradingPairRequest {
     /// The quote token of the pair (e.g. ckBTC).
     pub quote: Token,
     /// Minimum price increment. Must be greater than zero.
-    pub tick_size: u64,
+    pub tick_size: Nat,
     /// Minimum order quantity. Must be greater than zero.
     pub lot_size: u64,
     /// Maker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
@@ -477,7 +477,7 @@ pub enum AddTradingPairError {
     /// `tick_size` or `lot_size`.
     IndivisibleTickLotForBaseDecimals {
         /// The submitted tick size.
-        tick_size: u64,
+        tick_size: Nat,
         /// The submitted lot size.
         lot_size: u64,
         /// The base token's decimals (the divisor exponent).

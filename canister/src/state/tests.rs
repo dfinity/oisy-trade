@@ -551,7 +551,7 @@ mod validate_overflow_invariant {
 
     fn arb_tick_aligned_price() -> impl Strategy<Value = Price> {
         let tick = TICK_SIZE.get();
-        (1u64..=u64::MAX / tick).prop_map(move |ticks| Price::new(ticks * tick))
+        (1u128..=u128::MAX / tick).prop_map(move |ticks| Price::new(ticks * tick))
     }
 
     fn arb_lot_aligned_quantity() -> impl Strategy<Value = Quantity> {
@@ -630,7 +630,6 @@ mod settle_fills {
     use ic_stable_structures::VectorMemory;
     use proptest::prelude::*;
     use std::collections::BTreeMap;
-    use std::num::NonZeroU64;
 
     type TestState = State<VectorMemory, VectorMemory>;
 
@@ -649,7 +648,7 @@ mod settle_fills {
             BUYER,
             &pair,
             Side::Buy,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -657,7 +656,7 @@ mod settle_fills {
             SELLER,
             &pair,
             Side::Sell,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
@@ -682,7 +681,7 @@ mod settle_fills {
     #[test]
     fn should_settle_realistic_cketh_ckusdc_fill() {
         use crate::order::{LotSize, TickSize, TokenId, TokenMetadata, TradingPair};
-        use std::num::NonZeroU64;
+        use std::num::{NonZeroU64, NonZeroU128};
 
         let mut state = test_fixtures::state();
         let pair = TradingPair {
@@ -702,13 +701,13 @@ mod settle_fills {
                 symbol: "ckUSDC".to_string(),
                 decimals: 6,
             },
-            TickSize::new(NonZeroU64::new(10_000).unwrap()),
+            TickSize::new(NonZeroU128::new(10_000).unwrap()),
             LotSize::new(NonZeroU64::new(100_000_000_000_000).unwrap()),
             FeeRates::default(),
         );
 
         // 3000.50 USDC/ETH × 10^6 = 3_000_500_000 quote units per whole ETH.
-        let price = 3_000_500_000u64;
+        let price = 3_000_500_000u128;
         // 0.5 ETH = 5 × 10^17 wei.
         let quantity = 500_000_000_000_000_000u64;
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
@@ -726,6 +725,100 @@ mod settle_fills {
             balance(1_500_250_000, 0)
         );
         assert_token_conservation(&state, &totals_before);
+    }
+
+    /// ckBTC(8)/18-decimal-stablecoin pair priced at 6_000_000 whole quote per
+    /// whole BTC: the per-whole-base price is 6 × 10^24, far above `u64::MAX`.
+    /// The fill must settle to exactly `price × quantity / 10^8`, a quote amount
+    /// that the old `u64` price representation could not even hold.
+    #[test]
+    fn should_settle_fill_with_price_exceeding_u64() {
+        use crate::Timestamp;
+        use crate::order::{LotSize, PendingOrder, TickSize, TokenId, TokenMetadata, TradingPair};
+        use crate::state::StableMemoryOptions;
+        use std::num::{NonZeroU64, NonZeroU128};
+
+        let mut state = test_fixtures::state();
+        let pair = TradingPair {
+            base: TokenId::new(Principal::from_slice(&[0xbc])),
+            quote: TokenId::new(Principal::from_slice(&[0x5b])),
+        };
+        // tick = 10^18, lot = 1; tick × lot = 10^18 is a multiple of
+        // 10^base_decimals = 10^8, so every fill settles exactly.
+        let tick = 1_000_000_000_000_000_000u128;
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair.clone(),
+            TokenMetadata {
+                symbol: "ckBTC".to_string(),
+                decimals: 8,
+            },
+            TokenMetadata {
+                symbol: "ckUSD18".to_string(),
+                decimals: 18,
+            },
+            TickSize::new(NonZeroU128::new(tick).unwrap()),
+            LotSize::new(NonZeroU64::new(1).unwrap()),
+            FeeRates::default(),
+        );
+
+        // 6_000_000 whole quote per whole BTC = 6_000_000 × 10^18 = 6 × 10^24,
+        // a multiple of `tick` and well beyond u64::MAX (~1.8 × 10^19).
+        let price = Price::new(6_000_000_000_000_000_000_000_000u128);
+        assert!(price.get() > u64::MAX as u128);
+        // 1 whole BTC = 10^8 base units.
+        let quantity = Quantity::from(100_000_000u64);
+        // Expected settled quote = price × quantity / 10^8 = 6 × 10^24.
+        let expected_quote = Quantity::from_u128(6_000_000_000_000_000_000_000_000u128);
+
+        let mut place = |user: Principal, side: Side, deposit_token, deposit_amount| {
+            state.deposit(
+                user,
+                deposit_token,
+                deposit_amount,
+                StableMemoryOptions::Write,
+            );
+            let (order_id, order) = state
+                .validate_limit_order(
+                    user,
+                    pair.clone(),
+                    PendingOrder {
+                        side,
+                        price,
+                        quantity,
+                    },
+                )
+                .expect("validate_limit_order failed");
+            state.record_limit_order(
+                user,
+                order_id.book_id(),
+                order,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+        };
+        place(BUYER, Side::Buy, pair.quote, expected_quote);
+        place(SELLER, Side::Sell, pair.base, quantity);
+
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+        // Buyer receives the full 1 BTC; seller receives exactly 6 × 10^24 quote.
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.base),
+            Balance::new(quantity, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.quote),
+            Balance::new(Quantity::ZERO, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&SELLER, &pair.base),
+            Balance::new(Quantity::ZERO, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&SELLER, &pair.quote),
+            Balance::new(expected_quote, Quantity::ZERO)
+        );
     }
 
     #[test]
@@ -1078,7 +1171,7 @@ mod settle_fills {
     fn should_settle_trade_with_quantity_exceeding_u64_max() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let price = 100u64 * PRICE_SCALE;
+        let price = 100 * PRICE_SCALE;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
         let quantity = Quantity::from(u64::from(LOT_SIZE))
             .checked_mul_u64(u64::MAX)
@@ -1090,7 +1183,7 @@ mod settle_fills {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
         let quote_total = Price::new(price)
-            .checked_mul_quantity_scaled(&quantity, NonZeroU64::new(PRICE_SCALE).unwrap())
+            .checked_mul_quantity_scaled(&quantity, state.base_scale(&pair.base))
             .unwrap();
 
         // Buyer received all base tokens
@@ -1162,7 +1255,7 @@ mod settle_fills {
             buyer_a,
             &pair_a,
             Side::Buy,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1170,7 +1263,7 @@ mod settle_fills {
             seller_a,
             &pair_a,
             Side::Sell,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1178,7 +1271,7 @@ mod settle_fills {
             buyer_b,
             &pair_b,
             Side::Buy,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
         test_fixtures::place_order(
@@ -1186,7 +1279,7 @@ mod settle_fills {
             seller_b,
             &pair_b,
             Side::Sell,
-            price * PRICE_SCALE,
+            price as u128 * PRICE_SCALE,
             lot,
         );
 
@@ -1495,7 +1588,7 @@ mod settle_fills {
                 first_user,
                 &pair,
                 first_side,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1503,7 +1596,7 @@ mod settle_fills {
                 second_user,
                 &pair,
                 second_side,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1560,7 +1653,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1568,7 +1661,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1639,7 +1732,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1647,7 +1740,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1656,7 +1749,7 @@ mod settle_fills {
                 SELLER,
                 &pair,
                 Side::Sell,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             test_fixtures::place_order(
@@ -1664,7 +1757,7 @@ mod settle_fills {
                 BUYER,
                 &pair,
                 Side::Buy,
-                price * PRICE_SCALE,
+                price as u128 * PRICE_SCALE,
                 qty,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));

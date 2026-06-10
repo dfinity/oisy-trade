@@ -18,7 +18,7 @@ fn should_serialize_limit_order_request() {
     let request = LimitOrderRequest {
         pair: test_trading_pair(),
         side: Side::Buy,
-        price: 100,
+        price: Nat::from(100u64),
         quantity: Nat::from(1_000_000u64),
     };
     let encoded = candid::encode_one(&request).unwrap();
@@ -64,7 +64,7 @@ fn should_serialize_trading_pair_info() {
                 decimals: 8,
             },
         },
-        tick_size: 10,
+        tick_size: Nat::from(10u64),
         lot_size: 1_000_000,
     };
     let encoded = candid::encode_one(&info).unwrap();
@@ -136,11 +136,11 @@ fn should_serialize_order_book_ticker() {
         },
         OrderBookTicker {
             bid: Some(PriceLevel {
-                price: 100,
+                price: Nat::from(100u64),
                 quantity: Nat::from(500_000u64),
             }),
             ask: Some(PriceLevel {
-                price: 110,
+                price: Nat::from(110u64),
                 quantity: Nat::from(300_000u64),
             }),
         },
@@ -156,16 +156,16 @@ fn should_serialize_order_book_depth() {
     let depth = OrderBookDepth {
         bids: vec![
             PriceLevel {
-                price: 100,
+                price: Nat::from(100u64),
                 quantity: Nat::from(1_000u64),
             },
             PriceLevel {
-                price: 99,
+                price: Nat::from(99u64),
                 quantity: Nat::from(2_000u64),
             },
         ],
         asks: vec![PriceLevel {
-            price: 101,
+            price: Nat::from(101u64),
             quantity: Nat::from(500u64),
         }],
     };
@@ -220,8 +220,8 @@ fn should_serialize_add_limit_order_error() {
     for error in [
         AddLimitOrderError::UnknownTradingPair,
         AddLimitOrderError::InvalidPrice {
-            price: 7,
-            tick_size: 10,
+            price: Nat::from(7u64),
+            tick_size: Nat::from(10u64),
         },
         AddLimitOrderError::InvalidQuantity {
             quantity: Nat::from(500_000u64),

@@ -53,7 +53,7 @@ async fn assert_balances<R: Runtime>(
 
 mod add_limit_order {
     use assert_matches::assert_matches;
-    use candid::{Encode, Principal};
+    use candid::{Encode, Nat, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side};
@@ -70,7 +70,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
 
@@ -118,7 +118,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
 
@@ -198,7 +198,7 @@ mod add_limit_order {
         let buy_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
         let required_quote_amount = 1_000_000_000u64;
@@ -219,7 +219,7 @@ mod add_limit_order {
         let sell_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
@@ -333,7 +333,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 3_000_000u64.into(),
             })
             .await
@@ -343,7 +343,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 1_000_000u64.into(),
             })
             .await
@@ -391,7 +391,7 @@ mod cancel_limit_order {
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(3_000_000u64),
                 status: OrderStatus::Canceled(CanceledOrderInfo {
                     remaining_quantity: Nat::from(2_000_000u64),
@@ -480,7 +480,7 @@ async fn should_return_empty_trading_pairs() {
                     decimals: 8,
                 },
             },
-            tick_size: TICK_SIZE,
+            tick_size: Nat::from(TICK_SIZE),
             lot_size: LOT_SIZE,
         }]
     );
@@ -782,7 +782,7 @@ async fn should_fail_add_trading_pair() {
     // zero tick size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            tick_size: 0,
+            tick_size: Nat::from(0u64),
             ..setup.add_trading_pair_request()
         })
         .await;
@@ -844,7 +844,7 @@ async fn should_replay_events_on_upgrade() {
                 book_id: 0,
                 base: setup.base_token_id(),
                 quote: setup.quote_token_id(),
-                tick_size: TICK_SIZE,
+                tick_size: Nat::from(TICK_SIZE),
                 lot_size: LOT_SIZE,
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
@@ -880,7 +880,7 @@ async fn should_replay_events_on_upgrade() {
         .add_limit_order(dex_types::LimitOrderRequest {
             pair: setup.trading_pair(),
             side: dex_types::Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -906,7 +906,7 @@ async fn should_replay_events_on_upgrade() {
                 user: setup.user(),
                 order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
                 side: dex_types::Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
             });
         });
@@ -938,7 +938,7 @@ async fn should_replay_events_on_upgrade() {
         .add_limit_order(dex_types::LimitOrderRequest {
             pair: setup.trading_pair(),
             side: dex_types::Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -975,7 +975,7 @@ async fn should_replay_events_on_upgrade() {
                 user: buyer,
                 order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 1 },
                 side: dex_types::Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(deposit_amount),
             });
         });
@@ -1209,7 +1209,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
             })
             .await
@@ -1432,7 +1432,7 @@ mod order_book {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -1453,7 +1453,7 @@ mod order_book {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -1462,7 +1462,7 @@ mod order_book {
 
     fn level(price: u64, quantity: u64) -> PriceLevel {
         PriceLevel {
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         }
     }
@@ -1588,7 +1588,7 @@ mod chunked_matching {
                 .add_limit_order(LimitOrderRequest {
                     pair,
                     side: Side::Buy,
-                    price: PRICE,
+                    price: Nat::from(PRICE),
                     quantity: Nat::from(QUANTITY),
                 })
                 .await
@@ -1674,7 +1674,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1691,7 +1691,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 20_000 * PRICE_SCALE,
+            price: Nat::from(20_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         })
         .await

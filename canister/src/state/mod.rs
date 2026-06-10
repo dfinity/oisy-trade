@@ -1029,8 +1029,8 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 price,
                 tick_size,
             }) => dex_types::AddLimitOrderError::InvalidPrice {
-                price: price.get(),
-                tick_size: tick_size.get(),
+                price: candid::Nat::from(price.get()),
+                tick_size: candid::Nat::from(tick_size.get()),
             },
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
                 quantity,

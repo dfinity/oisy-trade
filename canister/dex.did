@@ -29,7 +29,7 @@ type LimitOrderRequest = record {
     side : Side;
     // Limit price in quote token units per base token unit.
     // Must be a positive multiple of the pair's `tick_size`.
-    price : nat64;
+    price : nat;
     // Order quantity in base token units.
     // Must be a positive multiple of the pair's `lot_size`.
     quantity : nat;
@@ -43,7 +43,7 @@ type AddLimitOrderError = variant {
     // The requested trading pair is not registered.
     UnknownTradingPair;
     // The price is not a positive multiple of the tick size.
-    InvalidPrice : record { price : nat64; tick_size : nat64 };
+    InvalidPrice : record { price : nat; tick_size : nat };
     // The quantity is not a positive multiple of the lot size.
     InvalidQuantity : record { quantity : nat; lot_size : nat64 };
     // The caller's on-DEX free balance in `token` is below `required`.
@@ -71,7 +71,7 @@ type TradingPairInfo = record {
     // The quote token.
     quote : Token;
     // Minimum price increment. All order prices must be a positive multiple of this value.
-    tick_size : nat64;
+    tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
     lot_size : nat64;
 };
@@ -79,7 +79,7 @@ type TradingPairInfo = record {
 // A single price level in an order book, aggregated across all resting orders at that price.
 type PriceLevel = record {
     // Price in quote token units per base token unit.
-    price : nat64;
+    price : nat;
     // Total quantity in base token units across all resting orders at this price.
     quantity : nat;
 };
@@ -161,7 +161,7 @@ type OrderRecord = record {
     /// Whether the order is a buy or a sell.
     side : Side;
     /// Limit price in quote units per base unit, as originally placed.
-    price : nat64;
+    price : nat;
     /// Quantity originally placed, in base token units.
     quantity : nat;
     /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
@@ -331,7 +331,7 @@ type AddTradingPairRequest = record {
     // The quote token of the pair.
     quote : Token;
     // Minimum price increment. Must be greater than zero.
-    tick_size : nat64;
+    tick_size : nat;
     // Minimum order quantity. Must be greater than zero.
     lot_size : nat64;
     // Maker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
@@ -361,7 +361,7 @@ type AddTradingPairError = variant {
     BaseDecimalsTooLarge : record { decimals : nat8 };
     // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
     // could not settle to an exact quote amount. Choose a coarser tick or lot.
-    IndivisibleTickLotForBaseDecimals : record { tick_size : nat64; lot_size : nat64; base_decimals : nat8 };
+    IndivisibleTickLotForBaseDecimals : record { tick_size : nat; lot_size : nat64; base_decimals : nat8 };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
@@ -402,7 +402,7 @@ type AddTradingPairEvent = record {
     book_id : nat64;
     base : TokenId;
     quote : TokenId;
-    tick_size : nat64;
+    tick_size : nat;
     lot_size : nat64;
     base_metadata : TokenMetadata;
     quote_metadata : TokenMetadata;
@@ -419,7 +419,7 @@ type AddLimitOrderEvent = record {
     user : principal;
     order_id : EventOrderId;
     side : Side;
-    price : nat64;
+    price : nat;
     quantity : nat;
 };
 

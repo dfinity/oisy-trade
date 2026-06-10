@@ -12,10 +12,10 @@ use canbench_rs::bench;
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode};
 use serde::Deserialize;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 
 /// Minimum price increment for ICP/USDT on Binance: 0.001 USDT with 8 decimal places.
-const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
+const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
@@ -97,7 +97,7 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
             principal,
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
-                price: Price::new(parse_decimal_8(&trade.p)),
+                price: Price::new(parse_decimal_8(&trade.p) as u128),
                 quantity: Quantity::from(parse_decimal_8(&trade.q)),
             },
         );
@@ -342,7 +342,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             principal,
             PendingOrder {
                 side: Side::Buy,
-                price: Price::new(parse_decimal_8(price_str)),
+                price: Price::new(parse_decimal_8(price_str) as u128),
                 quantity: Quantity::from(parse_decimal_8(qty_str)),
             },
         );
@@ -355,7 +355,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             principal,
             PendingOrder {
                 side: Side::Sell,
-                price: Price::new(parse_decimal_8(price_str)),
+                price: Price::new(parse_decimal_8(price_str) as u128),
                 quantity: Quantity::from(parse_decimal_8(qty_str)),
             },
         );

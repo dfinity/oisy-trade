@@ -38,7 +38,7 @@ impl From<OrderRecord> for dex_types::OrderRecord {
         dex_types::OrderRecord {
             owner: record.owner,
             side: record.side.into(),
-            price: record.price.into(),
+            price: candid::Nat::from(record.price.get()),
             quantity: record.quantity.into(),
             status: record.status.into(),
             timestamp: record.timestamp.as_nanos(),

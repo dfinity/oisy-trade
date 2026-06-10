@@ -157,7 +157,7 @@ mod add_trading_pair {
         assert_eq!(
             result,
             Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                tick_size: 10,
+                tick_size: candid::Nat::from(10u64),
                 lot_size: 1_000_000,
                 base_decimals: 8,
             })
@@ -220,7 +220,7 @@ mod add_trading_pair {
                     decimals: quote_decimals,
                 },
             },
-            tick_size,
+            tick_size: candid::Nat::from(tick_size),
             lot_size,
             maker_fee_bps: 0,
             taker_fee_bps: 0,
@@ -415,16 +415,16 @@ mod add_limit_order {
         init_state_with_order_book();
         let runtime = mock_runtime_for(DEFAULT_USER);
 
-        let cases = vec![(7, "not a multiple of tick size"), (0, "zero price")];
+        let cases = vec![(7u64, "not a multiple of tick size"), (0, "zero price")];
         for (price, name) in cases {
             let mut request = limit_order_request();
-            request.price = price;
+            request.price = candid::Nat::from(price);
             let result = add_limit_order(request, &runtime);
             assert_eq!(
                 result,
                 Err(dex_types::AddLimitOrderError::InvalidPrice {
-                    price,
-                    tick_size: TICK_SIZE.get(),
+                    price: candid::Nat::from(price),
+                    tick_size: candid::Nat::from(TICK_SIZE.get()),
                 }),
                 "case: {name}"
             );
@@ -508,7 +508,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Buy,
-            price: price * PRICE_SCALE,
+            price: candid::Nat::from(price as u128 * PRICE_SCALE),
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
@@ -545,7 +545,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Sell,
-            price: 10 * PRICE_SCALE,
+            price: candid::Nat::from(10 * PRICE_SCALE),
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
@@ -644,7 +644,7 @@ mod cancel_limit_order {
             Ok(dex_types::OrderRecord {
                 owner,
                 side: dex_types::Side::Buy,
-                price: 100 * PRICE_SCALE,
+                price: candid::Nat::from(100 * PRICE_SCALE),
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
@@ -698,7 +698,7 @@ mod cancel_limit_order {
             Ok(dex_types::OrderRecord {
                 owner,
                 side: dex_types::Side::Buy,
-                price: 100 * PRICE_SCALE,
+                price: candid::Nat::from(100 * PRICE_SCALE),
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
                 status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
                     remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
@@ -1475,11 +1475,11 @@ mod get_order_book_ticker {
             get_order_book_ticker(icp_ckbtc_trading_pair().into()),
             Ok(OrderBookTicker {
                 bid: Some(PriceLevel {
-                    price: 100 * PRICE_SCALE,
+                    price: Nat::from(100 * PRICE_SCALE),
                     quantity: Nat::from(4 * lot),
                 }),
                 ask: Some(PriceLevel {
-                    price: 110 * PRICE_SCALE,
+                    price: Nat::from(110 * PRICE_SCALE),
                     quantity: Nat::from(5 * lot),
                 }),
             }),
@@ -1507,9 +1507,9 @@ mod get_order_book_depth {
         }
     }
 
-    fn level(price: u64, quantity: u64) -> PriceLevel {
+    fn level(price: u128, quantity: u64) -> PriceLevel {
         PriceLevel {
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         }
     }
@@ -1597,11 +1597,11 @@ mod get_order_book_depth {
         // Place 101 bids at distinct prices so the default cuts 1 off.
         init_state_with_order_book();
         let lot = u64::from(LOT_SIZE);
-        let tick = u64::from(crate::test_fixtures::TICK_SIZE);
+        let tick = crate::test_fixtures::TICK_SIZE.get();
         for i in 0..101u64 {
             let user = Principal::from_slice(&(i as u16).to_be_bytes());
             fund_user(user);
-            place_limit_order(user, Side::Buy, (i + 1) * tick, lot);
+            place_limit_order(user, Side::Buy, u128::from(i + 1) * tick, lot);
         }
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
@@ -1676,7 +1676,7 @@ mod get_trading_pairs {
                         decimals: 8,
                     },
                 },
-                tick_size: TICK_SIZE.get(),
+                tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.get(),
             }]
         );

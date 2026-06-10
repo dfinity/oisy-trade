@@ -27,7 +27,7 @@ pub struct AddTradingPairEvent {
     pub book_id: u64,
     pub base: TokenId,
     pub quote: TokenId,
-    pub tick_size: u64,
+    pub tick_size: Nat,
     pub lot_size: u64,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
@@ -53,7 +53,7 @@ pub struct AddLimitOrderEvent {
     pub user: Principal,
     pub order_id: OrderId,
     pub side: dex_types::Side,
-    pub price: u64,
+    pub price: Nat,
     pub quantity: Nat,
 }
 
