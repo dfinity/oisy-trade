@@ -49,27 +49,6 @@ impl From<OrderRecord> for dex_types::OrderRecord {
     }
 }
 
-impl Storable for OrderRecord {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        minicbor::encode(self, &mut buf).expect("order record encoding should always succeed");
-        Cow::Owned(buf)
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        minicbor::encode(&self, &mut buf).expect("order record encoding should always succeed");
-        buf
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        minicbor::decode(bytes.as_ref())
-            .unwrap_or_else(|e| panic!("failed to decode order record bytes: {e}"))
-    }
-
-    const BOUND: Bound = Bound::Unbounded;
-}
-
 /// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
 /// with the canister-global insertion sequence assigned when it was first
 /// inserted. The sequence keys the per-user index (scanned in reverse for
