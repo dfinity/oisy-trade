@@ -5,7 +5,7 @@ use crate::order::{
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
+    self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
     icp_metadata, icp_token_id,
 };
 use askama::Template;
@@ -100,13 +100,22 @@ fn should_render_per_pair_metadata() {
 
     let dom = render(&state, 0);
     let dl_text = text(&dom, "section.pair dl");
+    let best_bid = 100 * PRICE_SCALE;
+    let best_ask = 110 * PRICE_SCALE;
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
-    assert!(dl_text.contains("100"), "best bid 100 in: {dl_text}");
-    assert!(dl_text.contains("110"), "best ask 110 in: {dl_text}");
     assert!(
-        dl_text.contains(&format!("{}", 110u64 - 100u64)),
-        "spread 10 in: {dl_text}"
+        dl_text.contains(&best_bid.to_string()),
+        "best bid {best_bid} in: {dl_text}"
+    );
+    assert!(
+        dl_text.contains(&best_ask.to_string()),
+        "best ask {best_ask} in: {dl_text}"
+    );
+    assert!(
+        dl_text.contains(&(best_ask - best_bid).to_string()),
+        "spread {} in: {dl_text}",
+        best_ask - best_bid
     );
 }
 
@@ -121,9 +130,9 @@ fn should_render_depth_chart_for_resting_orders() {
     let dom = render(&state, 0);
 
     let bid_prices = column(&dom, "table.depth-bids td.price");
-    assert_eq!(bid_prices, vec!["100"]);
+    assert_eq!(bid_prices, vec![(100 * PRICE_SCALE).to_string()]);
     let ask_prices = column(&dom, "table.depth-asks td.price");
-    assert_eq!(ask_prices, vec!["110"]);
+    assert_eq!(ask_prices, vec![(110 * PRICE_SCALE).to_string()]);
     let bid_qtys = column(&dom, "table.depth-bids tbody tr td:nth-child(2)");
     assert_eq!(bid_qtys, vec![candid::Nat::from(lot(1)).to_string()]);
 
@@ -210,7 +219,7 @@ fn place(
     let pair: TradingPair = icp_ckbtc_trading_pair();
     let pending = PendingOrder {
         side,
-        price: Price::new(price),
+        price: Price::new(price * PRICE_SCALE),
         quantity: Quantity::from(quantity),
     };
     let (token, required) = match pending.side {
@@ -218,7 +227,7 @@ fn place(
             pair.quote,
             pending
                 .price
-                .checked_mul_quantity(&pending.quantity)
+                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
                 .unwrap(),
         ),
         Side::Sell => (pair.base, pending.quantity),

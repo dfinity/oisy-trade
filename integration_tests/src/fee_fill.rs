@@ -1,5 +1,5 @@
 use crate::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-use crate::{LOT_SIZE, Setup, TICK_SIZE};
+use crate::{LOT_SIZE, PRICE_SCALE, Setup};
 use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Side, Token};
 
@@ -50,8 +50,11 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
     let seller = Principal::from_slice(&[0x01]);
     let buyer = Principal::from_slice(&[0x02]);
     let qty = LOT_SIZE; // one lot of the base token
-    let price = TICK_SIZE; // one tick
-    let notional = price * qty;
+    // Settlement divides by 10^base_decimals (ckSOL = 9 decimals), so pick a
+    // price (a multiple of the tick) large enough that the settled notional
+    // stays well above the fee denominator and the accrued fees are non-trivial.
+    let price = 10_000 * PRICE_SCALE;
+    let notional = price * qty / 1_000_000_000;
     setup
         .deposit_flow(seller, base.id.clone())
         .mint(qty + 2 * BASE_LEDGER_FEE)

@@ -5,6 +5,7 @@ use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::num::NonZeroU64;
 
 /// Central limit order book for a single trading pair.
 ///
@@ -496,10 +497,11 @@ pub struct Fill {
 }
 
 impl Fill {
-    /// The amount of quote tokens exchanged (maker_price × quantity).
-    pub fn quote_amount(&self) -> Quantity {
-        self.quantity
-            .checked_mul_u64(self.maker_price.0)
+    /// The amount of quote tokens exchanged:
+    /// `maker_price × quantity / base_scale` (`base_scale = 10^base_decimals`).
+    pub fn quote_amount(&self, base_scale: NonZeroU64) -> Quantity {
+        self.maker_price
+            .checked_mul_quantity_scaled(&self.quantity, base_scale)
             .expect("BUG: validation of order should prevent overflow")
     }
 
