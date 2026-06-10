@@ -1435,7 +1435,7 @@ mod settle_fills {
             let ops = super::super::compute_balance_operations(
                 &output,
                 FeeRates::default(),
-                std::num::NonZeroU64::new(1).unwrap(),
+                std::num::NonZeroU64::new(PRICE_SCALE).unwrap(),
             );
             let fills_len = output.fills.len();
 
