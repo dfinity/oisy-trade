@@ -72,8 +72,9 @@ impl Storable for OrderRecord {
 
 /// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
 /// with the canister-global insertion sequence assigned when it was first
-/// inserted. The sequence orders the per-user index newest-first and lets
-/// `get_my_orders` resolve an `OrderId` cursor back to its index position. It's
+/// inserted. The sequence keys the per-user index (scanned in reverse for
+/// newest-first) and lets `get_my_orders` resolve an `OrderId` cursor back to
+/// its index position. It's
 /// an index bookkeeping concern, so it lives in this wrapper rather than as a
 /// field on the domain `OrderRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
@@ -109,9 +110,10 @@ impl Storable for SeqOrderRecord {
 ///
 /// Two stable maps kept together here rather than split across the caller:
 /// - `orders`: the primary store, keyed by [`OrderId`].
-/// - `by_user`: a per-user index keyed by `(user, u64::MAX - global_seq)`,
-///   so a forward range scan over a user's prefix yields that user's orders
-///   newest-first. The value is the [`OrderId`], pointing back into `orders`.
+/// - `by_user`: a per-user index keyed by `(user, global_seq)`, so a range
+///   scan over a user's prefix yields that user's orders oldest-first —
+///   `orders_after` reverses it for newest-first. The value is the
+///   [`OrderId`], pointing back into `orders`.
 ///
 /// Interior mutability is as follows:
 /// * `by_user` is inserted once, then the entry is immutable,
@@ -141,9 +143,9 @@ impl<M: Memory> OrderHistory<M> {
     }
 
     /// Insert a new order record and index it under `user`. The order's
-    /// canister-global insertion sequence — which orders the per-user index
-    /// newest-first — is the current order count: the index is insert-only, so
-    /// the count is a dense, monotonic sequence.
+    /// canister-global insertion sequence — which orders the per-user index, a
+    /// reverse scan yielding newest-first — is the current order count: the
+    /// index is insert-only, so the count is a dense, monotonic sequence.
     /// Panics if the order ID is present.
     pub fn insert_once(&mut self, user: UserId, id: OrderId, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
@@ -193,8 +195,8 @@ impl<M: Memory> OrderHistory<M> {
     ) -> Vec<OrderId> {
         bench_scopes!("order_history", "order_history::orders_after");
         use std::ops::Bound;
-        let lower = match after {
-            None => Bound::Included(UserOrderKey::newest(user)),
+        let upper = match after {
+            None => Bound::Included(UserOrderKey::last(user)),
             Some(cursor) => {
                 let Some(entry) = self.orders.get(&cursor) else {
                     return Vec::new();
@@ -212,7 +214,8 @@ impl<M: Memory> OrderHistory<M> {
             }
         };
         self.by_user
-            .range((lower, Bound::Included(UserOrderKey::oldest(user))))
+            .range((Bound::Included(UserOrderKey::first(user)), upper))
+            .rev()
             .take(length)
             .map(|entry| entry.value())
             .collect()
@@ -234,47 +237,45 @@ impl<M: Memory> OrderHistory<M> {
 }
 
 /// Key into the per-user index: the interned [`UserId`] followed by the
-/// complement of the canister-global insertion sequence, so a forward range
-/// scan over a user's prefix yields their orders newest-first.
+/// canister-global insertion sequence, so a range scan over a user's prefix
+/// yields their orders oldest-first — [`OrderHistory::orders_after`] reverses
+/// it for newest-first.
 ///
 /// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
 /// already matches the [`Storable`] byte order that `StableBTreeMap` relies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct UserOrderKey {
     user: UserId,
-    rev_seq: u64,
+    seq: u64,
 }
 
 impl UserOrderKey {
     fn from_seq(user: UserId, seq: u64) -> Self {
-        Self {
-            user,
-            rev_seq: u64::MAX - seq,
-        }
+        Self { user, seq }
     }
 
-    /// Lower bound of `user`'s range — the newest possible order.
-    fn newest(user: UserId) -> Self {
-        Self { user, rev_seq: 0 }
+    /// Lower bound of `user`'s range — the oldest possible order.
+    fn first(user: UserId) -> Self {
+        Self { user, seq: 0 }
     }
 
-    /// Upper bound of `user`'s range — the oldest possible order.
-    fn oldest(user: UserId) -> Self {
+    /// Upper bound of `user`'s range — the newest possible order.
+    fn last(user: UserId) -> Self {
         Self {
             user,
-            rev_seq: u64::MAX,
+            seq: u64::MAX,
         }
     }
 }
 
-/// 8 bytes of `UserId` + 8 bytes of `rev_seq`, both big-endian.
+/// 8 bytes of `UserId` + 8 bytes of `seq`, both big-endian.
 const USER_ORDER_KEY_LEN: usize = 8 + 8;
 
 impl Storable for UserOrderKey {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = [0u8; USER_ORDER_KEY_LEN];
         buf[..8].copy_from_slice(&self.user.get().to_be_bytes());
-        buf[8..].copy_from_slice(&self.rev_seq.to_be_bytes());
+        buf[8..].copy_from_slice(&self.seq.to_be_bytes());
         Cow::Owned(buf.to_vec())
     }
 
@@ -292,8 +293,8 @@ impl Storable for UserOrderKey {
         let user = UserId::new(u64::from_be_bytes(
             bytes[..8].try_into().expect("8-byte slice"),
         ));
-        let rev_seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
-        Self { user, rev_seq }
+        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
+        Self { user, seq }
     }
 
     const BOUND: Bound = Bound::Bounded {
