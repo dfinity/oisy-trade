@@ -221,7 +221,7 @@ pub struct OrderRecord {
 
 /// Maximum number of orders returned by a single [`get_my_orders`] call.
 /// Requests for more are silently capped to this many.
-pub const MAX_ORDERS_PER_RESPONSE: u64 = 100;
+pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
 
 /// Request for the `get_my_orders` query: a page over the caller's orders,
 /// newest first. `length` is capped at [`MAX_ORDERS_PER_RESPONSE`].
@@ -234,7 +234,7 @@ pub struct GetMyOrdersArgs {
     /// `None` starts from the newest order.
     pub after: Option<OrderId>,
     /// Maximum number of orders to return.
-    pub length: u64,
+    pub length: u32,
 }
 
 /// One entry in a [`get_my_orders`] response: an order the caller placed.
@@ -244,7 +244,9 @@ pub struct UserOrder {
     pub id: OrderId,
     /// The trading pair the order was placed on.
     pub pair: TradingPair,
-    /// The full order record.
+    /// The full order record. `get_my_orders` only returns the caller's own
+    /// orders, so `order.owner` is always the caller — reused as-is for shape
+    /// parity with other order-returning endpoints.
     pub order: OrderRecord,
 }
 

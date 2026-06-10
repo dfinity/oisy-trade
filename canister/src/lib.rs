@@ -339,21 +339,35 @@ pub fn get_fee_balances(
     Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }
 
-pub fn get_my_orders(args: GetMyOrdersArgs, caller: candid::Principal) -> Vec<UserOrder> {
-    let after = args.after.map(|id| {
-        id.parse::<order::OrderId>()
-            .unwrap_or_else(|e| panic!("ERROR: invalid cursor order id: {e}"))
-    });
-    let length = usize::try_from(args.length.min(MAX_ORDERS_PER_RESPONSE))
-        .expect("BUG: length exceeds usize::MAX");
-    state::with_state(|s| s.get_user_orders(&caller, after, length))
-        .into_iter()
-        .map(|(id, pair, record)| UserOrder {
-            id: id.into(),
-            pair: pair.into(),
-            order: record.into(),
-        })
-        .collect()
+/// Why a [`get_my_orders`] call could not be served. The public query treats
+/// these as client bugs and traps; the typed error keeps the dispatcher
+/// unit-testable without a canister round-trip.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetMyOrdersError {
+    /// The `after` cursor was not a well-formed order id.
+    InvalidCursor(order::OrderIdParseError),
+}
+
+pub fn get_my_orders(
+    args: GetMyOrdersArgs,
+    caller: candid::Principal,
+) -> Result<Vec<UserOrder>, GetMyOrdersError> {
+    let after = args
+        .after
+        .map(|id| id.parse::<order::OrderId>())
+        .transpose()
+        .map_err(GetMyOrdersError::InvalidCursor)?;
+    let length = args.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
+    Ok(
+        state::with_state(|s| s.get_user_orders(&caller, after, length))
+            .into_iter()
+            .map(|(id, pair, record)| UserOrder {
+                id: id.into(),
+                pair: pair.into(),
+                order: record.into(),
+            })
+            .collect(),
+    )
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {

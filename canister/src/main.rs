@@ -150,7 +150,12 @@ fn get_fee_balances(
 #[ic_cdk::query]
 fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
     use dex_canister::Runtime;
-    dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller())
+    match dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller()) {
+        Ok(orders) => orders,
+        Err(dex_canister::GetMyOrdersError::InvalidCursor(e)) => {
+            panic!("ERROR: invalid cursor order id: {e}")
+        }
+    }
 }
 
 #[ic_cdk::query]

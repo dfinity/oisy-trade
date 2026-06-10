@@ -1470,6 +1470,71 @@ mod get_order_book_depth {
     }
 }
 
+mod get_my_orders {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, init_state_with_order_book, place_limit_order,
+    };
+    use crate::{GetMyOrdersError, get_my_orders};
+    use candid::Principal;
+    use dex_types::{GetMyOrdersArgs, MAX_ORDERS_PER_RESPONSE, Side};
+
+    fn place_resting_buys(user: Principal, count: u32) {
+        fund_user(user);
+        for _ in 0..count {
+            place_limit_order(user, Side::Buy, 100, u64::from(LOT_SIZE));
+        }
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+    }
+
+    #[test]
+    fn rejects_malformed_cursor() {
+        init_state_with_order_book();
+        let result = get_my_orders(
+            GetMyOrdersArgs {
+                after: Some("not-a-valid-order-id".to_string()),
+                length: 10,
+            },
+            Principal::from_slice(&[0x01]),
+        );
+        assert!(matches!(result, Err(GetMyOrdersError::InvalidCursor(_))));
+    }
+
+    #[test]
+    fn caps_length_at_max_orders_per_response() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        place_resting_buys(user, MAX_ORDERS_PER_RESPONSE + 1);
+
+        let orders = get_my_orders(
+            GetMyOrdersArgs {
+                after: None,
+                length: u32::MAX,
+            },
+            user,
+        )
+        .unwrap();
+        assert_eq!(orders.len(), MAX_ORDERS_PER_RESPONSE as usize);
+    }
+
+    #[test]
+    fn zero_length_returns_empty_page() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        place_resting_buys(user, 1);
+
+        let orders = get_my_orders(
+            GetMyOrdersArgs {
+                after: None,
+                length: 0,
+            },
+            user,
+        )
+        .unwrap();
+        assert!(orders.is_empty());
+    }
+}
+
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::state::init_state;

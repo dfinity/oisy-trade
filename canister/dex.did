@@ -178,7 +178,7 @@ type GetMyOrdersArgs = record {
     /// null starts from the newest order.
     after : opt OrderId;
     /// Maximum number of orders to return.
-    length : nat64;
+    length : nat32;
 };
 
 /// One entry in a `get_my_orders` response: an order the caller placed.

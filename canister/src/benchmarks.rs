@@ -266,9 +266,13 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
                     length: page,
                 },
                 trader,
-            );
+            )
+            .expect("benchmark cursor is always a valid order id");
             retrieved += orders.len();
-            if orders.len() < page as usize {
+            // Stop once the known total is reached; checking the count rather
+            // than waiting for a short page avoids one extra empty call when
+            // the total is an exact multiple of the page size.
+            if retrieved >= total {
                 break;
             }
             after = orders.last().map(|o| o.id.clone());

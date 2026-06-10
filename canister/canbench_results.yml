@@ -2,23 +2,23 @@ benches:
   bench_get_my_orders:
     total:
       calls: 1
-      instructions: 50905675
+      instructions: 50698111
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       order_history:
-        calls: 1011
-        instructions: 41628469
+        calls: 1010
+        instructions: 41494529
         heap_increase: 0
         stable_memory_increase: 0
       order_history::get:
         calls: 1000
-        instructions: 36544367
+        instructions: 36528267
         heap_increase: 0
         stable_memory_increase: 0
       order_history::orders_after:
-        calls: 11
-        instructions: 3518094
+        calls: 10
+        instructions: 3402444
         heap_increase: 0
         stable_memory_increase: 0
   bench_get_order_book_depth_default:

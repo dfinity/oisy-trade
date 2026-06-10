@@ -125,6 +125,7 @@ mod add_limit_order {
             .execute()
             .await;
 
+        let before_placement = setup.time_nanos().await;
         let mut ids = vec![];
         for _ in 0..3 {
             ids.push(
@@ -139,6 +140,7 @@ mod add_limit_order {
                     .unwrap(),
             );
         }
+        let after_placement = setup.time_nanos().await;
 
         // Newest first.
         let orders = client
@@ -156,7 +158,13 @@ mod add_limit_order {
             assert_eq!(o.order.owner, setup.user());
             assert_eq!(o.order.side, Side::Buy);
             assert_eq!(o.order.price, 100);
-            assert!(o.order.timestamp > 0, "carries a submission timestamp");
+            assert!(
+                before_placement <= o.order.timestamp && o.order.timestamp <= after_placement,
+                "submission timestamp {} outside placement window [{}, {}]",
+                o.order.timestamp,
+                before_placement,
+                after_placement
+            );
         }
 
         // Cursor pagination: resume after the newest, take one → the next order.
