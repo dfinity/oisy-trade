@@ -67,16 +67,16 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.quote_token_id();
         let fee = QUOTE_LEDGER_FEE;
-        // buy 1M base tokens for a price of 100 quote tokens per base token
-        // need 100M quote tokens
+        // buy 1M base tokens for a price of 1000 quote tokens per base token
+        // need 1000M quote tokens
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 100,
+            price: 1000,
             quantity: 1_000_000u64.into(),
         };
 
-        let required = 100_000_000u64;
+        let required = 1_000_000_000u64;
         assert_eq!(
             client.add_limit_order(order.clone()).await,
             Err(AddLimitOrderError::InsufficientBalance {
@@ -114,8 +114,8 @@ mod add_limit_order {
         let setup = Setup::new().await.with_trading_pair().await;
         let client = setup.dex_client();
 
-        // Fund enough quote for three resting buys of 1M @ 100 (100M each).
-        let per_order = 100_000_000u64;
+        // Fund enough quote for three resting buys of 1M @ 1000 (1B each).
+        let per_order = 1_000_000_000u64;
         let total = 3 * per_order;
         setup
             .deposit_flow(setup.user(), setup.quote_token_id())
@@ -133,7 +133,7 @@ mod add_limit_order {
                     .add_limit_order(LimitOrderRequest {
                         pair: setup.trading_pair(),
                         side: Side::Buy,
-                        price: 100,
+                        price: 1000,
                         quantity: 1_000_000u64.into(),
                     })
                     .await
@@ -157,7 +157,7 @@ mod add_limit_order {
             assert_eq!(o.pair, setup.trading_pair());
             assert_eq!(o.order.owner, setup.user());
             assert_eq!(o.order.side, Side::Buy);
-            assert_eq!(o.order.price, 100);
+            assert_eq!(o.order.price, 1000);
             assert!(
                 before_placement <= o.order.timestamp && o.order.timestamp <= after_placement,
                 "submission timestamp {} outside placement window [{}, {}]",
@@ -198,12 +198,12 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.base_token_id();
         let fee = BASE_LEDGER_FEE;
-        // sell 1M base tokens at a price of 100 quote tokens per base token
+        // sell 1M base tokens at a price of 1000 quote tokens per base token
         // need 1M base tokens
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 100,
+            price: 1000,
             quantity: 1_000_000u64.into(),
         };
 
@@ -278,15 +278,15 @@ mod add_limit_order {
         let seller = Principal::from_slice(&[0x02]);
         let seller_client = setup.dex_client_with_caller(seller);
 
-        // buy 1M base tokens for a price of 100 quote tokens per base token
-        // need 100M quote tokens
+        // buy 1M base tokens for a price of 1000 quote tokens per base token
+        // need 1000M quote tokens
         let buy_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 100,
+            price: 1000,
             quantity: 1_000_000u64.into(),
         };
-        let required_quote_amount = 100_000_000u64;
+        let required_quote_amount = 1_000_000_000u64;
         setup
             .deposit_flow(buyer, setup.quote_token_id())
             .mint(required_quote_amount + 2 * QUOTE_LEDGER_FEE)
@@ -299,12 +299,12 @@ mod add_limit_order {
             .await
             .unwrap();
 
-        // sell 1M base tokens at a price of 100 quote tokens per base token
+        // sell 1M base tokens at a price of 1000 quote tokens per base token
         // need 1M base tokens
         let sell_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 100,
+            price: 1000,
             quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
@@ -329,7 +329,7 @@ mod add_limit_order {
             OrderStatus::Filled
         );
 
-        // Buyer: received 1M base tokens, spent 100M quote tokens
+        // Buyer: received 1M base tokens, spent 1000M quote tokens
         assert_eq!(
             buyer_client
                 .get_balance(setup.base_token_id())
@@ -351,7 +351,7 @@ mod add_limit_order {
             },
         );
 
-        // Seller: spent 1M base tokens, received 100M quote tokens
+        // Seller: spent 1M base tokens, received 1000M quote tokens
         assert_eq!(
             seller_client
                 .get_balance(setup.base_token_id())
@@ -394,9 +394,9 @@ mod cancel_limit_order {
         let seller = Principal::from_slice(&[0x02]);
         let seller_client = setup.dex_client_with_caller(seller);
 
-        // Buyer wants 3M base @ 100 → reserves 300M quote.
-        // Seller supplies only 1M base @ 100 → fills 1M, 2M residual on buy.
-        let buyer_deposit = 300_000_000u64;
+        // Buyer wants 3M base @ 1000 → reserves 3000M quote.
+        // Seller supplies only 1M base @ 1000 → fills 1M, 2M residual on buy.
+        let buyer_deposit = 3_000_000_000u64;
         setup
             .deposit_flow(buyer, setup.quote_token_id())
             .mint(buyer_deposit + 2 * QUOTE_LEDGER_FEE)
@@ -418,7 +418,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price: 100,
+                price: 1000,
                 quantity: 3_000_000u64.into(),
             })
             .await
@@ -428,14 +428,14 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 100,
+                price: 1000,
                 quantity: 1_000_000u64.into(),
             })
             .await
             .unwrap();
         setup.env().tick().await;
 
-        // Buyer: 1M base filled, 200M quote still reserved for the 2M residual.
+        // Buyer: 1M base filled, 2000M quote still reserved for the 2M residual.
         assert_eq!(
             buyer_client.get_order_status(buy_id.clone()).await,
             OrderStatus::Open
@@ -447,7 +447,7 @@ mod cancel_limit_order {
                 .unwrap(),
             Balance {
                 free: 0u64.into(),
-                reserved: 200_000_000u64.into(),
+                reserved: 2_000_000_000u64.into(),
             }
         );
 
@@ -476,7 +476,7 @@ mod cancel_limit_order {
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
-                price: 100,
+                price: 1000,
                 quantity: Nat::from(3_000_000u64),
                 status: OrderStatus::Canceled(CanceledOrderInfo {
                     remaining_quantity: Nat::from(2_000_000u64),
@@ -497,7 +497,7 @@ mod cancel_limit_order {
                 .await
                 .unwrap(),
             Balance {
-                free: 200_000_000u64.into(),
+                free: 2_000_000_000u64.into(),
                 reserved: 0u64.into(),
             }
         );
@@ -965,7 +965,7 @@ async fn should_replay_events_on_upgrade() {
         .add_limit_order(dex_types::LimitOrderRequest {
             pair: setup.trading_pair(),
             side: dex_types::Side::Sell,
-            price: 100,
+            price: 1000,
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -991,7 +991,7 @@ async fn should_replay_events_on_upgrade() {
                 user: setup.user(),
                 order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
                 side: dex_types::Side::Sell,
-                price: 100,
+                price: 1000,
                 quantity: Nat::from(deposit_amount),
             });
         });
@@ -1008,7 +1008,7 @@ async fn should_replay_events_on_upgrade() {
     // no Unreserve (the price-improvement path is covered in the unit test
     // `should_replay_matching_with_price_improvement`).
     let buyer = Principal::from_slice(&[0x42]);
-    let price: u64 = 100;
+    let price: u64 = 1000;
     let quote_reserved = price * deposit_amount;
     setup
         .deposit_flow(buyer, setup.quote_token_id())
@@ -1293,7 +1293,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 100,
+                price: 1000,
                 quantity: Nat::from(deposit_amount),
             })
             .await
@@ -1447,8 +1447,8 @@ mod order_book {
     async fn should_expose_top_of_book_and_aggregated_depth() {
         let setup = Setup::new().await.with_trading_pair().await;
 
-        // Two buyers at price 100, one buyer at price 90; two sellers at 110, one at 120.
-        // The best-bid level aggregates across the two buyers at 100.
+        // Two buyers at price 10000, one buyer at price 9000; two sellers at 11000, one at 12000.
+        // The best-bid level aggregates across the two buyers at 10000.
         let u1 = Principal::from_slice(&[0x01]);
         let u2 = Principal::from_slice(&[0x02]);
         let u3 = Principal::from_slice(&[0x03]);
@@ -1456,12 +1456,12 @@ mod order_book {
         let u5 = Principal::from_slice(&[0x05]);
         let u6 = Principal::from_slice(&[0x06]);
 
-        fund_and_place_buy(&setup, u1, 100, 1_000_000).await;
-        fund_and_place_buy(&setup, u2, 100, 3_000_000).await;
-        fund_and_place_buy(&setup, u3, 90, 2_000_000).await;
-        fund_and_place_sell(&setup, u4, 110, 2_000_000).await;
-        fund_and_place_sell(&setup, u5, 110, 5_000_000).await;
-        fund_and_place_sell(&setup, u6, 120, 4_000_000).await;
+        fund_and_place_buy(&setup, u1, 10000, 1_000_000).await;
+        fund_and_place_buy(&setup, u2, 10000, 3_000_000).await;
+        fund_and_place_buy(&setup, u3, 9000, 2_000_000).await;
+        fund_and_place_sell(&setup, u4, 11000, 2_000_000).await;
+        fund_and_place_sell(&setup, u5, 11000, 5_000_000).await;
+        fund_and_place_sell(&setup, u6, 12000, 4_000_000).await;
 
         // Let all matching timers drain.
         setup.env().tick().await;
@@ -1472,8 +1472,8 @@ mod order_book {
         assert_eq!(
             client.get_order_book_ticker(pair).await,
             Ok(OrderBookTicker {
-                bid: Some(level(100, 4_000_000)),
-                ask: Some(level(110, 7_000_000)),
+                bid: Some(level(10000, 4_000_000)),
+                ask: Some(level(11000, 7_000_000)),
             })
         );
         assert_eq!(
@@ -1484,8 +1484,8 @@ mod order_book {
                 })
                 .await,
             Ok(OrderBookDepth {
-                bids: vec![level(100, 4_000_000), level(90, 2_000_000)],
-                asks: vec![level(110, 7_000_000), level(120, 4_000_000)],
+                bids: vec![level(10000, 4_000_000), level(9000, 2_000_000)],
+                asks: vec![level(11000, 7_000_000), level(12000, 4_000_000)],
             })
         );
 
@@ -1551,7 +1551,7 @@ mod chunked_matching {
 
     const MAX_ORDERS_PER_CHUNK: u32 = 5;
     const N_ORDERS: u32 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
-    const PRICE: u64 = 100;
+    const PRICE: u64 = 1000;
     const QUANTITY: u64 = 1_000_000;
 
     /// Installs the canister with a tiny `ExecutionPolicy` (5 orders per
@@ -1735,7 +1735,7 @@ async fn should_expose_metrics() {
         .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 0"#);
 
     let user = setup.user();
-    let required = 100_000_000u64;
+    let required = 1_000_000_000u64;
     setup
         .deposit_flow(user, setup.quote_token_id())
         .mint(required + 2 * QUOTE_LEDGER_FEE)
@@ -1748,7 +1748,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 100,
+            price: 1000,
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1765,7 +1765,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 200,
+            price: 2000,
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1777,8 +1777,8 @@ async fn should_expose_metrics() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 200"#)
-        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 100"#)
+        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 2000"#)
+        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 1000"#)
         .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
         .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
 

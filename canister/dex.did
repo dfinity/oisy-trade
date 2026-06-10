@@ -377,6 +377,12 @@ type AddTradingPairError = variant {
     TradingPairAlreadyExists;
     // The submitted token metadata does not match the previously registered metadata.
     InconsistentTokenMetadata : record { token : TokenId; expected : TokenMetadata; submitted : TokenMetadata };
+    // The base token has too many decimals for settlement to be representable
+    // (10^base_decimals must fit a nat64, i.e. decimals <= 19).
+    BaseDecimalsTooLarge : record { decimals : nat8 };
+    // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
+    // could not settle to an exact quote amount. Choose a coarser tick or lot.
+    IndivisibleTickLotForBaseDecimals : record { tick_size : nat64; lot_size : nat64; base_decimals : nat8 };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
