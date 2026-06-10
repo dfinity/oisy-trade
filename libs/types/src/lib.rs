@@ -219,7 +219,7 @@ pub struct OrderRecord {
     pub timestamp: u64,
 }
 
-/// Maximum number of orders returned by a single [`get_my_orders`] call.
+/// Maximum number of orders returned by a single `get_my_orders` call.
 /// Requests for more are silently capped to this many.
 pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
 
@@ -237,7 +237,7 @@ pub struct GetMyOrdersArgs {
     pub length: u32,
 }
 
-/// One entry in a [`get_my_orders`] response: an order the caller placed.
+/// One entry in a `get_my_orders` response: an order the caller placed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct UserOrder {
     /// The order's unique identifier.
