@@ -1109,7 +1109,7 @@ mod settle_fills {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
         let quote_total = Price::new(price)
-            .checked_mul_quantity_scaled(&quantity, NonZeroU64::new(PRICE_SCALE).unwrap())
+            .checked_mul_quantity_scaled(&quantity, state.base_scale(&pair.base))
             .unwrap();
 
         // Buyer received all base tokens
