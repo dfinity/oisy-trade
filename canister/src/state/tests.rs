@@ -649,7 +649,6 @@ mod settle_fills {
     use ic_stable_structures::VectorMemory;
     use proptest::prelude::*;
     use std::collections::BTreeMap;
-    use std::num::NonZeroU64;
 
     type TestState = State<VectorMemory, VectorMemory>;
 
