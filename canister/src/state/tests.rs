@@ -57,7 +57,10 @@ mod assert_caller_is_allowed {
                 max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
-            crate::state::OrderHistory::new(ic_stable_structures::VectorMemory::default()),
+            crate::state::OrderHistory::new(
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+            ),
             crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
@@ -447,6 +450,7 @@ mod record_limit_order {
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
         self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -497,6 +501,22 @@ mod record_limit_order {
         assert_eq!(
             state.order_history.get(&order_id).unwrap().timestamp,
             timestamp
+        );
+    }
+
+    #[test]
+    fn populates_the_per_user_index_newest_first() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+
+        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+
+        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        assert_eq!(
+            state.order_history.orders_after(owner_id, None, 10),
+            vec![second, first]
         );
     }
 }
@@ -1415,7 +1435,7 @@ mod execution_policy {
                 max_orders_per_chunk: 17,
                 instruction_budget: 12_345,
             },
-            OrderHistory::new(VectorMemory::default()),
+            OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )

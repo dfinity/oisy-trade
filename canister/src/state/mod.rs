@@ -237,6 +237,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
             let order_id = OrderId::new(book_id, order.id());
             self.order_history.insert_once(
+                user_id,
                 order_id,
                 OrderRecord {
                     owner: user,

@@ -15,7 +15,10 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
             panic!("ERROR: expected Init argument");
         }
     };
-    let order_history = OrderHistory::new(storage::order_history_memory());
+    let order_history = OrderHistory::new(
+        storage::order_history_memory(),
+        storage::user_orders_memory(),
+    );
     let balances = TokenBalance::new(storage::balances_memory());
     let user_registry = UserRegistry::new(storage::user_registry_memory());
     state::init_state(
@@ -57,7 +60,10 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
         (
-            OrderHistory::new(storage::order_history_memory()),
+            OrderHistory::new(
+                storage::order_history_memory(),
+                storage::user_orders_memory(),
+            ),
             TokenBalance::new(storage::balances_memory()),
             UserRegistry::new(storage::user_registry_memory()),
         )

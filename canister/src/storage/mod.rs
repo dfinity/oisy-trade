@@ -11,6 +11,7 @@ const ORDER_HISTORY_MEMORY_ID: MemoryId = MemoryId::new(2);
 const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 const STATE_SNAPSHOT_MEMORY_ID: MemoryId = MemoryId::new(4);
 const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
+const USER_ORDERS_MEMORY_ID: MemoryId = MemoryId::new(6);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -77,6 +78,12 @@ pub fn user_registry_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_REGISTRY_MEMORY_ID))
 }
 
+/// Returns the virtual memory slice that backs `OrderHistory`'s per-user
+/// order index (the second region passed to `OrderHistory::new`). Distinct
+/// from [`order_history_memory`], which backs the primary order store.
+pub fn user_orders_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
+}
 pub mod state_snapshot {
     use super::STATE_SNAPSHOT;
     use crate::state::StateSnapshot;
