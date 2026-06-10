@@ -65,8 +65,8 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.quote_token_id();
         let fee = QUOTE_LEDGER_FEE;
-        // buy 1M base tokens for a price of 1000 quote tokens per base token
-        // need 1000M quote tokens
+        // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE). Reserve = price * quantity / 10^9 = 1_000_000_000.
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
@@ -113,8 +113,8 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.base_token_id();
         let fee = BASE_LEDGER_FEE;
-        // sell 1M base tokens at a price of 1000 quote tokens per base token
-        // need 1M base tokens
+        // Sell 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE); a sell reserves the base → need 1_000_000 base units.
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
@@ -193,8 +193,8 @@ mod add_limit_order {
         let seller = Principal::from_slice(&[0x02]);
         let seller_client = setup.dex_client_with_caller(seller);
 
-        // buy 1M base tokens for a price of 1000 quote tokens per base token
-        // need 1000M quote tokens
+        // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE). Reserve = price * quantity / 10^9 = 1_000_000_000.
         let buy_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
@@ -214,8 +214,8 @@ mod add_limit_order {
             .await
             .unwrap();
 
-        // sell 1M base tokens at a price of 1000 quote tokens per base token
-        // need 1M base tokens
+        // Sell 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE); a sell reserves the base → need 1_000_000 base units.
         let sell_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
