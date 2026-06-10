@@ -383,8 +383,26 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
-        quantity.checked_mul_u64(self.0)
+    /// Quote-token amount owed for `quantity` base units at this price:
+    /// `price × quantity / base_scale`, where `base_scale = 10^base_decimals`.
+    ///
+    /// Exact (zero remainder) by the pair-creation invariant: `price` is a
+    /// multiple of the tick, `quantity` a multiple of the lot, and
+    /// `tick × lot` a multiple of `base_scale`. Returns `None` only if the
+    /// intermediate `price × quantity` overflows 256 bits.
+    pub fn checked_mul_quantity_scaled(
+        self,
+        quantity: &Quantity,
+        base_scale: NonZeroU64,
+    ) -> Option<Quantity> {
+        let (quote, remainder) = quantity
+            .checked_mul_u64(self.0)?
+            .checked_div_rem_u64(base_scale.get())?;
+        assert_eq!(
+            remainder, 0,
+            "BUG: settlement not exact — pair invariant violated"
+        );
+        Some(quote)
     }
 }
 

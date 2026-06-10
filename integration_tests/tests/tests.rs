@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use dex_client::{DexClient, Runtime};
 use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-use dex_int_tests::{LOT_SIZE, Setup, TICK_SIZE, fill_one_cross_with_fees};
+use dex_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use dex_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
@@ -54,8 +54,8 @@ async fn assert_balances<R: Runtime>(
 mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Principal};
-    use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
         AddLimitOrderError, Balance, GetMyOrdersArgs, LimitOrderRequest, OrderStatus, Side,
     };
@@ -67,12 +67,12 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.quote_token_id();
         let fee = QUOTE_LEDGER_FEE;
-        // buy 1M base tokens for a price of 1000 quote tokens per base token
-        // need 1000M quote tokens
+        // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE). Reserve = price * quantity / 10^9 = 1_000_000_000.
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         };
 
@@ -221,12 +221,12 @@ mod add_limit_order {
         let client = setup.dex_client();
         let token_id = setup.base_token_id();
         let fee = BASE_LEDGER_FEE;
-        // sell 1M base tokens at a price of 1000 quote tokens per base token
-        // need 1M base tokens
+        // Sell 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE); a sell reserves the base → need 1_000_000 base units.
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         };
 
@@ -301,12 +301,12 @@ mod add_limit_order {
         let seller = Principal::from_slice(&[0x02]);
         let seller_client = setup.dex_client_with_caller(seller);
 
-        // buy 1M base tokens for a price of 1000 quote tokens per base token
-        // need 1000M quote tokens
+        // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE). Reserve = price * quantity / 10^9 = 1_000_000_000.
         let buy_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         };
         let required_quote_amount = 1_000_000_000u64;
@@ -322,12 +322,12 @@ mod add_limit_order {
             .await
             .unwrap();
 
-        // sell 1M base tokens at a price of 1000 quote tokens per base token
-        // need 1M base tokens
+        // Sell 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
+        // (10_000 * PRICE_SCALE); a sell reserves the base → need 1_000_000 base units.
         let sell_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
@@ -402,8 +402,8 @@ mod add_limit_order {
 
 mod cancel_limit_order {
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
         Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
         OrderStatus, Side,
@@ -441,7 +441,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price: 1000,
+                price: 10_000 * PRICE_SCALE,
                 quantity: 3_000_000u64.into(),
             })
             .await
@@ -451,7 +451,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 1000,
+                price: 10_000 * PRICE_SCALE,
                 quantity: 1_000_000u64.into(),
             })
             .await
@@ -499,7 +499,7 @@ mod cancel_limit_order {
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
-                price: 1000,
+                price: 10_000 * PRICE_SCALE,
                 quantity: Nat::from(3_000_000u64),
                 status: OrderStatus::Canceled(CanceledOrderInfo {
                     remaining_quantity: Nat::from(2_000_000u64),
@@ -988,7 +988,7 @@ async fn should_replay_events_on_upgrade() {
         .add_limit_order(dex_types::LimitOrderRequest {
             pair: setup.trading_pair(),
             side: dex_types::Side::Sell,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -1014,7 +1014,7 @@ async fn should_replay_events_on_upgrade() {
                 user: setup.user(),
                 order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
                 side: dex_types::Side::Sell,
-                price: 1000,
+                price: 10_000 * PRICE_SCALE,
                 quantity: Nat::from(deposit_amount),
             });
         });
@@ -1031,8 +1031,9 @@ async fn should_replay_events_on_upgrade() {
     // no Unreserve (the price-improvement path is covered in the unit test
     // `should_replay_matching_with_price_improvement`).
     let buyer = Principal::from_slice(&[0x42]);
-    let price: u64 = 1000;
-    let quote_reserved = price * deposit_amount;
+    let price: u64 = 10_000 * PRICE_SCALE;
+    // Settlement is `price × quantity / 10^base_decimals` (ckSOL base = 9 dec).
+    let quote_reserved = price * deposit_amount / 1_000_000_000;
     setup
         .deposit_flow(buyer, setup.quote_token_id())
         .mint(quote_reserved + 2 * QUOTE_LEDGER_FEE)
@@ -1316,7 +1317,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 1000,
+                price: 10_000 * PRICE_SCALE,
                 quantity: Nat::from(deposit_amount),
             })
             .await
@@ -1459,8 +1460,8 @@ async fn should_get_dashboard() {
 
 mod order_book {
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
         GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
         Side,
@@ -1470,8 +1471,9 @@ mod order_book {
     async fn should_expose_top_of_book_and_aggregated_depth() {
         let setup = Setup::new().await.with_trading_pair().await;
 
-        // Two buyers at price 10000, one buyer at price 9000; two sellers at 11000, one at 12000.
-        // The best-bid level aggregates across the two buyers at 10000.
+        // Two buyers at the best bid, a third buyer one level lower; two sellers
+        // at the best ask, a third one level higher. The best-bid level
+        // aggregates the quantity across the two top buyers.
         let u1 = Principal::from_slice(&[0x01]);
         let u2 = Principal::from_slice(&[0x02]);
         let u3 = Principal::from_slice(&[0x03]);
@@ -1479,12 +1481,12 @@ mod order_book {
         let u5 = Principal::from_slice(&[0x05]);
         let u6 = Principal::from_slice(&[0x06]);
 
-        fund_and_place_buy(&setup, u1, 10000, 1_000_000).await;
-        fund_and_place_buy(&setup, u2, 10000, 3_000_000).await;
-        fund_and_place_buy(&setup, u3, 9000, 2_000_000).await;
-        fund_and_place_sell(&setup, u4, 11000, 2_000_000).await;
-        fund_and_place_sell(&setup, u5, 11000, 5_000_000).await;
-        fund_and_place_sell(&setup, u6, 12000, 4_000_000).await;
+        fund_and_place_buy(&setup, u1, 100_000 * PRICE_SCALE, 1_000_000).await;
+        fund_and_place_buy(&setup, u2, 100_000 * PRICE_SCALE, 3_000_000).await;
+        fund_and_place_buy(&setup, u3, 90_000 * PRICE_SCALE, 2_000_000).await;
+        fund_and_place_sell(&setup, u4, 110_000 * PRICE_SCALE, 2_000_000).await;
+        fund_and_place_sell(&setup, u5, 110_000 * PRICE_SCALE, 5_000_000).await;
+        fund_and_place_sell(&setup, u6, 120_000 * PRICE_SCALE, 4_000_000).await;
 
         // Let all matching timers drain.
         setup.env().tick().await;
@@ -1495,8 +1497,8 @@ mod order_book {
         assert_eq!(
             client.get_order_book_ticker(pair).await,
             Ok(OrderBookTicker {
-                bid: Some(level(10000, 4_000_000)),
-                ask: Some(level(11000, 7_000_000)),
+                bid: Some(level(100_000 * PRICE_SCALE, 4_000_000)),
+                ask: Some(level(110_000 * PRICE_SCALE, 7_000_000)),
             })
         );
         assert_eq!(
@@ -1507,8 +1509,14 @@ mod order_book {
                 })
                 .await,
             Ok(OrderBookDepth {
-                bids: vec![level(10000, 4_000_000), level(9000, 2_000_000)],
-                asks: vec![level(11000, 7_000_000), level(12000, 4_000_000)],
+                bids: vec![
+                    level(100_000 * PRICE_SCALE, 4_000_000),
+                    level(90_000 * PRICE_SCALE, 2_000_000),
+                ],
+                asks: vec![
+                    level(110_000 * PRICE_SCALE, 7_000_000),
+                    level(120_000 * PRICE_SCALE, 4_000_000),
+                ],
             })
         );
 
@@ -1516,7 +1524,10 @@ mod order_book {
     }
 
     async fn fund_and_place_buy(setup: &Setup, user: Principal, price: u64, quantity: u64) {
-        let required = price * quantity;
+        // Settlement is `price × quantity / 10^base_decimals` (ckSOL base = 9
+        // decimals). Compute in u128 to avoid overflow at the scaled prices.
+        let required = u64::try_from(price as u128 * quantity as u128 / 1_000_000_000)
+            .expect("required quote amount exceeds u64");
         setup
             .deposit_flow(user, setup.quote_token_id())
             .mint(required + 2 * QUOTE_LEDGER_FEE)
@@ -1771,7 +1782,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 1000,
+            price: 10_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1788,7 +1799,7 @@ async fn should_expose_metrics() {
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 2000,
+            price: 20_000 * PRICE_SCALE,
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1800,8 +1811,14 @@ async fn should_expose_metrics() {
     setup
         .assert_metrics()
         .await
-        .assert_contains_metric_matching(r#"ask\{base="CKSOL",quote="CKBTC"\} 2000"#)
-        .assert_contains_metric_matching(r#"bid\{base="CKSOL",quote="CKBTC"\} 1000"#)
+        .assert_contains_metric_matching(format!(
+            r#"ask\{{base="CKSOL",quote="CKBTC"\}} {}"#,
+            20_000 * PRICE_SCALE
+        ))
+        .assert_contains_metric_matching(format!(
+            r#"bid\{{base="CKSOL",quote="CKBTC"\}} {}"#,
+            10_000 * PRICE_SCALE
+        ))
         .assert_contains_metric_matching(r#"pending_orders\{base="CKSOL",quote="CKBTC"\} 0"#)
         .assert_contains_metric_matching(r#"resting_orders\{base="CKSOL",quote="CKBTC"\} 2"#);
 

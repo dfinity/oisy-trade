@@ -14,13 +14,20 @@ use ic_stable_structures::{Memory, VectorMemory};
 use std::iter::once;
 use std::num::NonZeroU64;
 
-/// ICP/BTC-like parameters from Binance.
-/// Source: `GET https://api.binance.com/api/v3/exchangeInfo?symbol=ICPBTC`
+/// Tick/lot for the ICP/ckBTC-like test pair (both tokens 8 decimals).
 ///
-/// Minimum price increment: 0.00000010 BTC, i.e. 10 satoshis.
-pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(10).unwrap());
+/// Price is denominated in quote smallest units per **whole** base token, and a
+/// fill settles to `price × quantity / 10^base_decimals`. `tick × lot = 100 ×
+/// 10^6 = 10^8` is a multiple of `10^base_decimals = 10^8`, so every fill
+/// settles to an exact quote amount.
+pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
+
+/// Scales a whole-quote-per-whole-base price into the on-book representation
+/// (quote smallest units per whole base token) for the 8-decimal test pair:
+/// `10^quote_decimals`.
+pub const PRICE_SCALE: u64 = 100_000_000;
 
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
@@ -90,7 +97,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
-        price: 100,
+        price: 100 * PRICE_SCALE,
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
@@ -307,7 +314,7 @@ where
             pair.quote,
             pending
                 .price
-                .checked_mul_quantity(&pending.quantity)
+                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
                 .expect("place_order: price × quantity overflow"),
         ),
         Side::Sell => (pair.base, pending.quantity),
