@@ -1,4 +1,26 @@
 benches:
+  bench_get_my_orders:
+    total:
+      calls: 1
+      instructions: 50829324
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      order_history:
+        calls: 1010
+        instructions: 41630095
+        heap_increase: 0
+        stable_memory_increase: 0
+      order_history::get:
+        calls: 1000
+        instructions: 36653183
+        heap_increase: 0
+        stable_memory_increase: 0
+      order_history::orders_after:
+        calls: 10
+        instructions: 3412986
+        heap_increase: 0
+        stable_memory_increase: 0
   bench_get_order_book_depth_default:
     total:
       calls: 1
@@ -468,13 +490,13 @@ benches:
   bench_upgrade_1000_no_fills:
     total:
       calls: 1
-      instructions: 3430210
+      instructions: 3430182
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 2162000
+        instructions: 2161986
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
@@ -494,7 +516,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 1153328
+        instructions: 1153314
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:
@@ -510,13 +532,13 @@ benches:
   bench_upgrade_full_depth:
     total:
       calls: 1
-      instructions: 49467025
+      instructions: 49466997
       heap_increase: 0
       stable_memory_increase: 128
     scopes:
       post_upgrade:
         calls: 1
-        instructions: 28917203
+        instructions: 28917189
         heap_increase: 0
         stable_memory_increase: 0
       post_upgrade::into_state:
@@ -536,7 +558,7 @@ benches:
         stable_memory_increase: 0
       pre_upgrade:
         calls: 1
-        instructions: 17159002
+        instructions: 17158988
         heap_increase: 0
         stable_memory_increase: 128
       pre_upgrade::from_state:

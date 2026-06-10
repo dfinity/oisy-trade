@@ -1,10 +1,11 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token, TradingPair,
-    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
+    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{num::NonZeroU64, time::Duration};
 
@@ -336,6 +337,37 @@ pub fn get_fee_balances(
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
     validate_filter_len(filter.as_deref())?;
     Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
+}
+
+/// Why a [`get_my_orders`] call could not be served.
+///
+/// Typically those errors indicate a client bug.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetMyOrdersError {
+    /// The `after` cursor was not a well-formed order id.
+    InvalidCursor(order::OrderIdParseError),
+}
+
+pub fn get_my_orders(
+    args: GetMyOrdersArgs,
+    caller: candid::Principal,
+) -> Result<Vec<UserOrder>, GetMyOrdersError> {
+    let after = args
+        .after
+        .map(|id| id.parse::<order::OrderId>())
+        .transpose()
+        .map_err(GetMyOrdersError::InvalidCursor)?;
+    let length = args.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
+    Ok(
+        state::with_state(|s| s.get_user_orders(&caller, after, length))
+            .into_iter()
+            .map(|(id, pair, record)| UserOrder {
+                id: id.into(),
+                pair: pair.into(),
+                order: record.into(),
+            })
+            .collect(),
+    )
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {

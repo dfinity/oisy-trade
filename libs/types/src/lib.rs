@@ -219,6 +219,37 @@ pub struct OrderRecord {
     pub timestamp: u64,
 }
 
+/// Maximum number of orders returned by a single `get_my_orders` call.
+/// Requests for more are silently capped to this many.
+pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
+
+/// Request for the `get_my_orders` query: a page over the caller's orders,
+/// newest first. `length` is capped at [`MAX_ORDERS_PER_RESPONSE`].
+///
+/// Pages via a cursor: pass the previous page's last [`UserOrder::id`] as
+/// `after` to get the next page; `None` starts from the newest order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyOrdersArgs {
+    /// Resume strictly after this order id (a prior page's last `id`).
+    /// `None` starts from the newest order.
+    pub after: Option<OrderId>,
+    /// Maximum number of orders to return.
+    pub length: u32,
+}
+
+/// One entry in a `get_my_orders` response: an order the caller placed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct UserOrder {
+    /// The order's unique identifier.
+    pub id: OrderId,
+    /// The trading pair the order was placed on.
+    pub pair: TradingPair,
+    /// The full order record. `get_my_orders` only returns the caller's own
+    /// orders, so `order.owner` is always the caller — reused as-is for shape
+    /// parity with other order-returning endpoints.
+    pub order: OrderRecord,
+}
+
 /// A token identified by its ledger canister ID.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
