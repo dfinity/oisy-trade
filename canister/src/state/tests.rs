@@ -519,9 +519,36 @@ mod record_limit_order {
             vec![second, first]
         );
     }
+}
+
+mod get_user_orders {
+    use crate::order::{FeeRates, OrderBookId, Side};
+    use crate::state::State;
+    use crate::test_fixtures::{
+        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        place_order,
+    };
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            FeeRates::default(),
+        );
+        state
+    }
 
     #[test]
-    fn get_user_orders_joins_pair_and_record_newest_first() {
+    fn joins_pair_and_record_newest_first() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u64::from(LOT_SIZE);
@@ -1513,6 +1540,7 @@ mod get_balances {
             state.get_balance(&stranger, &a_id),
             crate::balance::Balance::zero()
         );
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
 
         assert_eq!(
             state.user_registry, registry_before,

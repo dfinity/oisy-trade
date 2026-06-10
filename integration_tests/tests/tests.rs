@@ -112,38 +112,44 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_return_my_orders_newest_first_paginated() {
         let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
+        let alice = setup.dex_client();
+        let bob_principal = Principal::from_slice(&[0xBB]);
+        let bob = setup.dex_client_with_caller(bob_principal);
+        let pair = setup.trading_pair();
 
-        // Fund enough quote for three resting buys of 1M @ 1000 (1B each).
+        // Fund both callers for three resting buys of 1M @ 1000 (1B each).
         let per_order = 1_000_000_000u64;
         let total = 3 * per_order;
-        setup
-            .deposit_flow(setup.user(), setup.quote_token_id())
-            .mint(total + 2 * QUOTE_LEDGER_FEE)
-            .approve(total + QUOTE_LEDGER_FEE)
-            .deposit(total)
-            .execute()
-            .await;
+        for who in [setup.user(), bob_principal] {
+            setup
+                .deposit_flow(who, setup.quote_token_id())
+                .mint(total + 2 * QUOTE_LEDGER_FEE)
+                .approve(total + QUOTE_LEDGER_FEE)
+                .deposit(total)
+                .execute()
+                .await;
+        }
 
+        // Interleave alice's and bob's placements so a correct per-user index
+        // can't rely on a caller's orders being inserted contiguously.
+        let buy = LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price: 1000,
+            quantity: 1_000_000u64.into(),
+        };
         let before_placement = setup.time_nanos().await;
-        let mut ids = vec![];
+        let mut alice_ids = vec![];
+        let mut bob_ids = vec![];
         for _ in 0..3 {
-            ids.push(
-                client
-                    .add_limit_order(LimitOrderRequest {
-                        pair: setup.trading_pair(),
-                        side: Side::Buy,
-                        price: 1000,
-                        quantity: 1_000_000u64.into(),
-                    })
-                    .await
-                    .unwrap(),
-            );
+            alice_ids.push(alice.add_limit_order(buy.clone()).await.unwrap());
+            bob_ids.push(bob.add_limit_order(buy.clone()).await.unwrap());
         }
         let after_placement = setup.time_nanos().await;
 
-        // Newest first.
-        let orders = client
+        // Alice sees only her own orders, newest first — bob's interleaved
+        // orders don't leak in.
+        let orders = alice
             .get_my_orders(GetMyOrdersArgs {
                 after: None,
                 length: 10,
@@ -151,10 +157,14 @@ mod add_limit_order {
             .await;
         assert_eq!(
             orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
-            vec![ids[2].clone(), ids[1].clone(), ids[0].clone()]
+            vec![
+                alice_ids[2].clone(),
+                alice_ids[1].clone(),
+                alice_ids[0].clone()
+            ]
         );
         for o in &orders {
-            assert_eq!(o.pair, setup.trading_pair());
+            assert_eq!(o.pair, pair);
             assert_eq!(o.order.owner, setup.user());
             assert_eq!(o.order.side, Side::Buy);
             assert_eq!(o.order.price, 1000);
@@ -167,17 +177,30 @@ mod add_limit_order {
             );
         }
 
-        // Cursor pagination: resume after the newest, take one → the next order.
-        let page = client
+        // Bob likewise sees only his own.
+        let bob_orders = bob
             .get_my_orders(GetMyOrdersArgs {
-                after: Some(ids[2].clone()),
+                after: None,
+                length: 10,
+            })
+            .await;
+        assert_eq!(
+            bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
+        );
+        assert!(bob_orders.iter().all(|o| o.order.owner == bob_principal));
+
+        // Cursor pagination: resume after the newest, take one → the next order.
+        let page = alice
+            .get_my_orders(GetMyOrdersArgs {
+                after: Some(alice_ids[2].clone()),
                 length: 1,
             })
             .await;
         assert_eq!(page.len(), 1);
-        assert_eq!(page[0].id, ids[1]);
+        assert_eq!(page[0].id, alice_ids[1]);
 
-        // A different caller sees none of these orders.
+        // A caller that placed nothing sees none.
         let stranger = setup.dex_client_with_caller(Principal::from_slice(&[0xAB]));
         assert!(
             stranger

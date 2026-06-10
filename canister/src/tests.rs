@@ -1645,18 +1645,34 @@ mod get_order_book_depth {
 mod get_my_orders {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, fund_user, init_state_with_order_book, place_limit_order,
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
     };
-    use crate::{GetMyOrdersError, get_my_orders};
-    use candid::Principal;
-    use dex_types::{GetMyOrdersArgs, MAX_ORDERS_PER_RESPONSE, Side};
+    use crate::{GetMyOrdersError, add_limit_order, get_my_orders};
+    use candid::{Nat, Principal};
+    use dex_types::{GetMyOrdersArgs, LimitOrderRequest, MAX_ORDERS_PER_RESPONSE, OrderId, Side};
 
-    fn place_resting_buys(user: Principal, count: u32) {
+    /// Places `count` resting buys for `user` and returns their ids in
+    /// placement order, so `ids[0]` is the oldest and `ids[count - 1]` the
+    /// newest.
+    fn place_resting_buys(user: Principal, count: u32) -> Vec<OrderId> {
         fund_user(user);
-        for _ in 0..count {
-            place_limit_order(user, Side::Buy, 100, u64::from(LOT_SIZE));
-        }
+        let runtime = mock_runtime_for(user);
+        let ids = (0..count)
+            .map(|_| {
+                add_limit_order(
+                    LimitOrderRequest {
+                        pair: icp_ckbtc_trading_pair().into(),
+                        side: Side::Buy,
+                        price: 100,
+                        quantity: Nat::from(u64::from(LOT_SIZE)),
+                    },
+                    &runtime,
+                )
+                .unwrap()
+            })
+            .collect();
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        ids
     }
 
     #[test]
@@ -1673,20 +1689,38 @@ mod get_my_orders {
     }
 
     #[test]
-    fn caps_length_at_max_orders_per_response() {
+    fn caps_length_at_max_orders_per_response_and_paginates() {
         init_state_with_order_book();
         let user = Principal::from_slice(&[0x01]);
-        place_resting_buys(user, MAX_ORDERS_PER_RESPONSE + 1);
+        // ids[0] is the oldest order, ids[MAX_ORDERS_PER_RESPONSE] the newest.
+        let ids = place_resting_buys(user, MAX_ORDERS_PER_RESPONSE + 1);
 
-        let orders = get_my_orders(
-            GetMyOrdersArgs {
-                after: None,
-                length: u32::MAX,
-            },
-            user,
-        )
-        .unwrap();
-        assert_eq!(orders.len(), MAX_ORDERS_PER_RESPONSE as usize);
+        let page = |after| {
+            get_my_orders(
+                GetMyOrdersArgs {
+                    after,
+                    length: u32::MAX,
+                },
+                user,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|o| o.id)
+            .collect::<Vec<_>>()
+        };
+
+        // First page: clamped to MAX_ORDERS_PER_RESPONSE, newest-first — every
+        // order but the oldest (ids[0]).
+        let first = page(None);
+        let expected_first: Vec<_> = (1..=MAX_ORDERS_PER_RESPONSE as usize)
+            .rev()
+            .map(|i| ids[i].clone())
+            .collect();
+        assert_eq!(first, expected_first);
+
+        // Second page resumes after the first page's last id → just the oldest.
+        let second = page(Some(first.last().unwrap().clone()));
+        assert_eq!(second, vec![ids[0].clone()]);
     }
 
     #[test]

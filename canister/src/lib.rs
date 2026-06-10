@@ -339,9 +339,9 @@ pub fn get_fee_balances(
     Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }
 
-/// Why a [`get_my_orders`] call could not be served. The public query treats
-/// these as client bugs and traps; the typed error keeps the dispatcher
-/// unit-testable without a canister round-trip.
+/// Why a [`get_my_orders`] call could not be served.
+///
+/// Typically those errors indicate a client bug.
 #[derive(Debug, PartialEq, Eq)]
 pub enum GetMyOrdersError {
     /// The `after` cursor was not a well-formed order id.

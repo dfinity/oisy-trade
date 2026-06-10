@@ -458,8 +458,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         after: Option<OrderId>,
         length: usize,
     ) -> Vec<(OrderId, TradingPair, OrderRecord)> {
-        // `lookup` (not `get_or_register`): a never-seen principal has no
-        // orders, and a read path must not create a registry entry.
         let Some(user_id) = self.user_registry.lookup(*owner) else {
             return Vec::new();
         };
