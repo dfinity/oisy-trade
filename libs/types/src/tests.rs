@@ -65,7 +65,7 @@ fn should_serialize_trading_pair_info() {
             },
         },
         tick_size: Nat::from(10u64),
-        lot_size: 1_000_000,
+        lot_size: Nat::from(1_000_000u64),
     };
     let encoded = candid::encode_one(&info).unwrap();
     let decoded: TradingPairInfo = candid::decode_one(&encoded).unwrap();
@@ -225,7 +225,7 @@ fn should_serialize_add_limit_order_error() {
         },
         AddLimitOrderError::InvalidQuantity {
             quantity: Nat::from(500_000u64),
-            lot_size: 1_000_000,
+            lot_size: Nat::from(1_000_000u64),
         },
     ] {
         let encoded = candid::encode_one(&error).unwrap();

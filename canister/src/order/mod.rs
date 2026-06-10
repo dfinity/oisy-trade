@@ -383,10 +383,6 @@ impl Price {
         self.0.checked_sub(other.0).map(Self)
     }
 
-    pub(crate) fn checked_mul_quantity(self, quantity: &Quantity) -> Option<Quantity> {
-        quantity.checked_mul_u128(self.0)
-    }
-
     /// Quote-token amount owed for `quantity` base units at this price:
     /// `price × quantity / base_scale`, where `base_scale = 10^base_decimals`.
     ///
@@ -399,8 +395,8 @@ impl Price {
         quantity: &Quantity,
         base_scale: NonZeroU64,
     ) -> Option<Quantity> {
-        let (quote, remainder) = self
-            .checked_mul_quantity(quantity)?
+        let (quote, remainder) = quantity
+            .checked_mul_u128(self.0)?
             .checked_div_rem_u64(base_scale.get())?;
         assert_eq!(
             remainder, 0,
@@ -459,6 +455,24 @@ impl From<u128> for Price {
 impl From<Price> for u128 {
     fn from(price: Price) -> Self {
         price.0
+    }
+}
+
+impl From<Price> for Nat {
+    fn from(price: Price) -> Self {
+        Nat::from(price.get())
+    }
+}
+
+impl From<TickSize> for Nat {
+    fn from(tick_size: TickSize) -> Self {
+        Nat::from(tick_size.get())
+    }
+}
+
+impl From<LotSize> for Nat {
+    fn from(lot_size: LotSize) -> Self {
+        Nat::from(lot_size.get())
     }
 }
 

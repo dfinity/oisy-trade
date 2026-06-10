@@ -2,7 +2,7 @@ benches:
   bench_get_order_book_depth_default:
     total:
       calls: 1
-      instructions: 730169
+      instructions: 723977
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -19,7 +19,7 @@ benches:
   bench_get_order_book_depth_max:
     total:
       calls: 1
-      instructions: 6052914
+      instructions: 6000315
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -36,7 +36,7 @@ benches:
   bench_get_order_book_ticker:
     total:
       calls: 1
-      instructions: 10222
+      instructions: 10043
       heap_increase: 0
       stable_memory_increase: 0
     scopes:

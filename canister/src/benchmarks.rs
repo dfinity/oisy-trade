@@ -97,8 +97,8 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
             principal,
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
-                price: Price::new(parse_decimal_8(&trade.p) as u128),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
+                price: Price::new(parse_decimal_8(&trade.p)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
             },
         );
     }
@@ -252,20 +252,20 @@ struct AggTrade {
     m: bool,
 }
 
-/// Parse a Binance decimal string (e.g. "2.30400000") into a u64 assuming 8 decimal places.
+/// Parse a Binance decimal string (e.g. "2.30400000") into a u128 assuming 8 decimal places.
 /// Uses only integer arithmetic to avoid floating-point imprecision.
-fn parse_decimal_8(s: &str) -> u64 {
+fn parse_decimal_8(s: &str) -> u128 {
     let (integer_part, fractional_part) = match s.split_once('.') {
         Some((i, f)) => (i, f),
         None => (s, ""),
     };
-    let integer: u64 = integer_part.parse().expect("invalid integer part");
+    let integer: u128 = integer_part.parse().expect("invalid integer part");
     // Pad or truncate fractional part to exactly 8 digits.
     let mut frac_digits = [b'0'; 8];
     for (i, byte) in fractional_part.bytes().take(8).enumerate() {
         frac_digits[i] = byte;
     }
-    let fractional: u64 = std::str::from_utf8(&frac_digits)
+    let fractional: u128 = std::str::from_utf8(&frac_digits)
         .expect("ascii digits")
         .parse()
         .expect("invalid fractional part");
@@ -345,8 +345,8 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             principal,
             PendingOrder {
                 side: Side::Buy,
-                price: Price::new(parse_decimal_8(price_str) as u128),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }
@@ -358,8 +358,8 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             principal,
             PendingOrder {
                 side: Side::Sell,
-                price: Price::new(parse_decimal_8(price_str) as u128),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                price: Price::new(parse_decimal_8(price_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }

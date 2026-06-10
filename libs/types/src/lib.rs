@@ -37,7 +37,7 @@ pub struct LimitOrderRequest {
     pub pair: TradingPair,
     /// Whether this is a buy or sell order.
     pub side: Side,
-    /// Limit price in quote token units per base token unit.
+    /// Limit price in quote token smallest units per one whole base token.
     pub price: Nat,
     /// Order quantity in base token units.
     pub quantity: Nat,
@@ -62,7 +62,7 @@ pub enum AddLimitOrderError {
         /// The rejected quantity.
         quantity: Nat,
         /// The required lot size.
-        lot_size: u64,
+        lot_size: Nat,
     },
     /// The user does not have enough balance to place the order.
     InsufficientBalance {
@@ -98,13 +98,13 @@ pub struct TradingPairInfo {
     /// Minimum price increment.
     pub tick_size: Nat,
     /// Minimum order quantity.
-    pub lot_size: u64,
+    pub lot_size: Nat,
 }
 
 /// A single price level in an order book, aggregated across all resting orders at that price.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct PriceLevel {
-    /// Price in quote token units per base token unit.
+    /// Price in quote token smallest units per one whole base token.
     pub price: Nat,
     /// Total quantity in base token units across all resting orders at this price.
     pub quantity: Nat,
@@ -209,7 +209,7 @@ pub struct OrderRecord {
     pub owner: Principal,
     /// Whether the order is a buy or a sell.
     pub side: Side,
-    /// Limit price in quote units per base unit, as originally placed.
+    /// Limit price in quote token smallest units per one whole base token, as originally placed.
     pub price: Nat,
     /// Quantity originally placed, in base token units.
     pub quantity: Nat,
@@ -366,7 +366,7 @@ pub struct AddTradingPairRequest {
     /// Minimum price increment. Must be greater than zero.
     pub tick_size: Nat,
     /// Minimum order quantity. Must be greater than zero.
-    pub lot_size: u64,
+    pub lot_size: Nat,
     /// Maker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
     pub maker_fee_bps: u16,
     /// Taker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
@@ -479,7 +479,7 @@ pub enum AddTradingPairError {
         /// The submitted tick size.
         tick_size: Nat,
         /// The submitted lot size.
-        lot_size: u64,
+        lot_size: Nat,
         /// The base token's decimals (the divisor exponent).
         base_decimals: u8,
     },

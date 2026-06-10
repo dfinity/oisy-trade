@@ -481,7 +481,7 @@ async fn should_return_empty_trading_pairs() {
                 },
             },
             tick_size: Nat::from(TICK_SIZE),
-            lot_size: LOT_SIZE,
+            lot_size: Nat::from(LOT_SIZE),
         }]
     );
 
@@ -791,7 +791,7 @@ async fn should_fail_add_trading_pair() {
     // zero lot size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            lot_size: 0,
+            lot_size: Nat::from(0u64),
             ..setup.add_trading_pair_request()
         })
         .await;
@@ -845,7 +845,7 @@ async fn should_replay_events_on_upgrade() {
                 base: setup.base_token_id(),
                 quote: setup.quote_token_id(),
                 tick_size: Nat::from(TICK_SIZE),
-                lot_size: LOT_SIZE,
+                lot_size: Nat::from(LOT_SIZE),
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
             });

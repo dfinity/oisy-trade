@@ -118,7 +118,7 @@ pub fn trading_pair_request(
             metadata: quote_meta,
         },
         tick_size: candid::Nat::from(TICK_SIZE.get()),
-        lot_size: LOT_SIZE.get(),
+        lot_size: LOT_SIZE.into(),
         maker_fee_bps: 0,
         taker_fee_bps: 0,
     }

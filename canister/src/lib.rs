@@ -172,7 +172,7 @@ pub fn get_order_book_depth(
 
 fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLevel {
     PriceLevel {
-        price: candid::Nat::from(price.get()),
+        price: price.into(),
         quantity: quantity.into(),
     }
 }
@@ -200,8 +200,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                         id: dex_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
                     },
-                    tick_size: candid::Nat::from(book.tick_size().get()),
-                    lot_size: book.lot_size().get(),
+                    tick_size: book.tick_size().into(),
+                    lot_size: book.lot_size().into(),
                 }
             })
             .collect()
@@ -368,8 +368,10 @@ pub fn add_trading_pair(
     let tick_size = order::TickSize::new(
         NonZeroU128::new(tick_size_u128).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
+    let lot_size_u64 =
+        u64::try_from(&request.lot_size.0).map_err(|_| AddTradingPairError::InvalidLotSize)?;
     let lot_size = order::LotSize::new(
-        NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
+        NonZeroU64::new(lot_size_u64).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
     let maker = order::BasisPoint::new(request.maker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.maker_fee_bps))?;
@@ -410,8 +412,8 @@ pub fn add_trading_pair(
             .expect("base_scale is a nonzero power of ten");
         if remainder != 0 {
             return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                tick_size: candid::Nat::from(tick_size.get()),
-                lot_size: lot_size.get(),
+                tick_size: tick_size.into(),
+                lot_size: lot_size.into(),
                 base_decimals,
             });
         }

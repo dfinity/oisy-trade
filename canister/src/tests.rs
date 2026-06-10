@@ -158,7 +158,7 @@ mod add_trading_pair {
             result,
             Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
                 tick_size: candid::Nat::from(10u64),
-                lot_size: 1_000_000,
+                lot_size: candid::Nat::from(1_000_000u64),
                 base_decimals: 8,
             })
         );
@@ -221,7 +221,7 @@ mod add_trading_pair {
                 },
             },
             tick_size: candid::Nat::from(tick_size),
-            lot_size,
+            lot_size: candid::Nat::from(lot_size),
             maker_fee_bps: 0,
             taker_fee_bps: 0,
         }
@@ -449,7 +449,7 @@ mod add_limit_order {
                 result,
                 Err(dex_types::AddLimitOrderError::InvalidQuantity {
                     quantity: candid::Nat::from(quantity),
-                    lot_size: 1_000_000,
+                    lot_size: candid::Nat::from(1_000_000u64),
                 }),
                 "case: {name}"
             );
@@ -1677,7 +1677,7 @@ mod get_trading_pairs {
                     },
                 },
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
-                lot_size: LOT_SIZE.get(),
+                lot_size: LOT_SIZE.into(),
             }]
         );
     }

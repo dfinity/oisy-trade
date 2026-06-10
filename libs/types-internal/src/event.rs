@@ -28,7 +28,7 @@ pub struct AddTradingPairEvent {
     pub base: TokenId,
     pub quote: TokenId,
     pub tick_size: Nat,
-    pub lot_size: u64,
+    pub lot_size: Nat,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
 }
