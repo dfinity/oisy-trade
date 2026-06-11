@@ -16,8 +16,8 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    self, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook, OrderBookId,
+    OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PairToken,
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
@@ -247,8 +247,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     side: order.side(),
                     price: order.price(),
                     quantity: *order.remaining_quantity(),
+                    filled_quantity: Quantity::ZERO,
                     status: OrderStatus::Pending,
-                    timestamp,
+                    created_at: timestamp,
+                    last_updated_at: None,
                 },
             );
         }
@@ -283,7 +285,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get(&order_id)
             .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
         assert!(
-            matches!(order.status, OrderStatus::Canceled(_)),
+            matches!(order.status, OrderStatus::Canceled),
             "BUG: order {order_id} not canceled"
         );
         Ok(order)
@@ -304,13 +306,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
             OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled(_) => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
         }
     }
 
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         let (book_id, seq) = order_id.into_parts();
@@ -336,9 +339,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Sell => (PairToken::Base, remaining_quantity),
         };
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.set_status(
+            self.order_history.apply_update(
                 &order_id,
-                OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
+                OrderUpdate {
+                    status: Some(OrderStatus::Canceled),
+                    filled_delta: Quantity::ZERO,
+                },
+                now,
             );
         }
         self.pending_settling_events
@@ -361,6 +368,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
+        now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         #[cfg(feature = "canbench-rs")]
@@ -375,9 +383,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if matches!(persistence, StableMemoryOptions::Write) {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("status");
-            for transition in compute_order_status_transitions(&output) {
-                let order_id = OrderId::new(event.book_id, transition.seq);
-                self.order_history.set_status(&order_id, transition.status);
+            // Fold the batch into one update per touched order, then write each
+            // once: a single batch can fill one order across many `Fill`s (a
+            // taker sweeping several makers, or a maker hit repeatedly) and an
+            // order can both change status and accrue fills in the same batch.
+            let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
+            for fill in &output.fills {
+                for seq in [fill.taker_order_seq, fill.maker_order_seq] {
+                    let entry = updates.entry(seq).or_default();
+                    entry.filled_delta = entry
+                        .filled_delta
+                        .checked_add(fill.quantity)
+                        .expect("BUG: filled_delta overflow");
+                }
+            }
+            for seq in &output.resting_orders {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+            }
+            for seq in &output.filled_orders {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+            }
+            for (seq, update) in updates {
+                let order_id = OrderId::new(event.book_id, seq);
+                self.order_history.apply_update(&order_id, update, now);
             }
         }
         let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
@@ -449,10 +477,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
-        self.order_history.get(&order_id).map(|r| r.status)
-    }
-
     /// Returns up to `length` of `owner`'s orders, newest first, resuming
     /// strictly after the `after` order (a cursor from a prior page) — each
     /// paired with its trading pair and full record. An `after` that names a
@@ -482,6 +506,26 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 (id, pair, record)
             })
             .collect()
+    }
+
+    /// Returns the single order `id` paired with its trading pair and full
+    /// record when `owner` placed it, or `None` if the id is unknown or owned
+    /// by another principal.
+    pub fn get_user_order(
+        &self,
+        owner: &Principal,
+        id: OrderId,
+    ) -> Option<(OrderId, TradingPair, OrderRecord)> {
+        let record = self.order_history.get(&id)?;
+        if &record.owner != owner {
+            return None;
+        }
+        let pair = self
+            .trading_pairs
+            .get_pair(&id.book_id())
+            .expect("BUG: order references an unknown trading pair")
+            .clone();
+        Some((id, pair, record))
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -902,27 +946,6 @@ fn fee_only_balance(amount: Quantity) -> dex_types::Balance {
         free: amount.into(),
         reserved: candid::Nat::from(0u64),
     }
-}
-
-fn compute_order_status_transitions(
-    output: &MatchingOutput,
-) -> impl Iterator<Item = event::OrderStatusTransition> + '_ {
-    output
-        .resting_orders
-        .iter()
-        .map(|seq| event::OrderStatusTransition {
-            seq: *seq,
-            status: OrderStatus::Open,
-        })
-        .chain(
-            output
-                .filled_orders
-                .iter()
-                .map(|seq| event::OrderStatusTransition {
-                    seq: *seq,
-                    status: OrderStatus::Filled,
-                }),
-        )
 }
 
 #[cfg(test)]
