@@ -398,9 +398,9 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId,
-        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
-        Side, TickSize, TokenId, TokenMetadata,
+        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
+        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
+        TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -536,9 +536,7 @@ pub mod arbitrary {
             Just(OrderStatus::Pending),
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
-            arb_quantity().prop_map(|remaining_quantity| OrderStatus::Canceled(
-                CanceledOrderInfo { remaining_quantity },
-            )),
+            Just(OrderStatus::Canceled),
         ]
     }
 
@@ -563,7 +561,9 @@ pub mod arbitrary {
     }
 
     /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
-    /// lot-aligned non-zero quantity.
+    /// lot-aligned non-zero quantity. `filled_quantity` is a lot multiple
+    /// within `[0, quantity]`, upholding the `filled_quantity <= quantity`
+    /// invariant.
     pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
         let tick = TICK_SIZE.get();
         let lot = u64::from(LOT_SIZE);
@@ -573,16 +573,21 @@ pub mod arbitrary {
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
             arb_order_status(),
-            any::<u64>(), // submission timestamp (nanos)
+            any::<u64>(),             // created_at (nanos)
+            option::of(any::<u64>()), // last_updated_at (nanos)
         )
-            .prop_map(
-                move |(owner, side, price_ticks, qty_lots, status, timestamp)| OrderRecord {
-                    owner,
-                    side,
-                    price: Price::new(price_ticks as u128 * tick),
-                    quantity: Quantity::from(qty_lots * lot),
-                    status,
-                    timestamp: Timestamp::new(timestamp),
+            .prop_flat_map(
+                move |(owner, side, price_ticks, qty_lots, status, created_at, last_updated_at)| {
+                    (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
+                        owner,
+                        side,
+                        price: Price::new(price_ticks as u128 * tick),
+                        quantity: Quantity::from(qty_lots * lot),
+                        filled_quantity: Quantity::from(filled_lots * lot),
+                        status,
+                        created_at: Timestamp::new(created_at),
+                        last_updated_at: last_updated_at.map(Timestamp::new),
+                    })
                 },
             )
     }

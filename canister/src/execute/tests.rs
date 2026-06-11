@@ -17,6 +17,16 @@ type TestState = State<VectorMemory, VectorMemory>;
 const BUYER: Principal = Principal::from_slice(&[0x01]);
 const SELLER: Principal = Principal::from_slice(&[0x02]);
 
+/// Status of `order_id` regardless of which of the two test principals owns
+/// it, via the owner-scoped `get_user_order`.
+fn status_of(state: &TestState, order_id: OrderId) -> Option<OrderStatus> {
+    [BUYER, SELLER].into_iter().find_map(|owner| {
+        state
+            .get_user_order(&owner, order_id)
+            .map(|(_, _, record)| record.status)
+    })
+}
+
 #[test]
 fn should_return_complete_on_idle_state() {
     let mut state = setup_one_book();
@@ -51,8 +61,8 @@ fn should_complete_in_one_run_when_budget_covers_all() {
     let status = EXECUTOR.run_once(&mut state, &runtime);
 
     assert_eq!(status, ExecutionStatus::Complete);
-    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
-    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_id), Some(OrderStatus::Filled));
 }
 
 #[test]
@@ -88,7 +98,7 @@ fn should_signal_more_work_until_all_orders_are_drained() {
         ]
     ));
     for id in ids {
-        assert_eq!(state.get_order_status(id), Some(OrderStatus::Filled));
+        assert_eq!(status_of(&state, id), Some(OrderStatus::Filled));
     }
 }
 
@@ -280,6 +290,7 @@ fn should_drain_leftover_settling_events_before_running_matching() {
             book_id: OrderBookId::ZERO,
             orders: pending,
         },
+        crate::Timestamp::EPOCH,
         crate::state::StableMemoryOptions::Write,
     );
     assert!(state.has_pending_settling_events());

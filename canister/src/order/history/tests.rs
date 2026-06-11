@@ -1,6 +1,8 @@
 use super::{SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
+use crate::Timestamp;
 use crate::order::{
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, Price, Quantity, Side,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, Price,
+    Quantity, Side,
 };
 use crate::test_fixtures::arbitrary::arb_order_record;
 use crate::user::UserId;
@@ -22,8 +24,10 @@ fn test_record() -> OrderRecord {
         side: Side::Buy,
         price: Price::new(100),
         quantity: Quantity::from(1_000_000u64),
+        filled_quantity: Quantity::ZERO,
         status: OrderStatus::Pending,
-        timestamp: crate::Timestamp::EPOCH,
+        created_at: Timestamp::EPOCH,
+        last_updated_at: None,
     }
 }
 
@@ -53,19 +57,91 @@ fn get_returns_none_for_missing() {
 }
 
 #[test]
-fn set_status_updates_status() {
+fn apply_update_status_only() {
     let mut history = history();
     let id = order_id(0);
     history.insert_once(UserId::new(0), id, test_record());
 
-    assert_eq!(
-        history.get(&id).map(|r| r.status),
-        Some(OrderStatus::Pending),
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: Some(OrderStatus::Filled),
+            filled_delta: Quantity::ZERO,
+        },
+        Timestamp::new(7),
     );
-    history.set_status(&id, OrderStatus::Filled);
-    assert_eq!(
-        history.get(&id).map(|r| r.status),
-        Some(OrderStatus::Filled),
+    let record = history.get(&id).expect("record present");
+    assert_eq!(record.status, OrderStatus::Filled);
+    assert_eq!(record.filled_quantity, Quantity::ZERO);
+    assert_eq!(record.last_updated_at, Some(Timestamp::new(7)));
+}
+
+#[test]
+fn apply_update_delta_only() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: None,
+            filled_delta: Quantity::from(400_000u64),
+        },
+        Timestamp::new(9),
+    );
+    let record = history.get(&id).expect("record present");
+    // Status untouched, only the fill advanced.
+    assert_eq!(record.status, OrderStatus::Pending);
+    assert_eq!(record.filled_quantity, Quantity::from(400_000u64));
+    assert_eq!(record.last_updated_at, Some(Timestamp::new(9)));
+}
+
+#[test]
+fn apply_update_status_and_delta_in_one_write() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: Some(OrderStatus::Open),
+            filled_delta: Quantity::from(300_000u64),
+        },
+        Timestamp::new(11),
+    );
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: Some(OrderStatus::Filled),
+            filled_delta: Quantity::from(700_000u64),
+        },
+        Timestamp::new(13),
+    );
+    let record = history.get(&id).expect("record present");
+    // Deltas accumulate; status reflects the latest update.
+    assert_eq!(record.status, OrderStatus::Filled);
+    assert_eq!(record.filled_quantity, Quantity::from(1_000_000u64));
+    assert_eq!(record.last_updated_at, Some(Timestamp::new(13)));
+}
+
+#[test]
+#[should_panic(expected = "BUG: filled_quantity")]
+fn apply_update_traps_when_filled_exceeds_quantity() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    // quantity is 1_000_000; overfilling by one lot must trap — an always-on
+    // check, not a `debug_assert!` compiled out of the release canister.
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: None,
+            filled_delta: Quantity::from(1_000_001u64),
+        },
+        Timestamp::new(1),
     );
 }
 

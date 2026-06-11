@@ -646,10 +646,10 @@ mod cancel_limit_order {
                 side: dex_types::Side::Buy,
                 price: candid::Nat::from(100 * PRICE_SCALE),
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                }),
-                timestamp: 111,
+                filled_quantity: candid::Nat::from(0u64),
+                status: dex_types::OrderStatus::Canceled,
+                created_at: 111,
+                last_updated_at: Some(222),
             })
         );
 
@@ -693,34 +693,46 @@ mod cancel_limit_order {
             order_id.clone(),
             &mock_runtime_at(owner, Timestamp::new(222)),
         );
-        assert_eq!(
-            result,
-            Ok(dex_types::OrderRecord {
-                owner,
-                side: dex_types::Side::Buy,
-                price: candid::Nat::from(100 * PRICE_SCALE),
-                quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                }),
-                timestamp: 111,
-            })
-        );
-        assert_eq!(
-            crate::get_order_status(order_id),
-            dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-            })
-        );
+        let expected = dex_types::OrderRecord {
+            owner,
+            side: dex_types::Side::Buy,
+            price: candid::Nat::from(100 * PRICE_SCALE),
+            quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+            filled_quantity: candid::Nat::from(0u64),
+            status: dex_types::OrderStatus::Canceled,
+            created_at: 111,
+            last_updated_at: Some(222),
+        };
+        assert_eq!(result, Ok(expected.clone()));
+        let orders = crate::get_my_orders(
+            dex_types::GetMyOrdersArgs {
+                filter: Some(dex_types::GetMyOrdersFilter::ById(order_id)),
+            },
+            owner,
+        )
+        .unwrap();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].order, expected);
     }
 }
 
-mod get_order_status {
+mod order_status_via_get_my_orders {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
-    use crate::{add_limit_order, get_order_status};
+    use crate::{add_limit_order, get_my_orders};
     use candid::Principal;
-    use dex_types::OrderStatus;
+    use dex_types::{GetMyOrdersArgs, GetMyOrdersFilter, OrderStatus};
+
+    fn status_of(owner: Principal, order_id: dex_types::OrderId) -> Option<OrderStatus> {
+        let orders = get_my_orders(
+            GetMyOrdersArgs {
+                filter: Some(GetMyOrdersFilter::ById(order_id)),
+            },
+            owner,
+        )
+        .unwrap();
+        orders.into_iter().next().map(|o| o.order.status)
+    }
 
     #[test]
     fn should_return_pending_for_existing_order() {
@@ -728,8 +740,10 @@ mod get_order_status {
         fund_user(Principal::anonymous());
         let runtime = mock_runtime_for(Principal::anonymous());
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
-        let status = get_order_status(order_id);
-        assert_eq!(status, OrderStatus::Pending);
+        assert_eq!(
+            status_of(Principal::anonymous(), order_id),
+            Some(OrderStatus::Pending)
+        );
     }
 
     #[test]
@@ -747,23 +761,36 @@ mod get_order_status {
 
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-        assert_eq!(get_order_status(buy_id), OrderStatus::Filled);
-        assert_eq!(get_order_status(sell_id), OrderStatus::Filled);
+        assert_eq!(status_of(buyer, buy_id), Some(OrderStatus::Filled));
+        assert_eq!(status_of(seller, sell_id), Some(OrderStatus::Filled));
     }
 
     #[test]
-    fn should_return_not_found_for_nonexistent_order() {
+    fn should_return_empty_for_nonexistent_order() {
         init_state_with_order_book();
-        // Valid hex format but refers to a non-existent book/seq
-        let status = get_order_status("ffffffffffffffffffffffffffffffff".to_string());
-        assert_eq!(status, OrderStatus::NotFound);
+        // Valid hex format but refers to a non-existent book/seq.
+        assert_eq!(
+            status_of(
+                Principal::anonymous(),
+                "ffffffffffffffffffffffffffffffff".to_string()
+            ),
+            None
+        );
     }
 
     #[test]
-    #[should_panic(expected = "ERROR: invalid order id")]
-    fn should_trap_on_syntactically_invalid_order_id() {
+    fn should_reject_syntactically_invalid_order_id() {
         init_state_with_order_book();
-        get_order_status("not-a-valid-order-id".to_string());
+        let result = get_my_orders(
+            GetMyOrdersArgs {
+                filter: Some(GetMyOrdersFilter::ById("not-a-valid-order-id".to_string())),
+            },
+            Principal::anonymous(),
+        );
+        assert!(matches!(
+            result,
+            Err(crate::GetMyOrdersError::InvalidOrderId(_))
+        ));
     }
 }
 
@@ -1644,7 +1671,16 @@ mod get_my_orders {
     };
     use crate::{GetMyOrdersError, add_limit_order, get_my_orders};
     use candid::{Nat, Principal};
-    use dex_types::{GetMyOrdersArgs, LimitOrderRequest, MAX_ORDERS_PER_RESPONSE, OrderId, Side};
+    use dex_types::{
+        GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, LimitOrderRequest,
+        MAX_ORDERS_PER_RESPONSE, OrderId, Side,
+    };
+
+    fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
+        GetMyOrdersArgs {
+            filter: Some(GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length })),
+        }
+    }
 
     /// Places `count` resting buys for `user` and returns their ids in
     /// placement order, so `ids[0]` is the oldest and `ids[count - 1]` the
@@ -1674,13 +1710,10 @@ mod get_my_orders {
     fn rejects_malformed_cursor() {
         init_state_with_order_book();
         let result = get_my_orders(
-            GetMyOrdersArgs {
-                after: Some("not-a-valid-order-id".to_string()),
-                length: 10,
-            },
+            by_page(Some("not-a-valid-order-id".to_string()), 10),
             Principal::from_slice(&[0x01]),
         );
-        assert!(matches!(result, Err(GetMyOrdersError::InvalidCursor(_))));
+        assert!(matches!(result, Err(GetMyOrdersError::InvalidOrderId(_))));
     }
 
     #[test]
@@ -1691,17 +1724,11 @@ mod get_my_orders {
         let ids = place_resting_buys(user, MAX_ORDERS_PER_RESPONSE + 1);
 
         let page = |after| {
-            get_my_orders(
-                GetMyOrdersArgs {
-                    after,
-                    length: u32::MAX,
-                },
-                user,
-            )
-            .unwrap()
-            .into_iter()
-            .map(|o| o.id)
-            .collect::<Vec<_>>()
+            get_my_orders(by_page(after, u32::MAX), user)
+                .unwrap()
+                .into_iter()
+                .map(|o| o.id)
+                .collect::<Vec<_>>()
         };
 
         // First page: clamped to MAX_ORDERS_PER_RESPONSE, newest-first — every
@@ -1724,14 +1751,7 @@ mod get_my_orders {
         let user = Principal::from_slice(&[0x01]);
         place_resting_buys(user, 1);
 
-        let orders = get_my_orders(
-            GetMyOrdersArgs {
-                after: None,
-                length: 0,
-            },
-            user,
-        )
-        .unwrap();
+        let orders = get_my_orders(by_page(None, 0), user).unwrap();
         assert!(orders.is_empty());
     }
 }

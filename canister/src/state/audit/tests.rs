@@ -1,8 +1,8 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    CanceledOrderInfo, FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price,
-    Quantity, Side, TokenId, TradingPair,
+    FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
+    TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
@@ -209,15 +209,15 @@ impl Scenario {
         self.state
             .validate_cancel_limit_order(&user, &order_id)
             .expect("test setup: order must be cancelable");
+        let cancel_ts = self.timestamp();
         self.state
-            .record_cancel_limit_order(order_id, StableMemoryOptions::Write);
+            .record_cancel_limit_order(order_id, cancel_ts, StableMemoryOptions::Write);
         let settling_event = self
             .state
             .take_next_pending_settling_event()
             .expect("BUG: record_cancel_limit_order did not push a settling event");
         self.state
             .record_settling_event(&settling_event, StableMemoryOptions::Write);
-        let cancel_ts = self.timestamp();
         let settling_ts = self.timestamp();
         self.events.push(Event {
             timestamp: cancel_ts,
@@ -234,9 +234,13 @@ impl Scenario {
     /// caller-supplied `MatchingEvent` + `SettlingEvent` as the expected
     /// replay payload.
     fn with_matching_round(mut self, matching: MatchingEvent, settling: SettlingEvent) -> Self {
-        let runtime = crate::test_fixtures::mocks::mock_runtime_for(Principal::anonymous());
-        crate::EXECUTOR.run_once(&mut self.state, &runtime);
+        // The executor's `MatchingEvent` is timestamped with the runtime's
+        // `time()`; pin the runtime to `matching_ts` so the primary path stamps
+        // `last_updated_at` with the same value the replayed event carries.
         let matching_ts = self.timestamp();
+        let runtime =
+            crate::test_fixtures::mocks::mock_runtime_at(Principal::anonymous(), matching_ts);
+        crate::EXECUTOR.run_once(&mut self.state, &runtime);
         let settling_ts = self.timestamp();
         self.events.push(Event {
             timestamp: matching_ts,
@@ -277,6 +281,21 @@ impl Scenario {
             .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
             .status;
         assert_eq!(status, expected, "unexpected status for {order_id:?}");
+        self
+    }
+
+    fn assert_filled_quantity(self, order_id: OrderId, expected: impl Into<Quantity>) -> Self {
+        let filled = self
+            .state
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
+            .filled_quantity;
+        assert_eq!(
+            filled,
+            expected.into(),
+            "unexpected filled_quantity for {order_id:?}"
+        );
         self
     }
 
@@ -552,12 +571,10 @@ fn should_replay_cancel_pending_order() {
     scenario
         .with_cancel(user_1(), buy_id)
         .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
-        .assert_order_status(
-            buy_id,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Quantity::from(quantity),
-            }),
-        )
+        .assert_order_status(buy_id, OrderStatus::Canceled)
+        // Never matched: remaining (quantity − filled_quantity) is the full
+        // placed quantity, so filled_quantity is zero.
+        .assert_filled_quantity(buy_id, 0u64)
         .assert_replay_matches();
 }
 
@@ -629,12 +646,10 @@ fn should_replay_cancel_partially_filled_order() {
         .assert_balance(seller, TokenId::new(base()), 0u64, 0u64)
         .assert_balance(seller, TokenId::new(quote()), price * quantity, 0u64)
         .assert_order_status(sell_id, OrderStatus::Filled)
-        .assert_order_status(
-            buy_id,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Quantity::from(2 * quantity),
-            }),
-        )
+        .assert_order_status(buy_id, OrderStatus::Canceled)
+        // R5: the canceled buy keeps the 1 lot it filled before cancel;
+        // remaining (2 lots) is derived as quantity − filled_quantity.
+        .assert_filled_quantity(buy_id, quantity)
         .assert_replay_matches();
 }
 
