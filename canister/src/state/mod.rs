@@ -278,7 +278,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
-        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
         // leave settling events queued across messages, draining the whole
         // queue here lets an unrelated cancel apply balance ops from a
         // previous matching round and inherit its instruction debt. Pop
