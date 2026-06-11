@@ -225,8 +225,8 @@ fn get_events(
                         book_id: e.book_id.get(),
                         base: dex_types::TokenId::from(e.base),
                         quote: dex_types::TokenId::from(e.quote),
-                        tick_size: e.tick_size.into(),
-                        lot_size: e.lot_size.into(),
+                        tick_size: candid::Nat::from(e.tick_size),
+                        lot_size: candid::Nat::from(e.lot_size),
                         base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
                         quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
                     })
@@ -250,7 +250,7 @@ fn get_events(
                             seq: e.order_id.seq().get(),
                         },
                         side: dex_types::Side::from(e.side),
-                        price: e.price.into(),
+                        price: candid::Nat::from(e.price),
                         quantity: e.quantity.into(),
                     })
                 }

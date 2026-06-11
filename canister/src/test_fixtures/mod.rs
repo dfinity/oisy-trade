@@ -548,7 +548,14 @@ pub mod arbitrary {
     }
 
     pub fn arb_quantity() -> impl Strategy<Value = Quantity> {
-        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+        // Stratified across regimes so proptests cross the carry/encoding
+        // boundaries: u64-sized (CBOR u64 arm / mul fast path), u128-sized
+        // (high == 0), and the full u256 range.
+        prop_oneof![
+            any::<u64>().prop_map(|low| Quantity::new(0, u128::from(low))),
+            any::<u128>().prop_map(|low| Quantity::new(0, low)),
+            (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low)),
+        ]
     }
 
     pub fn arb_balance() -> impl Strategy<Value = Balance> {

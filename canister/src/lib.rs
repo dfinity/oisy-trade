@@ -173,7 +173,7 @@ pub fn get_order_book_depth(
 
 fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLevel {
     PriceLevel {
-        price: price.into(),
+        price: candid::Nat::from(price),
         quantity: quantity.into(),
     }
 }
@@ -201,8 +201,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                         id: dex_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
                     },
-                    tick_size: book.tick_size().into(),
-                    lot_size: book.lot_size().into(),
+                    tick_size: candid::Nat::from(book.tick_size()),
+                    lot_size: candid::Nat::from(book.lot_size()),
                 }
             })
             .collect()
@@ -444,8 +444,8 @@ pub fn add_trading_pair(
             .expect("base_scale is a nonzero power of ten");
         if remainder != 0 {
             return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                tick_size: tick_size.into(),
-                lot_size: lot_size.into(),
+                tick_size: candid::Nat::from(tick_size),
+                lot_size: candid::Nat::from(lot_size),
                 base_decimals,
             });
         }

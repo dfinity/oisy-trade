@@ -60,6 +60,7 @@ mod order_id {
 mod quantity {
     use crate::order::{LotSize, Quantity};
     use candid::Nat;
+    use num_bigint::BigUint;
     use proptest::prelude::*;
     use std::num::NonZeroU64;
 
@@ -191,17 +192,17 @@ mod quantity {
             prop_assert_eq!(a.checked_mul_u128(u128::from(rhs)), a.checked_mul_u64(rhs));
         }
 
-        /// For a u128-sized operand (`high == 0`), the product agrees with
-        /// native `u128` multiplication whenever that doesn't overflow —
-        /// exercises the `rhs > u64::MAX` recompose path against an oracle.
+        /// Oracle: `checked_mul_u128` agrees with arbitrary-precision
+        /// multiplication for any `Quantity × u128`, returning `None` exactly
+        /// when the true product exceeds 256 bits. Covers the fast path, the
+        /// `rhs > u64::MAX` recompose path, and overflow rejection.
         #[test]
-        fn checked_mul_u128_agrees_with_native_u128(lhs in any::<u128>(), rhs in any::<u128>()) {
-            if let Some(prod) = lhs.checked_mul(rhs) {
-                prop_assert_eq!(
-                    Quantity::from_u128(lhs).checked_mul_u128(rhs),
-                    Some(Quantity::from_u128(prod)),
-                );
-            }
+        fn checked_mul_u128_matches_biguint(a in arb_quantity(), rhs in any::<u128>()) {
+            let product = BigUint::from_bytes_be(&a.to_be_bytes()) * BigUint::from(rhs);
+            // `Quantity` holds 0..=2^256-1, so the product fits iff <= 256 bits.
+            let expected = (product.bits() <= 256)
+                .then(|| Quantity::from_be_bytes(&product.to_bytes_be()).unwrap());
+            prop_assert_eq!(a.checked_mul_u128(rhs), expected);
         }
 
         #[test]
