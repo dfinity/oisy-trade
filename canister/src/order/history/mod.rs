@@ -33,7 +33,15 @@ pub struct OrderRecord {
     /// Submission time, taken from the add-limit-order event. Display-only —
     /// no matching or ordering logic reads it.
     #[n(5)]
-    pub timestamp: Timestamp,
+    pub created_at: Timestamp,
+    /// Cumulative quantity filled so far, in base token units. Remaining is
+    /// `quantity − filled_quantity`.
+    #[n(6)]
+    pub filled_quantity: Quantity,
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel); `None` until the order is first modified.
+    #[n(7)]
+    pub last_updated_at: Option<Timestamp>,
 }
 
 impl From<OrderRecord> for dex_types::OrderRecord {
@@ -43,10 +51,21 @@ impl From<OrderRecord> for dex_types::OrderRecord {
             side: record.side.into(),
             price: candid::Nat::from(record.price),
             quantity: record.quantity.into(),
+            filled_quantity: record.filled_quantity.into(),
             status: record.status.into(),
-            timestamp: record.timestamp.as_nanos(),
+            created_at: record.created_at.as_nanos(),
+            last_updated_at: record.last_updated_at.map(|t| t.as_nanos()),
         }
     }
+}
+
+/// A combined update to an order record, applied in a single read-modify-write
+/// by [`OrderHistory::apply_update`]: an optional status transition plus a
+/// fill delta to add to `filled_quantity`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OrderUpdate {
+    pub status: Option<OrderStatus>,
+    pub filled_delta: Quantity,
 }
 
 /// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
@@ -96,7 +115,7 @@ impl Storable for SeqOrderRecord {
 ///
 /// Interior mutability is as follows:
 /// * `by_user` is inserted once, then the entry is immutable,
-/// * `orders` is inserted once and values may be updated, e.g. `set_status` and cancel/fill.
+/// * `orders` is inserted once and values may be updated, e.g. `apply_update` for status/fill.
 pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, SeqOrderRecord, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
@@ -147,14 +166,36 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.get(id).map(|entry| entry.record)
     }
 
-    /// Updates the status of an existing order. Panics if the order is unknown.
-    pub fn set_status(&mut self, id: &OrderId, status: OrderStatus) {
-        bench_scopes!("order_history", "order_history::set_status");
+    /// Applies a combined [`OrderUpdate`] to an existing order in a single
+    /// read-modify-write: sets the status if present, adds `filled_delta` to
+    /// `filled_quantity`, and stamps `last_updated_at = Some(now)`. Panics if
+    /// the order is unknown.
+    ///
+    /// `filled_quantity` is monotonic non-decreasing and must never exceed
+    /// `quantity`; this invariant is enforced by an always-on check that traps
+    /// on violation (not a `debug_assert!`, which is compiled out of the release
+    /// canister and would let a corrupted value persist silently).
+    pub fn apply_update(&mut self, id: &OrderId, update: OrderUpdate, now: Timestamp) {
+        bench_scopes!("order_history", "order_history::apply_update");
         let mut entry = self
             .orders
             .get(id)
             .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-        entry.record.status = status;
+        if let Some(status) = update.status {
+            entry.record.status = status;
+        }
+        let filled = entry
+            .record
+            .filled_quantity
+            .checked_add(update.filled_delta)
+            .expect("BUG: filled_quantity overflow");
+        assert!(
+            filled <= entry.record.quantity,
+            "BUG: filled_quantity {filled:?} exceeds quantity {:?} for order {id}",
+            entry.record.quantity
+        );
+        entry.record.filled_quantity = filled;
+        entry.record.last_updated_at = Some(now);
         self.orders.insert(*id, entry);
     }
 
