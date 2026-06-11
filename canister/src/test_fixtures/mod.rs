@@ -12,7 +12,7 @@ use candid::Principal;
 use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use ic_stable_structures::{Memory, VectorMemory};
 use std::iter::once;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 
 /// Tick/lot for the ICP/ckBTC-like test pair (both tokens 8 decimals).
 ///
@@ -20,14 +20,14 @@ use std::num::NonZeroU64;
 /// fill settles to `price × quantity / 10^base_decimals`. `tick × lot = 100 ×
 /// 10^6 = 10^8` is a multiple of `10^base_decimals = 10^8`, so every fill
 /// settles to an exact quote amount.
-pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100).unwrap());
+pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
 /// Scales a whole-quote-per-whole-base price into the on-book representation
 /// (quote smallest units per whole base token) for the 8-decimal test pair:
 /// `10^quote_decimals`.
-pub const PRICE_SCALE: u64 = 100_000_000;
+pub const PRICE_SCALE: u128 = 100_000_000;
 
 /// A default `OrderBookId` for use in unit tests that operate on a single book.
 pub const TEST_BOOK_ID: OrderBookId = OrderBookId::ZERO;
@@ -97,7 +97,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
         side: dex_types::Side::Buy,
-        price: 100 * PRICE_SCALE,
+        price: candid::Nat::from(100 * PRICE_SCALE),
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
@@ -117,8 +117,8 @@ pub fn trading_pair_request(
             id: quote_id.into(),
             metadata: quote_meta,
         },
-        tick_size: TICK_SIZE.get(),
-        lot_size: LOT_SIZE.get(),
+        tick_size: candid::Nat::from(TICK_SIZE.get()),
+        lot_size: LOT_SIZE.into(),
         maker_fee_bps: 0,
         taker_fee_bps: 0,
     }
@@ -143,7 +143,7 @@ pub fn icp_token_id() -> TokenId {
     TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
 }
 
-fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
+fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
         price: Price::new(price.into()),
@@ -152,11 +152,11 @@ fn order(id: u64, side: Side, price: impl Into<u64>, quantity: impl Into<u64>) -
     .into_order(OrderSeq::new(id))
 }
 
-pub fn buy(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
+pub fn buy(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Buy, price, quantity)
 }
 
-pub fn sell(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
+pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
     order(id, Side::Sell, price, quantity)
 }
 
@@ -167,7 +167,7 @@ pub fn sell(id: u64, price: impl Into<u64>, quantity: impl Into<u64>) -> Order {
 pub fn fill(
     taker: &Order,
     maker_order_seq: OrderSeq,
-    maker_price: impl Into<u64>,
+    maker_price: impl Into<u128>,
     quantity: impl Into<u64>,
 ) -> Fill {
     Fill {
@@ -181,7 +181,7 @@ pub fn fill(
 }
 
 pub fn all_order_types(
-    price: impl Into<u64>,
+    price: impl Into<u128>,
     quantity: impl Into<u64>,
 ) -> impl Iterator<Item = Order> {
     let price = price.into();
@@ -297,7 +297,7 @@ pub fn place_order<MH, MB>(
     user: Principal,
     pair: &TradingPair,
     side: Side,
-    price: u64,
+    price: u128,
     quantity: impl Into<Quantity>,
 ) -> order::OrderId
 where
@@ -334,12 +334,12 @@ where
 }
 
 #[cfg(test)]
-pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u64, quantity: u64) {
+pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u128, quantity: u64) {
     crate::add_limit_order(
         LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side,
-            price,
+            price: candid::Nat::from(price),
             quantity: candid::Nat::from(quantity),
         },
         &mocks::mock_runtime_for(user),
@@ -415,7 +415,7 @@ pub mod arbitrary {
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};
     use proptest::prop_oneof;
-    use std::num::NonZeroU64;
+    use std::num::{NonZeroU64, NonZeroU128};
 
     use super::{LOT_SIZE, TICK_SIZE};
 
@@ -431,7 +431,7 @@ pub mod arbitrary {
         )
             .prop_map(move |(side, price_ticks, qty_lots)| PendingOrder {
                 side,
-                price: Price::new(price_ticks * tick),
+                price: Price::new(price_ticks as u128 * tick),
                 quantity: Quantity::from(qty_lots * lot),
             })
     }
@@ -444,16 +444,16 @@ pub mod arbitrary {
         mid_ticks: u64,
         max_ticks: u64,
     ) -> impl Strategy<Value = PendingOrder> {
-        let tick = u64::from(TICK_SIZE);
+        let tick = TICK_SIZE.get();
         let lot = u64::from(LOT_SIZE);
         let bid = (1u64..mid_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
             side: Side::Buy,
-            price: Price::new(p * tick),
+            price: Price::new(p as u128 * tick),
             quantity: Quantity::from(q * lot),
         });
         let ask = ((mid_ticks + 1)..max_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
             side: Side::Sell,
-            price: Price::new(p * tick),
+            price: Price::new(p as u128 * tick),
             quantity: Quantity::from(q * lot),
         });
         prop_oneof![bid, ask]
@@ -492,12 +492,12 @@ pub mod arbitrary {
         )
             .prop_map(move |(is_buy, pa, pb, qty_lots)| {
                 let (taker_side, taker_price, maker_price) = if is_buy {
-                    let hi = pa.max(pb) * tick;
-                    let lo = pa.min(pb) * tick;
+                    let hi = pa.max(pb) as u128 * tick;
+                    let lo = pa.min(pb) as u128 * tick;
                     (Side::Buy, Price::new(hi), Price::new(lo))
                 } else {
-                    let hi = pa.max(pb) * tick;
-                    let lo = pa.min(pb) * tick;
+                    let hi = pa.max(pb) as u128 * tick;
+                    let lo = pa.min(pb) as u128 * tick;
                     (Side::Sell, Price::new(lo), Price::new(hi))
                 };
                 Fill {
@@ -548,7 +548,14 @@ pub mod arbitrary {
     }
 
     pub fn arb_quantity() -> impl Strategy<Value = Quantity> {
-        (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low))
+        // Stratified across regimes so proptests cross the carry/encoding
+        // boundaries: u64-sized (CBOR u64 arm / mul fast path), u128-sized
+        // (high == 0), and the full u256 range.
+        prop_oneof![
+            any::<u64>().prop_map(|low| Quantity::new(0, u128::from(low))),
+            any::<u128>().prop_map(|low| Quantity::new(0, low)),
+            (any::<u128>(), any::<u128>()).prop_map(|(high, low)| Quantity::new(high, low)),
+        ]
     }
 
     pub fn arb_balance() -> impl Strategy<Value = Balance> {
@@ -572,7 +579,7 @@ pub mod arbitrary {
                 move |(owner, side, price_ticks, qty_lots, status, timestamp)| OrderRecord {
                     owner,
                     side,
-                    price: Price::new(price_ticks * tick),
+                    price: Price::new(price_ticks as u128 * tick),
                     quantity: Quantity::from(qty_lots * lot),
                     status,
                     timestamp: Timestamp::new(timestamp),
@@ -581,7 +588,7 @@ pub mod arbitrary {
     }
 
     pub fn arb_price() -> impl Strategy<Value = Price> {
-        any::<u64>().prop_map(Price::new)
+        any::<u64>().prop_map(|p| Price::new(p as u128))
     }
 
     pub fn arb_order_seq() -> impl Strategy<Value = OrderSeq> {
@@ -681,7 +688,7 @@ pub mod arbitrary {
                     book_id: OrderBookId::new(book_id),
                     base: TokenId::new(base),
                     quote: TokenId::new(quote),
-                    tick_size: TickSize::new(NonZeroU64::new(tick_size).unwrap()),
+                    tick_size: TickSize::new(NonZeroU128::new(tick_size as u128).unwrap()),
                     lot_size: LotSize::new(NonZeroU64::new(lot_size).unwrap()),
                     base_metadata,
                     quote_metadata,

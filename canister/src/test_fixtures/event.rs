@@ -116,10 +116,10 @@ impl WorstCaseEvent {
         match self {
             Self::Init => 343,
             Self::Upgrade => 343,
-            Self::AddTradingPair => 146,
+            Self::AddTradingPair => 155,
             Self::Deposit => 96,
             Self::Withdraw => 105,
-            Self::AddLimitOrder => 98,
+            Self::AddLimitOrder => 107,
             Self::CancelLimitOrder => 36,
             Self::Matching => 10_028,
             Self::Settling => 127_328,
@@ -159,7 +159,7 @@ fn add_trading_pair() -> EventType {
         book_id: OrderBookId::new(u64::MAX),
         base: TokenId::new(max_principal(0)),
         quote: TokenId::new(max_principal(1)),
-        tick_size: TickSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
+        tick_size: TickSize::new(std::num::NonZeroU128::new(u128::MAX).unwrap()),
         lot_size: LotSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
         base_metadata: TokenMetadata {
             symbol: max_symbol(),
@@ -181,7 +181,7 @@ fn add_limit_order() -> EventType {
         user: max_principal(0),
         order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
         side: Side::Buy,
-        price: Price::new(u64::MAX),
+        price: Price::new(u128::MAX),
         quantity: max_quantity(),
     })
 }

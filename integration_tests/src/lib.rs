@@ -139,8 +139,8 @@ impl Setup {
                     decimals: 8,
                 },
             },
-            tick_size: TICK_SIZE,
-            lot_size: LOT_SIZE,
+            tick_size: Nat::from(TICK_SIZE),
+            lot_size: Nat::from(LOT_SIZE),
             maker_fee_bps: 0,
             taker_fee_bps: 0,
         }

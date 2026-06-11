@@ -213,7 +213,7 @@ fn place(
     state: &mut State<VectorMemory, VectorMemory>,
     user: Principal,
     side: Side,
-    price: u64,
+    price: u128,
     quantity: u64,
 ) -> OrderId {
     let pair: TradingPair = icp_ckbtc_trading_pair();

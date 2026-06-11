@@ -12,10 +12,10 @@ use canbench_rs::bench;
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode};
 use serde::Deserialize;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 
 /// Minimum price increment for ICP/USDT on Binance: 0.001 USDT with 8 decimal places.
-const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
+const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
@@ -39,7 +39,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
         PendingOrder {
             side: Side::Sell,
             price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-            quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
+            quantity: Quantity::from(100_000_000_000_000u64), // 1,000,000 ICP
         },
     );
 
@@ -98,7 +98,7 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
                 price: Price::new(parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
             },
         );
     }
@@ -242,7 +242,7 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
                 price: Price::new(parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
             },
         );
     }
@@ -312,20 +312,20 @@ struct AggTrade {
     m: bool,
 }
 
-/// Parse a Binance decimal string (e.g. "2.30400000") into a u64 assuming 8 decimal places.
+/// Parse a Binance decimal string (e.g. "2.30400000") into a u128 assuming 8 decimal places.
 /// Uses only integer arithmetic to avoid floating-point imprecision.
-fn parse_decimal_8(s: &str) -> u64 {
+fn parse_decimal_8(s: &str) -> u128 {
     let (integer_part, fractional_part) = match s.split_once('.') {
         Some((i, f)) => (i, f),
         None => (s, ""),
     };
-    let integer: u64 = integer_part.parse().expect("invalid integer part");
+    let integer: u128 = integer_part.parse().expect("invalid integer part");
     // Pad or truncate fractional part to exactly 8 digits.
     let mut frac_digits = [b'0'; 8];
     for (i, byte) in fractional_part.bytes().take(8).enumerate() {
         frac_digits[i] = byte;
     }
-    let fractional: u64 = std::str::from_utf8(&frac_digits)
+    let fractional: u128 = std::str::from_utf8(&frac_digits)
         .expect("ascii digits")
         .parse()
         .expect("invalid fractional part");
@@ -406,7 +406,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             PendingOrder {
                 side: Side::Buy,
                 price: Price::new(parse_decimal_8(price_str)),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }
@@ -419,7 +419,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             PendingOrder {
                 side: Side::Sell,
                 price: Price::new(parse_decimal_8(price_str)),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }

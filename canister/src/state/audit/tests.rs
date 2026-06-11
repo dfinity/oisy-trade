@@ -361,8 +361,8 @@ fn should_replay_withdraw() {
 
 #[test]
 fn should_replay_add_limit_order() {
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let (scenario, _) = Scenario::new()
         .with_trading_pair()
         .with_deposit(
@@ -383,8 +383,8 @@ fn should_replay_add_limit_order() {
 fn should_replay_matching() {
     let buyer = user_1();
     let seller = user_2();
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
 
     let (scenario, buy_id) = Scenario::new()
@@ -454,9 +454,9 @@ fn should_replay_matching() {
 fn should_replay_matching_with_price_improvement() {
     let buyer = user_1();
     let seller = user_2();
-    let maker_price = 100u64;
-    let taker_price = 110u64;
-    let quantity = 1_000_000u64;
+    let maker_price = 100u128;
+    let taker_price = 110u128;
+    let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
 
     // Sell rests first; crossing buy enters at the higher `taker_price`.
@@ -533,8 +533,8 @@ fn should_replay_matching_with_price_improvement() {
 
 #[test]
 fn should_replay_cancel_pending_order() {
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let reserved = price * quantity;
 
     let (scenario, buy_id) = Scenario::new()
@@ -565,8 +565,8 @@ fn should_replay_cancel_pending_order() {
 fn should_replay_cancel_partially_filled_order() {
     let buyer = user_1();
     let seller = user_2();
-    let price = 100u64;
-    let quantity = 1_000_000u64; // one lot
+    let price = 100u128;
+    let quantity = 1_000_000u128; // one lot
     let book_id = OrderBookId::ZERO;
 
     // Seller rests 1 lot; buyer takes 3 lots — 1 lot fills, 2 lots rest as

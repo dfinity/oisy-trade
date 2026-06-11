@@ -1061,15 +1061,15 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 price,
                 tick_size,
             }) => dex_types::AddLimitOrderError::InvalidPrice {
-                price: price.get(),
-                tick_size: tick_size.get(),
+                price: candid::Nat::from(price),
+                tick_size: candid::Nat::from(tick_size),
             },
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
                 quantity,
                 lot_size,
             }) => dex_types::AddLimitOrderError::InvalidQuantity {
                 quantity: quantity.into(),
-                lot_size: lot_size.get(),
+                lot_size: candid::Nat::from(lot_size),
             },
             AddLimitOrderError::InsufficientBalance {
                 token,

@@ -60,6 +60,7 @@ mod order_id {
 mod quantity {
     use crate::order::{LotSize, Quantity};
     use candid::Nat;
+    use num_bigint::BigUint;
     use proptest::prelude::*;
     use std::num::NonZeroU64;
 
@@ -159,6 +160,49 @@ mod quantity {
             let right = a.checked_mul_u64(c)
                 .and_then(|ac| b.checked_mul_u64(c).and_then(|bc| ac.checked_add(bc)));
             prop_assert_eq!(left, right);
+        }
+
+        #[test]
+        fn checked_mul_u128_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u128(1), Some(a));
+        }
+
+        #[test]
+        fn checked_mul_u128_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u128(0), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_mul_u128_distributes_over_add(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+            c in 1..1000u128,
+        ) {
+            // (a + b) * c == a * c + b * c
+            let left = a.checked_add(b).and_then(|s| s.checked_mul_u128(c));
+            let right = a.checked_mul_u128(c)
+                .and_then(|ac| b.checked_mul_u128(c).and_then(|bc| ac.checked_add(bc)));
+            prop_assert_eq!(left, right);
+        }
+
+        /// The u128 path must agree with the u64 path whenever `rhs` fits u64
+        /// (covers the fast-path delegation).
+        #[test]
+        fn checked_mul_u128_agrees_with_u64(a in arb_quantity(), rhs in any::<u64>()) {
+            prop_assert_eq!(a.checked_mul_u128(u128::from(rhs)), a.checked_mul_u64(rhs));
+        }
+
+        /// Oracle: `checked_mul_u128` agrees with arbitrary-precision
+        /// multiplication for any `Quantity × u128`, returning `None` exactly
+        /// when the true product exceeds 256 bits. Covers the fast path, the
+        /// `rhs > u64::MAX` recompose path, and overflow rejection.
+        #[test]
+        fn checked_mul_u128_matches_biguint(a in arb_quantity(), rhs in any::<u128>()) {
+            let product = BigUint::from_bytes_be(&a.to_be_bytes()) * BigUint::from(rhs);
+            // `Quantity` holds 0..=2^256-1, so the product fits iff <= 256 bits.
+            let expected = (product.bits() <= 256)
+                .then(|| Quantity::from_be_bytes(&product.to_bytes_be()).unwrap());
+            prop_assert_eq!(a.checked_mul_u128(rhs), expected);
         }
 
         #[test]
@@ -313,7 +357,7 @@ mod order_book {
 
         #[test]
         fn should_reject_invalid_orders_without_modifying_book() {
-            let cases: Vec<(u64, u64, MatchOrderError)> = vec![
+            let cases: Vec<(u128, u64, MatchOrderError)> = vec![
                 (
                     TICK_SIZE.get() / 2,
                     LOT_SIZE.get(),
@@ -363,7 +407,7 @@ mod order_book {
         #[test]
         fn should_accept_valid_order() {
             let mut book = order_book();
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let result = book.match_order(order);
                 assert!(result.is_ok());
             }
@@ -376,7 +420,7 @@ mod order_book {
 
         #[test]
         fn should_rest_in_empty_book() {
-            for order in all_order_types(TICK_SIZE, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
                 let result = book.match_order(order).unwrap();
@@ -447,7 +491,8 @@ mod order_book {
 
                 let result = book.match_order(taker).unwrap();
 
-                let prices: Vec<u64> = result.fills().iter().map(|f| f.maker_price.get()).collect();
+                let prices: Vec<u128> =
+                    result.fills().iter().map(|f| f.maker_price.get()).collect();
                 assert_eq!(prices, expected_prices);
                 assert!(book.is_empty());
             }
@@ -868,13 +913,13 @@ mod order_book {
             use crate::order::{
                 FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
             };
-            use std::num::NonZeroU64;
+            use std::num::{NonZeroU64, NonZeroU128};
 
             // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
             // wouldn't be multiples of the default LOT_SIZE).
             let mut book = OrderBook::new(
                 OrderBookId::ZERO,
-                TickSize::new(NonZeroU64::new(1).unwrap()),
+                TickSize::new(NonZeroU128::new(1).unwrap()),
                 LotSize::new(NonZeroU64::new(1).unwrap()),
                 FeeRates::default(),
             );
@@ -900,11 +945,11 @@ mod process_pending_orders {
     use crate::test_fixtures::{LOT_SIZE, PRICE_SCALE, order_book};
     use std::collections::BTreeSet;
 
-    fn buy(seq: u64, price: u64, quantity: u64) -> Order {
+    fn buy(seq: u64, price: u128, quantity: u64) -> Order {
         crate::test_fixtures::buy(seq, price, quantity)
     }
 
-    fn sell(seq: u64, price: u64, quantity: u64) -> Order {
+    fn sell(seq: u64, price: u128, quantity: u64) -> Order {
         crate::test_fixtures::sell(seq, price, quantity)
     }
 

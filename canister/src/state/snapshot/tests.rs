@@ -17,7 +17,7 @@ mod schema_stability {
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
     use dex_types_internal::Mode;
-    use std::num::NonZeroU64;
+    use std::num::{NonZeroU64, NonZeroU128};
 
     /// Fixture exercising every `#[n(N)]` field reachable from `StateSnapshot`:
     /// `mode`, `next_book_id`, one `TokenEntry` (both fields), one
@@ -82,7 +82,7 @@ mod schema_stability {
             order_books: vec![OrderBookSnapshot {
                 id: book_id,
                 next_seq: OrderSeq::new(3),
-                tick_size: TickSize::new(NonZeroU64::new(10).unwrap()),
+                tick_size: TickSize::new(NonZeroU128::new(10).unwrap()),
                 lot_size: LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
                 pending_orders: vec![pending],
                 bids: vec![PriceLevel {

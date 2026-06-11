@@ -19,7 +19,7 @@ use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::fmt;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 use std::str::FromStr;
 
 /// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
@@ -358,16 +358,16 @@ impl From<TradingPair> for dex_types::TradingPair {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
 )]
-pub struct Price(#[n(0)] u64);
+pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_via_quantity")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
 
-    pub fn new(value: u64) -> Self {
+    pub fn new(value: u128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0
     }
 
@@ -396,7 +396,7 @@ impl Price {
         base_scale: NonZeroU64,
     ) -> Option<Quantity> {
         let (quote, remainder) = quantity
-            .checked_mul_u64(self.0)?
+            .checked_mul_u128(self.0)?
             .checked_div_rem_u64(base_scale.get())?;
         assert_eq!(
             remainder, 0,
@@ -408,19 +408,19 @@ impl Price {
 
 /// Minimum price increment for a trading pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
-pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
+pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u128_via_quantity")] NonZeroU128);
 
 impl TickSize {
-    pub const fn new(value: NonZeroU64) -> Self {
+    pub const fn new(value: NonZeroU128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0.get()
     }
 }
 
-impl From<TickSize> for u64 {
+impl From<TickSize> for u128 {
     fn from(tick_size: TickSize) -> Self {
         tick_size.get()
     }
@@ -446,15 +446,33 @@ impl From<LotSize> for u64 {
     }
 }
 
-impl From<u64> for Price {
-    fn from(value: u64) -> Self {
+impl From<u128> for Price {
+    fn from(value: u128) -> Self {
         Self(value)
     }
 }
 
-impl From<Price> for u64 {
+impl From<Price> for u128 {
     fn from(price: Price) -> Self {
         price.0
+    }
+}
+
+impl From<Price> for Nat {
+    fn from(price: Price) -> Self {
+        Nat::from(price.get())
+    }
+}
+
+impl From<TickSize> for Nat {
+    fn from(tick_size: TickSize) -> Self {
+        Nat::from(tick_size.get())
+    }
+}
+
+impl From<LotSize> for Nat {
+    fn from(lot_size: LotSize) -> Self {
+        Nat::from(lot_size.get())
     }
 }
 
@@ -485,6 +503,11 @@ impl Quantity {
             high: 0,
             low: value,
         }
+    }
+
+    /// The value as a `u128`, or `None` if it exceeds `u128::MAX`.
+    pub const fn as_u128(self) -> Option<u128> {
+        if self.high == 0 { Some(self.low) } else { None }
     }
 
     pub(crate) fn high(&self) -> u128 {
@@ -579,6 +602,12 @@ impl From<u64> for Quantity {
     }
 }
 
+impl From<u128> for Quantity {
+    fn from(value: u128) -> Self {
+        Self::from_u128(value)
+    }
+}
+
 /// Error returned when a `Nat` value exceeds the 256-bit capacity of `Quantity`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantityOverflowError;
@@ -615,6 +644,35 @@ impl Quantity {
             .checked_add(rhs.high)?
             .checked_add(carry as u128)?;
         Some(Self { high, low })
+    }
+
+    /// Multiply this u256 by a `u128`, checked for overflow past 256 bits.
+    ///
+    /// Fast path: when `rhs` fits a `u64`, delegate to [`Self::checked_mul_u64`]
+    /// (the common case — settlement multiplies by prices well under `u64`).
+    /// Otherwise split `rhs` into two 64-bit limbs and reuse `checked_mul_u64`:
+    /// `self · rhs = self·rhs_lo + (self·rhs_hi)·2^64`.
+    pub fn checked_mul_u128(self, rhs: u128) -> Option<Self> {
+        bench_scopes!("qty", "qty::mul_u128");
+        if let Ok(rhs) = u64::try_from(rhs) {
+            return self.checked_mul_u64(rhs);
+        }
+        let lo = self.checked_mul_u64(rhs as u64)?;
+        let hi = self.checked_mul_u64((rhs >> 64) as u64)?;
+        lo.checked_add(hi.checked_shl_64()?)
+    }
+
+    /// Multiply this u256 by `2^64` (left-shift by 64 bits), checked for
+    /// overflow past 256 bits.
+    fn checked_shl_64(self) -> Option<Self> {
+        // Overflows iff the top 64 bits of `high` would shift past bit 255.
+        if self.high >> 64 != 0 {
+            return None;
+        }
+        Some(Self {
+            high: (self.high << 64) | (self.low >> 64),
+            low: self.low << 64,
+        })
     }
 
     pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
@@ -782,7 +840,9 @@ impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
     fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
         Ok(Self {
             side: Side::from(request.side),
-            price: Price::from(request.price),
+            price: Price::from(
+                u128::try_from(&request.price.0).map_err(|_| QuantityOverflowError)?,
+            ),
             quantity: Quantity::try_from(request.quantity)?,
         })
     }
