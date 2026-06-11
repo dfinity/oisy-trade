@@ -70,6 +70,60 @@ order book. The notional bounds reuse the `amount` that guard already computes.
 
 **`max_notional` is optional.** Not every pair needs a cap; `None` means no upper bound.
 
+## Worked example: ckETH/ckUSDC
+
+Concrete end-to-end walkthrough with **no fees** (`maker_fee_bps = taker_fee_bps = 0`), to
+isolate the notional arithmetic. Token decimals: ckETH (base) = **18**, ckUSDC (quote) = **6**,
+so `base_scale = 10^18`. Throughout, `notional = price × quantity / base_scale`, in ckUSDC base
+units.
+
+### 1. Create the pair
+
+`AddTradingPairRequest`:
+
+| Field          | Value                   | Meaning                                        |
+| -------------- | ----------------------- | ---------------------------------------------- |
+| `tick_size`    | `10_000`                | $0.01 / ETH (= `0.01 × 10^6` ckUSDC base units) |
+| `lot_size`     | `100_000_000_000_000`   | 0.0001 ETH (= `0.0001 × 10^18` ckETH base units)|
+| `min_notional` | `5_000_000`             | 5 ckUSDC (= `5 × 10^6`)                         |
+| `max_notional` | `Some(9_000_000_000_000)` | 9,000,000 ckUSDC (= `9_000_000 × 10^6`)       |
+
+Pair-creation checks pass:
+
+- `min_notional > 0` ✓ (R4)
+- `max_notional ≥ min_notional` ✓ — `9_000_000_000_000 ≥ 5_000_000` (R5)
+- tick·lot exactness (pre-existing invariant): `tick_size × lot_size = 10^4 × 10^14 = 10^18`,
+  which is exactly `base_scale`, so the remainder is 0 ✓
+
+### 2. Place an accepted order — buy 0.1 ETH at $2,500/ETH
+
+| Quantity                | Value                              | Check                                      |
+| ----------------------- | ---------------------------------- | ------------------------------------------ |
+| `price`                 | `2_500_000_000` (`2_500 × 10^6`)   | `2_500_000_000 / 10_000 = 250_000` → on tick ✓ |
+| `quantity`              | `100_000_000_000_000_000` (`0.1 × 10^18`) | `10^17 / 10^14 = 1_000` → on lot ✓   |
+| `notional`              | `2_500_000_000 × 10^17 / 10^18 = 250_000_000` | = 250 ckUSDC                    |
+
+Notional bounds:
+
+- `250_000_000 ≥ min_notional (5_000_000)` ✓ (R1 not triggered, R3 boundary not hit)
+- `250_000_000 ≤ max_notional (9_000_000_000_000)` ✓ (R2 not triggered)
+
+The order is accepted. With no fees, a buy reserves exactly the notional: **250 ckUSDC**
+(`250_000_000` base units).
+
+### 3. Rejected: dust order — 1 tick × 1 lot
+
+`price = 10_000`, `quantity = 10^14`. Passes tick and lot trivially, but
+`notional = 10_000 × 10^14 / 10^18 = 1` base unit = **0.000001 ckUSDC** — far below
+`min_notional`. Rejected with `BelowMinNotional` (R1). This is the dust the filter exists to
+stop: a settlement worth a millionth of a cent.
+
+### 4. Rejected: fat-finger — buy 5,000 ETH at $2,500/ETH
+
+`price = 2_500_000_000`, `quantity = 5_000 × 10^18`.
+`notional = 2_500_000_000 × (5_000 × 10^18) / 10^18 = 12_500_000_000_000` = **12,500,000 ckUSDC**,
+above `max_notional (9,000,000 ckUSDC)`. Rejected with `AboveMaxNotional` (R2).
+
 ## Implementation
 
 Bound types: `min_notional: Quantity`, `max_notional: Option<Quantity>`. Public API surfaces
