@@ -11,8 +11,8 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderRecord, Token, TokenId, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
@@ -88,20 +88,23 @@ impl<R: Runtime> DexClient<R> {
             .unwrap()
     }
 
-    /// Query the status of an existing order on the DEX canister.
-    pub async fn get_order_status(&self, order_id: OrderId) -> OrderStatus {
-        self.runtime
-            .call(self.dex_canister, "get_order_status", (order_id,), 0)
-            .await
-            .unwrap()
-    }
-
     /// Query the caller's orders, newest first, paginated.
     pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
         self.runtime
             .call(self.dex_canister, "get_my_orders", (args,), 0)
             .await
             .unwrap()
+    }
+
+    /// Point-lookup the caller's order by id, or `None` if the caller does not
+    /// own an order with that id.
+    pub async fn get_my_order(&self, order_id: OrderId) -> Option<UserOrder> {
+        self.get_my_orders(GetMyOrdersArgs {
+            filter: Some(dex_types::GetMyOrdersFilter::ById(order_id)),
+        })
+        .await
+        .into_iter()
+        .next()
     }
 
     /// Query all listed trading pairs on the DEX canister.

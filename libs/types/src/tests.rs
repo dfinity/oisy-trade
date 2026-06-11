@@ -1,8 +1,7 @@
 use crate::{
-    AddLimitOrderError, Balance, CanceledOrderInfo, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair,
-    TradingPairInfo,
+    AddLimitOrderError, Balance, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus,
+    PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair, TradingPairInfo,
 };
 use candid::{Nat, Principal};
 
@@ -29,13 +28,10 @@ fn should_serialize_limit_order_request() {
 #[test]
 fn should_serialize_order_status() {
     for status in [
-        OrderStatus::NotFound,
         OrderStatus::Pending,
         OrderStatus::Open,
         OrderStatus::Filled,
-        OrderStatus::Canceled(CanceledOrderInfo {
-            remaining_quantity: Nat::from(0u64),
-        }),
+        OrderStatus::Canceled,
     ] {
         let encoded = candid::encode_one(&status).unwrap();
         let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
