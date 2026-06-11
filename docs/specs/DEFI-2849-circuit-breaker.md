@@ -176,15 +176,20 @@ One `permit_*` per `EventType`, so the policy for each event is exhaustive, name
 greppable:
 
 - Gated: `permit_trading(caller, book)` (frozen → global halt → pair halt),
-  `permit_matching()` (global halt), `permit_deposit(caller)` / `permit_withdraw(caller)`
+  `permit_matching(book)` (global halt → that book's pair halt — **per-book**, so the
+  matching loop gates each book through this one method rather than a separate
+  `is_pair_halted` filter), `permit_deposit(caller)` / `permit_withdraw(caller)`
   (frozen; return `PreAsyncPermit`).
 - Always-`Ok` — ungated *in the permission layer*, but not all truly unguarded:
   `permit_cancel` and `permit_settling` are genuinely ungated; `permit_admin` is the
   permit for the halt/freeze/upgrade events and is controller/lifecycle-gated *at the
   endpoint*; `permit_add_trading_pair` is controller-gated at the endpoint. The
   always-`Ok` return documents "not gated here" at a named, greppable site — it does not
-  mean "unguarded".
-- Predicates for the matching loop: `is_pair_halted(&OrderBookId)`, `is_frozen(&Principal)`.
+  mean "unguarded". **`permit_settling` is intentionally book-less and never gated** —
+  settling must always drain (even under halt) so already-matched fills don't strand
+  (R2); a per-book settling gate would reintroduce that stranding.
+- Predicate: `is_frozen(&Principal)`. (Per-pair halt is enforced via `permit_matching(book)`,
+  not a standalone matching-loop filter.)
 
 `NotController` is **not** produced by `permit_*` (that axis needs `runtime.is_controller`,
 which pure state can't see) — it's returned by the endpoint guard, but lives in the same
@@ -239,20 +244,20 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
   `permit_trading(caller, book)?`. Map `UnauthorizedError::{TradingHalted, PairHalted,
   AccountFrozen}` onto new variants of internal + public `AddLimitOrderError`. The
   `SyncPermit` flows into the existing `process_event(AddLimitOrder, …)`.
-- **Matching** (`canister/src/execute/mod.rs`) — under global halt, `run_once` **still
-  drains in-flight settling** (`drain_settling` runs before the matching gate) but does
-  **no new matching**. Draining is required: a halt can land while
-  `pending_settling_events` are queued (a prior chunk hit the instruction budget), and
-  those events apply the balance effects of already-matched fills — skipping them would
-  strand a counterparty's proceeds for the duration of the halt, violating the
-  "users can always exit" guarantee (R2). Under halt, `run_once` reschedules **only** for
-  leftover settling (returns `MoreWork` iff `has_pending_settling_events()`, else
-  `Complete`) — it does **not** treat the halted books' pending *orders* as work, so it
-  never busy-spins. Per-pair halt: the per-book loop filters out halted books via
-  `is_pair_halted`, and the "work remaining?" predicate (`has_matchable_pending_orders`)
-  excludes halted books so the executor doesn't busy-spin re-arming a zero-delay timer;
-  `resume_trading` and `set_pair_status` (on the Active transition) re-arm matching from
-  the endpoint.
+- **Matching** (`canister/src/execute/mod.rs`) — `run_once` **always drains in-flight
+  settling first** (`drain_settling` before any matching), then matches only the books
+  for which `permit_matching(book)` is `Ok`. A book is gated by that one call: it returns
+  `Err(TradingHalted)` under global halt (every book) and `Err(PairHalted)` for a halted
+  book — so there is no separate `is_pair_halted` loop filter. Draining-first is required:
+  a halt can land while `pending_settling_events` are queued (a prior chunk hit the
+  instruction budget), and those events apply the balance effects of already-matched
+  fills — skipping them would strand a counterparty's proceeds for the halt's duration,
+  violating "users can always exit" (R2). The "work remaining?" predicate
+  (`has_matchable_pending_orders`) counts only books with pending orders **and**
+  `permit_matching(book).is_ok()`, so under global or per-pair halt `run_once` reschedules
+  **only** for leftover settling (`MoreWork` iff `has_pending_settling_events()`, else
+  `Complete`) and never busy-spins on halted books' pending orders. `resume_trading` and
+  `set_pair_status` (on the Active transition) re-arm matching from the endpoint.
   ⚠️ **Freeze must NOT touch matching:** do **not** filter a frozen account's resting
   orders out of the book or the matching loop — counterparty fills against them must
   succeed, with proceeds landing in the frozen (non-withdrawable) balance (R5).
@@ -342,35 +347,46 @@ cargo test -p dex_int_tests
 ### Delivery / PR sequence
 
 Stacked, ordered by increasing complexity; each PR is independently mergeable,
-compilable, and testable, and rebases on its parent. The async-permit machinery lands
-last, since only the freeze gates deposit/withdraw. Each mechanism PR carries its own
+compilable, and testable, and rebases on its parent. The async-permit *types* land in
+PR 1 as part of the permit vocabulary (so the sync/async distinction is visible from the
+scaffolding); only the freeze *enforcement* on deposit/withdraw lands last (PR 4). Each
+mechanism PR carries its own
 section in the runbook (`docs/runbook-circuit-breakers.md`) so docs stay in lockstep;
 each section states *who* may invoke the control (the canister controller) and *when*
 to use it (matching-engine bug → global halt; compromised/suspect ledger → per-pair
 halt; compliance or compromised principal → freeze).
 
 - **PR 1 — Permission scaffolding (behavior-neutral).** Empty `Permissions` + `State`
-  field, snapshotted (backward-compatible); `UnauthorizedError`, `SyncPermit`, `Permit`
-  (Sync only), one always-`Ok` `permit_*` per existing `EventType`; thread the `Permit`
-  parameter through `process_event`/`record_event` and every call site.
+  field, snapshotted (backward-compatible); the full permit vocabulary —
+  `UnauthorizedError`, `SyncPermit`, the async types (`PreAsyncPermit`/`PostAsyncPermit`/
+  `Reconciliation`/`reconcile`), and `Permit { Sync, Async }`; one always-`Ok` `permit_*`
+  per `EventType`, with `permit_matching(book)` taking the book and
+  `permit_deposit`/`permit_withdraw` returning `PreAsyncPermit` (reconciled to
+  `Permit::Async` at the deposit/withdraw recorder sites — always-`Clean` until the freeze
+  check lands in PR 4); thread the `Permit` parameter through `process_event`/`record_event`
+  and every call site.
   *Acceptance:* no behavioral change (all existing tests pass); `dex.did` unchanged;
   snapshot round-trips empty + old-format decodes to default; every recorder call site
-  supplies a permit.
+  supplies a permit; deposit/withdraw record via `Permit::Async` (the post-await re-check
+  is structurally present even though it can't yet deny).
 - **PR 2 — Global trading halt.** `trading_halted`; `SetGlobalHalt` + arm + snapshot;
-  gate `permit_trading`/`permit_matching`; `run_once` early-returns under halt;
+  `permit_trading`/`permit_matching(book)` gate the global halt; `run_once` drains
+  settling then matches only `permit_matching(book).is_ok()` books;
   `halt_trading`/`resume_trading` + candid; `AddLimitOrderError::TradingHalted`.
-  *Acceptance:* R1, R2, R6 (these two endpoints), R7 for the halt flag.
-- **PR 3 — Per-pair halt.** `halted_pairs`; `SetPairStatus` + arm + snapshot; per-book
-  matching filter + `permit_trading` pair check; `set_pair_status` + `PairStatus` +
-  `SetPairStatusError`; `AddLimitOrderError::PairHalted`.
+  *Acceptance:* R1, R2 (incl. settling still drains under halt), R6 (these two endpoints),
+  R7 for the halt flag.
+- **PR 3 — Per-pair halt.** `halted_pairs`; `SetPairStatus` + arm + snapshot;
+  `permit_matching(book)` and `permit_trading` extended with the per-book pair check (no
+  separate matching-loop filter); `set_pair_status` + `PairStatus` + `SetPairStatusError`;
+  `AddLimitOrderError::PairHalted`.
   *Acceptance:* R3, R6 (`set_pair_status`, incl. `UnknownTradingPair`), R7 for per-pair
   state, and the executor does not busy-spin on a halted-but-non-empty book.
-- **PR 4 — Per-account freeze (introduces the async-permit machinery).**
-  `frozen_accounts`; `SetAccountFrozen` + arm + snapshot; `permit_trading` frozen check;
-  `PreAsyncPermit`/`PostAsyncPermit`/`reconcile`, `Permit::Async`,
-  `permit_deposit`/`permit_withdraw`; enforce freeze on `deposit`/`withdraw` with the
-  pre/post pattern + `Raced` log; `freeze_account`/`unfreeze_account` + candid;
-  `DepositError`/`WithdrawError::AccountFrozen`. Kept atomic — a half-enforced freeze is
+- **PR 4 — Per-account freeze (the async machinery's enforcement).**
+  `frozen_accounts`; `SetAccountFrozen` + arm + snapshot; add the frozen check to
+  `permit_trading` and to `permit_deposit`/`permit_withdraw` (so `reconcile` can now yield
+  `Raced`) + the `Raced` observability log; `freeze_account`/`unfreeze_account` + candid;
+  `DepositError`/`WithdrawError::AccountFrozen`. The async permit *types* already exist
+  (PR 1); PR 4 only adds the freeze enforcement. Kept atomic — a half-enforced freeze is
   an unsafe intermediate state for a security control.
   *Acceptance:* R4, R5, R6 (these two endpoints), R9 (compile-time), R7 for freeze state.
 
