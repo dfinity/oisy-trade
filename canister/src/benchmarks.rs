@@ -221,6 +221,66 @@ fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     })
 }
 
+/// Benchmark paginating through *all* of a user's orders via `get_my_orders`,
+/// for the user holding the most orders. Reuses the
+/// `bench_process_pending_orders_1000` setup (fully populated Binance book) but
+/// places all 1000 trade orders under a single user, then walks every page
+/// (capped at `MAX_ORDERS_PER_RESPONSE`) until the history is exhausted.
+#[bench(raw)]
+fn bench_get_my_orders() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let trades = load_trades();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+
+    let trader = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, trader);
+    for trade in &trades {
+        place_order(
+            &mut state,
+            trader,
+            PendingOrder {
+                side: if trade.m { Side::Sell } else { Side::Buy },
+                price: Price::new(parse_decimal_8(&trade.p)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
+            },
+        );
+    }
+    assert_eq!(
+        state.get_user_orders(&trader, None, trades.len() * 2).len(),
+        trades.len()
+    );
+
+    crate::state::reset_state();
+    crate::state::init_state(state);
+
+    let total = trades.len();
+    let page = dex_types::MAX_ORDERS_PER_RESPONSE;
+    canbench_rs::bench_fn(|| {
+        let mut after: Option<dex_types::OrderId> = None;
+        let mut retrieved = 0usize;
+        loop {
+            let orders = crate::get_my_orders(
+                dex_types::GetMyOrdersArgs {
+                    after: after.clone(),
+                    length: page,
+                },
+                trader,
+            )
+            .expect("benchmark cursor is always a valid order id");
+            retrieved += orders.len();
+            // Stop once the known total is reached; checking the count rather
+            // than waiting for a short page avoids one extra empty call when
+            // the total is an exact multiple of the page size.
+            if retrieved >= total {
+                break;
+            }
+            after = orders.last().map(|o| o.id.clone());
+        }
+        assert_eq!(retrieved, total);
+    })
+}
+
 /// Build a freshly populated state from the Binance snapshot and install it
 /// as the canister's thread-local state, so library dispatchers that read via
 /// `state::with_state` observe it. canbench's `init` populated the

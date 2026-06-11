@@ -170,6 +170,27 @@ type OrderRecord = record {
     timestamp : nat64;
 };
 
+/// Request for `get_my_orders`: a page over the caller's orders, newest first.
+/// `length` is capped at 100. Pages via a cursor: pass the previous page's last
+/// order id as `after`; null starts from the newest order.
+type GetMyOrdersArgs = record {
+    /// Resume strictly after this order id (a prior page's last id).
+    /// null starts from the newest order.
+    after : opt OrderId;
+    /// Maximum number of orders to return.
+    length : nat32;
+};
+
+/// One entry in a `get_my_orders` response: an order the caller placed.
+type UserOrder = record {
+    /// The order's unique identifier.
+    id : OrderId;
+    /// The trading pair the order was placed on.
+    pair : TradingPair;
+    /// The full order record.
+    order : OrderRecord;
+};
+
 // A token identified by its ledger canister ID.
 type TokenId = record {
     // The canister ID of the token's ledger.
@@ -586,6 +607,10 @@ service : (DexArg) -> {
     // Each returned `Balance` carries the fee amount in `free`;
     // `reserved` is always zero (fees have no reserved concept).
     get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+
+    // Return the caller's orders, newest first, paginated. Useful for a
+    // front-end displaying a user's order history.
+    get_my_orders : (GetMyOrdersArgs) -> (vec UserOrder) query;
 
     // List every token registered with the DEX. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

@@ -453,6 +453,37 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.order_history.get(&order_id).map(|r| r.status)
     }
 
+    /// Returns up to `length` of `owner`'s orders, newest first, resuming
+    /// strictly after the `after` order (a cursor from a prior page) — each
+    /// paired with its trading pair and full record. An `after` that names a
+    /// non-existent order yields an empty page.
+    pub fn get_user_orders(
+        &self,
+        owner: &Principal,
+        after: Option<OrderId>,
+        length: usize,
+    ) -> Vec<(OrderId, TradingPair, OrderRecord)> {
+        let Some(user_id) = self.user_registry.lookup(*owner) else {
+            return Vec::new();
+        };
+        self.order_history
+            .orders_after(user_id, after, length)
+            .into_iter()
+            .map(|id| {
+                let record = self
+                    .order_history
+                    .get(&id)
+                    .expect("BUG: per-user index references a missing order record");
+                let pair = self
+                    .trading_pairs
+                    .get_pair(&id.book_id())
+                    .expect("BUG: order references an unknown trading pair")
+                    .clone();
+                (id, pair, record)
+            })
+            .collect()
+    }
+
     pub fn next_book_id(&self) -> OrderBookId {
         self.next_book_id
     }

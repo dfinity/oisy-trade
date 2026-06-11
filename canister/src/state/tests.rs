@@ -556,6 +556,65 @@ mod record_limit_order {
     }
 }
 
+mod get_user_orders {
+    use crate::order::{FeeRates, OrderBookId, Side};
+    use crate::state::State;
+    use crate::test_fixtures::{
+        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        place_order,
+    };
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            FeeRates::default(),
+        );
+        state
+    }
+
+    #[test]
+    fn joins_pair_and_record_newest_first() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u64::from(LOT_SIZE);
+        let stranger = Principal::from_slice(&[0x02]);
+
+        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+
+        let orders = state.get_user_orders(&OWNER, None, 10);
+        let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, vec![second, first], "newest first");
+        for (_, joined_pair, record) in &orders {
+            assert_eq!(*joined_pair, pair, "each entry carries its trading pair");
+            assert_eq!(record.owner, OWNER, "each record is owned by the caller");
+        }
+
+        // Cursor pagination: resume after the newest → the older order.
+        assert_eq!(
+            state
+                .get_user_orders(&OWNER, Some(second), 10)
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect::<Vec<_>>(),
+            vec![first]
+        );
+        // Caller isolation, and an unknown cursor yields nothing.
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
+        assert!(state.get_user_orders(&OWNER, Some(first), 10).is_empty());
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity};
     use crate::state::AddLimitOrderError;
@@ -1925,6 +1984,7 @@ mod get_balances {
             state.get_balance(&stranger, &a_id),
             crate::balance::Balance::zero()
         );
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
 
         assert_eq!(
             state.user_registry, registry_before,

@@ -56,7 +56,9 @@ mod add_limit_order {
     use candid::{Encode, Nat, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{PRICE_SCALE, Setup};
-    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side};
+    use dex_types::{
+        AddLimitOrderError, Balance, GetMyOrdersArgs, LimitOrderRequest, OrderStatus, Side,
+    };
     use pocket_ic::{RejectCode, RejectResponse};
 
     #[tokio::test]
@@ -103,6 +105,112 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_my_orders_newest_first_paginated() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let alice = setup.dex_client();
+        let bob_principal = Principal::from_slice(&[0xBB]);
+        let bob = setup.dex_client_with_caller(bob_principal);
+        let pair = setup.trading_pair();
+
+        // Fund both callers for three resting buys of 1M @ 1000 (1B each).
+        let per_order = 1_000_000_000u64;
+        let total = 3 * per_order;
+        for who in [setup.user(), bob_principal] {
+            setup
+                .deposit_flow(who, setup.quote_token_id())
+                .mint(total + 2 * QUOTE_LEDGER_FEE)
+                .approve(total + QUOTE_LEDGER_FEE)
+                .deposit(total)
+                .execute()
+                .await;
+        }
+
+        // Interleave alice's and bob's placements so a correct per-user index
+        // can't rely on a caller's orders being inserted contiguously.
+        let buy = LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price: 1000u64.into(),
+            quantity: 1_000_000u64.into(),
+        };
+        let before_placement = setup.time_nanos().await;
+        let mut alice_ids = vec![];
+        let mut bob_ids = vec![];
+        for _ in 0..3 {
+            alice_ids.push(alice.add_limit_order(buy.clone()).await.unwrap());
+            bob_ids.push(bob.add_limit_order(buy.clone()).await.unwrap());
+        }
+        let after_placement = setup.time_nanos().await;
+
+        // Alice sees only her own orders, newest first — bob's interleaved
+        // orders don't leak in.
+        let orders = alice
+            .get_my_orders(GetMyOrdersArgs {
+                after: None,
+                length: 10,
+            })
+            .await;
+        assert_eq!(
+            orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![
+                alice_ids[2].clone(),
+                alice_ids[1].clone(),
+                alice_ids[0].clone()
+            ]
+        );
+        for o in &orders {
+            assert_eq!(o.pair, pair);
+            assert_eq!(o.order.owner, setup.user());
+            assert_eq!(o.order.side, Side::Buy);
+            assert_eq!(o.order.price, candid::Nat::from(1000u64));
+            assert!(
+                before_placement <= o.order.timestamp && o.order.timestamp <= after_placement,
+                "submission timestamp {} outside placement window [{}, {}]",
+                o.order.timestamp,
+                before_placement,
+                after_placement
+            );
+        }
+
+        // Bob likewise sees only his own.
+        let bob_orders = bob
+            .get_my_orders(GetMyOrdersArgs {
+                after: None,
+                length: 10,
+            })
+            .await;
+        assert_eq!(
+            bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
+        );
+        assert!(bob_orders.iter().all(|o| o.order.owner == bob_principal));
+
+        // Cursor pagination: resume after the newest, take one → the next order.
+        let page = alice
+            .get_my_orders(GetMyOrdersArgs {
+                after: Some(alice_ids[2].clone()),
+                length: 1,
+            })
+            .await;
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, alice_ids[1]);
+
+        // A caller that placed nothing sees none.
+        let stranger = setup.dex_client_with_caller(Principal::from_slice(&[0xAB]));
+        assert!(
+            stranger
+                .get_my_orders(GetMyOrdersArgs {
+                    after: None,
+                    length: 10,
+                })
+                .await
+                .is_empty()
+        );
 
         setup.drop().await;
     }

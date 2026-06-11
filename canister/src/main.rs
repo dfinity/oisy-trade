@@ -1,10 +1,10 @@
 use dex_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
     OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
-    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -145,6 +145,17 @@ fn get_fee_balances(
     filter: Option<Vec<FilterToken>>,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
     dex_canister::get_fee_balances(filter)
+}
+
+#[ic_cdk::query]
+fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
+    use dex_canister::Runtime;
+    match dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller()) {
+        Ok(orders) => orders,
+        Err(dex_canister::GetMyOrdersError::InvalidCursor(e)) => {
+            panic!("ERROR: invalid cursor order id: {e}")
+        }
+    }
 }
 
 #[ic_cdk::query]
