@@ -270,7 +270,7 @@ mod add_limit_order {
     }
 
     #[tokio::test]
-    async fn should_fail_to_get_order_status() {
+    async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
         let setup = Setup::new().await;
 
         // R7: a well-formed but unknown id resolves to nothing — absence from
