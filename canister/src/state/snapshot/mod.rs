@@ -57,8 +57,7 @@ pub struct StateSnapshot {
     #[n(9)]
     pub fee_pool: Option<Vec<FeeEntry>>,
     /// Controller-managed permissions. Encoded as `None` when all-default,
-    /// and decoded as absent → default so snapshots written before this
-    /// field still load.
+    /// and decoded as absent.
     #[n(10)]
     pub permissions: Option<PermissionsSnapshot>,
 }
