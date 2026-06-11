@@ -404,8 +404,7 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent,
-        WithdrawEvent,
+        DepositEvent, Event, EventType, MatchingEvent, SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
@@ -809,11 +808,6 @@ pub mod arbitrary {
             },
         );
         prop_oneof![transfer, unreserve]
-    }
-
-    pub fn arb_order_status_transition() -> impl Strategy<Value = OrderStatusTransition> {
-        (arb_order_seq(), arb_order_status())
-            .prop_map(|(seq, status)| OrderStatusTransition { seq, status })
     }
 
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
