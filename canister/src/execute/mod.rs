@@ -90,7 +90,7 @@ impl Executor {
                 .expect("BUG: pending_order_seqs().take(order_budget) cannot exceed order_budget");
             let permit = state
                 .permissions()
-                .permit_matching()
+                .permit_matching(book_id)
                 .expect("BUG: matching is never gated in this build");
             audit::process_event(
                 state,

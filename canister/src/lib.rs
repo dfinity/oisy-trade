@@ -231,6 +231,9 @@ pub async fn deposit(
     let _guard =
         guard::UserOpGuard::new(caller, internal_token).ok_or(DepositError::OperationInProgress)?;
 
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
+        .expect("BUG: deposit is never gated in this build");
+
     let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
     if existing
         .free()
@@ -247,15 +250,12 @@ pub async fn deposit(
         token: order::TokenId::from(token_id),
         amount,
     };
+    let post = state::with_state(|s| pre.reconcile(s.permissions()));
     state::with_state_mut(|s| {
-        let permit = s
-            .permissions()
-            .permit_deposit(caller)
-            .expect("BUG: deposit is never gated in this build");
         state::audit::process_event(
             s,
             state::event::EventType::Deposit(event),
-            permit.into(),
+            post.into(),
             runtime,
         )
     });
@@ -288,6 +288,9 @@ pub async fn withdraw(
     let _guard = guard::UserOpGuard::new(caller, internal_token)
         .ok_or(WithdrawError::OperationInProgress)?;
 
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
+        .expect("BUG: withdraw is never gated in this build");
+
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
         WithdrawError::InsufficientBalance {
@@ -319,14 +322,10 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            let permit = state::with_state(|s| {
-                s.permissions()
-                    .permit_withdraw(caller)
-                    .expect("BUG: withdraw is never gated in this build")
-            });
+            let post = state::with_state(|s| pre.reconcile(s.permissions()));
             state::audit::record_event(
                 state::event::EventType::Withdraw(event),
-                permit.into(),
+                post.into(),
                 runtime,
             );
             Ok(response)
