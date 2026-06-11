@@ -35,8 +35,8 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
   `code : nat16` and a `detail` holding `opt` of that endpoint's error enum — for example `deposit`
   returns `record { code : nat16; detail : opt DepositError }`.
   This applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`,
-  `get_order_status`, `get_order_book_ticker`, `get_order_book_depth`, `add_trading_pair`, and
-  both the per-token and request-level errors of `get_balances` / `get_fee_balances`.
+  `get_order_status`, `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and
+  request-level errors of `get_balances` / `get_fee_balances`. Admin endpoints are out of scope.
 - **R2**: `code` is always present and is the single source of truth for retry disposition,
   derived from the variant via `ErrorCode::code`. The envelope is constructed as
   `{ code: detail.code(), detail: Some(detail) }`.
@@ -73,6 +73,8 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
 - **No free-text `message` field now.** The typed `detail` is self-describing. Because the
   envelope is a record, a `message : opt text` / `retry_after : opt nat` field can be added
   later with zero breakage; deferred until a concrete need.
+- **Admin endpoints are out of scope** (e.g. `add_trading_pair`). They are controller-only and
+  not part of the multi-language client surface this envelope targets.
 - **No changes to internal/state-layer error types** (`canister/src/state`, `order`, `ledger`
   internal enums) beyond mapping at the boundary.
 - **No change to which errors are logged.** The `main.rs` per-error logging arms encode
@@ -166,7 +168,7 @@ Each fallible endpoint wraps at the boundary, e.g. `… .map_err(ErrorInfo::from
 
 - `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw` →
   `Result<T, ErrorInfo<…Error>>`.
-- `get_order_book_ticker`, `get_order_book_depth`, `add_trading_pair` → likewise.
+- `get_order_book_ticker`, `get_order_book_depth` → likewise.
 - `get_order_status` → `Result<OrderStatus, ErrorInfo<GetOrderStatusError>>`.
 - `get_balances` / `get_fee_balances` →
   `Result<Vec<Result<UserTokenBalance, ErrorInfo<GetBalancesError>>>, ErrorInfo<GetBalancesRequestError>>`
@@ -220,9 +222,6 @@ Leading digit = fallback disposition (R3). `t` transient, `p` permanent, `a` act
 | `GetOrderStatusError::InvalidOrderId` | 400 | p |
 | `GetOrderBookTickerError::UnknownTradingPair` | 422 | p |
 | `GetOrderBookDepthError::{UnknownTradingPair, LimitTooLarge}` | 422 | p |
-| `AddTradingPairError::NotController` | 403 | p |
-| `AddTradingPairError::TradingPairAlreadyExists` | 409 | p |
-| `AddTradingPairError::*` (remaining validation) | 422 | p |
 | `GetBalancesError::TokenNotSupported` | 422 | p |
 | `GetBalancesRequestError::FilterTooLarge` | 422 | p |
 
@@ -272,9 +271,9 @@ PR1.
    `DepositError`, `WithdrawError`; wrap `add_limit_order`, `cancel_limit_order`, `deposit`,
    `withdraw`; `dex.did` (envelopes + disposition doc block); unit + integration tests.
    *Accepts*: R1 (these four), R2, R3, R4 (these four), R5, R6, R9.
-2. **PR2 — Extend the envelope to query/admin errors.**
+2. **PR2 — Extend the envelope to query errors.**
    `code()` + wrapping for `GetOrderBookTickerError`, `GetOrderBookDepthError`,
-   `AddTradingPairError`, `GetBalancesError`, `GetBalancesRequestError`; `dex.did`; tests.
+   `GetBalancesError`, `GetBalancesRequestError`; `dex.did`; tests.
    *Accepts*: R1 (remainder), R4 (remainder), R9.
 3. **PR3 — Stop conflating / trapping on malformed order IDs.**
    Add `CancelLimitOrderError::InvalidOrderId` (map cancel parse failure to it); add
