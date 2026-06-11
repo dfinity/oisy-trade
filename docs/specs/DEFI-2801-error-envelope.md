@@ -130,10 +130,14 @@ New public items:
 /// Retry disposition is carried by `code`; see the code-range contract in `dex.did`.
 /// `detail` is `opt` on the wire so clients built against an older interface decode an
 /// unknown future variant as `null` while still reading `code`.
-#[derive(Clone, Debug, PartialEq, Eq, CandidType, Serialize, Deserialize)]
+// No `Eq`: the update-endpoint error enums carry `Nat` and derive only `PartialEq`.
+#[derive(Clone, Debug, PartialEq, CandidType, Serialize, Deserialize)]
 pub struct ErrorInfo<E> {
-    pub code: u16,            // candid: nat16
-    pub detail: Option<E>,   // candid: opt E
+    /// Disposition code (candid `nat16`); see the code-range contract in `dex.did`.
+    pub code: u16,
+    /// Typed error (candid `opt E`); `None` decoded by clients built against an
+    /// older interface that don't recognize a newer variant.
+    pub detail: Option<E>,
 }
 
 pub trait ErrorCode {
