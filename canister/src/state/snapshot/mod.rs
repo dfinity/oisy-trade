@@ -56,8 +56,8 @@ pub struct StateSnapshot {
     /// when the pool is empty.
     #[n(9)]
     pub fee_pool: Option<Vec<FeeEntry>>,
-    /// Controller-managed permissions. Encoded as `None` when all-default,
-    /// and decoded as absent.
+    /// Controller-managed permissions. Encoded as `None` when all-default;
+    /// an absent field (e.g. a pre-change snapshot) decodes to the default.
     #[n(10)]
     pub permissions: Option<PermissionsSnapshot>,
 }
