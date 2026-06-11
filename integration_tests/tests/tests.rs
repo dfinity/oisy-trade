@@ -1129,6 +1129,38 @@ async fn should_replay_events_on_upgrade() {
 }
 
 #[tokio::test]
+async fn should_expose_fee_rates_in_add_trading_pair_event() {
+    use dex_types_internal::event::EventType;
+
+    let setup = Setup::new().await;
+    let maker_fee_bps = 10;
+    let taker_fee_bps = 23;
+    let result = setup
+        .dex_client_with_caller(setup.controller())
+        .add_trading_pair(AddTradingPairRequest {
+            maker_fee_bps,
+            taker_fee_bps,
+            ..setup.add_trading_pair_request()
+        })
+        .await;
+    assert_eq!(result, Ok(()));
+
+    setup.assert_that_events().await.satisfy(|events| {
+        let add = events
+            .iter()
+            .find_map(|e| match e {
+                EventType::AddTradingPair(e) => Some(e),
+                _ => None,
+            })
+            .expect("expected an AddTradingPair event in the log");
+        assert_eq!(add.maker_fee_bps, maker_fee_bps);
+        assert_eq!(add.taker_fee_bps, taker_fee_bps);
+    });
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_withdraw_and_receive_tokens_on_ledger() {
     use dex_types_internal::event::EventType;
 
