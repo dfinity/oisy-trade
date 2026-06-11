@@ -45,8 +45,8 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
     identical request; **5xx ⇒ DEX/ledger-side**, retry with backoff.
   - Recognized codes refine the fallback: **402** = action required (fix balance/allowance,
     then retry); **504** = indeterminate (reconcile state before retrying). **409** carries no
-    special retry meaning — it is an ordinary 4xx permanent conflict (the resource is already in a
-    terminal/existing state).
+    special retry meaning — it is an ordinary 4xx permanent conflict: **do not auto-retry** (the
+    resource is already in a terminal/existing state).
   - The leading-digit fallback is the only *stable* guarantee; specific code assignments may
     gain entries over time (see R6).
 - **R4**: Each variant maps to the `code` listed in [Code assignments](#code-assignments).
@@ -243,7 +243,8 @@ correctly says do-not-auto-retry.
 Unit (`libs/types/src/tests.rs`):
 - For every variant of every error enum, assert `code()` equals the value in
   [Code assignments](#code-assignments) — parameterized, no copy/paste. (**R4**)
-- Assert `ErrorInfo::from(e) == ErrorInfo { code: e.code(), detail: Some(e) }`. (**R2**)
+- Assert `ErrorInfo::from(e.clone()) == ErrorInfo { code: e.code(), detail: Some(e) }` (clone `e`
+  for the constructed expected value so it isn't moved twice). (**R2**)
 - Assert every assigned code's leading digit matches its documented disposition class. (**R3**)
 - Forward-compat decode test: encode a value of an enum that has an *extra* variant and decode it
   into the shipped (smaller) type; assert `detail` decodes to `None` while `code` decodes intact.
