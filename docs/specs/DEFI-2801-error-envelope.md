@@ -1,4 +1,3 @@
-<!-- Filename: docs/specs/DEFI-2801-error-envelope.md -->
 ---
 id: DEFI-2801
 title: Consolidate user-facing errors into a forward-compatible error envelope
