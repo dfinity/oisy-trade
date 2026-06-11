@@ -52,10 +52,10 @@ User                    DEX Canister
  |                          | insert/match against book
  |                          | credit proceeds on fills
  |                          |
- |-- get_order_status ----->|
- |<-- status (Pending/      |
- |    Open/Filled/          |
- |    Canceled) ------------|
+ |-- get_my_orders -------->|
+ |<-- orders with status    |
+ |    (Pending/Open/        |
+ |    Filled/Canceled) -----|
 ```
 
 ### 3. Withdrawal
@@ -338,7 +338,7 @@ Every order submitted to the DEX is recorded in a map keyed by `OrderId`; keys a
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
-The history exists for a single purpose: serving the `get_order_status(order_id)` query so clients that have lost track of a submission can recover its outcome.
+The history exists for a single purpose: serving the `get_my_orders` query (including its `ById` point lookup) so clients that have lost track of a submission can recover its outcome.
 
 ### Order History Memory Estimates
 
@@ -406,7 +406,7 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 
 **Query calls** (read-only):
 
-- **`get_order_status(order_id)`**: returns the current status of an order. Time: O(1) with an order-ID-indexed map.
+- **`get_my_orders(filter)`**: returns the caller's orders, each with its current status. The `ById` filter performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
 - **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the DEX, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
 - **`list_supported_tokens()`**: returns the full list of tokens registered with the DEX. Time: O(n) over the registered tokens.
 
