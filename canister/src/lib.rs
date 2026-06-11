@@ -4,8 +4,8 @@ use dex_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -118,15 +118,6 @@ pub fn drive_matching() {
         // reschedule itself if its run left work unfinished, so we don't
         // pile on another timer.
         execute::ExecutionStatus::Complete | execute::ExecutionStatus::AlreadyRunning => {}
-    }
-}
-
-pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    match order_id.parse::<order::OrderId>() {
-        Ok(id) => state::with_state(|s| s.get_order_status(id))
-            .map(Into::into)
-            .unwrap_or(OrderStatus::NotFound),
-        Err(e) => panic!("ERROR: invalid order id: {}", e),
     }
 }
 
@@ -347,30 +338,46 @@ pub fn get_fee_balances(
 /// Typically those errors indicate a client bug.
 #[derive(Debug, PartialEq, Eq)]
 pub enum GetMyOrdersError {
-    /// The `after` cursor was not a well-formed order id.
-    InvalidCursor(order::OrderIdParseError),
+    /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
+    /// not a well-formed order id.
+    InvalidOrderId(order::OrderIdParseError),
 }
 
 pub fn get_my_orders(
     args: GetMyOrdersArgs,
     caller: candid::Principal,
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
-    let after = args
-        .after
-        .map(|id| id.parse::<order::OrderId>())
-        .transpose()
-        .map_err(GetMyOrdersError::InvalidCursor)?;
-    let length = args.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
-    Ok(
-        state::with_state(|s| s.get_user_orders(&caller, after, length))
-            .into_iter()
-            .map(|(id, pair, record)| UserOrder {
-                id: id.into(),
-                pair: pair.into(),
-                order: record.into(),
-            })
-            .collect(),
-    )
+    let results = match args.filter {
+        Some(dex_types::GetMyOrdersFilter::ById(id)) => {
+            let id = id
+                .parse::<order::OrderId>()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            state::with_state(|s| s.get_user_order(&caller, id))
+                .into_iter()
+                .collect()
+        }
+        Some(dex_types::GetMyOrdersFilter::ByPage(page)) => {
+            let after = page
+                .after
+                .map(|id| id.parse::<order::OrderId>())
+                .transpose()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
+            state::with_state(|s| s.get_user_orders(&caller, after, length))
+        }
+        None => {
+            let length = MAX_ORDERS_PER_RESPONSE as usize;
+            state::with_state(|s| s.get_user_orders(&caller, None, length))
+        }
+    };
+    Ok(results
+        .into_iter()
+        .map(|(id, pair, record)| UserOrder {
+            id: id.into(),
+            pair: pair.into(),
+            order: record.into(),
+        })
+        .collect())
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
