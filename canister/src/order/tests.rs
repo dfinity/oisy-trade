@@ -913,6 +913,7 @@ mod order_book {
             use crate::order::{
                 FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
             };
+            use crate::test_fixtures::MIN_NOTIONAL;
             use std::num::{NonZeroU64, NonZeroU128};
 
             // lot_size = 1 lets us rest Quantity::MAX-sized orders (which
@@ -921,7 +922,7 @@ mod order_book {
                 OrderBookId::ZERO,
                 TickSize::new(NonZeroU128::new(1).unwrap()),
                 LotSize::new(NonZeroU64::new(1).unwrap()),
-                Quantity::ZERO,
+                MIN_NOTIONAL,
                 None,
                 FeeRates::default(),
             );
