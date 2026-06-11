@@ -30,10 +30,10 @@ proptest! {
     #[test]
     fn u128_via_quantity_roundtrips(v in any::<u128>()) {
         let mut buf = vec![];
-        crate::order::u128_via_quantity::encode(&v, &mut minicbor::Encoder::new(&mut buf), &mut ())
+        crate::cbor::u128_via_quantity::encode(&v, &mut minicbor::Encoder::new(&mut buf), &mut ())
             .unwrap();
         let decoded =
-            crate::order::u128_via_quantity::decode(&mut minicbor::Decoder::new(&buf), &mut ())
+            crate::cbor::u128_via_quantity::decode(&mut minicbor::Decoder::new(&buf), &mut ())
                 .unwrap();
         prop_assert_eq!(decoded, v);
     }
