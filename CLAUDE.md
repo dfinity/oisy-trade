@@ -30,10 +30,10 @@ When I give you a specification to build:
    Copilot, or any other reviewer/bot) not yet answered with a commit and/or a reply —
    send those comments back to `implementer`, which answers with NEW commits (no
    amend/rebase/squash/force-push) and replies on each thread. Repeat from 2.
-   Check for unresolved comments via `gh`, not by eye: conversation comments via
-   `gh api repos/{owner}/{repo}/issues/<n>/comments`, inline review comments via
-   `repos/{owner}/{repo}/pulls/<n>/comments`, review summaries via
-   `repos/{owner}/{repo}/pulls/<n>/reviews`, and review-thread resolution state via the
+   Check for unresolved comments via `gh`, not by eye — all via `gh api`: conversation
+   comments at `repos/{owner}/{repo}/issues/<n>/comments`, inline review comments at
+   `repos/{owner}/{repo}/pulls/<n>/comments`, review summaries at
+   `repos/{owner}/{repo}/pulls/<n>/reviews`; review-thread resolution state via the
    GraphQL `reviewThreads` field (not exposed by `gh pr view --json`).
 4. The automated loop is DONE only when the reviewer returns VERDICT: READY AND the PR
    has no unresolved comments. Then: do NOT mark the PR ready for review — leave it as a

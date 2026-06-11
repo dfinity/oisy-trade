@@ -96,7 +96,7 @@ Classify every comment:
 
 Record the verdict in GitHub (this IS the review trail):
 - Any 🔴/🟠 remaining, or CI not green →
-    gh pr review <num> --request-changes --body "<comments grouped by severity, file:line>"
+    gh pr review <num> --request-changes --body "🧐 <comments grouped by severity, file:line>"
 - Only 🔵 nits (or none) AND `gh pr checks <num>` all green →
     gh pr review <num> --comment --body "🧐 Review passed — no blockers/mediums, CI green. Ready for human approval.<list any nits>"
   NEVER run `gh pr review --approve`. Final approval is the human's, not yours.
