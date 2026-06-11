@@ -31,8 +31,8 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
 
 ## Requirements
 
-- **R1**: Every error-returning canister endpoint returns its error as an envelope `record` of a
-  `code : nat16` and a `detail` holding `opt` of that endpoint's error enum — for example `deposit`
+- **R1**: Every user-facing endpoint returning an error has the structure of an envelope: a
+  `record` of a `code : nat16` and a `detail` holding `opt` of that endpoint's error enum — for example `deposit`
   returns `record { code : nat16; detail : opt DepositError }`.
   This applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`,
   `get_order_status`, `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and
