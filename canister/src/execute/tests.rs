@@ -120,6 +120,81 @@ fn should_be_a_no_op_when_globally_halted() {
     assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
 }
 
+/// A global halt must still drain settling events left over from a prior
+/// chunk: those events apply the balance effects of already-matched fills, so
+/// stranding them for the halt would trap a counterparty's proceeds (R2). No
+/// new matching happens, and `run_once` reschedules only to finish the drain.
+#[test]
+fn should_drain_leftover_settling_events_under_global_halt() {
+    let mut state = setup_one_book();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+
+    // Stage a settling event without draining it by recording the matching
+    // event directly — that's the producer side of the settling queue.
+    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+    let pending: Vec<_> = state
+        .order_book(&OrderBookId::ZERO)
+        .unwrap()
+        .pending_order_seqs()
+        .collect();
+    state.record_matching_event(
+        &crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: pending,
+        },
+        crate::state::StableMemoryOptions::Write,
+    );
+    assert!(state.has_pending_settling_events());
+    assert!(!state.has_pending_orders());
+
+    state.permissions_mut().set_trading_halted(true);
+
+    set_unlimited_policy(&mut state);
+    let status = EXECUTOR.run_once(&mut state, &runtime());
+
+    // The leftover settling was applied despite the halt; no new matching ran.
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert!(!state.has_pending_settling_events());
+    assert_eq!(state.get_balance(&BUYER, &pair.base).free(), &lot.into());
+}
+
+/// Under global halt with crossable resting orders and no leftover settling,
+/// the executor must do no matching and report `Complete` so the rescheduler
+/// stops — it must not busy-spin re-arming the timer on the halted book's
+/// still-pending orders.
+#[test]
+fn should_not_busy_spin_under_global_halt() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    state.permissions_mut().set_trading_halted(true);
+    assert!(!state.has_pending_settling_events());
+
+    // Drive the actual reschedule decision: keep running while the executor
+    // claims more work. Under halt with no leftover settling there is none,
+    // so the very first run must report `Complete`.
+    let mut runs = 0;
+    let mut status = EXECUTOR.run_once(&mut state, &runtime);
+    while status == ExecutionStatus::MoreWork {
+        runs += 1;
+        assert!(runs <= 10, "executor busy-spun under global halt");
+        status = EXECUTOR.run_once(&mut state, &runtime);
+    }
+
+    assert_eq!(status, ExecutionStatus::Complete);
+    // No matching ran: the crossable orders are still pending.
+    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
+    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Pending));
+    assert!(state.has_pending_orders());
+}
+
 /// Driving the same workload through a single unlimited [`Executor`] run and
 /// through many chunk-size-1 runs must end in the same canister state.
 #[test]
