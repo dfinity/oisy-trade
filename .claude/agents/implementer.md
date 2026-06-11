@@ -9,10 +9,11 @@ Branch & PR:
 - Work on a dedicated feature branch, never on main.
 - After the first working implementation + tests, open a DRAFT PR:
     gh pr create --draft --title "<feature>" --body "<summary + link to spec>"
-- End every PR description with a PR stack overview: all PRs in the stack listed in
-  merge order (bottom to top), with a "you are here" marker on the current one. For a
-  lone PR the stack is just itself. Keep it consistent across the stack and update it
-  if the stack changes.
+- Only when the stack has more than one PR, end the PR description with a PR stack
+  overview under a section titled exactly "📚 PR stack": all PRs in the stack listed in
+  merge order (bottom to top), with a "you are here" marker on the current one. Keep it
+  consistent across the stack and update it if the stack changes. For a lone PR, omit the
+  stack section entirely.
 - Report the PR number back to the orchestrator.
 
 Commit discipline (HARD RULES — never violate):
