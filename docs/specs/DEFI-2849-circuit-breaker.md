@@ -1,4 +1,3 @@
-<!-- Filename: docs/specs/DEFI-2849-circuit-breaker.md -->
 ---
 id: DEFI-2849
 title: MVP Circuit-Breaker Controls
