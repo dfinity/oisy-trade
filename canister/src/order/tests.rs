@@ -162,6 +162,49 @@ mod quantity {
         }
 
         #[test]
+        fn checked_mul_u128_identity(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u128(1), Some(a));
+        }
+
+        #[test]
+        fn checked_mul_u128_zero(a in arb_quantity()) {
+            prop_assert_eq!(a.checked_mul_u128(0), Some(Quantity::ZERO));
+        }
+
+        #[test]
+        fn checked_mul_u128_distributes_over_add(
+            a in arb_small_quantity(),
+            b in arb_small_quantity(),
+            c in 1..1000u128,
+        ) {
+            // (a + b) * c == a * c + b * c
+            let left = a.checked_add(b).and_then(|s| s.checked_mul_u128(c));
+            let right = a.checked_mul_u128(c)
+                .and_then(|ac| b.checked_mul_u128(c).and_then(|bc| ac.checked_add(bc)));
+            prop_assert_eq!(left, right);
+        }
+
+        /// The u128 path must agree with the u64 path whenever `rhs` fits u64
+        /// (covers the fast-path delegation).
+        #[test]
+        fn checked_mul_u128_agrees_with_u64(a in arb_quantity(), rhs in any::<u64>()) {
+            prop_assert_eq!(a.checked_mul_u128(u128::from(rhs)), a.checked_mul_u64(rhs));
+        }
+
+        /// For a u128-sized operand (`high == 0`), the product agrees with
+        /// native `u128` multiplication whenever that doesn't overflow —
+        /// exercises the `rhs > u64::MAX` recompose path against an oracle.
+        #[test]
+        fn checked_mul_u128_agrees_with_native_u128(lhs in any::<u128>(), rhs in any::<u128>()) {
+            if let Some(prod) = lhs.checked_mul(rhs) {
+                prop_assert_eq!(
+                    Quantity::from_u128(lhs).checked_mul_u128(rhs),
+                    Some(Quantity::from_u128(prod)),
+                );
+            }
+        }
+
+        #[test]
         fn nat_roundtrip(a in arb_quantity()) {
             let nat: Nat = a.into();
             let back = Quantity::try_from(nat).unwrap();
@@ -313,9 +356,9 @@ mod order_book {
 
         #[test]
         fn should_reject_invalid_orders_without_modifying_book() {
-            let cases: Vec<(u64, u64, MatchOrderError)> = vec![
+            let cases: Vec<(u128, u64, MatchOrderError)> = vec![
                 (
-                    TICK_SIZE.get() as u64 / 2,
+                    TICK_SIZE.get() / 2,
                     LOT_SIZE.get(),
                     MatchOrderError::InvalidTickSize {
                         price: Price::new(TICK_SIZE.get() / 2),
@@ -331,7 +374,7 @@ mod order_book {
                     },
                 ),
                 (
-                    TICK_SIZE.get() as u64,
+                    TICK_SIZE.get(),
                     LOT_SIZE.get() / 2,
                     MatchOrderError::InvalidLotSize {
                         quantity: Quantity::from(LOT_SIZE.get() / 2),
@@ -339,7 +382,7 @@ mod order_book {
                     },
                 ),
                 (
-                    TICK_SIZE.get() as u64,
+                    TICK_SIZE.get(),
                     0,
                     MatchOrderError::InvalidLotSize {
                         quantity: Quantity::ZERO,
@@ -363,7 +406,7 @@ mod order_book {
         #[test]
         fn should_accept_valid_order() {
             let mut book = order_book();
-            for order in all_order_types(TICK_SIZE.get() as u64, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let result = book.match_order(order);
                 assert!(result.is_ok());
             }
@@ -376,7 +419,7 @@ mod order_book {
 
         #[test]
         fn should_rest_in_empty_book() {
-            for order in all_order_types(TICK_SIZE.get() as u64, LOT_SIZE) {
+            for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
                 let result = book.match_order(order).unwrap();

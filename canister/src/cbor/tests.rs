@@ -23,3 +23,18 @@ fn should_fail_to_decode_zero() {
 #[derive(minicbor::Encode, minicbor::Decode)]
 #[cbor(transparent)]
 struct CborNonZeroU64(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
+
+proptest! {
+    /// The `Quantity`-based u128 codec (used by `Price`/`TickSize`) round-trips
+    /// any `u128` value.
+    #[test]
+    fn u128_via_quantity_roundtrips(v in any::<u128>()) {
+        let mut buf = vec![];
+        crate::order::u128_via_quantity::encode(&v, &mut minicbor::Encoder::new(&mut buf), &mut ())
+            .unwrap();
+        let decoded =
+            crate::order::u128_via_quantity::decode(&mut minicbor::Decoder::new(&buf), &mut ())
+                .unwrap();
+        prop_assert_eq!(decoded, v);
+    }
+}

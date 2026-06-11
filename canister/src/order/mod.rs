@@ -358,7 +358,7 @@ impl From<TradingPair> for dex_types::TradingPair {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
 )]
-pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_codec")] u128);
+pub struct Price(#[cbor(n(0), with = "crate::order::u128_via_quantity")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
@@ -408,7 +408,7 @@ impl Price {
 
 /// Minimum price increment for a trading pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
-pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u128")] NonZeroU128);
+pub struct TickSize(#[cbor(n(0), with = "crate::order::non_zero_u128_via_quantity")] NonZeroU128);
 
 impl TickSize {
     pub const fn new(value: NonZeroU128) -> Self {
@@ -503,6 +503,11 @@ impl Quantity {
             high: 0,
             low: value,
         }
+    }
+
+    /// The value as a `u128`, or `None` if it exceeds `u128::MAX`.
+    pub const fn as_u128(self) -> Option<u128> {
+        if self.high == 0 { Some(self.low) } else { None }
     }
 
     pub(crate) fn high(&self) -> u128 {
@@ -643,45 +648,30 @@ impl Quantity {
 
     /// Multiply this u256 by a `u128`, checked for overflow past 256 bits.
     ///
-    /// Schoolbook multiplication on 64-bit limbs (`self` = four limbs, `rhs` =
-    /// two). Each accumulation `r[i+j] + a[i]·b[j] + carry` stays within `u128`
-    /// because `(2^64−1)² + 2·(2^64−1) = 2^128 − 1`. Limbs 4 and 5 must be zero
-    /// for the product to fit a u256.
+    /// Fast path: when `rhs` fits a `u64`, delegate to [`Self::checked_mul_u64`]
+    /// (the common case — settlement multiplies by prices well under `u64`).
+    /// Otherwise split `rhs` into two 64-bit limbs and reuse `checked_mul_u64`:
+    /// `self · rhs = self·rhs_lo + (self·rhs_hi)·2^64`.
     pub fn checked_mul_u128(self, rhs: u128) -> Option<Self> {
         bench_scopes!("qty", "qty::mul_u128");
-        const MASK: u128 = u64::MAX as u128;
-        let a = [
-            self.low & MASK,
-            self.low >> 64,
-            self.high & MASK,
-            self.high >> 64,
-        ];
-        let b = [rhs & MASK, rhs >> 64];
-        let mut r = [0u128; 6];
-        for i in 0..4 {
-            let mut carry = 0u128;
-            for j in 0..2 {
-                let cur = r[i + j] + a[i] * b[j] + carry;
-                r[i + j] = cur & MASK;
-                carry = cur >> 64;
-            }
-            let mut k = i + 2;
-            while carry != 0 {
-                if k >= 6 {
-                    return None;
-                }
-                let cur = r[k] + carry;
-                r[k] = cur & MASK;
-                carry = cur >> 64;
-                k += 1;
-            }
+        if let Ok(rhs) = u64::try_from(rhs) {
+            return self.checked_mul_u64(rhs);
         }
-        if r[4] != 0 || r[5] != 0 {
+        let lo = self.checked_mul_u64(rhs as u64)?;
+        let hi = self.checked_mul_u64((rhs >> 64) as u64)?;
+        lo.checked_add(hi.checked_shl_64()?)
+    }
+
+    /// Multiply this u256 by `2^64` (left-shift by 64 bits), checked for
+    /// overflow past 256 bits.
+    fn checked_shl_64(self) -> Option<Self> {
+        // Overflows iff the top 64 bits of `high` would shift past bit 255.
+        if self.high >> 64 != 0 {
             return None;
         }
         Some(Self {
-            high: r[2] | (r[3] << 64),
-            low: r[0] | (r[1] << 64),
+            high: (self.high << 64) | (self.low >> 64),
+            low: self.low << 64,
         })
     }
 
@@ -834,6 +824,57 @@ impl<'b, C> minicbor::Decode<'b, C> for Quantity {
         let bytes = d.bytes()?;
         Self::from_be_bytes(bytes)
             .ok_or_else(|| minicbor::decode::Error::message("Quantity exceeds 256 bits"))
+    }
+}
+
+/// CBOR codec for a `u128` field that reuses [`Quantity`]'s u64-or-`PosBignum`
+/// encoding (a `u128` is a `Quantity` with a zero high limb), so the bignum
+/// logic lives in exactly one place.
+pub(crate) mod u128_via_quantity {
+    use super::Quantity;
+    use minicbor::encode::Write;
+    use minicbor::{Decode, Decoder, Encode, Encoder};
+
+    pub fn encode<Ctx, W: Write>(
+        v: &u128,
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        Quantity::from_u128(*v).encode(e, ctx)
+    }
+
+    pub fn decode<Ctx>(
+        d: &mut Decoder<'_>,
+        ctx: &mut Ctx,
+    ) -> Result<u128, minicbor::decode::Error> {
+        Quantity::decode(d, ctx)?
+            .as_u128()
+            .ok_or_else(|| minicbor::decode::Error::message("value exceeds u128"))
+    }
+}
+
+/// CBOR codec for a `NonZeroU128` field, layered on [`u128_via_quantity`].
+pub(crate) mod non_zero_u128_via_quantity {
+    use super::u128_via_quantity;
+    use minicbor::encode::Write;
+    use minicbor::{Decoder, Encoder};
+    use std::num::NonZeroU128;
+
+    pub fn encode<Ctx, W: Write>(
+        v: &NonZeroU128,
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        u128_via_quantity::encode(&v.get(), e, ctx)
+    }
+
+    pub fn decode<Ctx>(
+        d: &mut Decoder<'_>,
+        ctx: &mut Ctx,
+    ) -> Result<NonZeroU128, minicbor::decode::Error> {
+        let v = u128_via_quantity::decode(d, ctx)?;
+        NonZeroU128::new(v)
+            .ok_or_else(|| minicbor::decode::Error::message("expected non-zero u128"))
     }
 }
 
