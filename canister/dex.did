@@ -395,8 +395,9 @@ type AddTradingPairError = variant {
     // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
     // could not settle to an exact quote amount. Choose a coarser tick or lot.
     IndivisibleTickLotForBaseDecimals : record { tick_size : nat; lot_size : nat; base_decimals : nat8 };
-    // The notional bounds are invalid: min_notional is zero, or max_notional is
-    // set and smaller than min_notional.
+    // The notional bounds are invalid: min_notional is zero, a bound is too
+    // large to fit the 256-bit quantity representation, or max_notional is set
+    // and smaller than min_notional.
     InvalidNotional : record { min_notional : nat; max_notional : opt nat };
 };
 
