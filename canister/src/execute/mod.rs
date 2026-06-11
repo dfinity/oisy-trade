@@ -36,7 +36,7 @@ pub enum ExecutionStatus {
 
 impl ExecutionStatus {
     pub fn from_state<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> Self {
-        if state.has_pending_orders() || state.has_pending_settling_events() {
+        if has_matchable_pending_orders(state) || state.has_pending_settling_events() {
             ExecutionStatus::MoreWork
         } else {
             ExecutionStatus::Complete
@@ -59,16 +59,16 @@ impl Executor {
         state: &mut State<MH, MB>,
         runtime: &impl Runtime,
     ) -> ExecutionStatus {
-        if state.permissions().trading_halted() {
-            return ExecutionStatus::Complete;
-        }
-
         let policy = state.execution_policy();
         let max_orders_per_chunk = policy.max_orders_per_chunk() as usize;
         let instruction_budget = policy.instruction_budget();
 
         // Clear any settling events left over from a prior chunk whose
-        // inline drain was interrupted by the instruction budget.
+        // inline drain was interrupted by the instruction budget. This runs
+        // before any matching gate so a halt that lands with in-flight
+        // settling still applies those already-matched fills' balance effects
+        // (otherwise a counterparty's proceeds would be stranded for the whole
+        // halt, breaking the "users can always exit" guarantee).
         self.drain_settling(instruction_budget, state, runtime);
 
         if runtime.instruction_counter() >= instruction_budget {
@@ -80,6 +80,13 @@ impl Executor {
             if order_budget == 0 || runtime.instruction_counter() >= instruction_budget {
                 return ExecutionStatus::from_state(state);
             }
+            // Gate each book through its own permit: a halted book (global or
+            // per-pair) is skipped while every other book keeps matching. The
+            // `has_matchable_pending_orders` predicate ignores halted books too,
+            // so a leftover-but-halted book never busy-spins the timer.
+            let Ok(permit) = state.permissions().permit_matching(book_id) else {
+                continue;
+            };
             let chunk: Vec<_> = state
                 .order_book(&book_id)
                 .expect("BUG: book_id missing from state")
@@ -92,10 +99,6 @@ impl Executor {
             order_budget = order_budget
                 .checked_sub(chunk.len())
                 .expect("BUG: pending_order_seqs().take(order_budget) cannot exceed order_budget");
-            let permit = state
-                .permissions()
-                .permit_matching(book_id)
-                .expect("BUG: matching halt is checked at run_once entry");
             audit::process_event(
                 state,
                 EventType::Matching(MatchingEvent {
@@ -130,6 +133,17 @@ impl Executor {
             audit::process_event(state, EventType::Settling(event), permit.into(), runtime);
         }
     }
+}
+
+/// Whether any book has pending orders that are *currently matchable* — i.e.
+/// has pending orders **and** is not halted (`permit_matching(book).is_ok()`).
+/// Under global or per-pair halt the halted books' pending orders do not count,
+/// so the executor reports `Complete` (or `MoreWork` only for leftover
+/// settling) rather than busy-spinning on orders it is not allowed to match.
+fn has_matchable_pending_orders<MH: Memory, MB: Memory>(state: &State<MH, MB>) -> bool {
+    state.order_books().any(|(id, book)| {
+        book.pending_orders_len() > 0 && state.permissions().permit_matching(*id).is_ok()
+    })
 }
 
 /// Order-book IDs ranked by decreasing pending-order count; ties broken by
