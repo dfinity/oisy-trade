@@ -427,6 +427,8 @@ type AddTradingPairEvent = record {
     lot_size : nat;
     base_metadata : TokenMetadata;
     quote_metadata : TokenMetadata;
+    maker_fee_bps : nat16;
+    taker_fee_bps : nat16;
 };
 
 // Structured order identifier used in events.

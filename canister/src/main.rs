@@ -229,6 +229,8 @@ fn get_events(
                         lot_size: candid::Nat::from(e.lot_size),
                         base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
                         quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
+                        maker_fee_bps: e.fee_rates.maker.get(),
+                        taker_fee_bps: e.fee_rates.taker.get(),
                     })
                 }
                 EventType::Deposit(e) => event::EventType::Deposit(event::DepositEvent {
