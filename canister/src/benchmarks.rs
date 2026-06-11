@@ -380,6 +380,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
         },
         TICK_SIZE,
         LOT_SIZE,
+        Quantity::from_u128(1),
+        None,
         fee_rates,
     );
     state

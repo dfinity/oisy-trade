@@ -3,7 +3,8 @@ use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, state as fresh_state,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
+    icp_metadata, state as fresh_state,
 };
 use candid::Principal;
 
@@ -95,6 +96,8 @@ mod schema_stability {
                 }],
                 filled_orders: vec![OrderSeq::new(4)],
                 fee_rates: FeeRates::default(),
+                min_notional: Quantity::from_u128(5),
+                max_notional: Some(Quantity::from_u128(9_000)),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -142,10 +145,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818981078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818b81078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a120818104828100810081828141011a000186a08182810782820085810581\
-        068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
+        186e818281021a0007a12081810482810081000519232881828141011a000186a0818281078282\
+        0085810581068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
         18c81b000000012a05f200";
 
     #[test]
@@ -190,6 +193,8 @@ fn should_roundtrip_state_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
 
@@ -280,6 +285,8 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
 
@@ -321,6 +328,40 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         "fee pool entry must survive the snapshot round-trip",
     );
     assert_eq!(state, restored);
+}
+
+// R7: `min_notional` and `max_notional` survive a snapshot round-trip.
+#[test]
+fn should_roundtrip_notional_bounds_through_snapshot() {
+    let mut state = fresh_state();
+    let pair = icp_ckbtc_trading_pair();
+    let min_notional = Quantity::from_u128(5_000_000);
+    let max_notional = Some(Quantity::from_u128(9_000_000_000_000));
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        pair,
+        icp_metadata(),
+        ckbtc_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+        min_notional,
+        max_notional,
+        FeeRates::default(),
+    );
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    let book = restored.order_book(&OrderBookId::ZERO).unwrap();
+    assert_eq!(book.min_notional(), min_notional);
+    assert_eq!(book.max_notional(), max_notional);
 }
 
 /// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are

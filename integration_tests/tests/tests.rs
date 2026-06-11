@@ -590,6 +590,8 @@ async fn should_return_empty_trading_pairs() {
             },
             tick_size: Nat::from(TICK_SIZE),
             lot_size: Nat::from(LOT_SIZE),
+            min_notional: Nat::from(1u64),
+            max_notional: None,
         }]
     );
 

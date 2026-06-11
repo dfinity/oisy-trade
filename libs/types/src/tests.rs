@@ -66,6 +66,8 @@ fn should_serialize_trading_pair_info() {
         },
         tick_size: Nat::from(10u64),
         lot_size: Nat::from(1_000_000u64),
+        min_notional: Nat::from(5_000_000u64),
+        max_notional: Some(Nat::from(9_000_000_000_000u64)),
     };
     let encoded = candid::encode_one(&info).unwrap();
     let decoded: TradingPairInfo = candid::decode_one(&encoded).unwrap();

@@ -78,6 +78,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         }) => {
             let pair = order::TradingPair {
                 base: *base,
@@ -90,6 +92,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 quote_metadata.clone(),
                 *tick_size,
                 *lot_size,
+                *min_notional,
+                *max_notional,
                 *fee_rates,
             );
         }

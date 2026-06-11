@@ -112,7 +112,14 @@ For that division to be exact for every order and fill (no rounding, no dust), a
 - Each pair has configurable parameters:
   - **Tick size**: minimum price increment.
   - **Lot size**: minimum order quantity.
+  - **Min notional**: minimum order value (`price × quantity / 10^base_decimals`, in quote
+    smallest units). Rejects dust orders worth less than the cost of settling them. Required;
+    must be greater than zero.
+  - **Max notional**: optional maximum order value (same units). Rejects fat-finger orders and
+    caps single-order impact. When set, must be greater than or equal to the min notional.
   - **Status**: active, halted, or delisted.
+- Tick, lot, min notional, and max notional are enforced independently: an order may fail any
+  one of them, and none is implied by another.
 - Orders can only be placed on active pairs.
 
 ### Order Lifecycle

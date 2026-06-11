@@ -50,6 +50,9 @@ type AddLimitOrderError = variant {
     // For a `Sell`, `token` is the base and `required` is `quantity`.
     // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
+    // The order's notional (price × quantity / 10^base_decimals, in quote
+    // smallest units) is below `min` or above `max`.
+    InvalidNotional : record { notional : nat; min : nat; max : opt nat };
 };
 
 /// Error returned when canceling a limit order fails.
@@ -74,6 +77,10 @@ type TradingPairInfo = record {
     tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
     lot_size : nat;
+    // Minimum order notional in quote token smallest units.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any.
+    max_notional : opt nat;
 };
 
 // A single price level in an order book, aggregated across all resting orders at that price.
@@ -359,6 +366,11 @@ type AddTradingPairRequest = record {
     maker_fee_bps : nat16;
     // Taker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
     taker_fee_bps : nat16;
+    // Minimum order notional in quote token smallest units. Must be greater than zero.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any. When set,
+    // must be greater than or equal to min_notional.
+    max_notional : opt nat;
 };
 
 // Error returned by the add_trading_pair endpoint.
@@ -383,6 +395,9 @@ type AddTradingPairError = variant {
     // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
     // could not settle to an exact quote amount. Choose a coarser tick or lot.
     IndivisibleTickLotForBaseDecimals : record { tick_size : nat; lot_size : nat; base_decimals : nat8 };
+    // The notional bounds are invalid: min_notional is zero, or max_notional is
+    // set and smaller than min_notional.
+    InvalidNotional : record { min_notional : nat; max_notional : opt nat };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
