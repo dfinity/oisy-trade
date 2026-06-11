@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 
 proptest! {
     #[test]
@@ -38,3 +38,27 @@ proptest! {
         prop_assert_eq!(decoded, v);
     }
 }
+
+proptest! {
+    /// The `NonZeroU128` adapter (used by `TickSize`) round-trips any non-zero value.
+    #[test]
+    fn should_roundtrip_non_zero_u128(value in 1..=u128::MAX) {
+        let nz = NonZeroU128::new(value).unwrap();
+        let mut buf = vec![];
+        minicbor::encode(CborNonZeroU128(nz), &mut buf).unwrap();
+        let decoded: CborNonZeroU128 = minicbor::decode(&buf).unwrap();
+        prop_assert_eq!(nz, decoded.0);
+    }
+}
+
+#[test]
+fn should_fail_to_decode_zero_u128() {
+    let mut buf = vec![];
+    minicbor::encode(0u64, &mut buf).unwrap();
+    let result = minicbor::decode::<CborNonZeroU128>(&buf);
+    assert!(result.is_err());
+}
+
+#[derive(minicbor::Encode, minicbor::Decode)]
+#[cbor(transparent)]
+struct CborNonZeroU128(#[cbor(n(0), with = "crate::cbor::non_zero_u128_via_quantity")] NonZeroU128);
