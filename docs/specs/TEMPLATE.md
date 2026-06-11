@@ -1,4 +1,3 @@
-<!-- Filename: docs/specs/DEFI-XXXX-short-slug.md -->
 ---
 id:
 title:
