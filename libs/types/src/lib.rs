@@ -533,8 +533,9 @@ pub enum AddTradingPairError {
         /// The base token's decimals (the divisor exponent).
         base_decimals: u8,
     },
-    /// The notional bounds are invalid: `min_notional` is zero, or
-    /// `max_notional` is set and smaller than `min_notional`.
+    /// The notional bounds are invalid: `min_notional` is zero, a bound is too
+    /// large to fit the 256-bit quantity representation, or `max_notional` is
+    /// set and smaller than `min_notional`.
     InvalidNotional {
         /// The submitted minimum notional.
         min_notional: Nat,
