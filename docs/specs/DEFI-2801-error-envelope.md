@@ -32,8 +32,9 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
 
 ## Requirements
 
-- **R1**: Every error-returning canister endpoint returns its error as an envelope
-  `record { code : nat16; detail : opt <ErrorEnum> }`, where `detail` carries the typed error.
+- **R1**: Every error-returning canister endpoint returns its error as an envelope `record` of a
+  `code : nat16` and a `detail` holding `opt` of that endpoint's error enum — for example `deposit`
+  returns `record { code : nat16; detail : opt DepositError }`.
   This applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`,
   `get_order_status`, `get_order_book_ticker`, `get_order_book_depth`, `add_trading_pair`, and
   both the per-token and request-level errors of `get_balances` / `get_fee_balances`.
@@ -185,7 +186,8 @@ they keep matching the bare enum.
 ### Candid (`canister/dex.did`)
 
 - A top-of-file comment block documenting the R3 disposition contract.
-- Each `*Result` `Err` arm becomes the envelope record with `detail : opt <Error>`.
+- Each `*Result` `Err` arm becomes the envelope record whose `detail` is `opt` of that result's
+  error enum (e.g. `opt WithdrawError`).
 - New `InvalidOrderId` variant on `CancelLimitOrderError`; new `GetOrderStatusError`; new
   `get_order_status` signature returning a result.
 
