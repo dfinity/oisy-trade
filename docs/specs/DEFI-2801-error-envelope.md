@@ -45,8 +45,9 @@ PRs touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to 
   - Unrecognized codes fall back by leading digit: **4xx ⇒ caller-side**, do not auto-retry the
     identical request; **5xx ⇒ DEX/ledger-side**, retry with backoff.
   - Recognized codes refine the fallback: **402** = action required (fix balance/allowance,
-    then retry); **409** = conflict / operation in progress (retry after the in-flight op
-    completes); **504** = indeterminate (reconcile state before retrying).
+    then retry); **504** = indeterminate (reconcile state before retrying). **409** carries no
+    special retry meaning — it is an ordinary 4xx permanent conflict (the resource is already in a
+    terminal/existing state).
   - The leading-digit fallback is the only *stable* guarantee; specific code assignments may
     gain entries over time (see R6).
 - **R4**: Each variant maps to the `code` listed in [Code assignments](#code-assignments).
@@ -205,14 +206,14 @@ Leading digit = fallback disposition (R3). `t` transient, `p` permanent, `a` act
 | `CancelLimitOrderError::{OrderAlreadyFilled, OrderAlreadyCanceled}` | 409 | p |
 | `CancelLimitOrderError::InvalidOrderId` | 400 | p |
 | `DepositError::{AmountExceedsMaximum, UnsupportedToken}` | 422 | p |
-| `DepositError::OperationInProgress` | 409 | t |
+| `DepositError::OperationInProgress` | 503 | t |
 | `DepositError::CallFailed` | 504 | i |
 | `DepositError::LedgerError(InsufficientFunds \| InsufficientAllowance)` | 402 | a |
 | `DepositError::LedgerError(TemporarilyUnavailable)` | 503 | t |
 | `DepositError::LedgerError(InternalError)` | 500 | t |
 | `WithdrawError::{AmountExceedsMaximum, UnsupportedToken, AmountTooSmall}` | 422 | p |
 | `WithdrawError::InsufficientBalance` | 402 | a |
-| `WithdrawError::OperationInProgress` | 409 | t |
+| `WithdrawError::OperationInProgress` | 503 | t |
 | `WithdrawError::CallFailed` | 504 | i |
 | `WithdrawError::LedgerError(InsufficientFunds)` | 500 | t (DEX-side inconsistency) |
 | `WithdrawError::LedgerError(TemporarilyUnavailable)` | 503 | t |
@@ -229,6 +230,11 @@ Leading digit = fallback disposition (R3). `t` transient, `p` permanent, `a` act
 Note the deliberate `InsufficientFunds` asymmetry: deposit = 402 (caller's external wallet is
 short — caller action fixes it), withdraw = 500 (DEX accounting says funds exist but the ledger
 disagrees — internal inconsistency, retry-after-reconcile).
+
+`OperationInProgress` uses **503** (transient, retry with backoff), not 409, so the leading digit
+alone tells an unrecognizing client to retry. **409** is reserved for *permanent* conflicts
+(`OrderAlreadyFilled`, `OrderAlreadyCanceled`, `TradingPairAlreadyExists`), whose 4xx fallback
+correctly says do-not-auto-retry.
 
 ### Test plan
 
