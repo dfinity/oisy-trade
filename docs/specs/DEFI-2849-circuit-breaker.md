@@ -240,11 +240,18 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
   `permit_trading(caller, book)?`. Map `UnauthorizedError::{TradingHalted, PairHalted,
   AccountFrozen}` onto new variants of internal + public `AddLimitOrderError`. The
   `SyncPermit` flows into the existing `process_event(AddLimitOrder, …)`.
-- **Matching** (`canister/src/execute/mod.rs`) — `run_once` early-returns
-  `ExecutionStatus::Complete` under global halt (no settling drain, no matching). The
-  per-book loop filters out halted books via `is_pair_halted`. The "work remaining?"
-  predicate (`has_matchable_pending_orders`) excludes halted books, so the executor does
-  **not** busy-spin re-arming a zero-delay timer while a non-empty book is halted;
+- **Matching** (`canister/src/execute/mod.rs`) — under global halt, `run_once` **still
+  drains in-flight settling** (`drain_settling` runs before the matching gate) but does
+  **no new matching**. Draining is required: a halt can land while
+  `pending_settling_events` are queued (a prior chunk hit the instruction budget), and
+  those events apply the balance effects of already-matched fills — skipping them would
+  strand a counterparty's proceeds for the duration of the halt, violating the
+  "users can always exit" guarantee (R2). Under halt, `run_once` reschedules **only** for
+  leftover settling (returns `MoreWork` iff `has_pending_settling_events()`, else
+  `Complete`) — it does **not** treat the halted books' pending *orders* as work, so it
+  never busy-spins. Per-pair halt: the per-book loop filters out halted books via
+  `is_pair_halted`, and the "work remaining?" predicate (`has_matchable_pending_orders`)
+  excludes halted books so the executor doesn't busy-spin re-arming a zero-delay timer;
   `resume_trading` and `set_pair_status` (on the Active transition) re-arm matching from
   the endpoint.
   ⚠️ **Freeze must NOT touch matching:** do **not** filter a frozen account's resting
