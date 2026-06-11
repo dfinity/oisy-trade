@@ -160,7 +160,7 @@ type OrderRecord = record {
     owner : principal;
     /// Whether the order is a buy or a sell.
     side : Side;
-    /// Limit price in quote units per base unit, as originally placed.
+    /// Limit price in quote token smallest units per one whole base token, as originally placed.
     price : nat;
     /// Quantity originally placed, in base token units.
     quantity : nat;
