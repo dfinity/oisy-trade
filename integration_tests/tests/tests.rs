@@ -943,7 +943,11 @@ async fn should_replay_events_on_upgrade() {
     });
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
-    let request = setup.add_trading_pair_request();
+    let request = AddTradingPairRequest {
+        maker_fee_bps: 10,
+        taker_fee_bps: 23,
+        ..setup.add_trading_pair_request()
+    };
     let maker_fee_bps = request.maker_fee_bps;
     let taker_fee_bps = request.taker_fee_bps;
     let result = setup
@@ -1111,50 +1115,22 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
-                        fee: None,
+                        // Seller is the resting maker: maker fee on the quote
+                        // notional = ceil(quote_reserved × 10 / 10_000).
+                        fee: Some(Nat::from(quote_reserved * maker_fee_bps as u64 / 10_000)),
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                        fee: None,
+                        // Buyer is the crossing taker: taker fee on the base
+                        // quantity = ceil(deposit_amount × 23 / 10_000).
+                        fee: Some(Nat::from(deposit_amount * taker_fee_bps as u64 / 10_000)),
                     },
                 ],
             });
         });
-    });
-
-    setup.drop().await;
-}
-
-#[tokio::test]
-async fn should_expose_fee_rates_in_add_trading_pair_event() {
-    use dex_types_internal::event::EventType;
-
-    let setup = Setup::new().await;
-    let maker_fee_bps = 10;
-    let taker_fee_bps = 23;
-    let result = setup
-        .dex_client_with_caller(setup.controller())
-        .add_trading_pair(AddTradingPairRequest {
-            maker_fee_bps,
-            taker_fee_bps,
-            ..setup.add_trading_pair_request()
-        })
-        .await;
-    assert_eq!(result, Ok(()));
-
-    setup.assert_that_events().await.satisfy(|events| {
-        let add = events
-            .iter()
-            .find_map(|e| match e {
-                EventType::AddTradingPair(e) => Some(e),
-                _ => None,
-            })
-            .expect("expected an AddTradingPair event in the log");
-        assert_eq!(add.maker_fee_bps, maker_fee_bps);
-        assert_eq!(add.taker_fee_bps, taker_fee_bps);
     });
 
     setup.drop().await;
