@@ -597,6 +597,12 @@ impl From<u64> for Quantity {
     }
 }
 
+impl From<u128> for Quantity {
+    fn from(value: u128) -> Self {
+        Self::from_u128(value)
+    }
+}
+
 /// Error returned when a `Nat` value exceeds the 256-bit capacity of `Quantity`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantityOverflowError;

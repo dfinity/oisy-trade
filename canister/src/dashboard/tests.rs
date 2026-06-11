@@ -213,13 +213,13 @@ fn place(
     state: &mut State<VectorMemory, VectorMemory>,
     user: Principal,
     side: Side,
-    price: u64,
+    price: u128,
     quantity: u64,
 ) -> OrderId {
     let pair: TradingPair = icp_ckbtc_trading_pair();
     let pending = PendingOrder {
         side,
-        price: Price::new(price as u128 * PRICE_SCALE),
+        price: Price::new(price * PRICE_SCALE),
         quantity: Quantity::from(quantity),
     };
     let (token, required) = match pending.side {

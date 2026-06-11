@@ -39,7 +39,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
         PendingOrder {
             side: Side::Sell,
             price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-            quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
+            quantity: Quantity::from(100_000_000_000_000u64), // 1,000,000 ICP
         },
     );
 

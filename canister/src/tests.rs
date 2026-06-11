@@ -502,13 +502,13 @@ mod add_limit_order {
         init_state_with_order_book();
         let pair = icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
-        let price = 100u64;
-        let quantity = 1_000_000u64;
+        let price = 100u128;
+        let quantity = 1_000_000u128;
         let required = price * quantity;
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Buy,
-            price: candid::Nat::from(price as u128 * PRICE_SCALE),
+            price: candid::Nat::from(price * PRICE_SCALE),
             quantity: candid::Nat::from(quantity),
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
@@ -541,7 +541,7 @@ mod add_limit_order {
         init_state_with_order_book();
         let pair = icp_ckbtc_trading_pair();
         let runtime = mock_runtime_for(DEFAULT_USER);
-        let quantity = 100_000_000u64;
+        let quantity = 100_000_000u128;
         let order = LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
             side: Side::Sell,
