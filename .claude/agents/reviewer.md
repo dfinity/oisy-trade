@@ -94,14 +94,24 @@ Classify every comment:
 - 🟠 Medium  — SHOULD change for approval.
 - 🔵 Nit     — mergeable with or without it.
 
-Record the verdict in GitHub (this IS the review trail):
+Post findings where they live — prefer inline, line-anchored comments:
+- Every finding that points at specific line(s) → an inline review comment ON those
+  lines, not buried in the summary body:
+    gh api repos/{owner}/{repo}/pulls/<num>/comments \
+      -f commit_id="$(gh pr view <num> --json headRefOid -q .headRefOid)" \
+      -f path="<file>" -F line=<line> -f side=RIGHT -f body="🧐 <severity> <finding>"
+  (for a range add `-F start_line=<n> -f start_side=RIGHT`; use `side=LEFT` for a
+  deleted line.)
+- Only the overall verdict and genuinely cross-cutting points (not tied to one location)
+  go in the review-summary body.
+
+Record the verdict in GitHub (this IS the review trail) — the summary body collects the
+verdict + cross-cutting notes; line-specific detail lives in the inline comments above:
 - Any 🔴/🟠 remaining, or CI not green →
-    gh pr review <num> --request-changes --body "🧐 <comments grouped by severity, file:line>"
+    gh pr review <num> --request-changes --body "🧐 <verdict + severity tally; cross-cutting points>"
 - Only 🔵 nits (or none) AND `gh pr checks <num>` all green →
     gh pr review <num> --comment --body "🧐 Review passed — no blockers/mediums, CI green. Ready for human approval.<list any nits>"
   NEVER run `gh pr review --approve`. Final approval is the human's, not yours.
-
-For line-specific comments: gh api repos/{owner}/{repo}/pulls/<num>/comments ...
 
 Return your verdict to the orchestrator as:
   VERDICT: READY               (clean — ready for human approval)
