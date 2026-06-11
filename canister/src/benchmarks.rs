@@ -262,8 +262,12 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
         loop {
             let orders = crate::get_my_orders(
                 dex_types::GetMyOrdersArgs {
-                    after: after.clone(),
-                    length: page,
+                    filter: Some(dex_types::GetMyOrdersFilter::ByPage(
+                        dex_types::GetMyOrdersPage {
+                            after: after.clone(),
+                            length: page,
+                        },
+                    )),
                 },
                 trader,
             )
