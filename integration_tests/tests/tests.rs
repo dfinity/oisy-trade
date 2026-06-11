@@ -958,6 +958,8 @@ async fn should_replay_events_on_upgrade() {
                 lot_size: Nat::from(LOT_SIZE),
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+                min_notional: Nat::from(1u64),
+                max_notional: None,
             });
         });
     });

@@ -229,6 +229,8 @@ fn get_events(
                         lot_size: candid::Nat::from(e.lot_size),
                         base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
                         quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
+                        min_notional: candid::Nat::from(e.min_notional),
+                        max_notional: e.max_notional.map(candid::Nat::from),
                     })
                 }
                 EventType::Deposit(e) => event::EventType::Deposit(event::DepositEvent {

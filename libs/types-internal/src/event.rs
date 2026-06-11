@@ -31,6 +31,8 @@ pub struct AddTradingPairEvent {
     pub lot_size: Nat,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
+    pub min_notional: Nat,
+    pub max_notional: Option<Nat>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
