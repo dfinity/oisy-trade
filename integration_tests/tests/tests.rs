@@ -58,9 +58,14 @@ mod add_limit_order {
     use dex_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
     use dex_types::{
         AddLimitOrderError, AddTradingPairRequest, Balance, GetMyOrdersArgs, LimitOrderRequest,
-        OrderStatus, Side,
+        OrderId, OrderStatus, Side,
     };
     use pocket_ic::{RejectCode, RejectResponse};
+
+    /// A `ByPage` filter, matching the previous flat `after`/`length` args.
+    fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
+        GetMyOrdersArgs::by_page(after, length)
+    }
 
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
@@ -105,7 +110,10 @@ mod add_limit_order {
         );
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
-        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+        assert_eq!(
+            client.get_my_order(order_id).await.map(|o| o.order.status),
+            Some(OrderStatus::Open)
+        );
 
         setup.drop().await;
     }
@@ -150,12 +158,7 @@ mod add_limit_order {
 
         // Alice sees only her own orders, newest first — bob's interleaved
         // orders don't leak in.
-        let orders = alice
-            .get_my_orders(GetMyOrdersArgs {
-                after: None,
-                length: 10,
-            })
-            .await;
+        let orders = alice.get_my_orders(by_page(None, 10)).await;
         assert_eq!(
             orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![
@@ -170,21 +173,16 @@ mod add_limit_order {
             assert_eq!(o.order.side, Side::Buy);
             assert_eq!(o.order.price, candid::Nat::from(1000u64));
             assert!(
-                before_placement <= o.order.timestamp && o.order.timestamp <= after_placement,
+                before_placement <= o.order.created_at && o.order.created_at <= after_placement,
                 "submission timestamp {} outside placement window [{}, {}]",
-                o.order.timestamp,
+                o.order.created_at,
                 before_placement,
                 after_placement
             );
         }
 
         // Bob likewise sees only his own.
-        let bob_orders = bob
-            .get_my_orders(GetMyOrdersArgs {
-                after: None,
-                length: 10,
-            })
-            .await;
+        let bob_orders = bob.get_my_orders(by_page(None, 10)).await;
         assert_eq!(
             bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
@@ -193,25 +191,27 @@ mod add_limit_order {
 
         // Cursor pagination: resume after the newest, take one → the next order.
         let page = alice
-            .get_my_orders(GetMyOrdersArgs {
-                after: Some(alice_ids[2].clone()),
-                length: 1,
-            })
+            .get_my_orders(by_page(Some(alice_ids[2].clone()), 1))
             .await;
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, alice_ids[1]);
 
+        // Point lookup by id: each caller resolves only their own orders.
+        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await;
+        assert_eq!(alice_by_id.map(|o| o.id), Some(alice_ids[0].clone()));
+        // An order owned by another principal is invisible to a foreign caller.
+        assert!(alice.get_my_order(bob_ids[0].clone()).await.is_none());
+        // An unknown (but well-formed) id resolves to nothing.
+        assert!(
+            alice
+                .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
+                .await
+                .is_none()
+        );
+
         // A caller that placed nothing sees none.
         let stranger = setup.dex_client_with_caller(Principal::from_slice(&[0xAB]));
-        assert!(
-            stranger
-                .get_my_orders(GetMyOrdersArgs {
-                    after: None,
-                    length: 10,
-                })
-                .await
-                .is_empty()
-        );
+        assert!(stranger.get_my_orders(by_page(None, 10)).await.is_empty());
 
         setup.drop().await;
     }
@@ -259,36 +259,41 @@ mod add_limit_order {
         );
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
-        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+        assert_eq!(
+            client.get_my_order(order_id).await.map(|o| o.order.status),
+            Some(OrderStatus::Open)
+        );
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_fail_to_get_order_status() {
+    async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
         let setup = Setup::new().await;
 
-        // Valid hex format but non-existent order
+        // A well-formed but unknown id resolves to nothing — absence from
+        // the result is the sole not-found signal.
         let not_found = setup
             .dex_client()
-            .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
+            .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
             .await;
-        assert_eq!(not_found, OrderStatus::NotFound);
+        assert!(not_found.is_none());
 
+        // A malformed id traps, consistent with the existing id/cursor parsing.
         let result = setup
             .env()
             .query_call(
                 setup.dex_id(),
                 Principal::anonymous(),
-                "get_order_status",
-                Encode!(&"not-a-valid-id".to_string()).unwrap(),
+                "get_my_orders",
+                Encode!(&Some(by_page(Some("not-a-valid-id".to_string()), 10))).unwrap(),
             )
             .await;
 
         assert_matches!(
             result,
             Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
-            if reject_message.contains("invalid order ID")
+            if reject_message.contains("invalid order id")
         );
 
         setup.drop().await;
@@ -343,14 +348,21 @@ mod add_limit_order {
 
         setup.env().tick().await;
 
-        // Both orders are fully filled
+        // Both orders are fully filled. Lookup is owner-scoped, so each side is
+        // queried with its own client.
         assert_eq!(
-            setup.dex_client().get_order_status(buy_order_id).await,
-            OrderStatus::Filled
+            buyer_client
+                .get_my_order(buy_order_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Filled)
         );
         assert_eq!(
-            setup.dex_client().get_order_status(sell_order_id).await,
-            OrderStatus::Filled
+            seller_client
+                .get_my_order(sell_order_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Filled)
         );
 
         // Buyer: received 1M base tokens, spent 1000M quote tokens
@@ -469,8 +481,7 @@ mod cancel_limit_order {
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
-        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
-        OrderStatus, Side,
+        Balance, CancelLimitOrderError, LimitOrderRequest, OrderRecord, OrderStatus, Side,
     };
 
     #[tokio::test]
@@ -523,10 +534,13 @@ mod cancel_limit_order {
         setup.env().tick().await;
 
         // Buyer: 1M base filled, 2000M quote still reserved for the 2M residual.
-        assert_eq!(
-            buyer_client.get_order_status(buy_id.clone()).await,
-            OrderStatus::Open
-        );
+        // Partially filled, resting Open with 1M of 3M filled.
+        let resting = buyer_client
+            .get_my_order(buy_id.clone())
+            .await
+            .expect("buyer owns the order");
+        assert_eq!(resting.order.status, OrderStatus::Open);
+        assert_eq!(resting.order.filled_quantity, Nat::from(1_000_000u64));
         assert_eq!(
             buyer_client
                 .get_balance(setup.quote_token_id())
@@ -548,35 +562,45 @@ mod cancel_limit_order {
             .cancel_limit_order(buy_id.clone())
             .await
             .unwrap();
-        // The record must carry the order's *submission* time, not the cancel
+        // `created_at` must carry the order's *submission* time, not the cancel
         // time (a tick ran in between), so pin it to the placement window.
         assert!(
-            before_placement <= canceled.timestamp && canceled.timestamp <= after_placement,
+            before_placement <= canceled.created_at && canceled.created_at <= after_placement,
             "submission timestamp {} should fall within the placement window [{before_placement}, {after_placement}]",
-            canceled.timestamp,
+            canceled.created_at,
         );
+        // Cancel stamps `last_updated_at`; it post-dates placement.
+        assert!(
+            canceled
+                .last_updated_at
+                .is_some_and(|t| t >= canceled.created_at),
+            "last_updated_at {:?} should be set at/after created_at {}",
+            canceled.last_updated_at,
+            canceled.created_at,
+        );
+        // The canceled record keeps its 1M filled; remaining (2M) is derived as
+        // quantity − filled_quantity. `Canceled` is a unit variant. The
+        // timestamps are checked in the windows above, so reuse them here.
         assert_eq!(
-            OrderRecord {
-                timestamp: 0,
-                ..canceled.clone()
-            },
+            canceled,
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(3_000_000u64),
-                status: OrderStatus::Canceled(CanceledOrderInfo {
-                    remaining_quantity: Nat::from(2_000_000u64),
-                }),
-                timestamp: 0,
+                filled_quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled,
+                created_at: canceled.created_at,
+                last_updated_at: canceled.last_updated_at,
             }
         );
 
         assert_eq!(
-            buyer_client.get_order_status(buy_id).await,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Nat::from(2_000_000u64),
-            })
+            buyer_client
+                .get_my_order(buy_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Canceled)
         );
         assert_eq!(
             buyer_client
@@ -1081,7 +1105,7 @@ async fn should_replay_events_on_upgrade() {
     setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
-        setup.dex_client().get_order_status(order_id.clone()),
+        setup.dex_client().get_my_order(order_id.clone()),
         setup.dex_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
@@ -1137,8 +1161,10 @@ async fn should_replay_events_on_upgrade() {
     setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
-        setup.dex_client().get_order_status(order_id.clone()),
-        setup.dex_client().get_order_status(buy_order_id.clone()),
+        setup.dex_client().get_my_order(order_id.clone()),
+        setup
+            .dex_client_with_caller(buyer)
+            .get_my_order(buy_order_id.clone()),
         setup.dex_client().get_balance(setup.base_token_id()),
         setup.dex_client().get_balance(setup.quote_token_id()),
         setup

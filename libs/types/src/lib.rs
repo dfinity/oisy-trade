@@ -186,8 +186,6 @@ pub enum GetOrderBookDepthError {
 /// Status of an order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum OrderStatus {
-    /// The order was not found.
-    NotFound,
     /// The order is pending processing.
     Pending,
     /// The order is open and resting in the order book.
@@ -195,23 +193,7 @@ pub enum OrderStatus {
     /// The order has been fully filled.
     Filled,
     /// The order has been canceled.
-    Canceled(CanceledOrderInfo),
-}
-
-/// Details about a canceled order.
-///
-/// Refund token and amount are derivable from the order's placement
-/// details + `remaining_quantity`, so they are not duplicated here —
-/// only the non-derivable piece is stored. Using `remaining_quantity`
-/// rather than `filled_quantity` lets the state-layer produce this
-/// value from `OrderBook::remove_order` alone, without a follow-up
-/// lookup in stable-memory order history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub struct CanceledOrderInfo {
-    /// Quantity that was still open on the book at the moment of cancel.
-    /// Equals the original placed quantity for a never-matched order, and
-    /// `original − filled` for a partially-filled one.
-    pub remaining_quantity: Nat,
+    Canceled,
 }
 
 /// Full view of an order as stored by the DEX. Returned by endpoints that
@@ -227,28 +209,86 @@ pub struct OrderRecord {
     pub price: Nat,
     /// Quantity originally placed, in base token units.
     pub quantity: Nat,
-    /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
+    /// Cumulative quantity filled so far, in base token units. Remaining is
+    /// `quantity − filled_quantity`.
+    pub filled_quantity: Nat,
+    /// Current lifecycle state.
     pub status: OrderStatus,
     /// Submission time in nanoseconds since the Unix epoch.
-    pub timestamp: u64,
+    pub created_at: u64,
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel) in nanoseconds since the Unix epoch; `None` until first modified.
+    pub last_updated_at: Option<u64>,
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.
 /// Requests for more are silently capped to this many.
 pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
 
-/// Request for the `get_my_orders` query: a page over the caller's orders,
-/// newest first. `length` is capped at [`MAX_ORDERS_PER_RESPONSE`].
+/// Request for the `get_my_orders` query.
+///
+/// The endpoint takes an `opt GetMyOrdersArgs`; an absent argument is
+/// equivalent to [`GetMyOrdersArgs::default()`], the first page from the
+/// newest order with the maximum length.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyOrdersArgs {
+    /// How to select the caller's orders.
+    pub filter: GetMyOrdersFilter,
+}
+
+impl GetMyOrdersArgs {
+    /// A point lookup by order id.
+    pub fn by_id(id: OrderId) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ById(id),
+        }
+    }
+
+    /// A page over the caller's orders, newest first.
+    pub fn by_page(after: Option<OrderId>, length: u32) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length }),
+        }
+    }
+}
+
+/// Selector for `get_my_orders`: either a point lookup by id or a page. The
+/// two modes are mutually exclusive by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum GetMyOrdersFilter {
+    /// Return the single matching order if the caller owns it, else empty.
+    ById(OrderId),
+    /// Return a page over the caller's orders, newest first.
+    ByPage(GetMyOrdersPage),
+}
+
+impl Default for GetMyOrdersFilter {
+    fn default() -> Self {
+        Self::ByPage(GetMyOrdersPage::default())
+    }
+}
+
+/// A page over the caller's orders, newest first. `length` is capped at
+/// [`MAX_ORDERS_PER_RESPONSE`].
 ///
 /// Pages via a cursor: pass the previous page's last [`UserOrder::id`] as
 /// `after` to get the next page; `None` starts from the newest order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub struct GetMyOrdersArgs {
+pub struct GetMyOrdersPage {
     /// Resume strictly after this order id (a prior page's last `id`).
     /// `None` starts from the newest order.
     pub after: Option<OrderId>,
     /// Maximum number of orders to return.
     pub length: u32,
+}
+
+impl Default for GetMyOrdersPage {
+    fn default() -> Self {
+        Self {
+            after: None,
+            length: MAX_ORDERS_PER_RESPONSE,
+        }
+    }
 }
 
 /// One entry in a `get_my_orders` response: an order the caller placed.

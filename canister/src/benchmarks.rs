@@ -261,10 +261,7 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
         let mut retrieved = 0usize;
         loop {
             let orders = crate::get_my_orders(
-                dex_types::GetMyOrdersArgs {
-                    after: after.clone(),
-                    length: page,
-                },
+                Some(dex_types::GetMyOrdersArgs::by_page(after.clone(), page)),
                 trader,
             )
             .expect("benchmark cursor is always a valid order id");

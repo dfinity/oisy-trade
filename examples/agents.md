@@ -38,7 +38,7 @@ Users speak human ("0.01 SOL"); the DEX speaks base units (`10^decimals`). Alway
 
 **"What pairs can I trade?"** → `get_trading_pairs`; summarize in human terms ("ckDevnetSOL vs ckSepoliaETH, min order 0.001 SOL, price tick 0.00001 ETH/SOL").
 
-**"Sell 0.01 SOL for ckSepoliaETH at market."** → (1) confirm the pair is listed; (2) convert 0.01 SOL to `10_000_000` base units; (3) verify `quantity` is a multiple of `lot_size`; (4) pick a price (ask if unclear — there's no `get_orderbook`); (5) check the seller's on-DEX free base ≥ `quantity`; (6) place the order as the seller identity; (7) poll `get_order_status` for `Filled`.
+**"Sell 0.01 SOL for ckSepoliaETH at market."** → (1) confirm the pair is listed; (2) convert 0.01 SOL to `10_000_000` base units; (3) verify `quantity` is a multiple of `lot_size`; (4) pick a price (ask if unclear — there's no `get_orderbook`); (5) check the seller's on-DEX free base ≥ `quantity`; (6) place the order as the seller identity; (7) poll `get_my_orders` (with the `ById` filter for that order id) for `Filled`.
 
 **On any error** → translate the variant name into plain language plus a concrete next step (e.g. `InsufficientAllowance { allowance }` → "your allowance is X but you need X + fee — let me re-approve").
 
@@ -48,5 +48,5 @@ Users speak human ("0.01 SOL"); the DEX speaks base units (`10^decimals`). Alway
 - **Don't skip `icrc1_fee`** before quoting an approve / deposit / withdraw amount.
 - **Don't use floating point** for token-amount math.
 - **Don't invoke a signing call** with an identity the user hasn't authorized for this conversation.
-- **Don't claim an order filled** because `add_limit_order` returned `Ok` — that's acceptance, not execution. Confirm via `get_order_status`.
+- **Don't claim an order filled** because `add_limit_order` returned `Ok` — that's acceptance, not execution. Confirm via `get_my_orders` (with the `ById` filter).
 - **Don't over-deposit "for safety"** — on ledgers with high fees, it's expensive and usually not what the user wants.

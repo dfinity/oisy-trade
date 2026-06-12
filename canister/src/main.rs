@@ -3,8 +3,8 @@ use dex_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
-    TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
+    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use dex_types_internal::DexArg;
 use dex_types_internal::log::Priority;
@@ -41,11 +41,6 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
         }
     }
     result
-}
-
-#[ic_cdk::query]
-fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    dex_canister::get_order_status(order_id)
 }
 
 #[ic_cdk::query]
@@ -148,12 +143,12 @@ fn get_fee_balances(
 }
 
 #[ic_cdk::query]
-fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
+fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Vec<UserOrder> {
     use dex_canister::Runtime;
     match dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller()) {
         Ok(orders) => orders,
-        Err(dex_canister::GetMyOrdersError::InvalidCursor(e)) => {
-            panic!("ERROR: invalid cursor order id: {e}")
+        Err(dex_canister::GetMyOrdersError::InvalidOrderId(e)) => {
+            panic!("ERROR: invalid order id: {e}")
         }
     }
 }

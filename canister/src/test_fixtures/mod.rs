@@ -374,6 +374,18 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
+/// Asserts two [`OrderRecord`]s are equal on every field except the
+/// `created_at` / `last_updated_at` timestamps, which tests assert separately.
+#[track_caller]
+pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &order::OrderRecord) {
+    let normalized = order::OrderRecord {
+        created_at: expected.created_at,
+        last_updated_at: expected.last_updated_at,
+        ..actual.clone()
+    };
+    assert_eq!(&normalized, expected);
+}
+
 pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }
@@ -421,14 +433,13 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, CanceledOrderInfo, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId,
-        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
-        Side, TickSize, TokenId, TokenMetadata,
+        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
+        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
+        TickSize, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SettlingEvent,
-        WithdrawEvent,
+        DepositEvent, Event, EventType, MatchingEvent, SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
@@ -559,10 +570,12 @@ pub mod arbitrary {
             Just(OrderStatus::Pending),
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
-            arb_quantity().prop_map(|remaining_quantity| OrderStatus::Canceled(
-                CanceledOrderInfo { remaining_quantity },
-            )),
+            Just(OrderStatus::Canceled),
         ]
+    }
+
+    pub fn arb_timestamp() -> impl Strategy<Value = Timestamp> {
+        any::<u64>().prop_map(Timestamp::new)
     }
 
     pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
@@ -586,7 +599,9 @@ pub mod arbitrary {
     }
 
     /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
-    /// lot-aligned non-zero quantity.
+    /// lot-aligned non-zero quantity. `filled_quantity` is a lot multiple
+    /// within `[0, quantity]`, upholding the `filled_quantity <= quantity`
+    /// invariant.
     pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
         let tick = TICK_SIZE.get();
         let lot = u64::from(LOT_SIZE);
@@ -596,16 +611,21 @@ pub mod arbitrary {
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
             arb_order_status(),
-            any::<u64>(), // submission timestamp (nanos)
+            arb_timestamp(),             // created_at
+            option::of(arb_timestamp()), // last_updated_at
         )
-            .prop_map(
-                move |(owner, side, price_ticks, qty_lots, status, timestamp)| OrderRecord {
-                    owner,
-                    side,
-                    price: Price::new(price_ticks as u128 * tick),
-                    quantity: Quantity::from(qty_lots * lot),
-                    status,
-                    timestamp: Timestamp::new(timestamp),
+            .prop_flat_map(
+                move |(owner, side, price_ticks, qty_lots, status, created_at, last_updated_at)| {
+                    (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
+                        owner,
+                        side,
+                        price: Price::new(price_ticks as u128 * tick),
+                        quantity: Quantity::from(qty_lots * lot),
+                        filled_quantity: Quantity::from(filled_lots * lot),
+                        status,
+                        created_at,
+                        last_updated_at,
+                    })
                 },
             )
     }
@@ -835,11 +855,6 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
-    pub fn arb_order_status_transition() -> impl Strategy<Value = OrderStatusTransition> {
-        (arb_order_seq(), arb_order_status())
-            .prop_map(|(seq, status)| OrderStatusTransition { seq, status })
-    }
-
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
         (any::<u64>(), vec(arb_balance_operation(), 0..10)).prop_map(
             |(book_id, balance_operations)| SettlingEvent {
@@ -864,10 +879,8 @@ pub mod arbitrary {
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {
-        (any::<u64>(), arb_event_type()).prop_map(|(timestamp, payload)| Event {
-            timestamp: Timestamp::new(timestamp),
-            payload,
-        })
+        (arb_timestamp(), arb_event_type())
+            .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }
 }
 
