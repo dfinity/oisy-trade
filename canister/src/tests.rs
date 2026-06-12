@@ -1788,6 +1788,27 @@ mod get_my_orders {
         let orders = get_my_orders(by_page(None, 0), user).unwrap();
         assert!(orders.is_empty());
     }
+
+    #[test]
+    fn absent_args_default_to_first_page_newest_first() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        let ids = place_resting_buys(user, 3);
+
+        let default_orders = get_my_orders(None, user).unwrap();
+
+        let expected: Vec<_> = ids.iter().rev().cloned().collect();
+        assert_eq!(
+            default_orders
+                .iter()
+                .map(|o| o.id.clone())
+                .collect::<Vec<_>>(),
+            expected,
+        );
+
+        let explicit_orders = get_my_orders(by_page(None, MAX_ORDERS_PER_RESPONSE), user).unwrap();
+        assert_eq!(default_orders, explicit_orders);
+    }
 }
 
 mod get_trading_pairs {
