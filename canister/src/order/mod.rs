@@ -5,8 +5,8 @@ mod history;
 mod tests;
 
 pub use book::{
-    Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
-    RemovedOrder,
+    Fill, MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,
+    PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use history::OrderHistory;

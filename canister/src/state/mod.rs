@@ -16,8 +16,9 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError,
+    Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
+    PairToken,
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
@@ -174,15 +175,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .checked_mul_quantity_scaled(&pending.quantity, self.base_scale(&pair.base))
             .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
 
-        let min_notional = book.min_notional();
-        let max_notional = book.max_notional();
-        if amount < min_notional || max_notional.is_some_and(|max| amount > max) {
-            return Err(AddLimitOrderError::InvalidNotional {
-                notional: amount,
-                min: min_notional,
-                max: max_notional,
-            });
-        }
+        book.check_notional(&amount)
+            .map_err(|NotionalError { notional, min, max }| {
+                AddLimitOrderError::InvalidNotional { notional, min, max }
+            })?;
 
         let (token, required) = match pending.side {
             Side::Buy => (pair.quote, amount),

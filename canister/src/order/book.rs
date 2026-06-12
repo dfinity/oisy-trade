@@ -205,6 +205,19 @@ impl OrderBook {
         Ok(())
     }
 
+    /// Check that `notional` (the scaled `price × quantity`, in quote smallest
+    /// units) lies within the book's `[min_notional, max_notional]` bounds.
+    pub fn check_notional(&self, notional: &Quantity) -> Result<(), NotionalError> {
+        if *notional < self.min_notional || self.max_notional.is_some_and(|max| *notional > max) {
+            return Err(NotionalError {
+                notional: *notional,
+                min: self.min_notional,
+                max: self.max_notional,
+            });
+        }
+        Ok(())
+    }
+
     /// Enqueue an order for matching.
     pub(crate) fn add_pending_order(&mut self, order: Order) {
         assert!(
@@ -536,6 +549,14 @@ pub enum MatchOrderError {
         quantity: Quantity,
         lot_size: LotSize,
     },
+}
+
+/// The order notional lies outside the book's `[min_notional, max_notional]` bounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotionalError {
+    pub notional: Quantity,
+    pub min: Quantity,
+    pub max: Option<Quantity>,
 }
 
 /// CBOR-encoded view of [`OrderBook`] used for pre/post-upgrade persistence.
