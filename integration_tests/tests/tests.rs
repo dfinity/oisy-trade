@@ -422,7 +422,7 @@ mod add_limit_order {
         let pair = setup.trading_pair();
         let price = Nat::from(10_000 * PRICE_SCALE);
         let order = |lots: u64| LimitOrderRequest {
-            pair: pair.clone(),
+            pair,
             side: Side::Buy,
             price: price.clone(),
             quantity: Nat::from(lots * LOT_SIZE),
