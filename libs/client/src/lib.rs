@@ -88,7 +88,8 @@ impl<R: Runtime> DexClient<R> {
             .unwrap()
     }
 
-    /// Query the caller's orders, newest first, paginated.
+    /// Query the caller's orders: a page (newest first) or a single order by id,
+    /// depending on the `GetMyOrdersArgs` filter.
     pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
         self.runtime
             .call(self.dex_canister, "get_my_orders", (Some(args),), 0)
