@@ -4,7 +4,7 @@ use oisy_trade_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
     UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{

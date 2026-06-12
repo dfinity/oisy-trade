@@ -12,8 +12,8 @@ use oisy_trade_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, OrderStatus, Token, TokenId, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderRecord, Token, TokenId, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use serde::de::DeserializeOwned;
 

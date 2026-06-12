@@ -2146,8 +2146,8 @@ mod get_balances {
 mod global_halt {
     use assert_matches::assert_matches;
     use candid::{Nat, Principal};
-    use oisy_trade_int_tests::Setup;
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
         AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, UnauthorizedError,
         WithdrawRequest,
@@ -2162,12 +2162,12 @@ mod global_halt {
         let setup = Setup::new().await.with_trading_pair().await;
         let user = setup.user();
         let client = setup.oisy_trade_client();
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
         let quote = setup.quote_token_id();
 
         // Fund the user with enough quote to place two resting buy orders and
         // keep a free balance to withdraw.
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
         let free_to_withdraw = 10_000_000u64;
@@ -2183,7 +2183,7 @@ mod global_halt {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         };
 
@@ -2191,7 +2191,12 @@ mod global_halt {
         let resting_id = client.add_limit_order(order.clone()).await.unwrap();
         setup.env().tick().await;
         assert_eq!(
-            client.get_order_status(resting_id.clone()).await,
+            client
+                .get_my_order(resting_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Open
         );
 
@@ -2206,7 +2211,7 @@ mod global_halt {
 
         // The resting order can still be canceled.
         let canceled = client.cancel_limit_order(resting_id.clone()).await.unwrap();
-        assert_matches!(canceled.status, OrderStatus::Canceled(_));
+        assert_matches!(canceled.status, OrderStatus::Canceled);
 
         // A withdrawal of available balance still succeeds.
         client
@@ -2222,7 +2227,7 @@ mod global_halt {
         let new_id = client.add_limit_order(order).await.unwrap();
         setup.env().tick().await;
         assert_eq!(
-            client.get_order_status(new_id).await,
+            client.get_my_order(new_id).await.unwrap().order.status,
             OrderStatus::Open,
             "orders are accepted again after resume"
         );
@@ -2237,14 +2242,16 @@ mod global_halt {
     async fn should_stop_matching_under_global_halt() {
         let setup = Setup::new().await.with_trading_pair().await;
         let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.dex_client_with_caller(buyer);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
-        let seller_client = setup.dex_client_with_caller(seller);
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
-        let price = 100u64;
+        // 10_000 ckBTC per whole ckSOL (10_000 * PRICE_SCALE), 1M base units.
+        // Reserve = price * quantity / 10^9 = 1_000_000_000 quote units.
+        let price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
-        let required_quote = price * quantity;
+        let required_quote = 1_000_000_000u64;
         let required_base = quantity;
 
         // Halt trading before any order is placed so the matching timer that
@@ -2267,7 +2274,7 @@ mod global_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2284,7 +2291,7 @@ mod global_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2302,12 +2309,24 @@ mod global_halt {
         }
         // Neither order has filled: their statuses are still not `Filled` ...
         assert_ne!(
-            setup.oisy_trade_client().get_order_status(buy_id.clone()).await,
+            setup
+                .oisy_trade_client()
+                .get_my_order(buy_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled,
             "buy must not fill while halted"
         );
         assert_ne!(
-            setup.oisy_trade_client().get_order_status(sell_id.clone()).await,
+            setup
+                .oisy_trade_client()
+                .get_my_order(sell_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled,
             "sell must not fill while halted"
         );
@@ -2370,12 +2389,152 @@ mod global_halt {
             setup.env().tick().await;
         }
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(buy_id).await,
+            setup
+                .oisy_trade_client()
+                .get_my_order(buy_id)
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled
         );
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(sell_id).await,
+            setup
+                .oisy_trade_client()
+                .get_my_order(sell_id)
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required_base.into(),
+                reserved: 0u64.into()
+            },
+        );
+
+        setup.drop().await;
+    }
+
+    /// `resume_trading` re-arms matching from the endpoint: a cross that piled
+    /// up while halted fills right after resume, without placing a new order
+    /// and without advancing time past the periodic matching interval.
+    #[tokio::test]
+    async fn should_rearm_matching_on_resume() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+
+        // 10_000 ckBTC per whole ckSOL (10_000 * PRICE_SCALE), 1M base units.
+        // Reserve = price * quantity / 10^9 = 1_000_000_000 quote units.
+        let price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+        let required_quote = 1_000_000_000u64;
+        let required_base = quantity;
+
+        // Place a crossable buy/sell pair while trading is active, without
+        // ticking in between so neither placement kickoff has run yet.
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote + QUOTE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(required_base + 2 * BASE_LEDGER_FEE)
+            .approve(required_base + BASE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+        let sell_id = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+
+        // Halt before any tick runs the placement kickoffs, so the cross stays
+        // pending and unmatched under halt.
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+        assert_ne!(
+            setup
+                .oisy_trade_client()
+                .get_my_order(buy_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "buy must not fill while halted"
+        );
+        assert_ne!(
+            setup
+                .oisy_trade_client()
+                .get_my_order(sell_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "sell must not fill while halted"
+        );
+
+        // Resume and tick WITHOUT advancing time past the matching interval and
+        // WITHOUT placing a new order: the resume kickoff alone drives the fill.
+        // Time is never advanced, so the periodic matching timer cannot fire.
+        assert_eq!(controller_client.resume_trading().await, Ok(()));
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+
+        assert_eq!(
+            setup
+                .oisy_trade_client()
+                .get_my_order(buy_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "buy fills from the resume kickoff"
+        );
+        assert_eq!(
+            setup
+                .oisy_trade_client()
+                .get_my_order(sell_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "sell fills from the resume kickoff"
         );
         assert_eq!(
             buyer_client
@@ -2396,7 +2555,7 @@ mod global_halt {
     #[tokio::test]
     async fn should_reject_non_controller_callers() {
         let setup = Setup::new().await;
-        let user_client = setup.dex_client_with_caller(Principal::from_slice(&[0x01]));
+        let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
 
         assert_eq!(
             user_client.halt_trading().await,
@@ -2417,10 +2576,10 @@ mod global_halt {
         let setup = Setup::new().await.with_trading_pair().await;
         let user = setup.user();
         let client = setup.oisy_trade_client();
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
         let quote = setup.quote_token_id();
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
         setup
@@ -2437,7 +2596,7 @@ mod global_halt {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         };
         assert_eq!(

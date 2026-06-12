@@ -4,9 +4,9 @@ use oisy_trade_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
-    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
