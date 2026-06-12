@@ -35,6 +35,9 @@ thread_local! {
     });
 }
 
+/// Appends `payload` to the event log directly. The gated entry point is
+/// `audit::{process_event, record_event}`, which consume a `Permit`; direct
+/// callers of this function bypass the permissions layer.
 pub fn record_event(timestamp: Timestamp, payload: EventType) {
     EVENTS
         .with(|events| events.borrow().append(&Event { timestamp, payload }))
