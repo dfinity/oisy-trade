@@ -192,7 +192,7 @@ Estimated memory per order book side:
 **Real-world reference: Binance ICP/BTC order book snapshot** (retrieved via `GET /api/v3/depth?symbol=ICPBTC&limit=5000`):
 
 - 135 bid price levels, 1,310 ask price levels (1,445 total).
-- Binance aggregates all orders at a price into a single entry. Assuming ~10 individual orders per price level on a OISY TRADE (no aggregation), the estimated memory for this pair would be:
+- Binance aggregates all orders at a price into a single entry. Assuming ~10 individual orders per price level on OISY TRADE (no aggregation), the estimated memory for this pair would be:
 
 ```
 1,445 levels × 112 B  +  14,450 orders × 64 B  ≈  1 MiB
