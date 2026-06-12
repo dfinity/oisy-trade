@@ -91,6 +91,7 @@ impl Executor {
             let permit = state
                 .permissions()
                 .permit_matching(book_id)
+                // TODO(DEFI-2849): convert to a proper error return when this gate goes live (PRs 2–4)
                 .expect("BUG: matching is never gated in this build");
             audit::process_event(
                 state,
@@ -121,6 +122,7 @@ impl Executor {
             let permit = state
                 .permissions()
                 .permit_settling()
+                // TODO(DEFI-2849): convert to a proper error return when this gate goes live (PRs 2–4)
                 .expect("BUG: settling is never gated in this build");
             audit::process_event(state, EventType::Settling(event), permit.into(), runtime);
         }
