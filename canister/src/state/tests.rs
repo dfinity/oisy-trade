@@ -720,7 +720,7 @@ mod validate_overflow_invariant {
     }
 }
 
-mod notional_bounds {
+mod validate_limit_order {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
     use crate::state::AddLimitOrderError;
     use crate::state::State;
@@ -738,7 +738,7 @@ mod notional_bounds {
     /// `LOT_SIZE` and 8 base decimals, an order of `t` ticks and `q` lots has
     /// notional `price × quantity / 10^8 = t × q` quote units, so notionals
     /// are easy to dial in.
-    fn state_with_bounds(
+    fn state_with_notional_bounds(
         min_notional: Quantity,
         max_notional: Option<Quantity>,
     ) -> State<VectorMemory, VectorMemory> {
@@ -772,43 +772,38 @@ mod notional_bounds {
             .map(|_| ())
     }
 
-    // R1: an order whose notional is below `min_notional` is rejected.
     #[test]
     fn should_reject_notional_below_min() {
-        let state = state_with_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
-        assert_matches!(
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
             validate(&state, 2, 2),
             Err(AddLimitOrderError::InvalidNotional {
-                notional,
-                min,
-                max,
-            }) if notional == Quantity::from_u128(4)
-                && min == Quantity::from_u128(5)
-                && max == Some(Quantity::from_u128(8))
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
         );
     }
 
-    // R2: an order whose notional is above `max_notional` is rejected.
     #[test]
     fn should_reject_notional_above_max() {
-        let state = state_with_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
-        assert_matches!(
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
             validate(&state, 9, 1),
             Err(AddLimitOrderError::InvalidNotional {
-                notional,
-                min,
-                max,
-            }) if notional == Quantity::from_u128(9)
-                && min == Quantity::from_u128(5)
-                && max == Some(Quantity::from_u128(8))
+                notional: Quantity::from_u128(9),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
         );
     }
 
-    // R3: an order whose notional equals `min_notional` exactly is accepted
-    // (the notional check passes; the balance check then runs).
     #[test]
     fn should_accept_notional_equal_to_min() {
-        let state = state_with_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
         // notional == 5 == min: not an `InvalidNotional` rejection.
         assert_matches!(
             validate(&state, 5, 1),
@@ -816,37 +811,37 @@ mod notional_bounds {
         );
     }
 
-    // R3: an order whose notional equals `max_notional` exactly is accepted.
     #[test]
     fn should_accept_notional_equal_to_max() {
-        let state = state_with_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
         assert_matches!(
             validate(&state, 8, 1),
             Err(AddLimitOrderError::InsufficientBalance { .. })
         );
     }
 
-    // R2: with `max_notional` unset, no upper bound is enforced.
     #[test]
     fn should_not_enforce_upper_bound_when_max_unset() {
-        let state = state_with_bounds(Quantity::from_u128(5), None);
+        let state = state_with_notional_bounds(Quantity::from_u128(5), None);
         assert_matches!(
             validate(&state, 1_000, 1_000),
             Err(AddLimitOrderError::InsufficientBalance { .. })
         );
     }
 
-    // R6: tick/lot and notional are enforced independently. An order on tick
-    // and lot can still fail a notional bound, and an order off tick/lot fails
-    // the tick/lot check regardless of where its notional lands.
     #[test]
     fn should_enforce_tick_lot_and_notional_independently() {
-        let state = state_with_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
 
-        // On tick and lot, but notional 4 < min 5.
-        assert_matches!(
+        assert_eq!(
             validate(&state, 2, 2),
-            Err(AddLimitOrderError::InvalidNotional { .. })
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
         );
 
         // Off tick (price not a multiple of TICK_SIZE) but notional within
@@ -951,7 +946,7 @@ mod settle_fills {
             },
             TickSize::new(NonZeroU128::new(10_000).unwrap()),
             LotSize::new(NonZeroU64::new(100_000_000_000_000).unwrap()),
-            Quantity::from_u128(1),
+            MIN_NOTIONAL,
             None,
             FeeRates::default(),
         );
@@ -1012,7 +1007,7 @@ mod settle_fills {
             },
             TickSize::new(NonZeroU128::new(tick).unwrap()),
             LotSize::new(NonZeroU64::new(1).unwrap()),
-            Quantity::from_u128(1),
+            MIN_NOTIONAL,
             None,
             FeeRates::default(),
         );
