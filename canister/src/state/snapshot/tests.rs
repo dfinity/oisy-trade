@@ -394,7 +394,7 @@ fn should_roundtrip_empty_permissions_through_snapshot() {
 #[test]
 fn should_decode_old_format_snapshot_to_default_permissions() {
     use crate::state::event::SettlingEvent;
-    use dex_types_internal::Mode;
+    use oisy_trade_types_internal::Mode;
 
     let state = fresh_state();
     let snapshot = StateSnapshot::from_state(&state);
