@@ -186,20 +186,26 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Applies a combined [`OrderUpdate`] to an existing order in a single
     /// read-modify-write: sets the status if present, adds `filled_delta` to
-    /// `filled_quantity`, and stamps `last_updated_at = Some(now)`. Panics if
-    /// the order is unknown.
+    /// `filled_quantity`, and stamps `last_updated_at = Some(now)`. A no-op
+    /// update (status absent or equal to the current status, and a zero
+    /// `filled_delta`) writes nothing and leaves `last_updated_at` unchanged.
+    ///
+    /// # Panics
     ///
     /// `filled_quantity` is monotonic non-decreasing and must never exceed
     /// `quantity`; this invariant is enforced by an always-on check that traps
-    /// on violation (not a `debug_assert!`, which is compiled out of the release
-    /// canister and would let a corrupted value persist silently).
+    /// on violation.
     pub fn apply_update(&mut self, id: &OrderId, update: OrderUpdate, now: Timestamp) {
         bench_scopes!("order_history", "order_history::apply_update");
         let mut entry = self
             .orders
             .get(id)
             .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-        if let Some(status) = update.status {
+        let status_change = update.status.filter(|s| *s != entry.record.status);
+        if status_change.is_none() && update.filled_delta == Quantity::ZERO {
+            return;
+        }
+        if let Some(status) = status_change {
             entry.record.status = status;
         }
         let filled = entry

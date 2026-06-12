@@ -121,6 +121,50 @@ fn apply_update_status_and_delta_in_one_write() {
 }
 
 #[test]
+fn apply_update_is_a_noop_when_update_is_a_noop() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    // An empty update is a no-op: nothing written, `last_updated_at` stays None.
+    history.apply_update(&id, OrderUpdate::default(), Timestamp::new(99));
+    assert_eq!(history.get(&id), Some(test_record()));
+
+    // A status equal to the current one with a zero delta is also a no-op.
+    history.apply_update(
+        &id,
+        OrderUpdate::status(OrderStatus::Pending),
+        Timestamp::new(99),
+    );
+    assert_eq!(history.get(&id), Some(test_record()));
+}
+
+#[test]
+fn apply_update_does_not_change_last_updated_at_on_noop() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    // First, a real update stamps `last_updated_at`.
+    history.apply_update(
+        &id,
+        OrderUpdate::status(OrderStatus::Open),
+        Timestamp::new(5),
+    );
+    let after_real = history.get(&id).expect("record present");
+    assert_eq!(after_real.last_updated_at, Some(Timestamp::new(5)));
+
+    // A subsequent no-op (same status, zero delta) leaves the record — and so
+    // `last_updated_at` — untouched, despite a later `now`.
+    history.apply_update(
+        &id,
+        OrderUpdate::status(OrderStatus::Open),
+        Timestamp::new(42),
+    );
+    assert_eq!(history.get(&id), Some(after_real));
+}
+
+#[test]
 #[should_panic(expected = "BUG: filled_quantity")]
 fn apply_update_traps_when_filled_exceeds_quantity() {
     let mut history = history();
