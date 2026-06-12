@@ -220,58 +220,87 @@ fn get_events(
             payload: match event.payload {
                 EventType::Init(args) => event::EventType::Init(args),
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
-                EventType::AddTradingPair(e) => {
-                    event::EventType::AddTradingPair(event::AddTradingPairEvent {
-                        book_id: e.book_id.get(),
-                        base: dex_types::TokenId::from(e.base),
-                        quote: dex_types::TokenId::from(e.quote),
-                        tick_size: candid::Nat::from(e.tick_size),
-                        lot_size: candid::Nat::from(e.lot_size),
-                        base_metadata: dex_types::TokenMetadata::from(e.base_metadata),
-                        quote_metadata: dex_types::TokenMetadata::from(e.quote_metadata),
-                        min_notional: candid::Nat::from(e.min_notional),
-                        max_notional: e.max_notional.map(candid::Nat::from),
-                    })
-                }
-                EventType::Deposit(e) => event::EventType::Deposit(event::DepositEvent {
-                    user: e.user,
-                    token: dex_types::TokenId::from(e.token),
-                    amount: e.amount.into(),
+                EventType::AddTradingPair(dex_canister::state::event::AddTradingPairEvent {
+                    book_id,
+                    base,
+                    quote,
+                    tick_size,
+                    lot_size,
+                    base_metadata,
+                    quote_metadata,
+                    fee_rates,
+                    min_notional,
+                    max_notional,
+                }) => event::EventType::AddTradingPair(event::AddTradingPairEvent {
+                    book_id: book_id.get(),
+                    base: dex_types::TokenId::from(base),
+                    quote: dex_types::TokenId::from(quote),
+                    tick_size: candid::Nat::from(tick_size),
+                    lot_size: candid::Nat::from(lot_size),
+                    base_metadata: dex_types::TokenMetadata::from(base_metadata),
+                    quote_metadata: dex_types::TokenMetadata::from(quote_metadata),
+                    maker_fee_bps: fee_rates.maker.get(),
+                    taker_fee_bps: fee_rates.taker.get(),
+                    min_notional: candid::Nat::from(min_notional),
+                    max_notional: max_notional.map(candid::Nat::from),
                 }),
-                EventType::Withdraw(e) => event::EventType::Withdraw(event::WithdrawEvent {
-                    block_index: e.block_index,
-                    user: e.user,
-                    token: dex_types::TokenId::from(e.token),
-                    amount: e.amount.into(),
+                EventType::Deposit(dex_canister::state::event::DepositEvent {
+                    user,
+                    token,
+                    amount,
+                }) => event::EventType::Deposit(event::DepositEvent {
+                    user,
+                    token: dex_types::TokenId::from(token),
+                    amount: amount.into(),
                 }),
-                EventType::AddLimitOrder(e) => {
-                    event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
-                        user: e.user,
-                        order_id: event::OrderId {
-                            book_id: e.order_id.book_id().get(),
-                            seq: e.order_id.seq().get(),
-                        },
-                        side: dex_types::Side::from(e.side),
-                        price: candid::Nat::from(e.price),
-                        quantity: e.quantity.into(),
-                    })
-                }
-                EventType::CancelLimitOrder(e) => {
-                    event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
-                        order_id: event::OrderId {
-                            book_id: e.order_id.book_id().get(),
-                            seq: e.order_id.seq().get(),
-                        },
-                    })
-                }
-                EventType::Matching(e) => event::EventType::Matching(event::MatchingEvent {
-                    book_id: e.book_id.get(),
-                    orders: e.orders.into_iter().map(|s| s.get()).collect(),
+                EventType::Withdraw(dex_canister::state::event::WithdrawEvent {
+                    block_index,
+                    user,
+                    token,
+                    amount,
+                }) => event::EventType::Withdraw(event::WithdrawEvent {
+                    block_index,
+                    user,
+                    token: dex_types::TokenId::from(token),
+                    amount: amount.into(),
                 }),
-                EventType::Settling(e) => event::EventType::Settling(event::SettlingEvent {
-                    book_id: e.book_id.get(),
-                    balance_operations: e
-                        .balance_operations
+                EventType::AddLimitOrder(dex_canister::state::event::AddLimitOrderEvent {
+                    user,
+                    order_id,
+                    side,
+                    price,
+                    quantity,
+                }) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
+                    user,
+                    order_id: event::OrderId {
+                        book_id: order_id.book_id().get(),
+                        seq: order_id.seq().get(),
+                    },
+                    side: dex_types::Side::from(side),
+                    price: candid::Nat::from(price),
+                    quantity: quantity.into(),
+                }),
+                EventType::CancelLimitOrder(
+                    dex_canister::state::event::CancelLimitOrderEvent { order_id },
+                ) => event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                    order_id: event::OrderId {
+                        book_id: order_id.book_id().get(),
+                        seq: order_id.seq().get(),
+                    },
+                }),
+                EventType::Matching(dex_canister::state::event::MatchingEvent {
+                    book_id,
+                    orders,
+                }) => event::EventType::Matching(event::MatchingEvent {
+                    book_id: book_id.get(),
+                    orders: orders.into_iter().map(|s| s.get()).collect(),
+                }),
+                EventType::Settling(dex_canister::state::event::SettlingEvent {
+                    book_id,
+                    balance_operations,
+                }) => event::EventType::Settling(event::SettlingEvent {
+                    book_id: book_id.get(),
+                    balance_operations: balance_operations
                         .into_iter()
                         .map(map_balance_operation)
                         .collect(),

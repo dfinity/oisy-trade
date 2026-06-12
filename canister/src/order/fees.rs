@@ -34,6 +34,10 @@ impl BasisPoint {
         Ok(Self(value))
     }
 
+    pub fn get(self) -> u16 {
+        self.0
+    }
+
     /// Compute `ceil(amount × self / 10_000)` as a u256 [`Quantity`].
     ///
     /// Decomposing `amount = q × 10_000 + r` with `q = amount / 10_000`
