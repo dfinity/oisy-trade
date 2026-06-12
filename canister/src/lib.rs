@@ -231,9 +231,6 @@ pub async fn deposit(
     let _guard =
         guard::UserOpGuard::new(caller, internal_token).ok_or(DepositError::OperationInProgress)?;
 
-    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
-        .expect("BUG: deposit is never gated in this build");
-
     let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
     if existing
         .free()
@@ -243,6 +240,9 @@ pub async fn deposit(
     {
         return Err(DepositError::AmountExceedsMaximum);
     }
+
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
+        .expect("BUG: deposit is never gated in this build");
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -288,15 +288,15 @@ pub async fn withdraw(
     let _guard = guard::UserOpGuard::new(caller, internal_token)
         .ok_or(WithdrawError::OperationInProgress)?;
 
-    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
-        .expect("BUG: withdraw is never gated in this build");
-
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
         WithdrawError::InsufficientBalance {
             available: e.available.into(),
         }
     })?;
+
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
+        .expect("BUG: withdraw is never gated in this build");
 
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
