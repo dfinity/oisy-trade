@@ -23,8 +23,8 @@ use crate::order::{
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
-use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
@@ -523,15 +523,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self,
         token_id: TokenId,
         submitted: &TokenMetadata,
-    ) -> Result<(), dex_types::AddTradingPairError> {
+    ) -> Result<(), oisy_trade_types::AddTradingPairError> {
         if let Some(existing) = self.tokens.get(&token_id)
             && existing != submitted
         {
-            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: token_id.into(),
-                expected: existing.clone().into(),
-                submitted: submitted.clone().into(),
-            });
+            return Err(
+                oisy_trade_types::AddTradingPairError::InconsistentTokenMetadata {
+                    token: token_id.into(),
+                    expected: existing.clone().into(),
+                    submitted: submitted.clone().into(),
+                },
+            );
         }
         Ok(())
     }
@@ -609,12 +611,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Returns the canister-owned fee pool, shaped like [`get_balances`].
     /// - `None`: every token with a non-zero fee pool entry.
     /// - `Some(filter)`: each filter entry resolved per-entry; unsupported
-    ///   tokens are reported as [`dex_types::GetBalancesError::TokenNotSupported`].
+    ///   tokens are reported as [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
     ///   Registered tokens with no accrual return `Balance::ZERO`.
     pub fn get_fee_balances(
         &self,
-        filter: Option<&[dex_types::FilterToken]>,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        filter: Option<&[oisy_trade_types::FilterToken]>,
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
                 fee_only_balance(self.balances.fee_balance(t).unwrap_or_default())
@@ -629,8 +631,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                         .get(&token)
                         .expect("BUG: fee pool entry for unregistered token")
                         .clone();
-                    Ok(dex_types::UserTokenBalance {
-                        token: dex_types::Token {
+                    Ok(oisy_trade_types::UserTokenBalance {
+                        token: oisy_trade_types::Token {
                             id: token.into(),
                             metadata: metadata.into(),
                         },
@@ -645,27 +647,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// and [`Self::get_fee_balances`]: dedupe filter entries, look up the
     /// token in `self.tokens`, and resolve each entry's balance via the
     /// caller-supplied `balance_lookup`. Unknown tokens are reported as
-    /// [`dex_types::GetBalancesError::TokenNotSupported`].
+    /// [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
     fn apply_filter<F>(
         &self,
-        filter: &[dex_types::FilterToken],
+        filter: &[oisy_trade_types::FilterToken],
         balance_lookup: F,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>>
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>>
     where
-        F: Fn(&TokenId) -> dex_types::Balance,
+        F: Fn(&TokenId) -> oisy_trade_types::Balance,
     {
-        let mut seen: BTreeSet<dex_types::FilterToken> = BTreeSet::new();
+        let mut seen: BTreeSet<oisy_trade_types::FilterToken> = BTreeSet::new();
         filter
             .iter()
             .filter(|ft| seen.insert((*ft).clone()))
             .map(|ft| {
                 let internal_token = match ft {
-                    dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
+                    oisy_trade_types::FilterToken::ById(t) => TokenId::from(t.clone()),
                 };
                 match self.tokens.get(&internal_token) {
-                    None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
-                    Some(metadata) => Ok(dex_types::UserTokenBalance {
-                        token: dex_types::Token {
+                    None => Err(oisy_trade_types::GetBalancesError::TokenNotSupported(
+                        ft.clone(),
+                    )),
+                    Some(metadata) => Ok(oisy_trade_types::UserTokenBalance {
+                        token: oisy_trade_types::Token {
                             id: internal_token.into(),
                             metadata: metadata.clone().into(),
                         },
@@ -711,8 +715,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_balances(
         &self,
         user: &Principal,
-        filter: Option<&[dex_types::FilterToken]>,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        filter: Option<&[oisy_trade_types::FilterToken]>,
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
         // `lookup` (not `intern`) so mere queriers don't pollute the registry.
         // `None` ⇒ the user has never held a balance, so every balance is zero.
         let user_id = self.user_registry.lookup(*user);
@@ -734,8 +738,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                             .get_balance(user_id, t)
                             .filter(|b| !b.is_zero())
                             .map(|b| {
-                                Ok(dex_types::UserTokenBalance {
-                                    token: dex_types::Token {
+                                Ok(oisy_trade_types::UserTokenBalance {
+                                    token: oisy_trade_types::Token {
                                         id: (*t).into(),
                                         metadata: metadata.clone().into(),
                                     },
@@ -893,12 +897,12 @@ fn nonzero(q: Quantity) -> Option<Quantity> {
     if q.is_zero() { None } else { Some(q) }
 }
 
-/// `dex_types::Balance` carrying a fee amount in `free` and zero in
+/// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in
 /// `reserved`. Fees have no reserved concept; the `Balance` shape is
 /// reused to keep the `get_fee_balances` response identical in shape to
 /// `get_balances`.
-fn fee_only_balance(amount: Quantity) -> dex_types::Balance {
-    dex_types::Balance {
+fn fee_only_balance(amount: Quantity) -> oisy_trade_types::Balance {
+    oisy_trade_types::Balance {
         free: amount.into(),
         reserved: candid::Nat::from(0u64),
     }
@@ -1033,41 +1037,45 @@ pub enum CancelLimitOrderError {
     OrderAlreadyCanceled,
 }
 
-impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
     fn from(err: CancelLimitOrderError) -> Self {
         match err {
-            CancelLimitOrderError::OrderNotFound => dex_types::CancelLimitOrderError::OrderNotFound,
-            CancelLimitOrderError::NotOrderOwner => dex_types::CancelLimitOrderError::NotOrderOwner,
+            CancelLimitOrderError::OrderNotFound => {
+                oisy_trade_types::CancelLimitOrderError::OrderNotFound
+            }
+            CancelLimitOrderError::NotOrderOwner => {
+                oisy_trade_types::CancelLimitOrderError::NotOrderOwner
+            }
             CancelLimitOrderError::OrderAlreadyFilled => {
-                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+                oisy_trade_types::CancelLimitOrderError::OrderAlreadyFilled
             }
             CancelLimitOrderError::OrderAlreadyCanceled => {
-                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+                oisy_trade_types::CancelLimitOrderError::OrderAlreadyCanceled
             }
         }
     }
 }
 
-impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
+impl From<AddLimitOrderError> for oisy_trade_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
         match err {
             AddLimitOrderError::AmountExceedsMaximum => {
-                dex_types::AddLimitOrderError::AmountExceedsMaximum
+                oisy_trade_types::AddLimitOrderError::AmountExceedsMaximum
             }
             AddLimitOrderError::UnknownTradingPair => {
-                dex_types::AddLimitOrderError::UnknownTradingPair
+                oisy_trade_types::AddLimitOrderError::UnknownTradingPair
             }
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
                 price,
                 tick_size,
-            }) => dex_types::AddLimitOrderError::InvalidPrice {
+            }) => oisy_trade_types::AddLimitOrderError::InvalidPrice {
                 price: candid::Nat::from(price),
                 tick_size: candid::Nat::from(tick_size),
             },
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
                 quantity,
                 lot_size,
-            }) => dex_types::AddLimitOrderError::InvalidQuantity {
+            }) => oisy_trade_types::AddLimitOrderError::InvalidQuantity {
                 quantity: quantity.into(),
                 lot_size: candid::Nat::from(lot_size),
             },
@@ -1075,8 +1083,8 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 token,
                 available,
                 required,
-            } => dex_types::AddLimitOrderError::InsufficientBalance {
-                token: dex_types::TokenId::from(token),
+            } => oisy_trade_types::AddLimitOrderError::InsufficientBalance {
+                token: oisy_trade_types::TokenId::from(token),
                 available: available.into(),
                 required: required.into(),
             },

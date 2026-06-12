@@ -6,7 +6,7 @@ mod add_trading_pair {
     };
     use crate::{add_trading_pair, state};
     use candid::Principal;
-    use dex_types::{AddTradingPairError, TokenId, TokenMetadata};
+    use oisy_trade_types::{AddTradingPairError, TokenId, TokenMetadata};
 
     #[test]
     fn should_reject_inconsistent_metadata_for_base_token() {
@@ -204,16 +204,16 @@ mod add_trading_pair {
         quote_decimals: u8,
         tick_size: u64,
         lot_size: u64,
-    ) -> dex_types::AddTradingPairRequest {
-        dex_types::AddTradingPairRequest {
-            base: dex_types::Token {
+    ) -> oisy_trade_types::AddTradingPairRequest {
+        oisy_trade_types::AddTradingPairRequest {
+            base: oisy_trade_types::Token {
                 id: base,
                 metadata: TokenMetadata {
                     symbol: "BASE".to_string(),
                     decimals: base_decimals,
                 },
             },
-            quote: dex_types::Token {
+            quote: oisy_trade_types::Token {
                 id: quote,
                 metadata: TokenMetadata {
                     symbol: "QUOTE".to_string(),
@@ -369,12 +369,12 @@ mod add_limit_order {
     };
     use crate::{add_limit_order, get_balances, state};
     use candid::Principal;
-    use dex_types::{Balance, FilterToken, LimitOrderRequest, Side};
+    use oisy_trade_types::{Balance, FilterToken, LimitOrderRequest, Side};
     use std::collections::BTreeSet;
 
     const DEFAULT_USER: Principal = Principal::from_slice(&[0x042]);
 
-    fn balance_of(token: dex_types::TokenId, caller: Principal) -> Balance {
+    fn balance_of(token: oisy_trade_types::TokenId, caller: Principal) -> Balance {
         let mut result = get_balances(Some(vec![FilterToken::ById(token)]), caller).unwrap();
         assert_eq!(result.len(), 1);
         result.remove(0).unwrap().balance
@@ -399,14 +399,14 @@ mod add_limit_order {
         init_state_with_order_book();
         let runtime = mock_runtime_for(DEFAULT_USER);
         let mut request = limit_order_request();
-        request.pair = dex_types::TradingPair {
+        request.pair = oisy_trade_types::TradingPair {
             base: Principal::management_canister(),
             quote: Principal::management_canister(),
         };
         let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
-            Err(dex_types::AddLimitOrderError::UnknownTradingPair)
+            Err(oisy_trade_types::AddLimitOrderError::UnknownTradingPair)
         );
     }
 
@@ -422,7 +422,7 @@ mod add_limit_order {
             let result = add_limit_order(request, &runtime);
             assert_eq!(
                 result,
-                Err(dex_types::AddLimitOrderError::InvalidPrice {
+                Err(oisy_trade_types::AddLimitOrderError::InvalidPrice {
                     price: candid::Nat::from(price),
                     tick_size: candid::Nat::from(TICK_SIZE.get()),
                 }),
@@ -442,12 +442,12 @@ mod add_limit_order {
         ];
         for (quantity, name) in cases {
             let mut request = limit_order_request();
-            request.side = dex_types::Side::Sell;
+            request.side = oisy_trade_types::Side::Sell;
             request.quantity = candid::Nat::from(quantity);
             let result = add_limit_order(request, &runtime);
             assert_eq!(
                 result,
-                Err(dex_types::AddLimitOrderError::InvalidQuantity {
+                Err(oisy_trade_types::AddLimitOrderError::InvalidQuantity {
                     quantity: candid::Nat::from(quantity),
                     lot_size: candid::Nat::from(1_000_000u64),
                 }),
@@ -466,8 +466,8 @@ mod add_limit_order {
         let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
-            Err(dex_types::AddLimitOrderError::InsufficientBalance {
-                token: dex_types::TokenId {
+            Err(oisy_trade_types::AddLimitOrderError::InsufficientBalance {
+                token: oisy_trade_types::TokenId {
                     ledger_id: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
                 },
                 available: candid::Nat::from(0u64),
@@ -483,12 +483,12 @@ mod add_limit_order {
         let user = Principal::from_slice(&[0x01]);
         let runtime = mock_runtime_for(user);
         let mut request = limit_order_request();
-        request.side = dex_types::Side::Sell;
+        request.side = oisy_trade_types::Side::Sell;
         let result = add_limit_order(request, &runtime);
         assert_eq!(
             result,
-            Err(dex_types::AddLimitOrderError::InsufficientBalance {
-                token: dex_types::TokenId {
+            Err(oisy_trade_types::AddLimitOrderError::InsufficientBalance {
+                token: oisy_trade_types::TokenId {
                     ledger_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
                 },
                 available: candid::Nat::from(0u64),
@@ -584,8 +584,8 @@ mod cancel_limit_order {
     };
     use crate::{add_limit_order, cancel_limit_order};
     use candid::Principal;
-    use dex_types::CancelLimitOrderError;
-    use dex_types_internal::Mode;
+    use oisy_trade_types::CancelLimitOrderError;
+    use oisy_trade_types_internal::Mode;
 
     #[test]
     #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
@@ -641,14 +641,16 @@ mod cancel_limit_order {
                 order_id.clone(),
                 &mock_runtime_at(owner, Timestamp::new(222))
             ),
-            Ok(dex_types::OrderRecord {
+            Ok(oisy_trade_types::OrderRecord {
                 owner,
-                side: dex_types::Side::Buy,
+                side: oisy_trade_types::Side::Buy,
                 price: candid::Nat::from(100 * PRICE_SCALE),
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                }),
+                status: oisy_trade_types::OrderStatus::Canceled(
+                    oisy_trade_types::CanceledOrderInfo {
+                        remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                    }
+                ),
                 timestamp: 111,
             })
         );
@@ -668,7 +670,7 @@ mod cancel_limit_order {
 
         let buy_id = add_limit_order(limit_order_request(), &mock_runtime_for(buyer)).unwrap();
         let mut sell_request = limit_order_request();
-        sell_request.side = dex_types::Side::Sell;
+        sell_request.side = oisy_trade_types::Side::Sell;
         add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
         crate::process_pending_orders(&mock_runtime_for(buyer));
 
@@ -695,20 +697,22 @@ mod cancel_limit_order {
         );
         assert_eq!(
             result,
-            Ok(dex_types::OrderRecord {
+            Ok(oisy_trade_types::OrderRecord {
                 owner,
-                side: dex_types::Side::Buy,
+                side: oisy_trade_types::Side::Buy,
                 price: candid::Nat::from(100 * PRICE_SCALE),
                 quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                status: dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
-                    remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
-                }),
+                status: oisy_trade_types::OrderStatus::Canceled(
+                    oisy_trade_types::CanceledOrderInfo {
+                        remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+                    }
+                ),
                 timestamp: 111,
             })
         );
         assert_eq!(
             crate::get_order_status(order_id),
-            dex_types::OrderStatus::Canceled(dex_types::CanceledOrderInfo {
+            oisy_trade_types::OrderStatus::Canceled(oisy_trade_types::CanceledOrderInfo {
                 remaining_quantity: candid::Nat::from(u64::from(LOT_SIZE)),
             })
         );
@@ -720,7 +724,7 @@ mod get_order_status {
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
     use crate::{add_limit_order, get_order_status};
     use candid::Principal;
-    use dex_types::OrderStatus;
+    use oisy_trade_types::OrderStatus;
 
     #[test]
     fn should_return_pending_for_existing_order() {
@@ -742,7 +746,7 @@ mod get_order_status {
 
         let buy_id = add_limit_order(limit_order_request(), &mock_runtime_for(buyer)).unwrap();
         let mut sell_request = limit_order_request();
-        sell_request.side = dex_types::Side::Sell;
+        sell_request.side = oisy_trade_types::Side::Sell;
         let sell_id = add_limit_order(sell_request, &mock_runtime_for(seller)).unwrap();
 
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
@@ -777,8 +781,8 @@ mod deposit {
         ckbtc_token_id, icp_token_id, init_state_with_order_book, transfer_from_response,
     };
     use candid::{Nat, Principal};
-    use dex_types::{DepositError, DepositRequest, LedgerTransferFromError};
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
+    use oisy_trade_types::{DepositError, DepositRequest, LedgerTransferFromError};
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const OTHER_USER: Principal = Principal::from_slice(&[0x43]);
@@ -882,16 +886,16 @@ mod withdraw {
     use crate::test_fixtures::transfer_response;
     use crate::{state, withdraw};
     use candid::{Nat, Principal};
-    use dex_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
     use ic_cdk::call::Response;
     use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
     use mockall::Sequence;
+    use oisy_trade_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const TOKEN_LEDGER: Principal = Principal::from_slice(&[0xAA]);
 
-    fn token_id() -> dex_types::TokenId {
-        dex_types::TokenId {
+    fn token_id() -> oisy_trade_types::TokenId {
+        oisy_trade_types::TokenId {
             ledger_id: TOKEN_LEDGER,
         }
     }
@@ -1083,7 +1087,7 @@ mod withdraw {
         let deposit = 1_000_000u64;
         init_state_with_balance(deposit);
 
-        // The ledger says the DEX canister doesn't hold enough tokens.
+        // The ledger says the OISY TRADE canister doesn't hold enough tokens.
         let runtime = mock_runtime_returning(vec![transfer_response(Err(
             TransferError::InsufficientFunds {
                 balance: Nat::from(0u64),
@@ -1150,7 +1154,7 @@ mod withdraw {
 
         assert_eq!(
             result,
-            Ok(dex_types::WithdrawResponse {
+            Ok(oisy_trade_types::WithdrawResponse {
                 block_index: block_index.clone()
             })
         );
@@ -1426,7 +1430,9 @@ mod get_order_book_ticker {
         place_limit_order,
     };
     use candid::{Nat, Principal};
-    use dex_types::{GetOrderBookTickerError, OrderBookTicker, PriceLevel, Side, TradingPair};
+    use oisy_trade_types::{
+        GetOrderBookTickerError, OrderBookTicker, PriceLevel, Side, TradingPair,
+    };
 
     #[test]
     fn should_return_unknown_trading_pair_for_unregistered() {
@@ -1495,7 +1501,7 @@ mod get_order_book_depth {
         place_limit_order,
     };
     use candid::{Nat, Principal};
-    use dex_types::{
+    use oisy_trade_types::{
         GetOrderBookDepthError, GetOrderBookDepthRequest, OrderBookDepth, PriceLevel, Side,
         TradingPair,
     };
@@ -1644,7 +1650,9 @@ mod get_my_orders {
     };
     use crate::{GetMyOrdersError, add_limit_order, get_my_orders};
     use candid::{Nat, Principal};
-    use dex_types::{GetMyOrdersArgs, LimitOrderRequest, MAX_ORDERS_PER_RESPONSE, OrderId, Side};
+    use oisy_trade_types::{
+        GetMyOrdersArgs, LimitOrderRequest, MAX_ORDERS_PER_RESPONSE, OrderId, Side,
+    };
 
     /// Places `count` resting buys for `user` and returns their ids in
     /// placement order, so `ids[0]` is the oldest and `ids[count - 1]` the
@@ -1743,7 +1751,7 @@ mod get_trading_pairs {
     use crate::test_fixtures::{
         LOT_SIZE, TICK_SIZE, ckbtc_token_id, icp_token_id, init_state_with_order_book,
     };
-    use dex_types::TradingPairInfo;
+    use oisy_trade_types::TradingPairInfo;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -1761,16 +1769,16 @@ mod get_trading_pairs {
         assert_eq!(
             pairs,
             vec![TradingPairInfo {
-                base: dex_types::Token {
-                    id: dex_types::TokenId::from(icp_token_id()),
-                    metadata: dex_types::TokenMetadata {
+                base: oisy_trade_types::Token {
+                    id: oisy_trade_types::TokenId::from(icp_token_id()),
+                    metadata: oisy_trade_types::TokenMetadata {
                         symbol: "ICP".to_string(),
                         decimals: 8,
                     },
                 },
-                quote: dex_types::Token {
-                    id: dex_types::TokenId::from(ckbtc_token_id()),
-                    metadata: dex_types::TokenMetadata {
+                quote: oisy_trade_types::Token {
+                    id: oisy_trade_types::TokenId::from(ckbtc_token_id()),
+                    metadata: oisy_trade_types::TokenMetadata {
                         symbol: "ckBTC".to_string(),
                         decimals: 8,
                     },
@@ -1788,7 +1796,7 @@ mod get_balances {
     use crate::test_fixtures::arbitrary::arb_filter_tokens;
     use crate::test_fixtures::init_state_with_order_book;
     use candid::Principal;
-    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use oisy_trade_types::{GetBalancesRequestError, MAX_FILTER_LEN};
     use proptest::{prop_assert, prop_assert_eq, proptest};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
@@ -1824,7 +1832,7 @@ mod get_fee_balances {
     use crate::state::reset_state;
     use crate::test_fixtures::arbitrary::arb_filter_tokens;
     use crate::test_fixtures::init_state_with_order_book;
-    use dex_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use oisy_trade_types::{GetBalancesRequestError, MAX_FILTER_LEN};
     use proptest::{prop_assert, prop_assert_eq, proptest};
 
     proptest! {

@@ -16,11 +16,11 @@ fn should_default_to_production_policy() {
     let p = ExecutionPolicy::default();
     assert_eq!(
         p.max_orders_per_chunk(),
-        dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+        oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
     );
     assert_eq!(
         p.instruction_budget(),
-        dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+        oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
     );
 }
 

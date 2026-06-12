@@ -16,7 +16,7 @@ mod schema_stability {
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
-    use dex_types_internal::Mode;
+    use oisy_trade_types_internal::Mode;
     use std::num::{NonZeroU64, NonZeroU128};
 
     /// Fixture exercising every `#[n(N)]` field reachable from `StateSnapshot`:

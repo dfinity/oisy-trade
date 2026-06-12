@@ -1,7 +1,7 @@
 [package]
-name = "dex_client"
+name = "oisy_trade_client"
 version = "0.1.0"
-description = "Client to interact with the DEX canister"
+description = "Client to interact with the OISY TRADE canister"
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -13,6 +13,6 @@ include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 [dependencies]
 async-trait = { workspace = true }
 candid = { workspace = true }
-dex_types = { path = "../types" }
 ic-cdk = { workspace = true }
+oisy_trade_types = { path = "../types" }
 serde = { workspace = true }

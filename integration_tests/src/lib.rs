@@ -4,7 +4,7 @@ pub mod fee_fill;
 pub mod icrc_ledger;
 
 pub use deposit_flow::DepositFlow;
-pub use events::DexEventAssert;
+pub use events::OisyTradeEventAssert;
 pub use fee_fill::{FeeFillOutcome, fill_one_cross_with_fees};
 pub use icrc_ledger::LedgerClient;
 
@@ -12,13 +12,13 @@ use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Decode, Encode, Nat, Principal, decode_args, encode_args};
 use canlog::{Log, LogEntry};
-use dex_client::{DexClient, Runtime};
-use dex_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair};
-use dex_types_internal::{DexArg, InitArg, Mode, UpgradeArg, log::Priority};
 use ic_cdk::call::RejectCode;
 use ic_http_types::{HttpRequest, HttpResponse};
 pub use ic_metrics_assert::{AsyncCanisterHttpQuery, MetricsAssert};
 use icrc_ledger_types::icrc1::account::Account;
+use oisy_trade_client::{OisyTradeClient, Runtime};
+use oisy_trade_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair};
+use oisy_trade_types_internal::{InitArg, Mode, OisyTradeArg, UpgradeArg, log::Priority};
 use pocket_ic::{
     CanisterId, CanisterSettings, PocketIcBuilder, RejectResponse, nonblocking::PocketIc,
 };
@@ -35,7 +35,7 @@ pub struct Setup {
     env: Option<PocketIc>,
     caller: Principal,
     controller: Principal,
-    dex_id: CanisterId,
+    oisy_trade_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
 }
@@ -44,8 +44,8 @@ impl Setup {
     pub async fn new() -> Self {
         Self::new_with_init_arg(InitArg {
             mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         })
         .await
     }
@@ -71,8 +71,8 @@ impl Setup {
         env.add_cycles(canister_id, u128::MAX).await;
         env.install_canister(
             canister_id,
-            dex_wasm(),
-            Encode!(&DexArg::Init(init_arg)).unwrap(),
+            oisy_trade_wasm(),
+            Encode!(&OisyTradeArg::Init(init_arg)).unwrap(),
             Some(controller),
         )
         .await;
@@ -99,7 +99,7 @@ impl Setup {
             env: Some(env),
             caller,
             controller,
-            dex_id: canister_id,
+            oisy_trade_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
         }
@@ -111,7 +111,7 @@ impl Setup {
     }
 
     pub async fn add_trading_pair(&self) {
-        let controller_client = self.dex_client_with_caller(self.controller());
+        let controller_client = self.oisy_trade_client_with_caller(self.controller());
         let result = controller_client
             .add_trading_pair(self.add_trading_pair_request())
             .await;
@@ -165,15 +165,15 @@ impl Setup {
         }
     }
 
-    pub fn dex_account(&self) -> Account {
+    pub fn oisy_trade_account(&self) -> Account {
         Account {
-            owner: self.dex_id,
+            owner: self.oisy_trade_id,
             subaccount: None,
         }
     }
 
-    pub fn dex_client(&self) -> DexClient<PocketIcRuntime<'_>> {
-        DexClient::new(self.new_pocket_ic(), self.dex_id)
+    pub fn oisy_trade_client(&self) -> OisyTradeClient<PocketIcRuntime<'_>> {
+        OisyTradeClient::new(self.new_pocket_ic(), self.oisy_trade_id)
     }
 
     pub fn base_token_ledger(&self) -> LedgerClient<'_> {
@@ -200,8 +200,8 @@ impl Setup {
         self.controller
     }
 
-    pub fn dex_id(&self) -> CanisterId {
-        self.dex_id
+    pub fn oisy_trade_id(&self) -> CanisterId {
+        self.oisy_trade_id
     }
 
     pub fn base_ledger_id(&self) -> CanisterId {
@@ -248,13 +248,16 @@ impl Setup {
             .await
     }
 
-    pub fn dex_client_with_caller(&self, caller: Principal) -> DexClient<PocketIcRuntime<'_>> {
-        DexClient::new(
+    pub fn oisy_trade_client_with_caller(
+        &self,
+        caller: Principal,
+    ) -> OisyTradeClient<PocketIcRuntime<'_>> {
+        OisyTradeClient::new(
             PocketIcRuntime {
                 env: self.env.as_ref().unwrap(),
                 caller,
             },
-            self.dex_id,
+            self.oisy_trade_id,
         )
     }
 
@@ -275,7 +278,7 @@ impl Setup {
         let response: HttpResponse = self
             .env()
             .query_call(
-                self.dex_id,
+                self.oisy_trade_id,
                 Principal::anonymous(),
                 "http_request",
                 Encode!(&request).unwrap(),
@@ -306,7 +309,7 @@ impl Setup {
         let response: HttpResponse = self
             .env()
             .query_call(
-                self.dex_id,
+                self.oisy_trade_id,
                 Principal::anonymous(),
                 "http_request",
                 Encode!(&request).unwrap(),
@@ -320,32 +323,32 @@ impl Setup {
     }
 
     pub async fn upgrade(&self, upgrade_arg: Option<UpgradeArg>) {
-        let arg = DexArg::Upgrade(upgrade_arg);
+        let arg = OisyTradeArg::Upgrade(upgrade_arg);
         self.env()
-            .stop_canister(self.dex_id, Some(self.controller))
+            .stop_canister(self.oisy_trade_id, Some(self.controller))
             .await
-            .expect("failed to stop DEX");
+            .expect("failed to stop OISY TRADE");
         self.env()
             .upgrade_canister(
-                self.dex_id,
-                dex_wasm(),
+                self.oisy_trade_id,
+                oisy_trade_wasm(),
                 Encode!(&arg).unwrap(),
                 Some(self.controller),
             )
             .await
-            .expect("failed to upgrade DEX canister");
+            .expect("failed to upgrade OISY TRADE canister");
         self.env()
-            .start_canister(self.dex_id, Some(self.controller))
+            .start_canister(self.oisy_trade_id, Some(self.controller))
             .await
-            .expect("failed to start DEX after upgrade");
+            .expect("failed to start OISY TRADE after upgrade");
     }
 
-    pub async fn assert_that_events(&self) -> DexEventAssert {
-        DexEventAssert::new(self.get_all_events().await)
+    pub async fn assert_that_events(&self) -> OisyTradeEventAssert {
+        OisyTradeEventAssert::new(self.get_all_events().await)
     }
 
-    pub async fn get_all_events(&self) -> Vec<dex_types_internal::event::Event> {
-        use dex_types_internal::event::GetEventsResult;
+    pub async fn get_all_events(&self) -> Vec<oisy_trade_types_internal::event::Event> {
+        use oisy_trade_types_internal::event::GetEventsResult;
 
         const FIRST_BATCH_SIZE: u64 = 100;
 
@@ -366,12 +369,12 @@ impl Setup {
         &self,
         start: u64,
         length: u64,
-    ) -> dex_types_internal::event::GetEventsResult {
-        use dex_types_internal::event::{GetEventsArgs, GetEventsResult};
+    ) -> oisy_trade_types_internal::event::GetEventsResult {
+        use oisy_trade_types_internal::event::{GetEventsArgs, GetEventsResult};
 
         self.env()
             .query_call(
-                self.dex_id,
+                self.oisy_trade_id,
                 Principal::anonymous(),
                 "get_events",
                 Encode!(&GetEventsArgs { start, length }).unwrap(),
@@ -397,16 +400,16 @@ impl Drop for Setup {
     }
 }
 
-fn dex_wasm() -> Vec<u8> {
-    let path = std::env::var("DEX_CANISTER_WASM_PATH")
+fn oisy_trade_wasm() -> Vec<u8> {
+    let path = std::env::var("OISY_TRADE_CANISTER_WASM_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-                .join("../wasms/dex_canister.wasm.gz")
+                .join("../wasms/oisy_trade_canister.wasm.gz")
         });
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "Failed to read DEX WASM at {}: {}\nRun `just build` first.",
+            "Failed to read OISY TRADE WASM at {}: {}\nRun `just build` first.",
             path.display(),
             e
         )
@@ -433,7 +436,12 @@ pub fn ledger_wasm() -> Vec<u8> {
 impl AsyncCanisterHttpQuery<RejectResponse> for &Setup {
     async fn http_query(&self, request: Vec<u8>) -> Result<Vec<u8>, RejectResponse> {
         self.env()
-            .query_call(self.dex_id, Principal::anonymous(), "http_request", request)
+            .query_call(
+                self.oisy_trade_id,
+                Principal::anonymous(),
+                "http_request",
+                request,
+            )
             .await
     }
 }

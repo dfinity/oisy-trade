@@ -8,7 +8,7 @@ tags: [circuit-breaker, permissions, security, trading-halt, freeze]
 
 ## Motivation
 
-The DEX has no way to stop trading when something goes wrong. We want three
+The OISY TRADE has no way to stop trading when something goes wrong. We want three
 controller-gated **soft halts** so an operator can contain an incident without
 tearing down state and without trapping users' funds:
 
@@ -286,7 +286,7 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
 Five controller-gated endpoints. Each: a business fn in `canister/src/lib.rs` guarded by
 `if !runtime.is_controller(&runtime.msg_caller()) { return Err(...NotController) }`, which
 builds the event and records it with `permit_admin()`; a thin `#[ic_cdk::update]` wrapper
-in `canister/src/main.rs`; and a declaration in `canister/dex.did`.
+in `canister/src/main.rs`; and a declaration in `canister/oisy_trade.did`.
 
 | Endpoint | Arg | Event |
 |---|---|---|
@@ -301,7 +301,7 @@ unknown pair via a dedicated `SetPairStatusError { NotController, UnknownTrading
 (keeps the global `UnauthorizedError` about authorization). Public `PairStatus { Active,
 Halted }` is exposed only at the candid boundary (internally two states suffice).
 Idempotent calls are no-op successes that still emit the event (R8). Public types mirror
-`AddTradingPairError`; `dex.did` gains the endpoints, `PairStatus`, the error types, and
+`AddTradingPairError`; `oisy_trade.did` gains the endpoints, `PairStatus`, the error types, and
 the new `AddLimitOrderError`/`DepositError`/`WithdrawError` variants. The repo's candid
 equality check must pass.
 
@@ -340,8 +340,8 @@ Verification:
 ```
 cargo fmt --all
 just lint
-cargo test -p dex_canister
-cargo test -p dex_int_tests
+cargo test -p oisy_trade_canister
+cargo test -p oisy_trade_int_tests
 # + the repo's candid equality check (see justfile / CI)
 ```
 
@@ -366,7 +366,7 @@ halt; compliance or compromised principal → freeze).
   `Permit::Async` at the deposit/withdraw recorder sites — always-`Clean` until the freeze
   check lands in PR 4); thread the `Permit` parameter through `process_event`/`record_event`
   and every call site.
-  *Acceptance:* no behavioral change (all existing tests pass); `dex.did` unchanged;
+  *Acceptance:* no behavioral change (all existing tests pass); `oisy_trade.did` unchanged;
   snapshot round-trips empty + old-format decodes to default; every recorder call site
   supplies a permit; deposit/withdraw record via `Permit::Async` (the post-await re-check
   is structurally present even though it can't yet deny).

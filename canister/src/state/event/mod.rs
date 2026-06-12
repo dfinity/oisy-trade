@@ -4,10 +4,10 @@ use crate::order::{
     Side, TickSize, TokenId, TokenMetadata,
 };
 use candid::Principal;
-use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use minicbor::{Decode, Encode};
+use oisy_trade_types_internal::{InitArg, UpgradeArg};
 use std::borrow::Cow;
 
 #[cfg(test)]

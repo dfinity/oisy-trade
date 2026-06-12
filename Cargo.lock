@@ -640,91 +640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dex_canister"
-version = "0.1.0"
-dependencies = [
- "askama",
- "assert_matches",
- "async-trait",
- "bimap",
- "canbench-rs",
- "candid",
- "candid_parser",
- "canlog",
- "dex_types",
- "dex_types_internal",
- "ic-cdk",
- "ic-cdk-timers",
- "ic-http-types",
- "ic-metrics-encoder",
- "ic-stable-structures",
- "icrc-cbor",
- "icrc-ledger-types",
- "minicbor",
- "mockall",
- "num-bigint",
- "proptest",
- "scraper",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "tokio",
-]
-
-[[package]]
-name = "dex_client"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "candid",
- "dex_types",
- "ic-cdk",
- "serde",
-]
-
-[[package]]
-name = "dex_int_tests"
-version = "0.1.0"
-dependencies = [
- "assert_matches",
- "async-trait",
- "candid",
- "canlog",
- "dex_client",
- "dex_types",
- "dex_types_internal",
- "ic-cdk",
- "ic-http-types",
- "ic-metrics-assert",
- "icrc-ledger-types",
- "pocket-ic",
- "scopeguard",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "dex_types"
-version = "0.1.0"
-dependencies = [
- "candid",
- "serde",
-]
-
-[[package]]
-name = "dex_types_internal"
-version = "0.1.0"
-dependencies = [
- "candid",
- "canlog",
- "dex_types",
- "icrc-cbor",
- "minicbor",
- "serde",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1924,6 +1839,91 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "oisy_trade_canister"
+version = "0.1.0"
+dependencies = [
+ "askama",
+ "assert_matches",
+ "async-trait",
+ "bimap",
+ "canbench-rs",
+ "candid",
+ "candid_parser",
+ "canlog",
+ "ic-cdk",
+ "ic-cdk-timers",
+ "ic-http-types",
+ "ic-metrics-encoder",
+ "ic-stable-structures",
+ "icrc-cbor",
+ "icrc-ledger-types",
+ "minicbor",
+ "mockall",
+ "num-bigint",
+ "oisy_trade_types",
+ "oisy_trade_types_internal",
+ "proptest",
+ "scraper",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "tokio",
+]
+
+[[package]]
+name = "oisy_trade_client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "candid",
+ "ic-cdk",
+ "oisy_trade_types",
+ "serde",
+]
+
+[[package]]
+name = "oisy_trade_int_tests"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "candid",
+ "canlog",
+ "ic-cdk",
+ "ic-http-types",
+ "ic-metrics-assert",
+ "icrc-ledger-types",
+ "oisy_trade_client",
+ "oisy_trade_types",
+ "oisy_trade_types_internal",
+ "pocket-ic",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "oisy_trade_types"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "serde",
+]
+
+[[package]]
+name = "oisy_trade_types_internal"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "canlog",
+ "icrc-cbor",
+ "minicbor",
+ "oisy_trade_types",
+ "serde",
 ]
 
 [[package]]

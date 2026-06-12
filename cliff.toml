@@ -31,11 +31,11 @@ footer = """
     {% if release.version -%}
         {% if release.previous.version -%}
             [{{ release.version | trim_start_matches(pat="v") }}]: \
-                https://github.com/dfinity/dex\
+                https://github.com/dfinity/oisy-trade\
                     /compare/{{ release.previous.version }}..{{ release.version }}
         {% endif -%}
     {% else -%}
-        [unreleased]: https://github.com/dfinity/dex\
+        [unreleased]: https://github.com/dfinity/oisy-trade\
             /compare/{{ release.previous.version }}..HEAD
     {% endif -%}
 {% endfor %}

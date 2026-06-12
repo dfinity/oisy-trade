@@ -36,9 +36,9 @@ pub struct OrderRecord {
     pub timestamp: Timestamp,
 }
 
-impl From<OrderRecord> for dex_types::OrderRecord {
+impl From<OrderRecord> for oisy_trade_types::OrderRecord {
     fn from(record: OrderRecord) -> Self {
-        dex_types::OrderRecord {
+        oisy_trade_types::OrderRecord {
             owner: record.owner,
             side: record.side.into(),
             price: candid::Nat::from(record.price),

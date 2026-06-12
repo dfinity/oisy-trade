@@ -119,7 +119,7 @@ ICP/USDT has the deepest book with at least 5,697 price levels of resting orders
 
 Both pairs saw their peak at the exact same hour (2026-03-11 06:00 UTC), suggesting a market-wide event. The peak-to-average ratio is 103x (BTC) and 54x (USDT), showing extreme spikiness.
 
-## Interpretation for ICP DEX Design
+## Interpretation for ICP OISY TRADE Design
 
 **Steady-state load is very manageable.** During normal conditions, ICP/USDT -- the busiest pair -- sees about 2,600 trades/hour (~0.7/sec). Even aggregating both pairs, the matching engine would process fewer than 1 trade per second on average. This is well within the capacity of a single canister on ICP.
 
@@ -127,6 +127,6 @@ Both pairs saw their peak at the exact same hour (2026-03-11 06:00 UTC), suggest
 
 **Order book size is moderate.** The deepest book (ICP/USDT) has at least ~5,700 price levels. An ICP canister can easily hold this in-memory. Even 10x this depth (57,000 levels) would be manageable.
 
-**Fan-out is cheap in our design.** Each incoming order generates ~2 fills on average (ICP/USDT). Since our DEX settles fills via internal balance updates (no ledger calls), the fan-out only adds in-canister bookkeeping cost, which is negligible. Ledger transfers are only needed at deposit/withdrawal time, not per fill.
+**Fan-out is cheap in our design.** Each incoming order generates ~2 fills on average (ICP/USDT). Since our OISY TRADE settles fills via internal balance updates (no ledger calls), the fan-out only adds in-canister bookkeeping cost, which is negligible. Ledger transfers are only needed at deposit/withdrawal time, not per fill.
 
 **ICP/USDT should be the primary benchmark.** It represents ~80% of volume and depth. ICP/BTC is essentially a rounding error in comparison and could be deprioritized in capacity planning.

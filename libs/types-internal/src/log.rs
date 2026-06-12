@@ -1,4 +1,4 @@
-//! Log types used by the DEX canister.
+//! Log types used by the OISY TRADE canister.
 
 use canlog::{GetLogFilter, LogFilter, LogPriorityLevels};
 use serde::{Deserialize, Serialize};

@@ -1,10 +1,10 @@
-use dex_types_internal::event::{Event, EventType};
+use oisy_trade_types_internal::event::{Event, EventType};
 
-pub struct DexEventAssert {
+pub struct OisyTradeEventAssert {
     events: Vec<EventType>,
 }
 
-impl DexEventAssert {
+impl OisyTradeEventAssert {
     pub fn new(events: impl IntoIterator<Item = Event>) -> Self {
         let events: Vec<_> = events.into_iter().map(|e| e.payload).collect();
         Self { events }
@@ -17,7 +17,7 @@ impl DexEventAssert {
         let events = self.events;
         let debug_guard = scopeguard::guard((), |()| {
             eprintln!(
-                "ERROR: assertion on DEX events failed. Events: {:?}",
+                "ERROR: assertion on OISY TRADE events failed. Events: {:?}",
                 events
             )
         });

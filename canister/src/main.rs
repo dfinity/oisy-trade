@@ -1,4 +1,5 @@
-use dex_types::{
+use ic_http_types::{HttpRequest, HttpResponse};
+use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
@@ -6,13 +7,13 @@ use dex_types::{
     OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
     TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
-use dex_types_internal::DexArg;
-use dex_types_internal::log::Priority;
-use ic_http_types::{HttpRequest, HttpResponse};
+use oisy_trade_types_internal::OisyTradeArg;
+use oisy_trade_types_internal::log::Priority;
 
 #[ic_cdk::update]
 fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderError> {
-    let order_id = dex_canister::add_limit_order(request.clone(), &dex_canister::IC_RUNTIME)?;
+    let order_id =
+        oisy_trade_canister::add_limit_order(request.clone(), &oisy_trade_canister::IC_RUNTIME)?;
     canlog::log!(
         Priority::Info,
         "[add_limit_order]: created order_id={} for request {:?}",
@@ -23,14 +24,15 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
     // TODO DEFI-2823: coalesce — a burst of order placements currently
     // queues one zero-delay timer per call.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        dex_canister::drive_matching();
+        oisy_trade_canister::drive_matching();
     });
     Ok(order_id)
 }
 
 #[ic_cdk::update]
 fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrderError> {
-    let result = dex_canister::cancel_limit_order(order_id.clone(), &dex_canister::IC_RUNTIME);
+    let result =
+        oisy_trade_canister::cancel_limit_order(order_id.clone(), &oisy_trade_canister::IC_RUNTIME);
     match &result {
         Ok(record) => canlog::log!(
             Priority::Info,
@@ -44,31 +46,31 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
 }
 
 #[ic_cdk::query]
-fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    dex_canister::get_order_status(order_id)
+fn get_order_status(order_id: oisy_trade_types::OrderId) -> OrderStatus {
+    oisy_trade_canister::get_order_status(order_id)
 }
 
 #[ic_cdk::query]
 fn get_trading_pairs() -> Vec<TradingPairInfo> {
-    dex_canister::get_trading_pairs()
+    oisy_trade_canister::get_trading_pairs()
 }
 
 #[ic_cdk::query]
 fn get_order_book_ticker(pair: TradingPair) -> Result<OrderBookTicker, GetOrderBookTickerError> {
-    dex_canister::get_order_book_ticker(pair)
+    oisy_trade_canister::get_order_book_ticker(pair)
 }
 
 #[ic_cdk::query]
 fn get_order_book_depth(
     request: GetOrderBookDepthRequest,
 ) -> Result<OrderBookDepth, GetOrderBookDepthError> {
-    dex_canister::get_order_book_depth(request)
+    oisy_trade_canister::get_order_book_depth(request)
 }
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
     let deposit_dbg = format!("{request:?}");
-    let result = dex_canister::deposit(request, &dex_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::deposit(request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
@@ -102,7 +104,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 #[ic_cdk::update]
 async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
     let withdraw_dbg = format!("{request:?}");
-    let result = dex_canister::withdraw(request, &dex_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::withdraw(request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
@@ -136,23 +138,23 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
 fn get_balances(
     filter: Option<Vec<FilterToken>>,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
-    use dex_canister::Runtime;
-    dex_canister::get_balances(filter, dex_canister::IC_RUNTIME.msg_caller())
+    use oisy_trade_canister::Runtime;
+    oisy_trade_canister::get_balances(filter, oisy_trade_canister::IC_RUNTIME.msg_caller())
 }
 
 #[ic_cdk::query]
 fn get_fee_balances(
     filter: Option<Vec<FilterToken>>,
 ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
-    dex_canister::get_fee_balances(filter)
+    oisy_trade_canister::get_fee_balances(filter)
 }
 
 #[ic_cdk::query]
 fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
-    use dex_canister::Runtime;
-    match dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller()) {
+    use oisy_trade_canister::Runtime;
+    match oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()) {
         Ok(orders) => orders,
-        Err(dex_canister::GetMyOrdersError::InvalidCursor(e)) => {
+        Err(oisy_trade_canister::GetMyOrdersError::InvalidCursor(e)) => {
             panic!("ERROR: invalid cursor order id: {e}")
         }
     }
@@ -160,36 +162,36 @@ fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
 
 #[ic_cdk::query]
 fn list_supported_tokens() -> Vec<Token> {
-    dex_canister::list_supported_tokens()
+    oisy_trade_canister::list_supported_tokens()
 }
 
 #[ic_cdk::update]
 fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPairError> {
-    dex_canister::add_trading_pair(request, &dex_canister::IC_RUNTIME)
+    oisy_trade_canister::add_trading_pair(request, &oisy_trade_canister::IC_RUNTIME)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
 #[ic_cdk::query]
 fn get_events(
-    args: dex_types_internal::event::GetEventsArgs,
-) -> dex_types_internal::event::GetEventsResult {
-    use dex_canister::state::event::{Event, EventType};
-    use dex_types_internal::event;
+    args: oisy_trade_types_internal::event::GetEventsArgs,
+) -> oisy_trade_types_internal::event::GetEventsResult {
+    use oisy_trade_canister::state::event::{Event, EventType};
+    use oisy_trade_types_internal::event;
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
-    fn map_pair_token(token: dex_canister::order::PairToken) -> event::PairToken {
+    fn map_pair_token(token: oisy_trade_canister::order::PairToken) -> event::PairToken {
         match token {
-            dex_canister::order::PairToken::Base => event::PairToken::Base,
-            dex_canister::order::PairToken::Quote => event::PairToken::Quote,
+            oisy_trade_canister::order::PairToken::Base => event::PairToken::Base,
+            oisy_trade_canister::order::PairToken::Quote => event::PairToken::Quote,
         }
     }
 
     fn map_balance_operation(
-        op: dex_canister::state::event::BalanceOperation,
+        op: oisy_trade_canister::state::event::BalanceOperation,
     ) -> event::BalanceOperation {
         match op {
-            dex_canister::state::event::BalanceOperation::Transfer {
+            oisy_trade_canister::state::event::BalanceOperation::Transfer {
                 from_order,
                 to_order,
                 token,
@@ -202,7 +204,7 @@ fn get_events(
                 amount: amount.into(),
                 fee: fee.map(Into::into),
             },
-            dex_canister::state::event::BalanceOperation::Unreserve {
+            oisy_trade_canister::state::event::BalanceOperation::Unreserve {
                 order,
                 token,
                 amount,
@@ -220,36 +222,38 @@ fn get_events(
             payload: match event.payload {
                 EventType::Init(args) => event::EventType::Init(args),
                 EventType::Upgrade(args) => event::EventType::Upgrade(args),
-                EventType::AddTradingPair(dex_canister::state::event::AddTradingPairEvent {
-                    book_id,
-                    base,
-                    quote,
-                    tick_size,
-                    lot_size,
-                    base_metadata,
-                    quote_metadata,
-                    fee_rates,
-                }) => event::EventType::AddTradingPair(event::AddTradingPairEvent {
+                EventType::AddTradingPair(
+                    oisy_trade_canister::state::event::AddTradingPairEvent {
+                        book_id,
+                        base,
+                        quote,
+                        tick_size,
+                        lot_size,
+                        base_metadata,
+                        quote_metadata,
+                        fee_rates,
+                    },
+                ) => event::EventType::AddTradingPair(event::AddTradingPairEvent {
                     book_id: book_id.get(),
-                    base: dex_types::TokenId::from(base),
-                    quote: dex_types::TokenId::from(quote),
+                    base: oisy_trade_types::TokenId::from(base),
+                    quote: oisy_trade_types::TokenId::from(quote),
                     tick_size: candid::Nat::from(tick_size),
                     lot_size: candid::Nat::from(lot_size),
-                    base_metadata: dex_types::TokenMetadata::from(base_metadata),
-                    quote_metadata: dex_types::TokenMetadata::from(quote_metadata),
+                    base_metadata: oisy_trade_types::TokenMetadata::from(base_metadata),
+                    quote_metadata: oisy_trade_types::TokenMetadata::from(quote_metadata),
                     maker_fee_bps: fee_rates.maker.get(),
                     taker_fee_bps: fee_rates.taker.get(),
                 }),
-                EventType::Deposit(dex_canister::state::event::DepositEvent {
+                EventType::Deposit(oisy_trade_canister::state::event::DepositEvent {
                     user,
                     token,
                     amount,
                 }) => event::EventType::Deposit(event::DepositEvent {
                     user,
-                    token: dex_types::TokenId::from(token),
+                    token: oisy_trade_types::TokenId::from(token),
                     amount: amount.into(),
                 }),
-                EventType::Withdraw(dex_canister::state::event::WithdrawEvent {
+                EventType::Withdraw(oisy_trade_canister::state::event::WithdrawEvent {
                     block_index,
                     user,
                     token,
@@ -257,41 +261,43 @@ fn get_events(
                 }) => event::EventType::Withdraw(event::WithdrawEvent {
                     block_index,
                     user,
-                    token: dex_types::TokenId::from(token),
+                    token: oisy_trade_types::TokenId::from(token),
                     amount: amount.into(),
                 }),
-                EventType::AddLimitOrder(dex_canister::state::event::AddLimitOrderEvent {
-                    user,
-                    order_id,
-                    side,
-                    price,
-                    quantity,
-                }) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
+                EventType::AddLimitOrder(
+                    oisy_trade_canister::state::event::AddLimitOrderEvent {
+                        user,
+                        order_id,
+                        side,
+                        price,
+                        quantity,
+                    },
+                ) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                     user,
                     order_id: event::OrderId {
                         book_id: order_id.book_id().get(),
                         seq: order_id.seq().get(),
                     },
-                    side: dex_types::Side::from(side),
+                    side: oisy_trade_types::Side::from(side),
                     price: candid::Nat::from(price),
                     quantity: quantity.into(),
                 }),
                 EventType::CancelLimitOrder(
-                    dex_canister::state::event::CancelLimitOrderEvent { order_id },
+                    oisy_trade_canister::state::event::CancelLimitOrderEvent { order_id },
                 ) => event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
                     order_id: event::OrderId {
                         book_id: order_id.book_id().get(),
                         seq: order_id.seq().get(),
                     },
                 }),
-                EventType::Matching(dex_canister::state::event::MatchingEvent {
+                EventType::Matching(oisy_trade_canister::state::event::MatchingEvent {
                     book_id,
                     orders,
                 }) => event::EventType::Matching(event::MatchingEvent {
                     book_id: book_id.get(),
                     orders: orders.into_iter().map(|s| s.get()).collect(),
                 }),
-                EventType::Settling(dex_canister::state::event::SettlingEvent {
+                EventType::Settling(oisy_trade_canister::state::event::SettlingEvent {
                     book_id,
                     balance_operations,
                 }) => event::EventType::Settling(event::SettlingEvent {
@@ -308,28 +314,28 @@ fn get_events(
     let start = usize::try_from(args.start).expect("BUG: start index exceeds usize::MAX");
     let length = usize::try_from(args.length.min(MAX_EVENTS_PER_RESPONSE))
         .expect("BUG: length exceeds usize::MAX");
-    let events = dex_canister::storage::with_event_iter(|it| {
+    let events = oisy_trade_canister::storage::with_event_iter(|it| {
         it.skip(start).take(length).map(map_event).collect()
     });
     event::GetEventsResult {
         events,
-        total_event_count: dex_canister::storage::total_event_count(),
+        total_event_count: oisy_trade_canister::storage::total_event_count(),
     }
 }
 
 #[ic_cdk::init]
-fn init(arg: DexArg) {
-    dex_canister::lifecycle::init(arg, &dex_canister::IC_RUNTIME);
+fn init(arg: OisyTradeArg) {
+    oisy_trade_canister::lifecycle::init(arg, &oisy_trade_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::pre_upgrade]
 fn pre_upgrade() {
-    dex_canister::lifecycle::pre_upgrade(&dex_canister::IC_RUNTIME);
+    oisy_trade_canister::lifecycle::pre_upgrade(&oisy_trade_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::post_upgrade]
-fn post_upgrade(arg: Option<DexArg>) {
-    dex_canister::lifecycle::post_upgrade(arg, &dex_canister::IC_RUNTIME);
+fn post_upgrade(arg: Option<OisyTradeArg>) {
+    oisy_trade_canister::lifecycle::post_upgrade(arg, &oisy_trade_canister::IC_RUNTIME);
 }
 
 #[ic_cdk::query(hidden = true)]
@@ -395,9 +401,13 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         "/dashboard" => {
             use askama::Template;
             let canister_id = ic_cdk::api::canister_self();
-            let total_events = dex_canister::storage::total_event_count();
-            let dashboard = dex_canister::state::with_state(|s| {
-                dex_canister::dashboard::DashboardTemplate::from_state(s, canister_id, total_events)
+            let total_events = oisy_trade_canister::storage::total_event_count();
+            let dashboard = oisy_trade_canister::state::with_state(|s| {
+                oisy_trade_canister::dashboard::DashboardTemplate::from_state(
+                    s,
+                    canister_id,
+                    total_events,
+                )
             });
             match dashboard.render() {
                 Ok(body) => HttpResponseBuilder::ok()
@@ -411,7 +421,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
             use ic_metrics_encoder::MetricsEncoder;
 
             let mut writer = MetricsEncoder::new(vec![], ic_cdk::api::time() as i64 / 1_000_000);
-            match dex_canister::metrics::encode_metrics(&mut writer) {
+            match oisy_trade_canister::metrics::encode_metrics(&mut writer) {
                 Ok(()) => HttpResponseBuilder::ok()
                     .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
                     .with_body_and_content_length(writer.into_inner())
@@ -434,8 +444,8 @@ fn check_candid_interface_compatibility() {
     let new_interface = __export_service();
 
     // check the public interface against the actual one
-    let old_interface =
-        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("dex.did");
+    let old_interface = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("oisy_trade.did");
 
     service_equal(
         CandidSource::Text(&new_interface),

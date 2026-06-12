@@ -20,9 +20,9 @@ use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use crate::user::UserRegistry;
 use candid::Nat;
-use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
+use oisy_trade_types_internal::Mode;
 use std::collections::{BTreeMap, VecDeque};
 
 #[cfg(test)]

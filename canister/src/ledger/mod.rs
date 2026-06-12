@@ -1,5 +1,5 @@
 use crate::Runtime;
-use dex_types::{
+use oisy_trade_types::{
     DepositError, DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
     WithdrawError, WithdrawResponse,
 };
@@ -28,7 +28,7 @@ pub async fn deposit(
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
     // TODO(DEFI-2741): Consider adding a check for supported tokens to disallow users to deposit
-    //  funds that are not supported by the DEX.
+    //  funds that are not supported by the OISY TRADE.
     let token = request.token_id;
     let amount = request.amount;
     let caller = runtime.msg_caller();
@@ -77,13 +77,13 @@ pub async fn deposit(
     Ok(DepositResponse { block_index })
 }
 
-/// Transfer tokens from the DEX canister to `to` via `icrc1_transfer`.
+/// Transfer tokens from the OISY TRADE canister to `to` via `icrc1_transfer`.
 ///
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
 /// `BadFee`, the correct fee is used for a single retry. The amount shall
 /// be larger than zero (checked by caller).
 pub(crate) async fn withdraw(
-    token: &dex_types::TokenId,
+    token: &oisy_trade_types::TokenId,
     to: candid::Principal,
     amount: candid::Nat,
     cached_fee: candid::Nat,
@@ -148,7 +148,7 @@ pub(crate) async fn withdraw(
 }
 
 async fn icrc1_transfer(
-    token: &dex_types::TokenId,
+    token: &oisy_trade_types::TokenId,
     to: candid::Principal,
     transfer_amount: candid::Nat,
     fee: candid::Nat,

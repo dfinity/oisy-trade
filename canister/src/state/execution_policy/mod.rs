@@ -1,4 +1,4 @@
-use dex_types_internal::{DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK};
+use oisy_trade_types_internal::{DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK};
 use std::num::{NonZeroU32, NonZeroU64};
 
 #[cfg(test)]

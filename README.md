@@ -1,11 +1,11 @@
-# DEX
+# OISY TRADE
 
-[![CI](https://github.com/dfinity/dex/actions/workflows/ci.yml/badge.svg)](https://github.com/dfinity/dex/actions/workflows/ci.yml)
+[![CI](https://github.com/dfinity/oisy-trade/actions/workflows/ci.yml/badge.svg)](https://github.com/dfinity/oisy-trade/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Internet Computer](https://img.shields.io/badge/Internet%20Computer-mainnet-blueviolet.svg)](https://internetcomputer.org/)
 
-> Order book DEX on the [Internet Computer](https://internetcomputer.org/).
+> Order book OISY TRADE on the [Internet Computer](https://internetcomputer.org/).
 
 ## Table of Contents
 
@@ -42,14 +42,14 @@ See the [design document](docs/design.md) for the full architecture.
 <a id="usage"></a>
 ## 📘 Usage
 
-Walk through the main DEX flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the DEX as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
+Walk through the main OISY TRADE flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the OISY TRADE as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
 
 See [`examples/getting_started.md`](examples/getting_started.md).
 
 
 ### 🤖Agents
 
-Talk to your agent to interact with the DEX 😎.
+Talk to your agent to interact with the OISY TRADE 😎.
 
 > Buy 0.01 SOL at a limit price of 0.037 ETH per SOL
 
@@ -83,7 +83,7 @@ List all available recipes with `just`.
 
 ### Reproducible build
 
-`just docker-build` produces `wasms/dex_canister.wasm.gz` that is byte-identical regardless of host platform, as long as Docker is available. The build runs inside a `linux/amd64` container with a digest-pinned base image and a pinned Rust toolchain; on Apple Silicon it transparently runs under Rosetta/QEMU.
+`just docker-build` produces `wasms/oisy_trade_canister.wasm.gz` that is byte-identical regardless of host platform, as long as Docker is available. The build runs inside a `linux/amd64` container with a digest-pinned base image and a pinned Rust toolchain; on Apple Silicon it transparently runs under Rosetta/QEMU.
 
 CI verifies reproducibility by building the same commit twice on different runner images (`ubuntu-22.04` and `ubuntu-24.04`) and asserting the SHA-256 hashes match.
 
@@ -91,7 +91,7 @@ To verify a tagged release against the canister deployed on the IC, check out th
 
 ```bash
 just docker-build
-sha256sum wasms/dex_canister.wasm.gz
+sha256sum wasms/oisy_trade_canister.wasm.gz
 ```
 
 The resulting hash should match both the SHA-256 published in the GitHub Release notes and the canister's module hash on the IC.
@@ -114,7 +114,7 @@ Releases are cut from `main` with [release-plz](https://release-plz.dev/) in two
 1. **Open the release PR.** Run the [`Release`](.github/workflows/release.yml) workflow (Actions → Release → *Run workflow*). It opens a PR that bumps the crate versions and updates the changelogs from the [conventional commits](https://www.conventionalcommits.org/) made since the last release.
 2. **Merge the release PR.** Review and merge it. Merging triggers the [`Publish`](.github/workflows/publish.yml) workflow, which:
    - tags the released crates,
-   - builds `dex_canister.wasm.gz` reproducibly from the tagged commit and publishes a GitHub Release with the WASM, its SHA-256, the candid interface, and the deployment status, and
-   - publishes `dex_types` to [crates.io](https://crates.io/).
+   - builds `oisy_trade_canister.wasm.gz` reproducibly from the tagged commit and publishes a GitHub Release with the WASM, its SHA-256, the candid interface, and the deployment status, and
+   - publishes `oisy_trade_types` to [crates.io](https://crates.io/).
 
 The pipeline does not deploy — releasing and deploying are separate steps.
