@@ -125,6 +125,7 @@ mod schema_stability {
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
             fee_pool: None,
+            permissions: None,
         }
     }
 
@@ -364,4 +365,88 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
         },
         "Except for transient guard sets, restored state must be equal to original"
     );
+}
+
+/// A default (empty) `Permissions` round-trips through the snapshot, and the
+/// restored state compares equal to the original.
+#[test]
+fn should_roundtrip_empty_permissions_through_snapshot() {
+    let state = fresh_state();
+
+    let snapshot = StateSnapshot::from_state(&state);
+    assert_eq!(snapshot.permissions, None);
+
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    assert_eq!(state, restored);
+}
+
+/// A snapshot written before the `permissions` field existed (the `#[n(10)]`
+/// slot absent) decodes into a snapshot whose `permissions` is `None`, which
+/// rebuilds the default `Permissions` on `into_state`.
+#[test]
+fn should_decode_old_format_snapshot_to_default_permissions() {
+    use crate::state::event::SettlingEvent;
+    use dex_types_internal::Mode;
+
+    let state = fresh_state();
+    let snapshot = StateSnapshot::from_state(&state);
+
+    // Encode through a struct identical to `StateSnapshot` minus the trailing
+    // `permissions` field, simulating a pre-change snapshot on the wire.
+    #[derive(minicbor::Encode)]
+    struct OldSnapshot<'a> {
+        #[n(0)]
+        mode: &'a Mode,
+        #[n(1)]
+        next_book_id: &'a OrderBookId,
+        #[n(2)]
+        tokens: &'a Vec<super::TokenEntry>,
+        #[n(3)]
+        trading_pairs: &'a Vec<super::TradingPairEntry>,
+        #[n(4)]
+        order_books: &'a Vec<crate::order::OrderBookSnapshot>,
+        #[n(5)]
+        ledger_fee_cache: &'a Vec<super::LedgerFeeEntry>,
+        #[n(6)]
+        pending_settling_events: &'a Option<Vec<SettlingEvent>>,
+        #[n(7)]
+        max_orders_per_chunk: &'a Option<u32>,
+        #[n(8)]
+        instruction_budget: &'a Option<u64>,
+        #[n(9)]
+        fee_pool: &'a Option<Vec<crate::balance::FeeEntry>>,
+    }
+
+    let old = OldSnapshot {
+        mode: &snapshot.mode,
+        next_book_id: &snapshot.next_book_id,
+        tokens: &snapshot.tokens,
+        trading_pairs: &snapshot.trading_pairs,
+        order_books: &snapshot.order_books,
+        ledger_fee_cache: &snapshot.ledger_fee_cache,
+        pending_settling_events: &snapshot.pending_settling_events,
+        max_orders_per_chunk: &snapshot.max_orders_per_chunk,
+        instruction_budget: &snapshot.instruction_budget,
+        fee_pool: &snapshot.fee_pool,
+    };
+
+    let mut buf = vec![];
+    minicbor::encode(&old, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+
+    assert_eq!(decoded.permissions, None);
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+    assert_eq!(state, restored);
 }
