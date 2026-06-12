@@ -212,6 +212,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
+                    min_notional: book.min_notional().into(),
+                    max_notional: book.max_notional().map(Into::into),
                 }
             })
             .collect()
@@ -436,6 +438,25 @@ pub fn add_trading_pair(
     let taker = order::BasisPoint::new(request.taker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.taker_fee_bps))?;
     let fee_rates = order::FeeRates { maker, taker };
+    let invalid_notional = || AddTradingPairError::InvalidNotional {
+        min_notional: request.min_notional.clone(),
+        max_notional: request.max_notional.clone(),
+    };
+    let min_notional =
+        order::Quantity::try_from(request.min_notional.clone()).map_err(|_| invalid_notional())?;
+    if min_notional.is_zero() {
+        return Err(invalid_notional());
+    }
+    let max_notional = match &request.max_notional {
+        None => None,
+        Some(max) => {
+            let max = order::Quantity::try_from(max.clone()).map_err(|_| invalid_notional())?;
+            if max < min_notional {
+                return Err(invalid_notional());
+            }
+            Some(max)
+        }
+    };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
             base: order::TokenId::from(request.base.id),
@@ -485,6 +506,8 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         };
         let permit = s
             .permissions()

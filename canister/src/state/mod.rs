@@ -18,9 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
-    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError,
+    Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
+    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -181,6 +182,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .price
             .checked_mul_quantity_scaled(&pending.quantity, self.base_scale(&pair.base))
             .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
+
+        book.check_notional(&amount)
+            .map_err(|NotionalError { notional, min, max }| {
+                AddLimitOrderError::InvalidNotional { notional, min, max }
+            })?;
 
         let (token, required) = match pending.side {
             Side::Buy => (pair.quote, amount),
@@ -523,12 +529,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         quote_metadata: TokenMetadata,
         tick_size: TickSize,
         lot_size: LotSize,
+        min_notional: Quantity,
+        max_notional: Option<Quantity>,
         fee_rates: FeeRates,
     ) {
         self.record_token(pair.base, base_metadata);
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
-        let book = OrderBook::new(book_id, tick_size, lot_size, fee_rates);
+        let book = OrderBook::new(
+            book_id,
+            tick_size,
+            lot_size,
+            min_notional,
+            max_notional,
+            fee_rates,
+        );
         self.trading_pairs.insert(pair, book_id);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
@@ -1050,6 +1065,11 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+    InvalidNotional {
+        notional: Quantity,
+        min: Quantity,
+        max: Option<Quantity>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1107,6 +1127,13 @@ impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
                 available: available.into(),
                 required: required.into(),
             },
+            AddLimitOrderError::InvalidNotional { notional, min, max } => {
+                dex_types::AddLimitOrderError::InvalidNotional {
+                    notional: notional.into(),
+                    min: min.into(),
+                    max: max.map(Into::into),
+                }
+            }
         }
     }
 }

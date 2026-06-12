@@ -61,6 +61,10 @@ pub struct AddTradingPairEvent {
     pub quote_metadata: TokenMetadata,
     #[n(7)]
     pub fee_rates: FeeRates,
+    #[n(8)]
+    pub min_notional: Quantity,
+    #[n(9)]
+    pub max_notional: Option<Quantity>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

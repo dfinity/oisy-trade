@@ -229,6 +229,8 @@ fn get_events(
                     base_metadata,
                     quote_metadata,
                     fee_rates,
+                    min_notional,
+                    max_notional,
                 }) => event::EventType::AddTradingPair(event::AddTradingPairEvent {
                     book_id: book_id.get(),
                     base: dex_types::TokenId::from(base),
@@ -239,6 +241,8 @@ fn get_events(
                     quote_metadata: dex_types::TokenMetadata::from(quote_metadata),
                     maker_fee_bps: fee_rates.maker.get(),
                     taker_fee_bps: fee_rates.taker.get(),
+                    min_notional: candid::Nat::from(min_notional),
+                    max_notional: max_notional.map(candid::Nat::from),
                 }),
                 EventType::Deposit(dex_canister::state::event::DepositEvent {
                     user,

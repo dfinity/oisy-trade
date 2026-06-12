@@ -11,8 +11,8 @@ use crate::state::event::{
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
-    LOT_SIZE, PRICE_SCALE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata,
-    state, user_registry,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata,
+    order_history, quote_metadata, state, user_registry,
 };
 use candid::Principal;
 use dex_types_internal::Mode;
@@ -108,6 +108,8 @@ impl Scenario {
             quote_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         self.events.push(add_trading_pair_event(base(), quote()));

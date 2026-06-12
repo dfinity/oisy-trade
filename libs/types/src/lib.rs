@@ -73,6 +73,16 @@ pub enum AddLimitOrderError {
         /// The balance required to place the order.
         required: Nat,
     },
+    /// The order's notional (`price × quantity / 10^base_decimals`, in quote
+    /// smallest units) is below `min` or above `max`.
+    InvalidNotional {
+        /// The order's notional in quote token smallest units.
+        notional: Nat,
+        /// The configured minimum notional.
+        min: Nat,
+        /// The configured maximum notional, if any.
+        max: Option<Nat>,
+    },
 }
 
 /// Error returned when canceling a limit order fails.
@@ -99,6 +109,10 @@ pub struct TradingPairInfo {
     pub tick_size: Nat,
     /// Minimum order quantity.
     pub lot_size: Nat,
+    /// Minimum order notional in quote token smallest units.
+    pub min_notional: Nat,
+    /// Maximum order notional in quote token smallest units, if any.
+    pub max_notional: Option<Nat>,
 }
 
 /// A single price level in an order book, aggregated across all resting orders at that price.
@@ -402,6 +416,11 @@ pub struct AddTradingPairRequest {
     pub maker_fee_bps: u16,
     /// Taker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
     pub taker_fee_bps: u16,
+    /// Minimum order notional in quote token smallest units. Must be greater than zero.
+    pub min_notional: Nat,
+    /// Maximum order notional in quote token smallest units, if any.
+    /// When set, must be greater than or equal to `min_notional`.
+    pub max_notional: Option<Nat>,
 }
 
 /// Request to withdraw tokens from the DEX.
@@ -513,5 +532,14 @@ pub enum AddTradingPairError {
         lot_size: Nat,
         /// The base token's decimals (the divisor exponent).
         base_decimals: u8,
+    },
+    /// The notional bounds are invalid: `min_notional` is zero, a bound is too
+    /// large to fit the 256-bit quantity representation, or `max_notional` is
+    /// set and smaller than `min_notional`.
+    InvalidNotional {
+        /// The submitted minimum notional.
+        min_notional: Nat,
+        /// The submitted maximum notional, if any.
+        max_notional: Option<Nat>,
     },
 }

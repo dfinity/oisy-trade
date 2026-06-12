@@ -72,8 +72,8 @@ mod record_trading_pair {
     use crate::order::{FeeRates, OrderBookId, TokenId, TokenMetadata, TradingPair};
     use crate::test_fixtures;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata,
-        icp_token_id,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, ckbtc_token_id,
+        icp_ckbtc_trading_pair, icp_metadata, icp_token_id,
     };
     use candid::Principal;
 
@@ -87,6 +87,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -114,6 +116,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -128,6 +132,8 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
     }
@@ -148,6 +154,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state.record_trading_pair(
@@ -160,6 +168,8 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -178,6 +188,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -194,6 +206,8 @@ mod record_trading_pair {
             },
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -208,7 +222,8 @@ mod add_limit_order {
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use assert_matches::assert_matches;
     use candid::Principal;
@@ -224,6 +239,8 @@ mod add_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         let user = Principal::from_slice(&[0x01]);
@@ -247,8 +264,8 @@ mod cancel_limit_order {
     use crate::state::State;
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
-        self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, balances_pair, ckbtc_metadata,
-        icp_ckbtc_trading_pair, icp_metadata, place_order,
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -474,6 +491,8 @@ mod cancel_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -484,8 +503,8 @@ mod record_limit_order {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side};
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
-        self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
-        icp_metadata, place_order,
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -501,6 +520,8 @@ mod record_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -560,8 +581,8 @@ mod get_user_orders {
     use crate::order::{FeeRates, OrderBookId, Side};
     use crate::state::State;
     use crate::test_fixtures::{
-        self, LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
-        place_order,
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -577,6 +598,8 @@ mod get_user_orders {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -621,7 +644,8 @@ mod validate_overflow_invariant {
     use crate::test_fixtures;
     use crate::test_fixtures::arbitrary::arb_side;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
+        icp_metadata,
     };
     use candid::Principal;
     use proptest::prelude::{Strategy, any};
@@ -664,6 +688,8 @@ mod validate_overflow_invariant {
                 ckbtc_metadata(),
                 TICK_SIZE,
                 LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
                 FeeRates::default(),
             );
 
@@ -694,6 +720,144 @@ mod validate_overflow_invariant {
     }
 }
 
+mod validate_limit_order {
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::state::AddLimitOrderError;
+    use crate::state::State;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{
+        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
+    use assert_matches::assert_matches;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const USER: Principal = Principal::from_slice(&[0x01]);
+
+    /// Registers ICP/ckBTC with the given notional bounds. With `TICK_SIZE`,
+    /// `LOT_SIZE` and 8 base decimals, an order of `t` ticks and `q` lots has
+    /// notional `price × quantity / 10^8 = t × q` quote units, so notionals
+    /// are easy to dial in.
+    fn state_with_notional_bounds(
+        min_notional: Quantity,
+        max_notional: Option<Quantity>,
+    ) -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            min_notional,
+            max_notional,
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn validate(
+        state: &State<VectorMemory, VectorMemory>,
+        ticks: u128,
+        lots: u64,
+    ) -> Result<(), AddLimitOrderError> {
+        let pending = PendingOrder {
+            side: Side::Buy,
+            price: Price::new(ticks * TICK_SIZE.get()),
+            quantity: Quantity::from(lots * LOT_SIZE.get()),
+        };
+        state
+            .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
+            .map(|_| ())
+    }
+
+    #[test]
+    fn should_reject_notional_below_min() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
+            validate(&state, 2, 2),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_notional_above_max() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
+            validate(&state, 9, 1),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(9),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+    }
+
+    #[test]
+    fn should_accept_notional_equal_to_min() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        // notional == 5 == min: not an `InvalidNotional` rejection.
+        assert_matches!(
+            validate(&state, 5, 1),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_accept_notional_equal_to_max() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_matches!(
+            validate(&state, 8, 1),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_not_enforce_upper_bound_when_max_unset() {
+        let state = state_with_notional_bounds(Quantity::from_u128(5), None);
+        assert_matches!(
+            validate(&state, 1_000, 1_000),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_enforce_tick_lot_and_notional_independently() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+
+        assert_eq!(
+            validate(&state, 2, 2),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+
+        // Off tick (price not a multiple of TICK_SIZE) but notional within
+        // bounds: rejected for tick, not notional.
+        let off_tick = PendingOrder {
+            side: Side::Buy,
+            price: Price::new(TICK_SIZE.get() + 1),
+            quantity: Quantity::from(6 * LOT_SIZE.get()),
+        };
+        assert_matches!(
+            state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
+            Err(AddLimitOrderError::InvalidOrder(_))
+        );
+    }
+}
+
 mod settle_fills {
     use crate::EXECUTOR;
     use crate::balance::Balance;
@@ -702,7 +866,8 @@ mod settle_fills {
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -781,6 +946,8 @@ mod settle_fills {
             },
             TickSize::new(NonZeroU128::new(10_000).unwrap()),
             LotSize::new(NonZeroU64::new(100_000_000_000_000).unwrap()),
+            MIN_NOTIONAL,
+            None,
             FeeRates::default(),
         );
 
@@ -840,6 +1007,8 @@ mod settle_fills {
             },
             TickSize::new(NonZeroU128::new(tick).unwrap()),
             LotSize::new(NonZeroU64::new(1).unwrap()),
+            MIN_NOTIONAL,
+            None,
             FeeRates::default(),
         );
 
@@ -1314,6 +1483,8 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         // Pair B: a distinct base/quote token pair on a second book.
@@ -1336,6 +1507,8 @@ mod settle_fills {
             },
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -1411,6 +1584,8 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -1883,6 +2058,8 @@ mod settle_fills {
                 ckbtc_metadata(),
                 TICK_SIZE,
                 LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
                 FeeRates {
                     maker: BasisPoint::new(maker_bps).unwrap(),
                     taker: BasisPoint::new(taker_bps).unwrap(),
@@ -2313,7 +2490,8 @@ mod pending_state_predicates {
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
 
@@ -2389,6 +2567,8 @@ mod pending_state_predicates {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
