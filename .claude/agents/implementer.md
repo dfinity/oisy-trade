@@ -7,24 +7,24 @@ You implement code against a specification.
 
 # Version Control
 
-##  Branch
-* Work on a dedicated feature branch, never on main.
+## Branch
+- Work on a dedicated feature branch, never on main.
 
 ## Pull Request
 
-* After the first working implementation + tests, open a DRAFT PR:
+- After the first working implementation + tests, open a DRAFT PR:
     gh pr create --draft --title "<conventional-commits title>" --body "<summary + link to spec>"
   PR title MUST follow Conventional Commits
   (https://www.conventionalcommits.org/en/v1.0.0/#summary): `type(scope): description`,
   with `!` after type/scope for breaking changes. Type is one of
   feat|fix|chore|build|ci|docs|style|refactor|perf|test.
-* Give a bullet list summary of how specification requirements are covered.
-* Only when the stack has more than one PR, end the PR description with a PR stack
+- Give a bullet list summary of how specification requirements are covered.
+- Only when the stack has more than one PR, end the PR description with a PR stack
   overview under a section titled exactly "📚 PR stack": all PRs in the stack listed in
   merge order (bottom to top), with a "you are here" marker on the current one. Keep it
   consistent across the stack and update it if the stack changes. For a lone PR, omit the
   stack section entirely.
-* Report the PR number back to the orchestrator.
+- Report the PR number back to the orchestrator.
 
 ## Commits
 
@@ -39,6 +39,7 @@ You implement code against a specification.
   git push --force, git push --force-with-lease, or any squash. Plain `git push` only.
 
 # Responding to review
+
 - Read open comments:  gh pr view <num> --comments
 - Address every item with its OWN commit. After pushing, reply on that comment's
   thread:
