@@ -2,10 +2,12 @@ pub mod audit;
 pub mod event;
 pub mod execution_policy;
 mod map;
+pub mod permissions;
 pub mod snapshot;
 
 pub use execution_policy::ExecutionPolicy;
 pub use map::TradingPairMap;
+pub use permissions::Permissions;
 pub use snapshot::StateSnapshot;
 
 #[cfg(test)]
@@ -93,6 +95,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// operations. Entries live only for the duration of a single async
     /// request and are reset on upgrade.
     in_flight_user_ops: BTreeSet<(Principal, TokenId)>,
+    permissions: Permissions,
 }
 
 impl<MH: Memory, MB: Memory> State<MH, MB> {
@@ -118,6 +121,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
             in_flight_user_ops: BTreeSet::default(),
+            permissions: Permissions::default(),
         })
     }
 
@@ -131,6 +135,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn set_execution_policy(&mut self, policy: ExecutionPolicy) {
         self.execution_policy = policy;
+    }
+
+    pub fn permissions(&self) -> &Permissions {
+        &self.permissions
     }
 
     pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
@@ -263,19 +271,33 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.validate_cancel_limit_order(user, &order_id)?;
 
+        let permit = self
+            .permissions()
+            .permit_cancel()
+            .expect("BUG: cancel is never gated in this build");
         audit::process_event(
             self,
             event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            permit.into(),
             runtime,
         );
 
-        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
         // leave settling events queued across messages, draining the whole
         // queue here lets an unrelated cancel apply balance ops from a
         // previous matching round and inherit its instruction debt. Pop
         // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
-            audit::process_event(self, event::EventType::Settling(event), runtime);
+            let permit = self
+                .permissions()
+                .permit_settling()
+                .expect("BUG: settling is never gated in this build");
+            audit::process_event(
+                self,
+                event::EventType::Settling(event),
+                permit.into(),
+                runtime,
+            );
         }
 
         let order = self
@@ -946,6 +968,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_history,
             pending_settling_events,
             in_flight_user_ops,
+            permissions,
         } = self;
         Self {
             mode: mode.clone(),
@@ -961,6 +984,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_history: order_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
+            permissions: permissions.clone(),
         }
     }
 }
@@ -982,6 +1006,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_history,
             pending_settling_events,
             in_flight_user_ops,
+            permissions,
         } = self;
         let Self {
             mode: other_mode,
@@ -997,6 +1022,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_history: other_order_history,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
+            permissions: other_permissions,
         } = other;
         mode == other_mode
             && execution_policy == other_execution_policy
@@ -1011,6 +1037,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && order_history == other_order_history
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
+            && permissions == other_permissions
     }
 }
 

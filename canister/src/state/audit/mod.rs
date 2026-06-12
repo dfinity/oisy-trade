@@ -5,6 +5,7 @@ use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
     WithdrawEvent,
 };
+use crate::state::permissions::Permit;
 use crate::storage;
 use crate::user::UserRegistry;
 use crate::{Runtime, Timestamp};
@@ -18,6 +19,7 @@ mod tests;
 pub fn process_event<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: EventType,
+    _permit: Permit,
     runtime: &impl Runtime,
 ) {
     let timestamp = runtime.time();
@@ -35,7 +37,7 @@ pub fn process_event<MH: Memory, MB: Memory>(
 /// Unlike [`process_event`], the timestamp is read inline rather than captured
 /// into a local: this path applies no state transition, so there is no
 /// shared-timestamp invariant between a mutation and its event-log entry.
-pub fn record_event(payload: EventType, runtime: &impl Runtime) {
+pub fn record_event(payload: EventType, _permit: Permit, runtime: &impl Runtime) {
     storage::record_event(runtime.time(), payload);
 }
 
