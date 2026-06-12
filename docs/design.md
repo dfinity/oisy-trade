@@ -1,6 +1,6 @@
 # OISY TRADE: Fully Onchain Order Book
 
-High-level design for an order book OISY TRADE running entirely onchain as an Internet Computer canister.
+High-level design for OISY TRADE, an order-book DEX running entirely onchain as an Internet Computer canister.
 
 ## Table of Contents
 

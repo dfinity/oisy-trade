@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Internet Computer](https://img.shields.io/badge/Internet%20Computer-mainnet-blueviolet.svg)](https://internetcomputer.org/)
 
-> Order book OISY TRADE on the [Internet Computer](https://internetcomputer.org/).
+> OISY TRADE is an order-book DEX on the [Internet Computer](https://internetcomputer.org/).
 
 ## Table of Contents
 
