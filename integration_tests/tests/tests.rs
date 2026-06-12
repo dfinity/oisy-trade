@@ -55,9 +55,10 @@ mod add_limit_order {
     use assert_matches::assert_matches;
     use candid::{Encode, Nat, Principal};
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{PRICE_SCALE, Setup};
+    use dex_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
     use dex_types::{
-        AddLimitOrderError, Balance, GetMyOrdersArgs, LimitOrderRequest, OrderId, OrderStatus, Side,
+        AddLimitOrderError, AddTradingPairRequest, Balance, GetMyOrdersArgs, LimitOrderRequest,
+        OrderId, OrderStatus, Side,
     };
     use pocket_ic::{RejectCode, RejectResponse};
 
@@ -410,6 +411,69 @@ mod add_limit_order {
 
         setup.drop().await;
     }
+
+    #[tokio::test]
+    async fn should_enforce_notional_bounds_at_placement() {
+        let setup = Setup::new().await;
+        let controller_client = setup.dex_client_with_caller(setup.controller());
+        // notional = price * quantity / 10^9. With price = 10_000 * PRICE_SCALE
+        // and 1 lot (LOT_SIZE base units), one lot is worth 1_000_000_000 quote
+        // units, so notional = lots * 1_000_000_000.
+        let min_notional = 2_000_000_000u64;
+        let max_notional = 5_000_000_000u64;
+        let result = controller_client
+            .add_trading_pair(AddTradingPairRequest {
+                min_notional: Nat::from(min_notional),
+                max_notional: Some(Nat::from(max_notional)),
+                ..setup.add_trading_pair_request()
+            })
+            .await;
+        assert_eq!(result, Ok(()));
+
+        let client = setup.dex_client();
+        let pair = setup.trading_pair();
+        let price = Nat::from(10_000 * PRICE_SCALE);
+        let order = |lots: u64| LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price: price.clone(),
+            quantity: Nat::from(lots * LOT_SIZE),
+        };
+
+        // 1 lot -> notional 1_000_000_000 < min: rejected.
+        assert_eq!(
+            client.add_limit_order(order(1)).await,
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Nat::from(1_000_000_000u64),
+                min: Nat::from(min_notional),
+                max: Some(Nat::from(max_notional)),
+            })
+        );
+
+        // 6 lots -> notional 6_000_000_000 > max: rejected.
+        assert_eq!(
+            client.add_limit_order(order(6)).await,
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Nat::from(6_000_000_000u64),
+                min: Nat::from(min_notional),
+                max: Some(Nat::from(max_notional)),
+            })
+        );
+
+        // 3 lots -> notional 3_000_000_000 within [min, max]: accepted once funded.
+        let required = 3_000_000_000u64;
+        let fee = QUOTE_LEDGER_FEE;
+        setup
+            .deposit_flow(setup.user(), setup.quote_token_id())
+            .mint(required + 2 * fee)
+            .approve(required + fee)
+            .deposit(required)
+            .execute()
+            .await;
+        client.add_limit_order(order(3)).await.unwrap();
+
+        setup.drop().await;
+    }
 }
 
 mod cancel_limit_order {
@@ -614,6 +678,8 @@ async fn should_return_empty_trading_pairs() {
             },
             tick_size: Nat::from(TICK_SIZE),
             lot_size: Nat::from(LOT_SIZE),
+            min_notional: Nat::from(1u64),
+            max_notional: None,
         }]
     );
 
@@ -967,7 +1033,18 @@ async fn should_replay_events_on_upgrade() {
     });
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
-    setup.add_trading_pair().await;
+    let request = AddTradingPairRequest {
+        maker_fee_bps: 10,
+        taker_fee_bps: 23,
+        ..setup.add_trading_pair_request()
+    };
+    let maker_fee_bps = request.maker_fee_bps;
+    let taker_fee_bps = request.taker_fee_bps;
+    let result = setup
+        .dex_client_with_caller(setup.controller())
+        .add_trading_pair(request)
+        .await;
+    assert_eq!(result, Ok(()));
     assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
@@ -980,6 +1057,10 @@ async fn should_replay_events_on_upgrade() {
                 lot_size: Nat::from(LOT_SIZE),
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+                maker_fee_bps,
+                taker_fee_bps,
+                min_notional: Nat::from(1u64),
+                max_notional: None,
             });
         });
     });
@@ -1128,14 +1209,14 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
-                        fee: None,
+                        fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                        fee: None,
+                        fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
             });

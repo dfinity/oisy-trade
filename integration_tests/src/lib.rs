@@ -143,6 +143,8 @@ impl Setup {
             lot_size: Nat::from(LOT_SIZE),
             maker_fee_bps: 0,
             taker_fee_bps: 0,
+            min_notional: Nat::from(1u64),
+            max_notional: None,
         }
     }
 

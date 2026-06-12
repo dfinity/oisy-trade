@@ -196,6 +196,56 @@ mod add_trading_pair {
         );
     }
 
+    #[test]
+    fn should_reject_zero_min_notional() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let base = TokenId {
+            ledger_id: Principal::from_slice(&[0x16]),
+        };
+        let quote = TokenId {
+            ledger_id: Principal::from_slice(&[0x17]),
+        };
+        let mut request = pair_request(base, 8, quote, 6, 10_000, 10_000);
+        request.min_notional = candid::Nat::from(0u64);
+        request.max_notional = None;
+
+        let result = add_trading_pair(request, &runtime);
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InvalidNotional {
+                min_notional: candid::Nat::from(0u64),
+                max_notional: None,
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_max_notional_below_min_notional() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let base = TokenId {
+            ledger_id: Principal::from_slice(&[0x18]),
+        };
+        let quote = TokenId {
+            ledger_id: Principal::from_slice(&[0x19]),
+        };
+        let mut request = pair_request(base, 8, quote, 6, 10_000, 10_000);
+        request.min_notional = candid::Nat::from(5u64);
+        request.max_notional = Some(candid::Nat::from(4u64));
+
+        let result = add_trading_pair(request, &runtime);
+
+        assert_eq!(
+            result,
+            Err(AddTradingPairError::InvalidNotional {
+                min_notional: candid::Nat::from(5u64),
+                max_notional: Some(candid::Nat::from(4u64)),
+            })
+        );
+    }
+
     /// Builds a request with explicit decimals/tick/lot and unique token ids.
     fn pair_request(
         base: TokenId,
@@ -224,6 +274,8 @@ mod add_trading_pair {
             lot_size: candid::Nat::from(lot_size),
             maker_fee_bps: 0,
             taker_fee_bps: 0,
+            min_notional: candid::Nat::from(1u64),
+            max_notional: None,
         }
     }
 
@@ -1743,7 +1795,8 @@ mod get_trading_pairs {
     use crate::state::init_state;
     use crate::test_fixtures;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_token_id, icp_token_id, init_state_with_order_book,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_token_id, icp_token_id,
+        init_state_with_order_book,
     };
     use dex_types::TradingPairInfo;
 
@@ -1779,6 +1832,8 @@ mod get_trading_pairs {
                 },
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.into(),
+                min_notional: MIN_NOTIONAL.into(),
+                max_notional: Some(MAX_NOTIONAL.into()),
             }]
         );
     }

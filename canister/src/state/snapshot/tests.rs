@@ -3,7 +3,8 @@ use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, state as fresh_state,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
+    icp_metadata, state as fresh_state,
 };
 use candid::Principal;
 
@@ -95,6 +96,8 @@ mod schema_stability {
                 }],
                 filled_orders: vec![OrderSeq::new(4)],
                 fee_rates: FeeRates::default(),
+                min_notional: Quantity::from_u128(5),
+                max_notional: Some(Quantity::from_u128(9_000)),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -125,6 +128,7 @@ mod schema_stability {
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
             fee_pool: None,
+            permissions: None,
         }
     }
 
@@ -142,10 +146,10 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818981078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818b81078103\
         810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a120818104828100810081828141011a000186a08182810782820085810581\
-        068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
+        186e818281021a0007a12081810482810081000519232881828141011a000186a0818281078282\
+        0085810581068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
         18c81b000000012a05f200";
 
     #[test]
@@ -190,6 +194,8 @@ fn should_roundtrip_state_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
 
@@ -280,6 +286,8 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
 
@@ -323,6 +331,39 @@ fn should_roundtrip_fee_pool_through_snapshot() {
     assert_eq!(state, restored);
 }
 
+#[test]
+fn should_roundtrip_notional_bounds_through_snapshot() {
+    let mut state = fresh_state();
+    let pair = icp_ckbtc_trading_pair();
+    let min_notional = Quantity::from_u128(5_000_000);
+    let max_notional = Some(Quantity::from_u128(9_000_000_000_000));
+    state.record_trading_pair(
+        OrderBookId::ZERO,
+        pair,
+        icp_metadata(),
+        ckbtc_metadata(),
+        TICK_SIZE,
+        LOT_SIZE,
+        min_notional,
+        max_notional,
+        FeeRates::default(),
+    );
+
+    let snapshot = StateSnapshot::from_state(&state);
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    let book = restored.order_book(&OrderBookId::ZERO).unwrap();
+    assert_eq!(book.min_notional(), min_notional);
+    assert_eq!(book.max_notional(), max_notional);
+}
+
 /// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are
 /// intentionally excluded from the snapshot and reset to empty on restore.
 #[test]
@@ -364,4 +405,88 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
         },
         "Except for transient guard sets, restored state must be equal to original"
     );
+}
+
+/// A default (empty) `Permissions` round-trips through the snapshot, and the
+/// restored state compares equal to the original.
+#[test]
+fn should_roundtrip_empty_permissions_through_snapshot() {
+    let state = fresh_state();
+
+    let snapshot = StateSnapshot::from_state(&state);
+    assert_eq!(snapshot.permissions, None);
+
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    assert_eq!(state, restored);
+}
+
+/// A snapshot written before the `permissions` field existed (the `#[n(10)]`
+/// slot absent) decodes into a snapshot whose `permissions` is `None`, which
+/// rebuilds the default `Permissions` on `into_state`.
+#[test]
+fn should_decode_old_format_snapshot_to_default_permissions() {
+    use crate::state::event::SettlingEvent;
+    use dex_types_internal::Mode;
+
+    let state = fresh_state();
+    let snapshot = StateSnapshot::from_state(&state);
+
+    // Encode through a struct identical to `StateSnapshot` minus the trailing
+    // `permissions` field, simulating a pre-change snapshot on the wire.
+    #[derive(minicbor::Encode)]
+    struct OldSnapshot<'a> {
+        #[n(0)]
+        mode: &'a Mode,
+        #[n(1)]
+        next_book_id: &'a OrderBookId,
+        #[n(2)]
+        tokens: &'a Vec<super::TokenEntry>,
+        #[n(3)]
+        trading_pairs: &'a Vec<super::TradingPairEntry>,
+        #[n(4)]
+        order_books: &'a Vec<crate::order::OrderBookSnapshot>,
+        #[n(5)]
+        ledger_fee_cache: &'a Vec<super::LedgerFeeEntry>,
+        #[n(6)]
+        pending_settling_events: &'a Option<Vec<SettlingEvent>>,
+        #[n(7)]
+        max_orders_per_chunk: &'a Option<u32>,
+        #[n(8)]
+        instruction_budget: &'a Option<u64>,
+        #[n(9)]
+        fee_pool: &'a Option<Vec<crate::balance::FeeEntry>>,
+    }
+
+    let old = OldSnapshot {
+        mode: &snapshot.mode,
+        next_book_id: &snapshot.next_book_id,
+        tokens: &snapshot.tokens,
+        trading_pairs: &snapshot.trading_pairs,
+        order_books: &snapshot.order_books,
+        ledger_fee_cache: &snapshot.ledger_fee_cache,
+        pending_settling_events: &snapshot.pending_settling_events,
+        max_orders_per_chunk: &snapshot.max_orders_per_chunk,
+        instruction_budget: &snapshot.instruction_budget,
+        fee_pool: &snapshot.fee_pool,
+    };
+
+    let mut buf = vec![];
+    minicbor::encode(&old, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+
+    assert_eq!(decoded.permissions, None);
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+    assert_eq!(state, restored);
 }

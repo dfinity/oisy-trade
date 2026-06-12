@@ -66,6 +66,10 @@ pub fn add_limit_order(
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_trading(caller, order_id.book_id())
+            .expect("BUG: trading is never gated in this build");
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
@@ -73,7 +77,12 @@ pub fn add_limit_order(
             price: order.price(),
             quantity: *order.remaining_quantity(),
         };
-        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddLimitOrder(event),
+            permit.into(),
+            runtime,
+        );
     });
     Ok(order_id.to_string())
 }
@@ -194,6 +203,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
+                    min_notional: book.min_notional().into(),
+                    max_notional: book.max_notional().map(Into::into),
                 }
             })
             .collect()
@@ -227,14 +238,23 @@ pub async fn deposit(
         return Err(DepositError::AmountExceedsMaximum);
     }
 
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
+        .expect("BUG: deposit is never gated in this build");
+
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
         user: caller,
         token: order::TokenId::from(token_id),
         amount,
     };
+    let post = state::with_state(|s| pre.reconcile(s.permissions()));
     state::with_state_mut(|s| {
-        state::audit::process_event(s, state::event::EventType::Deposit(event), runtime)
+        state::audit::process_event(
+            s,
+            state::event::EventType::Deposit(event),
+            post.into(),
+            runtime,
+        )
     });
 
     Ok(deposit_response)
@@ -272,6 +292,9 @@ pub async fn withdraw(
         }
     })?;
 
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
+        .expect("BUG: withdraw is never gated in this build");
+
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
 
@@ -296,7 +319,12 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            let post = state::with_state(|s| pre.reconcile(s.permissions()));
+            state::audit::record_event(
+                state::event::EventType::Withdraw(event),
+                post.into(),
+                runtime,
+            );
             Ok(response)
         }
         Err(e) => {
@@ -414,6 +442,25 @@ pub fn add_trading_pair(
     let taker = order::BasisPoint::new(request.taker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.taker_fee_bps))?;
     let fee_rates = order::FeeRates { maker, taker };
+    let invalid_notional = || AddTradingPairError::InvalidNotional {
+        min_notional: request.min_notional.clone(),
+        max_notional: request.max_notional.clone(),
+    };
+    let min_notional =
+        order::Quantity::try_from(request.min_notional.clone()).map_err(|_| invalid_notional())?;
+    if min_notional.is_zero() {
+        return Err(invalid_notional());
+    }
+    let max_notional = match &request.max_notional {
+        None => None,
+        Some(max) => {
+            let max = order::Quantity::try_from(max.clone()).map_err(|_| invalid_notional())?;
+            if max < min_notional {
+                return Err(invalid_notional());
+            }
+            Some(max)
+        }
+    };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
             base: order::TokenId::from(request.base.id),
@@ -463,8 +510,19 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         };
-        state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
+        let permit = s
+            .permissions()
+            .permit_add_trading_pair()
+            .expect("BUG: add_trading_pair is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddTradingPair(event),
+            permit.into(),
+            runtime,
+        );
         Ok(())
     })
 }

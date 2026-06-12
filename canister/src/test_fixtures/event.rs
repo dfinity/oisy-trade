@@ -10,7 +10,7 @@ use crate::state::event::{
 use candid::Principal;
 use dex_types_internal::{InitArg, Mode, UpgradeArg};
 
-use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
+use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
@@ -50,6 +50,8 @@ pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             base_metadata: base_metadata(),
             quote_metadata: quote_metadata(),
             fee_rates: FeeRates::default(),
+            min_notional: MIN_NOTIONAL,
+            max_notional: Some(MAX_NOTIONAL),
         }),
     }
 }
@@ -116,7 +118,7 @@ impl WorstCaseEvent {
         match self {
             Self::Init => 343,
             Self::Upgrade => 343,
-            Self::AddTradingPair => 155,
+            Self::AddTradingPair => 225,
             Self::Deposit => 96,
             Self::Withdraw => 105,
             Self::AddLimitOrder => 107,
@@ -173,6 +175,8 @@ fn add_trading_pair() -> EventType {
             maker: crate::order::BasisPoint::MAX,
             taker: crate::order::BasisPoint::MAX,
         },
+        min_notional: Quantity::MAX,
+        max_notional: Some(Quantity::MAX),
     })
 }
 

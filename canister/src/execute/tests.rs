@@ -7,7 +7,8 @@ use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
 use crate::test_fixtures;
 use crate::test_fixtures::mocks::MockRuntime;
 use crate::test_fixtures::{
-    LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+    icp_ckbtc_trading_pair, icp_metadata,
 };
 use candid::Principal;
 use ic_stable_structures::VectorMemory;
@@ -406,6 +407,8 @@ fn setup_one_book() -> TestState {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
     state
@@ -433,6 +436,8 @@ fn setup_two_books() -> TestState {
         },
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
     state

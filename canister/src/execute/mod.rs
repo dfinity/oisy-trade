@@ -88,12 +88,18 @@ impl Executor {
             order_budget = order_budget
                 .checked_sub(chunk.len())
                 .expect("BUG: pending_order_seqs().take(order_budget) cannot exceed order_budget");
+            let permit = state
+                .permissions()
+                .permit_matching(book_id)
+                // TODO(DEFI-2849): convert to a proper error return when this gate goes live (PRs 2–4)
+                .expect("BUG: matching is never gated in this build");
             audit::process_event(
                 state,
                 EventType::Matching(MatchingEvent {
                     book_id,
                     orders: chunk,
                 }),
+                permit.into(),
                 runtime,
             );
             // Settle this book's matches before advancing to the next book.
@@ -113,7 +119,12 @@ impl Executor {
             let Some(event) = state.take_next_pending_settling_event() else {
                 break;
             };
-            audit::process_event(state, EventType::Settling(event), runtime);
+            let permit = state
+                .permissions()
+                .permit_settling()
+                // TODO(DEFI-2849): convert to a proper error return when this gate goes live (PRs 2–4)
+                .expect("BUG: settling is never gated in this build");
+            audit::process_event(state, EventType::Settling(event), permit.into(), runtime);
         }
     }
 }

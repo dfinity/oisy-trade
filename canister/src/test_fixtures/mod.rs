@@ -24,6 +24,16 @@ pub const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100).unwrap());
 /// Minimum order quantity: 0.01 ICP with 8 decimal places, i.e. 0.01 * 10^8.
 pub const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
+/// Minimum order notional for the test pair, in quote smallest units. Set to
+/// the smallest notional a 1-tick × 1-lot order produces (`100 × 10^6 / 10^8 =
+/// 1`) so the existing fixtures place valid orders.
+pub const MIN_NOTIONAL: Quantity = Quantity::from_u128(1);
+/// Maximum order notional for the test pair, in quote smallest units. Set to
+/// the maximum so the default fixtures never trip the upper bound; the bound
+/// itself is still exercised (snapshot round-trip, query response). Tests that
+/// assert rejection register their own pair with tight bounds.
+pub const MAX_NOTIONAL: Quantity = Quantity::MAX;
+
 /// Scales a whole-quote-per-whole-base price into the on-book representation
 /// (quote smallest units per whole base token) for the 8-decimal test pair:
 /// `10^quote_decimals`.
@@ -121,11 +131,20 @@ pub fn trading_pair_request(
         lot_size: LOT_SIZE.into(),
         maker_fee_bps: 0,
         taker_fee_bps: 0,
+        min_notional: MIN_NOTIONAL.into(),
+        max_notional: Some(MAX_NOTIONAL.into()),
     }
 }
 
 pub fn order_book() -> OrderBook {
-    OrderBook::new(TEST_BOOK_ID, TICK_SIZE, LOT_SIZE, FeeRates::default())
+    OrderBook::new(
+        TEST_BOOK_ID,
+        TICK_SIZE,
+        LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
+        FeeRates::default(),
+    )
 }
 
 pub fn icp_ckbtc_trading_pair() -> TradingPair {
@@ -207,6 +226,8 @@ pub fn two_token_state() -> (state::State<VectorMemory, VectorMemory>, TokenId, 
         icp_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
     (state, a_id, b_id)
@@ -260,6 +281,8 @@ pub fn init_state_with_order_book() {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
     });
@@ -693,6 +716,8 @@ pub mod arbitrary {
             arb_token_metadata(),
             arb_token_metadata(),
             arb_fee_rates(),
+            arb_quantity(),
+            option::of(arb_quantity()),
         )
             .prop_map(
                 |(
@@ -704,6 +729,8 @@ pub mod arbitrary {
                     base_metadata,
                     quote_metadata,
                     fee_rates,
+                    min_notional,
+                    max_notional,
                 )| AddTradingPairEvent {
                     book_id: OrderBookId::new(book_id),
                     base: TokenId::new(base),
@@ -713,6 +740,8 @@ pub mod arbitrary {
                     base_metadata,
                     quote_metadata,
                     fee_rates,
+                    min_notional,
+                    max_notional,
                 },
             )
     }
