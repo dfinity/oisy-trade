@@ -4,8 +4,8 @@ use oisy_trade_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    OrderStatus, PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -130,15 +130,6 @@ pub fn drive_matching() {
     }
 }
 
-pub fn get_order_status(order_id: oisy_trade_types::OrderId) -> OrderStatus {
-    match order_id.parse::<order::OrderId>() {
-        Ok(id) => state::with_state(|s| s.get_order_status(id))
-            .map(Into::into)
-            .unwrap_or(OrderStatus::NotFound),
-        Err(e) => panic!("ERROR: invalid order id: {}", e),
-    }
-}
-
 pub fn get_order_book_ticker(
     pair: TradingPair,
 ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
@@ -212,6 +203,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
+                    min_notional: book.min_notional().into(),
+                    max_notional: book.max_notional().map(Into::into),
                 }
             })
             .collect()
@@ -373,30 +366,43 @@ pub fn get_fee_balances(
 /// Typically those errors indicate a client bug.
 #[derive(Debug, PartialEq, Eq)]
 pub enum GetMyOrdersError {
-    /// The `after` cursor was not a well-formed order id.
-    InvalidCursor(order::OrderIdParseError),
+    /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
+    /// not a well-formed order id.
+    InvalidOrderId(order::OrderIdParseError),
 }
 
 pub fn get_my_orders(
-    args: GetMyOrdersArgs,
+    args: Option<GetMyOrdersArgs>,
     caller: candid::Principal,
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
-    let after = args
-        .after
-        .map(|id| id.parse::<order::OrderId>())
-        .transpose()
-        .map_err(GetMyOrdersError::InvalidCursor)?;
-    let length = args.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
-    Ok(
-        state::with_state(|s| s.get_user_orders(&caller, after, length))
-            .into_iter()
-            .map(|(id, pair, record)| UserOrder {
-                id: id.into(),
-                pair: pair.into(),
-                order: record.into(),
-            })
-            .collect(),
-    )
+    let filter = args.unwrap_or_default().filter;
+    let results = match filter {
+        oisy_trade_types::GetMyOrdersFilter::ById(id) => {
+            let id = id
+                .parse::<order::OrderId>()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            state::with_state(|s| s.get_user_order(&caller, id))
+                .into_iter()
+                .collect()
+        }
+        oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
+            let after = page
+                .after
+                .map(|id| id.parse::<order::OrderId>())
+                .transpose()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
+            state::with_state(|s| s.get_user_orders(&caller, after, length))
+        }
+    };
+    Ok(results
+        .into_iter()
+        .map(|(id, pair, record)| UserOrder {
+            id: id.into(),
+            pair: pair.into(),
+            order: record.into(),
+        })
+        .collect())
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
@@ -436,6 +442,25 @@ pub fn add_trading_pair(
     let taker = order::BasisPoint::new(request.taker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.taker_fee_bps))?;
     let fee_rates = order::FeeRates { maker, taker };
+    let invalid_notional = || AddTradingPairError::InvalidNotional {
+        min_notional: request.min_notional.clone(),
+        max_notional: request.max_notional.clone(),
+    };
+    let min_notional =
+        order::Quantity::try_from(request.min_notional.clone()).map_err(|_| invalid_notional())?;
+    if min_notional.is_zero() {
+        return Err(invalid_notional());
+    }
+    let max_notional = match &request.max_notional {
+        None => None,
+        Some(max) => {
+            let max = order::Quantity::try_from(max.clone()).map_err(|_| invalid_notional())?;
+            if max < min_notional {
+                return Err(invalid_notional());
+            }
+            Some(max)
+        }
+    };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
             base: order::TokenId::from(request.base.id),
@@ -485,6 +510,8 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         };
         let permit = s
             .permissions()

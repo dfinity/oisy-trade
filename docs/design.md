@@ -52,10 +52,10 @@ User                    OISY TRADE
  |                          | insert/match against book
  |                          | credit proceeds on fills
  |                          |
- |-- get_order_status ----->|
- |<-- status (Pending/      |
- |    Open/Filled/          |
- |    Canceled) ------------|
+ |-- get_my_orders -------->|
+ |<-- orders with status    |
+ |    (Pending/Open/        |
+ |    Filled/Canceled) -----|
 ```
 
 ### 3. Withdrawal
@@ -112,7 +112,14 @@ For that division to be exact for every order and fill (no rounding, no dust), a
 - Each pair has configurable parameters:
   - **Tick size**: minimum price increment.
   - **Lot size**: minimum order quantity.
+  - **Min notional**: minimum order value (`price × quantity / 10^base_decimals`, in quote
+    smallest units). Rejects dust orders worth less than the cost of settling them. Required;
+    must be greater than zero.
+  - **Max notional**: optional maximum order value (same units). Rejects fat-finger orders and
+    caps single-order impact. When set, must be greater than or equal to the min notional.
   - **Status**: active, halted, or delisted.
+- Tick, lot, min notional, and max notional are enforced independently: an order may fail any
+  one of them, and none is implied by another.
 - Orders can only be placed on active pairs.
 
 ### Order Lifecycle
@@ -338,7 +345,7 @@ Every order submitted to the OISY TRADE is recorded in a map keyed by `OrderId`;
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
-The history exists for a single purpose: serving the `get_order_status(order_id)` query so clients that have lost track of a submission can recover its outcome.
+The history exists for a single purpose: serving the `get_my_orders` query (including its `ById` point lookup) so clients that have lost track of a submission can recover its outcome.
 
 ### Order History Memory Estimates
 
@@ -406,7 +413,7 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 
 **Query calls** (read-only):
 
-- **`get_order_status(order_id)`**: returns the current status of an order. Time: O(1) with an order-ID-indexed map.
+- **`get_my_orders(opt GetMyOrdersArgs)`**: returns the caller's orders, each with its current status. The argument is optional; when absent it defaults to the first page (newest first, `length = MAX_ORDERS_PER_RESPONSE`). When present, `GetMyOrdersArgs.filter` selects the mode: `ById` performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
 - **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
 - **`list_supported_tokens()`**: returns the full list of tokens registered with the OISY TRADE. Time: O(n) over the registered tokens.
 

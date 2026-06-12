@@ -5,11 +5,11 @@ mod history;
 mod tests;
 
 pub use book::{
-    Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
-    RemovedOrder,
+    Fill, MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook,
+    OrderBookSnapshot, PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use history::OrderHistory;
+pub use history::{OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
@@ -59,8 +59,7 @@ impl From<Side> for oisy_trade_types::Side {
 }
 
 /// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
-/// states of [`oisy_trade_types::OrderStatus`]; the public `NotFound` variant is
-/// synthesized at the canister boundary when no record exists.
+/// states of [`oisy_trade_types::OrderStatus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub enum OrderStatus {
     #[n(0)]
@@ -70,15 +69,7 @@ pub enum OrderStatus {
     #[n(2)]
     Filled,
     #[n(3)]
-    Canceled(#[n(0)] CanceledOrderInfo),
-}
-
-/// Fill information captured when an order transitions to `Canceled`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct CanceledOrderInfo {
-    /// Quantity that was still open on the book at the moment of cancel and will never be filled.
-    #[n(0)]
-    pub remaining_quantity: Quantity,
+    Canceled,
 }
 
 impl From<OrderStatus> for oisy_trade_types::OrderStatus {
@@ -87,15 +78,7 @@ impl From<OrderStatus> for oisy_trade_types::OrderStatus {
             OrderStatus::Pending => oisy_trade_types::OrderStatus::Pending,
             OrderStatus::Open => oisy_trade_types::OrderStatus::Open,
             OrderStatus::Filled => oisy_trade_types::OrderStatus::Filled,
-            OrderStatus::Canceled(info) => oisy_trade_types::OrderStatus::Canceled(info.into()),
-        }
-    }
-}
-
-impl From<CanceledOrderInfo> for oisy_trade_types::CanceledOrderInfo {
-    fn from(info: CanceledOrderInfo) -> Self {
-        oisy_trade_types::CanceledOrderInfo {
-            remaining_quantity: info.remaining_quantity.into(),
+            OrderStatus::Canceled => oisy_trade_types::OrderStatus::Canceled,
         }
     }
 }

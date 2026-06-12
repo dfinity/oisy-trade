@@ -33,7 +33,15 @@ pub struct OrderRecord {
     /// Submission time, taken from the add-limit-order event. Display-only —
     /// no matching or ordering logic reads it.
     #[n(5)]
-    pub timestamp: Timestamp,
+    pub created_at: Timestamp,
+    /// Cumulative quantity filled so far, in base token units. Remaining is
+    /// `quantity − filled_quantity`.
+    #[n(6)]
+    pub filled_quantity: Quantity,
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel); `None` until the order is first modified.
+    #[n(7)]
+    pub last_updated_at: Option<Timestamp>,
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -43,9 +51,77 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             side: record.side.into(),
             price: candid::Nat::from(record.price),
             quantity: record.quantity.into(),
+            filled_quantity: record.filled_quantity.into(),
             status: record.status.into(),
-            timestamp: record.timestamp.as_nanos(),
+            created_at: record.created_at.as_nanos(),
+            last_updated_at: record.last_updated_at.map(|t| t.as_nanos()),
         }
+    }
+}
+
+/// A combined update to an order record, applied in a single read-modify-write
+/// by [`OrderHistory::apply_update`]: an optional status transition plus a
+/// fill delta to add to `filled_quantity`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OrderUpdate {
+    pub status: Option<OrderStatus>,
+    pub filled_delta: Quantity,
+}
+
+impl OrderUpdate {
+    /// A status-only update (no fill delta).
+    pub fn status(status: OrderStatus) -> Self {
+        Self {
+            status: Some(status),
+            filled_delta: Quantity::ZERO,
+        }
+    }
+
+    /// A fill-only update (no status change).
+    pub fn filled(filled_delta: Quantity) -> Self {
+        Self {
+            status: None,
+            filled_delta,
+        }
+    }
+
+    /// Apply the update to the order record. Returns whether the record was changed.
+    ///
+    /// # Panics
+    ///
+    /// `filled_quantity` is monotonic non-decreasing and must never exceed
+    /// `quantity`; this invariant is enforced by an always-on check that traps
+    /// on violation.
+    pub fn apply(self, order: &mut OrderRecord) -> bool {
+        let mut changed = false;
+        let OrderUpdate {
+            status,
+            filled_delta,
+        } = self;
+
+        if let Some(new_status) = status
+            && new_status != order.status
+        {
+            changed = true;
+            order.status = new_status;
+        }
+
+        if filled_delta != Quantity::ZERO {
+            changed = true;
+            order.filled_quantity = order
+                .filled_quantity
+                .checked_add(filled_delta)
+                .expect("BUG: filled_quantity overflow");
+
+            assert!(
+                order.filled_quantity <= order.quantity,
+                "BUG: filled_quantity {:?} exceeds quantity {:?} for order created_at {:?}",
+                order.filled_quantity,
+                order.quantity,
+                order.created_at,
+            );
+        }
+        changed
     }
 }
 
@@ -96,7 +172,7 @@ impl Storable for SeqOrderRecord {
 ///
 /// Interior mutability is as follows:
 /// * `by_user` is inserted once, then the entry is immutable,
-/// * `orders` is inserted once and values may be updated, e.g. `set_status` and cancel/fill.
+/// * `orders` is inserted once and values may be updated, e.g. `apply_update` for status/fill.
 pub struct OrderHistory<M: Memory> {
     orders: StableBTreeMap<OrderId, SeqOrderRecord, M>,
     by_user: StableBTreeMap<UserOrderKey, OrderId, M>,
@@ -147,15 +223,22 @@ impl<M: Memory> OrderHistory<M> {
         self.orders.get(id).map(|entry| entry.record)
     }
 
-    /// Updates the status of an existing order. Panics if the order is unknown.
-    pub fn set_status(&mut self, id: &OrderId, status: OrderStatus) {
-        bench_scopes!("order_history", "order_history::set_status");
+    /// Applies a combined [`OrderUpdate`] to an existing order in a single
+    /// read-modify-write: sets the status if present, adds `filled_delta` to
+    /// `filled_quantity`, and stamps `last_updated_at = Some(now)`. A no-op
+    /// update (status absent or equal to the current status, and a zero
+    /// `filled_delta`) writes nothing and leaves `last_updated_at` unchanged.
+    pub fn apply_update(&mut self, id: &OrderId, update: OrderUpdate, now: Timestamp) {
+        bench_scopes!("order_history", "order_history::apply_update");
         let mut entry = self
             .orders
             .get(id)
             .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-        entry.record.status = status;
-        self.orders.insert(*id, entry);
+
+        if update.apply(&mut entry.record) {
+            entry.record.last_updated_at = Some(now);
+            self.orders.insert(*id, entry);
+        }
     }
 
     /// Returns up to `length` of `user`'s orders in newest-first order. With

@@ -80,6 +80,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         }) => {
             let pair = order::TradingPair {
                 base: *base,
@@ -92,6 +94,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 quote_metadata.clone(),
                 *tick_size,
                 *lot_size,
+                *min_notional,
+                *max_notional,
                 *fee_rates,
             );
         }
@@ -131,10 +135,10 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_limit_order(*user, book_id, order, timestamp, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
-            state.record_cancel_limit_order(*order_id, persistence);
+            state.record_cancel_limit_order(*order_id, timestamp, persistence);
         }
         EventType::Matching(event) => {
-            state.record_matching_event(event, persistence);
+            state.record_matching_event(event, timestamp, persistence);
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);

@@ -204,9 +204,15 @@ export BUY_ORDER_ID=<paste-the-order-id-here>
 ## 6. Check order status
 
 ```bash
-icp canister call oisy_trade get_order_status "(\"$SELL_ORDER_ID\")" --environment staging --query --identity anonymous
-icp canister call oisy_trade get_order_status "(\"$BUY_ORDER_ID\")" --environment staging --query --identity anonymous
+icp canister call oisy_trade get_my_orders --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
+(opt record { filter = variant { ById = "$SELL_ORDER_ID" } })
+EOF
+icp canister call oisy_trade get_my_orders --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
+(opt record { filter = variant { ById = "$BUY_ORDER_ID" } })
+EOF
 ```
+
+`get_my_orders` returns the caller's orders; the `ById` filter selects a single order by id and returns it (or an empty vector if the caller does not own it). Each returned order carries a `status` field:
 
 | Status     | Meaning                                   |
 |------------|-------------------------------------------|
@@ -214,7 +220,6 @@ icp canister call oisy_trade get_order_status "(\"$BUY_ORDER_ID\")" --environmen
 | `Open`     | Resting in the order book                 |
 | `Filled`   | Fully filled                              |
 | `Canceled` | Canceled                                  |
-| `NotFound` | Unknown order ID                          |
 
 Both orders should reach `Filled` once the matching engine has ticked. The engine typically processes within a few seconds — if you see `Pending`, wait a moment and re-run the query.
 

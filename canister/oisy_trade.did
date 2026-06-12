@@ -50,8 +50,12 @@ type AddLimitOrderError = variant {
     InvalidQuantity : record { quantity : nat; lot_size : nat };
     // The caller's free balance in `token` is below `required`.
     // For a `Sell`, `token` is the base and `required` is `quantity`.
-    // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
+    // For a `Buy`, `token` is the quote and `required` is the scaled quote
+    // amount `price × quantity / 10^base_decimals` (in quote smallest units).
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
+    // The order's notional (price × quantity / 10^base_decimals, in quote
+    // smallest units) is below `min` or above `max`.
+    InvalidNotional : record { notional : nat; min : nat; max : opt nat };
 };
 
 /// Error returned when canceling a limit order fails.
@@ -76,6 +80,10 @@ type TradingPairInfo = record {
     tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
     lot_size : nat;
+    // Minimum order notional in quote token smallest units.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any.
+    max_notional : opt nat;
 };
 
 // A single price level in an order book, aggregated across all resting orders at that price.
@@ -133,8 +141,6 @@ type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBook
 
 // Status of an order.
 type OrderStatus = variant {
-    // The order was not found.
-    NotFound;
     // The order is pending processing.
     Pending;
     // The order is open and resting in the order book.
@@ -142,21 +148,10 @@ type OrderStatus = variant {
     // The order has been fully filled.
     Filled;
     /// The order has been canceled.
-    Canceled : CanceledOrderInfo;
+    Canceled;
 };
 
-/// Details about a canceled order. The refund (token + amount) is derivable
-/// from the order's placement details + `remaining_quantity`, so it is not
-/// duplicated here.
-type CanceledOrderInfo = record {
-    /// Quantity that was still open on the book at the moment of cancel.
-    /// Equals the original placed quantity for a never-matched order, and
-    /// `original − filled` for a partially-filled one.
-    remaining_quantity : nat;
-};
-
-/// Full view of an order as stored by the canister. Returned by endpoints that
-/// have the whole record already loaded (e.g. `cancel_limit_order`).
+/// Full view of an order as stored by the canister.
 type OrderRecord = record {
     /// Principal that placed the order.
     owner : principal;
@@ -166,21 +161,32 @@ type OrderRecord = record {
     price : nat;
     /// Quantity originally placed, in base token units.
     quantity : nat;
-    /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
+    /// Cumulative quantity filled so far, in base token units.
+    /// Remaining is `quantity − filled_quantity`.
+    filled_quantity : nat;
+    /// Current lifecycle state.
     status : OrderStatus;
     /// Submission time in nanoseconds since the Unix epoch.
-    timestamp : nat64;
+    created_at : nat64;
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel) in nanoseconds since the Unix epoch; null until first modified.
+    last_updated_at : opt nat64;
 };
 
-/// Request for `get_my_orders`: a page over the caller's orders, newest first.
-/// `length` is capped at 100. Pages via a cursor: pass the previous page's last
-/// order id as `after`; null starts from the newest order.
+/// Request for `get_my_orders`.
 type GetMyOrdersArgs = record {
-    /// Resume strictly after this order id (a prior page's last id).
-    /// null starts from the newest order.
-    after : opt OrderId;
-    /// Maximum number of orders to return.
-    length : nat32;
+    /// How to select the caller's orders.
+    filter : GetMyOrdersFilter;
+};
+
+/// Selector for `get_my_orders`: a point lookup by id or a page.
+type GetMyOrdersFilter = variant {
+    /// Return the single matching order if the caller owns it, else empty.
+    ById : OrderId;
+    /// Return a page over the caller's orders, newest first. `length` is capped
+    /// at 100. Pages via a cursor: pass the previous page's last order id as
+    /// `after`; null starts from the newest order.
+    ByPage : record { after : opt OrderId; length : nat32 };
 };
 
 /// One entry in a `get_my_orders` response: an order the caller placed.
@@ -361,6 +367,11 @@ type AddTradingPairRequest = record {
     maker_fee_bps : nat16;
     // Taker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
     taker_fee_bps : nat16;
+    // Minimum order notional in quote token smallest units. Must be greater than zero.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any. When set,
+    // must be greater than or equal to min_notional.
+    max_notional : opt nat;
 };
 
 // Error returned by the add_trading_pair endpoint.
@@ -385,6 +396,10 @@ type AddTradingPairError = variant {
     // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
     // could not settle to an exact quote amount. Choose a coarser tick or lot.
     IndivisibleTickLotForBaseDecimals : record { tick_size : nat; lot_size : nat; base_decimals : nat8 };
+    // The notional bounds are invalid: min_notional is zero, a bound is too
+    // large to fit the 256-bit quantity representation, or max_notional is set
+    // and smaller than min_notional.
+    InvalidNotional : record { min_notional : nat; max_notional : opt nat };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
@@ -431,6 +446,8 @@ type AddTradingPairEvent = record {
     quote_metadata : TokenMetadata;
     maker_fee_bps : nat16;
     taker_fee_bps : nat16;
+    min_notional : nat;
+    max_notional : opt nat;
 };
 
 // Structured order identifier used in events.
@@ -540,16 +557,13 @@ service : (OisyTradeArg) -> {
     // Submit a new limit order. The order is queued for *asynchronous*
     // processing by the matching engine; an `OrderId` is returned
     // immediately. An `Ok` response means the order was accepted into the
-    // queue, not that it filled — poll `get_order_status` to observe the
-    // actual lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
+    // queue, not that it filled — call `get_my_orders` to observe the actual
+    // lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
     /// Cancel a limit order previously submitted by the caller. Any remaining
     /// reserved balance is credited back to the caller's free balance.
     cancel_limit_order : (OrderId) -> (variant { Ok : OrderRecord; Err : CancelLimitOrderError });
-
-    // Query the status of an order by its ID.
-    get_order_status : (OrderId) -> (OrderStatus) query;
 
     // Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
@@ -612,9 +626,10 @@ service : (OisyTradeArg) -> {
     // `reserved` is always zero (fees have no reserved concept).
     get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
-    // Return the caller's orders, newest first, paginated. Useful for a
-    // front-end displaying a user's order history.
-    get_my_orders : (GetMyOrdersArgs) -> (vec UserOrder) query;
+    // Return the caller's orders, either a single order by id or a page,
+    // newest first. The argument is optional: an absent argument is equivalent
+    // to a page from the newest order with the maximum length.
+    get_my_orders : (opt GetMyOrdersArgs) -> (vec UserOrder) query;
 
     // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

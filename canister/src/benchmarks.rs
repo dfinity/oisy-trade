@@ -261,10 +261,10 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
         let mut retrieved = 0usize;
         loop {
             let orders = crate::get_my_orders(
-                oisy_trade_types::GetMyOrdersArgs {
-                    after: after.clone(),
-                    length: page,
-                },
+                Some(oisy_trade_types::GetMyOrdersArgs::by_page(
+                    after.clone(),
+                    page,
+                )),
                 trader,
             )
             .expect("benchmark cursor is always a valid order id");
@@ -380,6 +380,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
         },
         TICK_SIZE,
         LOT_SIZE,
+        Quantity::from_u128(1),
+        None,
         fee_rates,
     );
     state

@@ -4,8 +4,8 @@ use oisy_trade_types::{
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, OrderStatus, Token, TradingPair,
-    TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
+    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -43,11 +43,6 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
         }
     }
     result
-}
-
-#[ic_cdk::query]
-fn get_order_status(order_id: oisy_trade_types::OrderId) -> OrderStatus {
-    oisy_trade_canister::get_order_status(order_id)
 }
 
 #[ic_cdk::query]
@@ -150,12 +145,12 @@ fn get_fee_balances(
 }
 
 #[ic_cdk::query]
-fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
+fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Vec<UserOrder> {
     use oisy_trade_canister::Runtime;
     match oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()) {
         Ok(orders) => orders,
-        Err(oisy_trade_canister::GetMyOrdersError::InvalidCursor(e)) => {
-            panic!("ERROR: invalid cursor order id: {e}")
+        Err(oisy_trade_canister::GetMyOrdersError::InvalidOrderId(e)) => {
+            panic!("ERROR: invalid order id: {e}")
         }
     }
 }
@@ -232,6 +227,8 @@ fn get_events(
                         base_metadata,
                         quote_metadata,
                         fee_rates,
+                        min_notional,
+                        max_notional,
                     },
                 ) => event::EventType::AddTradingPair(event::AddTradingPairEvent {
                     book_id: book_id.get(),
@@ -243,6 +240,8 @@ fn get_events(
                     quote_metadata: oisy_trade_types::TokenMetadata::from(quote_metadata),
                     maker_fee_bps: fee_rates.maker.get(),
                     taker_fee_bps: fee_rates.taker.get(),
+                    min_notional: candid::Nat::from(min_notional),
+                    max_notional: max_notional.map(candid::Nat::from),
                 }),
                 EventType::Deposit(oisy_trade_canister::state::event::DepositEvent {
                     user,

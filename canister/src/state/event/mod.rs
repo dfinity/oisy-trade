@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
-    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity,
-    Side, TickSize, TokenId, TokenMetadata,
+    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use candid::Principal;
 use ic_stable_structures::Storable;
@@ -61,6 +61,10 @@ pub struct AddTradingPairEvent {
     pub quote_metadata: TokenMetadata,
     #[n(7)]
     pub fee_rates: FeeRates,
+    #[n(8)]
+    pub min_notional: Quantity,
+    #[n(9)]
+    pub max_notional: Option<Quantity>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -160,14 +164,6 @@ pub enum BalanceOperation {
         #[n(2)]
         amount: Quantity,
     },
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
-pub struct OrderStatusTransition {
-    #[n(0)]
-    pub seq: OrderSeq,
-    #[n(1)]
-    pub status: OrderStatus,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
