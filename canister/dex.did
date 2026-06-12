@@ -167,8 +167,8 @@ type OrderRecord = record {
 /// Request for `get_my_orders`. An absent `filter` defaults to a page from the
 /// newest order with the maximum length.
 type GetMyOrdersArgs = record {
-    /// How to select the caller's orders. Absent ⇒ first page, newest first.
-    filter : opt GetMyOrdersFilter;
+    /// How to select the caller's orders.
+    filter : GetMyOrdersFilter;
 };
 
 /// Selector for `get_my_orders`: a point lookup by id or a page. The two modes
@@ -608,7 +608,7 @@ service : (DexArg) -> {
 
     // Return the caller's orders, newest first, paginated. Useful for a
     // front-end displaying a user's order history.
-    get_my_orders : (GetMyOrdersArgs) -> (vec UserOrder) query;
+    get_my_orders : (opt GetMyOrdersArgs) -> (vec UserOrder) query;
 
     // List every token registered with the DEX. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

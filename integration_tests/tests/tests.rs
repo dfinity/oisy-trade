@@ -57,16 +57,13 @@ mod add_limit_order {
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
-        AddLimitOrderError, Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage,
-        LimitOrderRequest, OrderId, OrderStatus, Side,
+        AddLimitOrderError, Balance, GetMyOrdersArgs, LimitOrderRequest, OrderId, OrderStatus, Side,
     };
     use pocket_ic::{RejectCode, RejectResponse};
 
     /// A `ByPage` filter, matching the previous flat `after`/`length` args.
     fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
-        GetMyOrdersArgs {
-            filter: Some(GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length })),
-        }
+        GetMyOrdersArgs::by_page(after, length)
     }
 
     #[tokio::test]
@@ -288,7 +285,7 @@ mod add_limit_order {
                 setup.dex_id(),
                 Principal::anonymous(),
                 "get_my_orders",
-                Encode!(&by_page(Some("not-a-valid-id".to_string()), 10)).unwrap(),
+                Encode!(&Some(by_page(Some("not-a-valid-id".to_string()), 10))).unwrap(),
             )
             .await;
 

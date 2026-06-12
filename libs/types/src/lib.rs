@@ -213,12 +213,29 @@ pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
 
 /// Request for the `get_my_orders` query.
 ///
-/// An absent `filter` defaults to a page from the newest order with the
-/// maximum length, i.e. `ByPage { after: None, length: MAX_ORDERS_PER_RESPONSE }`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+/// The endpoint takes an `opt GetMyOrdersArgs`; an absent argument is
+/// equivalent to [`GetMyOrdersArgs::default()`], the first page from the
+/// newest order with the maximum length.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct GetMyOrdersArgs {
-    /// How to select the caller's orders. Absent ⇒ first page, newest first.
-    pub filter: Option<GetMyOrdersFilter>,
+    /// How to select the caller's orders.
+    pub filter: GetMyOrdersFilter,
+}
+
+impl GetMyOrdersArgs {
+    /// A point lookup by order id.
+    pub fn by_id(id: OrderId) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ById(id),
+        }
+    }
+
+    /// A page over the caller's orders, newest first.
+    pub fn by_page(after: Option<OrderId>, length: u32) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length }),
+        }
+    }
 }
 
 /// Selector for `get_my_orders`: either a point lookup by id or a page. The
@@ -229,6 +246,12 @@ pub enum GetMyOrdersFilter {
     ById(OrderId),
     /// Return a page over the caller's orders, newest first.
     ByPage(GetMyOrdersPage),
+}
+
+impl Default for GetMyOrdersFilter {
+    fn default() -> Self {
+        Self::ByPage(GetMyOrdersPage::default())
+    }
 }
 
 /// A page over the caller's orders, newest first. `length` is capped at
@@ -243,6 +266,15 @@ pub struct GetMyOrdersPage {
     pub after: Option<OrderId>,
     /// Maximum number of orders to return.
     pub length: u32,
+}
+
+impl Default for GetMyOrdersPage {
+    fn default() -> Self {
+        Self {
+            after: None,
+            length: MAX_ORDERS_PER_RESPONSE,
+        }
+    }
 }
 
 /// One entry in a `get_my_orders` response: an order the caller placed.

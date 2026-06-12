@@ -123,16 +123,18 @@ must respect that `Write` gate so replay does not re-apply it.
 - `OrderStatus` drops `NotFound`; `Canceled` becomes a unit variant. Resulting set:
   `Pending`, `Open`, `Filled`, `Canceled`.
 - `CanceledOrderInfo` is removed.
-- `GetMyOrdersArgs` becomes a single optional filter that is either a point lookup or a
-  page, replacing the flat `after`/`length` pair.
+- `GetMyOrdersArgs` carries a single non-optional `filter` that is either a point lookup or
+  a page, replacing the flat `after`/`length` pair. The endpoint takes `opt GetMyOrdersArgs`;
+  an absent argument is the default (first page, newest first).
 - `get_order_status` is removed from the canister interface.
 
 The candid surface (the repo's candid equality check must pass):
 
 ```candid
+// The endpoint arg is optional: `get_my_orders : (opt GetMyOrdersArgs) -> ...`.
+// An absent argument defaults to the first page, newest first.
 type GetMyOrdersArgs = record {
-    // Absent filter defaults to a page from the newest order with the maximum length.
-    filter : opt GetMyOrdersFilter;
+    filter : GetMyOrdersFilter;
 };
 
 type GetMyOrdersFilter = variant {
@@ -154,7 +156,7 @@ type OrderRecord = record {
 type OrderStatus = variant { Pending; Open; Filled; Canceled };
 ```
 
-`length` is capped at `MAX_ORDERS_PER_RESPONSE` as today; an absent `filter` is equivalent
+`length` is capped at `MAX_ORDERS_PER_RESPONSE` as today; an absent argument is equivalent
 to `ByPage { after = null; length = MAX_ORDERS_PER_RESPONSE }`. A malformed `OrderId` (in
 either `ById` or `ByPage.after`) is rejected exactly as the current id/cursor parsing does
 (trap), so behavior is consistent across the endpoint.
@@ -200,10 +202,11 @@ What goes away is only its *persistence* in history: with `CanceledOrderInfo` re
 
 ### Endpoint — `canister/src/lib.rs`, `canister/src/main.rs`
 
-- `get_my_orders`: match `args.filter`. `Some(ById(id))` → resolve the caller's `UserId` and
-  return the single owned record as a one-element `vec` (empty if the id is unknown or owned
-  by another principal). `Some(ByPage { after, length })` or `None` → the existing
-  newest-first cursor scan (`None` uses `after = None`, `length = MAX_ORDERS_PER_RESPONSE`).
+- `get_my_orders`: an absent argument defaults to `GetMyOrdersArgs::default()`; then match
+  `args.filter`. `ById(id)` → resolve the caller's `UserId` and return the single owned
+  record as a one-element `vec` (empty if the id is unknown or owned by another principal).
+  `ByPage { after, length }` → the existing newest-first cursor scan. The default filter is
+  `ByPage { after = None, length = MAX_ORDERS_PER_RESPONSE }`.
 - Remove `get_order_status` (business fn in `lib.rs`, the `#[ic_cdk::query]` wrapper in
   `main.rs`, and `state::get_order_status` if otherwise unused).
 

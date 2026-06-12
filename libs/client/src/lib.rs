@@ -91,7 +91,7 @@ impl<R: Runtime> DexClient<R> {
     /// Query the caller's orders, newest first, paginated.
     pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
         self.runtime
-            .call(self.dex_canister, "get_my_orders", (args,), 0)
+            .call(self.dex_canister, "get_my_orders", (Some(args),), 0)
             .await
             .unwrap()
     }
@@ -99,12 +99,10 @@ impl<R: Runtime> DexClient<R> {
     /// Point-lookup the caller's order by id, or `None` if the caller does not
     /// own an order with that id.
     pub async fn get_my_order(&self, order_id: OrderId) -> Option<UserOrder> {
-        self.get_my_orders(GetMyOrdersArgs {
-            filter: Some(dex_types::GetMyOrdersFilter::ById(order_id)),
-        })
-        .await
-        .into_iter()
-        .next()
+        self.get_my_orders(GetMyOrdersArgs::by_id(order_id))
+            .await
+            .into_iter()
+            .next()
     }
 
     /// Query all listed trading pairs on the DEX canister.

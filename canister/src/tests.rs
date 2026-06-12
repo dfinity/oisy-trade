@@ -704,13 +704,8 @@ mod cancel_limit_order {
             last_updated_at: Some(222),
         };
         assert_eq!(result, Ok(expected.clone()));
-        let orders = crate::get_my_orders(
-            dex_types::GetMyOrdersArgs {
-                filter: Some(dex_types::GetMyOrdersFilter::ById(order_id)),
-            },
-            owner,
-        )
-        .unwrap();
+        let orders =
+            crate::get_my_orders(Some(dex_types::GetMyOrdersArgs::by_id(order_id)), owner).unwrap();
         assert_eq!(orders.len(), 1);
         assert_eq!(orders[0].order, expected);
     }
@@ -721,16 +716,10 @@ mod order_status_via_get_my_orders {
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
     use crate::{add_limit_order, get_my_orders};
     use candid::Principal;
-    use dex_types::{GetMyOrdersArgs, GetMyOrdersFilter, OrderStatus};
+    use dex_types::{GetMyOrdersArgs, OrderStatus};
 
     fn status_of(owner: Principal, order_id: dex_types::OrderId) -> Option<OrderStatus> {
-        let orders = get_my_orders(
-            GetMyOrdersArgs {
-                filter: Some(GetMyOrdersFilter::ById(order_id)),
-            },
-            owner,
-        )
-        .unwrap();
+        let orders = get_my_orders(Some(GetMyOrdersArgs::by_id(order_id)), owner).unwrap();
         orders.into_iter().next().map(|o| o.order.status)
     }
 
@@ -782,9 +771,7 @@ mod order_status_via_get_my_orders {
     fn should_reject_syntactically_invalid_order_id() {
         init_state_with_order_book();
         let result = get_my_orders(
-            GetMyOrdersArgs {
-                filter: Some(GetMyOrdersFilter::ById("not-a-valid-order-id".to_string())),
-            },
+            Some(GetMyOrdersArgs::by_id("not-a-valid-order-id".to_string())),
             Principal::anonymous(),
         );
         assert!(matches!(
@@ -1671,15 +1658,10 @@ mod get_my_orders {
     };
     use crate::{GetMyOrdersError, add_limit_order, get_my_orders};
     use candid::{Nat, Principal};
-    use dex_types::{
-        GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, LimitOrderRequest,
-        MAX_ORDERS_PER_RESPONSE, OrderId, Side,
-    };
+    use dex_types::{GetMyOrdersArgs, LimitOrderRequest, MAX_ORDERS_PER_RESPONSE, OrderId, Side};
 
-    fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
-        GetMyOrdersArgs {
-            filter: Some(GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length })),
-        }
+    fn by_page(after: Option<OrderId>, length: u32) -> Option<GetMyOrdersArgs> {
+        Some(GetMyOrdersArgs::by_page(after, length))
     }
 
     /// Places `count` resting buys for `user` and returns their ids in

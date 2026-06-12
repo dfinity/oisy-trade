@@ -143,7 +143,7 @@ fn get_fee_balances(
 }
 
 #[ic_cdk::query]
-fn get_my_orders(args: GetMyOrdersArgs) -> Vec<UserOrder> {
+fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Vec<UserOrder> {
     use dex_canister::Runtime;
     match dex_canister::get_my_orders(args, dex_canister::IC_RUNTIME.msg_caller()) {
         Ok(orders) => orders,

@@ -344,11 +344,12 @@ pub enum GetMyOrdersError {
 }
 
 pub fn get_my_orders(
-    args: GetMyOrdersArgs,
+    args: Option<GetMyOrdersArgs>,
     caller: candid::Principal,
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
-    let results = match args.filter {
-        Some(dex_types::GetMyOrdersFilter::ById(id)) => {
+    let filter = args.unwrap_or_default().filter;
+    let results = match filter {
+        dex_types::GetMyOrdersFilter::ById(id) => {
             let id = id
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
@@ -356,7 +357,7 @@ pub fn get_my_orders(
                 .into_iter()
                 .collect()
         }
-        Some(dex_types::GetMyOrdersFilter::ByPage(page)) => {
+        dex_types::GetMyOrdersFilter::ByPage(page) => {
             let after = page
                 .after
                 .map(|id| id.parse::<order::OrderId>())
@@ -364,10 +365,6 @@ pub fn get_my_orders(
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
             state::with_state(|s| s.get_user_orders(&caller, after, length))
-        }
-        None => {
-            let length = MAX_ORDERS_PER_RESPONSE as usize;
-            state::with_state(|s| s.get_user_orders(&caller, None, length))
         }
     };
     Ok(results
