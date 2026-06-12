@@ -18,8 +18,8 @@ use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError,
     Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus,
-    PairToken,
-    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
