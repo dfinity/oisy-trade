@@ -64,10 +64,7 @@ fn apply_update_status_only() {
 
     history.apply_update(
         &id,
-        OrderUpdate {
-            status: Some(OrderStatus::Filled),
-            filled_delta: Quantity::ZERO,
-        },
+        OrderUpdate::status(OrderStatus::Filled),
         Timestamp::new(7),
     );
     let record = history.get(&id).expect("record present");
@@ -84,10 +81,7 @@ fn apply_update_delta_only() {
 
     history.apply_update(
         &id,
-        OrderUpdate {
-            status: None,
-            filled_delta: Quantity::from(400_000u64),
-        },
+        OrderUpdate::filled(Quantity::from(400_000u64)),
         Timestamp::new(9),
     );
     let record = history.get(&id).expect("record present");
@@ -137,10 +131,7 @@ fn apply_update_traps_when_filled_exceeds_quantity() {
     // check, not a `debug_assert!` compiled out of the release canister.
     history.apply_update(
         &id,
-        OrderUpdate {
-            status: None,
-            filled_delta: Quantity::from(1_000_001u64),
-        },
+        OrderUpdate::filled(Quantity::from(1_000_001u64)),
         Timestamp::new(1),
     );
 }

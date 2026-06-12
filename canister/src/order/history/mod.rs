@@ -68,6 +68,24 @@ pub struct OrderUpdate {
     pub filled_delta: Quantity,
 }
 
+impl OrderUpdate {
+    /// A status-only update (no fill delta).
+    pub fn status(status: OrderStatus) -> Self {
+        Self {
+            status: Some(status),
+            filled_delta: Quantity::ZERO,
+        }
+    }
+
+    /// A fill-only update (no status change).
+    pub fn filled(filled_delta: Quantity) -> Self {
+        Self {
+            status: None,
+            filled_delta,
+        }
+    }
+}
+
 /// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
 /// with the canister-global insertion sequence assigned when it was first
 /// inserted. The sequence keys the per-user index (scanned in reverse for

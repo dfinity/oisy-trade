@@ -341,10 +341,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
-                OrderUpdate {
-                    status: Some(OrderStatus::Canceled),
-                    filled_delta: Quantity::ZERO,
-                },
+                OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
         }
