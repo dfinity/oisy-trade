@@ -205,10 +205,10 @@ export BUY_ORDER_ID=<paste-the-order-id-here>
 
 ```bash
 icp canister call dex get_my_orders --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
-(record { filter = opt variant { ById = "$SELL_ORDER_ID" } })
+(opt record { filter = variant { ById = "$SELL_ORDER_ID" } })
 EOF
 icp canister call dex get_my_orders --args-file /dev/stdin --environment staging --query --identity "$BUYER_IDENTITY" <<EOF
-(record { filter = opt variant { ById = "$BUY_ORDER_ID" } })
+(opt record { filter = variant { ById = "$BUY_ORDER_ID" } })
 EOF
 ```
 
