@@ -115,10 +115,9 @@ impl OrderUpdate {
 
             assert!(
                 order.filled_quantity <= order.quantity,
-                "BUG: filled_quantity {:?} exceeds quantity {:?} for order {:?}",
+                "BUG: filled_quantity {:?} exceeds quantity {:?}",
                 order.filled_quantity,
                 order.quantity,
-                order
             );
         }
         changed
