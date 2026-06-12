@@ -1115,8 +1115,6 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
-                        // Seller is the resting maker: maker fee on the quote
-                        // notional = ceil(quote_reserved × 10 / 10_000).
                         fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
@@ -1124,8 +1122,6 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                        // Buyer is the crossing taker: taker fee on the base
-                        // quantity = ceil(deposit_amount × 23 / 10_000).
                         fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
