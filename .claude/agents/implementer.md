@@ -52,12 +52,17 @@ You implement code against a specification.
 
 ## Rust
 
-* No ticket references in code, rustdoc, or runbooks — the branch name carries the
+- No ticket references in code, rustdoc, or runbooks — the branch name carries the
   ticket. Tickets are fine in spec docs under `docs/specs/` (filename + `id:`) and in
   `// TODO(...)` comments that point at a ticket.
-* Write unit tests in separate files, example: `my_module/tests.rs`.
-* Avoid test helpers (annotated with `#[cfg(test)]`) in the productive code. Example no `test_helper` method in `my_module/mod.rs`.
-* Gather common test helpers in a top-level test fixtures file, e.g. `test_fixtures.rs`.
-* Order of reading should be most important first. Example: first the tests, then the test helpers.
-* Don't write comments unless explicitly requested. Don't write comments stating this cover requirement X.
-* Use explicit imports. Example: avoid `use proptest::prelude::*;`; use instead `use proptest::prelude::{Strategy, any};`
+- Write unit tests in separate files, e.g. `my_module/tests.rs`.
+- Avoid test helpers (annotated with `#[cfg(test)]`) in production code. For example,
+  no `test_helper` method in `my_module/mod.rs`.
+- Gather common test helpers in a top-level `test_fixtures` module (e.g.
+  `canister/src/test_fixtures/`).
+- Order content by importance, most important first. For example, put `#[test]`
+  functions before the helpers they use.
+- Don't write comments unless explicitly requested. In particular, don't write
+  comments noting which specification requirement a piece of code covers.
+- Use explicit imports. Example: avoid `use proptest::prelude::*;`; use instead
+  `use proptest::prelude::{Strategy, any};`
