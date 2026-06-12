@@ -27,7 +27,8 @@ deliberately applies. All three are invoked only by the canister controller.
 ## Requirements
 
 - **R1 — Global halt blocks entry.** If trading is halted, then a new `add_limit_order`
-  is rejected with `TradingHalted` and the matching engine makes no forward progress.
+  is rejected with `TradingHalted` and the matching engine starts no new matching and
+  produces no new fills (in-flight settling still drains — R2).
 - **R2 — Halt preserves the exit.** Under global halt, `cancel_limit_order` and
   withdrawal of available balance still succeed; `resume_trading` re-enables orders and
   matching.
