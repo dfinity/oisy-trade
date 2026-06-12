@@ -196,7 +196,6 @@ mod add_trading_pair {
         );
     }
 
-    // R4: pair creation rejects `min_notional == 0`.
     #[test]
     fn should_reject_zero_min_notional() {
         init_state_with_order_book();
@@ -222,7 +221,6 @@ mod add_trading_pair {
         );
     }
 
-    // R5: pair creation rejects `max_notional < min_notional`.
     #[test]
     fn should_reject_max_notional_below_min_notional() {
         init_state_with_order_book();
