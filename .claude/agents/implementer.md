@@ -13,8 +13,10 @@ You implement code against a specification.
 ## Pull Request
 
 - After the first working implementation + tests, open a DRAFT PR:
-    gh pr create --draft --title "<conventional-commits title>" --body "<summary + link to spec>"
-  PR title MUST follow Conventional Commits
+
+      gh pr create --draft --title "<conventional-commits title>" --body "<summary + link to spec>"
+
+- The PR title MUST follow Conventional Commits
   (https://www.conventionalcommits.org/en/v1.0.0/#summary): `type(scope): description`,
   with `!` after type/scope for breaking changes. Type is one of
   feat|fix|chore|build|ci|docs|style|refactor|perf|test.
