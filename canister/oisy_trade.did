@@ -1,3 +1,5 @@
+// OISY TRADE canister: an order book DEX on the Internet Computer.
+
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
 // Encoded as a 32-character hex string.
@@ -6,10 +8,10 @@ type OrderId = text;
 // Side of an order.
 type Side = variant {
     // Buy order (bid). On submission reserves `price × quantity` of the
-    // *quote* token from the caller's on-OISY-TRADE free balance.
+    // *quote* token from the caller's free balance.
     Buy;
     // Sell order (ask). On submission reserves `quantity` of the *base*
-    // token from the caller's on-OISY-TRADE free balance.
+    // token from the caller's free balance.
     Sell;
 };
 
@@ -46,7 +48,7 @@ type AddLimitOrderError = variant {
     InvalidPrice : record { price : nat; tick_size : nat };
     // The quantity is not a positive multiple of the lot size.
     InvalidQuantity : record { quantity : nat; lot_size : nat };
-    // The caller's on-OISY-TRADE free balance in `token` is below `required`.
+    // The caller's free balance in `token` is below `required`.
     // For a `Sell`, `token` is the base and `required` is `quantity`.
     // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
@@ -102,7 +104,7 @@ type OrderBookDepth = record {
 
 // Error returned by the `get_order_book_ticker` query.
 type GetOrderBookTickerError = variant {
-    // The requested trading pair is not registered on the OISY TRADE.
+    // The requested trading pair is not registered.
     UnknownTradingPair;
 };
 
@@ -112,7 +114,7 @@ type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBo
 type GetOrderBookDepthRequest = record {
     // The trading pair whose depth should be returned.
     trading_pair : TradingPair;
-    // Maximum number of price levels returned per side. When absent, the OISY TRADE
+    // Maximum number of price levels returned per side. When absent, the canister
     // returns 100 levels per side. The maximum accepted value is 1000; above
     // that the query returns `LimitTooLarge`. `opt 0` is accepted and returns
     // empty `bids`/`asks` vectors.
@@ -121,7 +123,7 @@ type GetOrderBookDepthRequest = record {
 
 // Error returned by the `get_order_book_depth` query.
 type GetOrderBookDepthError = variant {
-    // The requested trading pair is not registered on the OISY TRADE.
+    // The requested trading pair is not registered.
     UnknownTradingPair;
     // The requested depth limit exceeds the maximum supported value (1000).
     LimitTooLarge : record { requested : nat32; max : nat32 };
@@ -153,7 +155,7 @@ type CanceledOrderInfo = record {
     remaining_quantity : nat;
 };
 
-/// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
+/// Full view of an order as stored by the canister. Returned by endpoints that
 /// have the whole record already loaded (e.g. `cancel_limit_order`).
 type OrderRecord = record {
     /// Principal that placed the order.
@@ -225,7 +227,7 @@ type LedgerTransferFromError = variant {
 type DepositError = variant {
     // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    // The token is not part of any trading pair on the OISY TRADE.
+    // The token is not part of any registered trading pair.
     UnsupportedToken : record { token_id : TokenId };
     // Another deposit or withdrawal is already in flight for this
     // (caller, token). Retry once the previous operation completes.
@@ -236,12 +238,12 @@ type DepositError = variant {
     LedgerError : LedgerTransferFromError;
 };
 
-// Request to deposit tokens into the OISY TRADE.
+// Request to deposit tokens into the canister.
 type DepositRequest = record {
     // The token to deposit.
     token_id : TokenId;
     // The amount to deposit, in the token's base units.
-    // The caller's ICRC-2 allowance to the OISY TRADE on the token ledger must cover
+    // The caller's ICRC-2 allowance to the canister on the token ledger must cover
     // `amount + ledger_fee` (the `icrc2_transfer_from` fee is charged against
     // the allowance on top of the transferred amount).
     amount : nat;
@@ -255,11 +257,11 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
-// Request to withdraw tokens from the OISY TRADE.
+// Request to withdraw tokens from the canister.
 type WithdrawRequest = record {
     // The token to withdraw.
     token_id : TokenId;
-    // The amount to withdraw from the caller's on-OISY-TRADE free balance, in the
+    // The amount to withdraw from the caller's free balance, in the
     // token's base units. The ledger transfer fee is deducted from this
     // amount, so the caller receives `amount - ledger_fee` on the ledger;
     // `amount` must therefore be ≥ `ledger_fee` (otherwise the call rejects
@@ -284,7 +286,7 @@ type LedgerTransferError = variant {
 type WithdrawError = variant {
     // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    // The token is not part of any trading pair on the OISY TRADE.
+    // The token is not part of any registered trading pair.
     UnsupportedToken : record { token_id : TokenId };
     // The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
@@ -345,7 +347,7 @@ type GetBalancesResponse = variant {
     Err : GetBalancesRequestError;
 };
 
-// Request to add a new trading pair to the OISY TRADE.
+// Request to add a new trading pair to the canister.
 type AddTradingPairRequest = record {
     // The base token of the pair.
     base : Token;
@@ -387,7 +389,7 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
-// Controls who may call update endpoints on the OISY TRADE canister.
+// Controls who may call update endpoints on the canister.
 type Mode = variant {
     // Anyone may call update endpoints.
     GeneralAvailability;
@@ -415,7 +417,7 @@ type UpgradeArg = record {
     instruction_budget : opt nat64;
 };
 
-// Argument passed to the OISY TRADE canister on init or upgrade.
+// Argument passed to the canister on init or upgrade.
 type OisyTradeArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
 // Event payload for adding a trading pair.
@@ -564,18 +566,18 @@ service : (OisyTradeArg) -> {
     // Returns `UnknownTradingPair` if the pair is not registered.
     get_order_book_depth : (GetOrderBookDepthRequest) -> (GetOrderBookDepthResult) query;
 
-    // Deposit tokens into the OISY TRADE. Calls `icrc2_transfer_from` on the token
-    // ledger to pull `amount` from the caller to the OISY TRADE canister, then
-    // credits the caller's on-OISY-TRADE free balance.
+    // Deposit tokens into the canister. Calls `icrc2_transfer_from` on the token
+    // ledger to pull `amount` from the caller to the canister, then
+    // credits the caller's free balance.
     //
-    // The caller must have previously called `icrc2_approve` authorizing the
-    // OISY TRADE as spender. The ledger charges its fee on both `icrc2_approve` and
+    // The caller must have previously called `icrc2_approve` authorizing the canister
+    // as spender. The ledger charges its fee on both `icrc2_approve` and
     // `icrc2_transfer_from`, so:
     // - the allowance must cover `amount + ledger_fee`;
     // - the caller's on-ledger balance must cover `amount + 2 × ledger_fee`.
     deposit : (DepositRequest) -> (DepositResult);
 
-    // Withdraw tokens from the OISY TRADE. Debits `amount` from the caller's on-OISY-TRADE
+    // Withdraw tokens from the canister. Debits `amount` from the caller's
     // free balance and transfers `amount - ledger_fee` to the caller via
     // `icrc1_transfer` on the token ledger.
     //
@@ -614,12 +616,12 @@ service : (OisyTradeArg) -> {
     // front-end displaying a user's order history.
     get_my_orders : (GetMyOrdersArgs) -> (vec UserOrder) query;
 
-    // List every token registered with the OISY TRADE. Intended as a primitive
+    // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
 
-    // Add a new trading pair to the OISY TRADE. Only callable by a controller.
+    // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.

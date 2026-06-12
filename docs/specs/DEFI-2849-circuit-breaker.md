@@ -8,7 +8,7 @@ tags: [circuit-breaker, permissions, security, trading-halt, freeze]
 
 ## Motivation
 
-The OISY TRADE has no way to stop trading when something goes wrong. We want three
+OISY TRADE has no way to stop trading when something goes wrong. We want three
 controller-gated **soft halts** so an operator can contain an incident without
 tearing down state and without trapping users' funds:
 

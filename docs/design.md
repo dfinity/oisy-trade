@@ -22,13 +22,13 @@ There are three distinct flows:
 The user moves tokens from their wallet into the OISY TRADE canister. This is a prerequisite for trading.
 
 ```
-User                    OISY TRADE Canister                  ICRC-2 Ledger
+User                    OISY TRADE                   ICRC-2 Ledger
  |                          |                              |
  |-- icrc2_approve ---------------------------------------->|
  |                          |                              |
  |-- deposit(token, amt) -->|                              |
  |                          |-- icrc2_transfer_from ------>|
- |                          |   (user -> OISY TRADE canister)     |
+ |                          |   (user -> OISY TRADE)       |
  |                          |                              |
  |                          | credit user's internal       |
  |                          | balance                      |
@@ -40,7 +40,7 @@ User                    OISY TRADE Canister                  ICRC-2 Ledger
 The user places orders using their deposited balance. Matching and settlement are purely internal bookkeeping — no token transfers occur, no asynchronous calls.
 
 ```
-User                    OISY TRADE Canister
+User                    OISY TRADE
  |                          |
  |-- add_limit_order ------>|
  |                          | debit user's available balance
@@ -63,13 +63,13 @@ User                    OISY TRADE Canister
 The user moves tokens from the OISY TRADE canister back to their wallet.
 
 ```
-User                    OISY TRADE Canister                  ICRC-2 Ledger
+User                    OISY TRADE                   ICRC-2 Ledger
  |                          |                              |
  |-- withdraw(token, amt) ->|                              |
  |                          | debit user's internal        |
  |                          | balance                      |
  |                          |-- icrc1_transfer ----------->|
- |                          |   (OISY TRADE canister -> user)     |
+ |                          |   (OISY TRADE -> user)       |
  |<-- ok -------------------|                              |
 ```
 
