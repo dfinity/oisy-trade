@@ -2816,8 +2816,8 @@ mod pair_halt {
 mod account_freeze {
     use assert_matches::assert_matches;
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
     use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use dex_int_tests::{PRICE_SCALE, Setup};
     use dex_types::{
         AddLimitOrderError, Balance, DepositError, DepositRequest, LimitOrderRequest, OrderStatus,
         Side, UnauthorizedError, WithdrawError, WithdrawRequest,
@@ -2834,7 +2834,7 @@ mod account_freeze {
         let controller_client = setup.dex_client_with_caller(setup.controller());
         let quote = setup.quote_token_id();
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
         // Fund enough for a resting order, a second order attempt while frozen
@@ -2853,7 +2853,7 @@ mod account_freeze {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         };
 
@@ -2906,7 +2906,7 @@ mod account_freeze {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2927,9 +2927,11 @@ mod account_freeze {
         let counterparty_client = setup.dex_client_with_caller(counterparty);
         let controller_client = setup.dex_client_with_caller(setup.controller());
 
-        let price = 100u64;
+        // 10_000 ckBTC per whole ckSOL (10_000 * PRICE_SCALE), 1M base units.
+        // Reserve = price * quantity / 10^9 = 1_000_000_000 quote units.
+        let price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
-        let required_quote = price * quantity;
+        let required_quote = 1_000_000_000u64;
         let required_base = quantity;
 
         // The to-be-frozen user rests a buy (reserves quote); the counterparty
@@ -2954,7 +2956,7 @@ mod account_freeze {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2967,7 +2969,7 @@ mod account_freeze {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -3049,7 +3051,7 @@ mod account_freeze {
         let controller_client = setup.dex_client_with_caller(setup.controller());
         let quote = setup.quote_token_id();
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
         setup
@@ -3066,7 +3068,7 @@ mod account_freeze {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         };
         assert_eq!(
