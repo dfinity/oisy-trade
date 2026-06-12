@@ -84,6 +84,45 @@ impl OrderUpdate {
             filled_delta,
         }
     }
+
+    /// Apply the update to the order record. Returns whether the record was changed.
+    ///
+    /// # Panics
+    ///
+    /// `filled_quantity` is monotonic non-decreasing and must never exceed
+    /// `quantity`; this invariant is enforced by an always-on check that traps
+    /// on violation.
+    pub fn apply(self, order: &mut OrderRecord) -> bool {
+        let mut changed = false;
+        let OrderUpdate {
+            status,
+            filled_delta,
+        } = self;
+
+        if let Some(new_status) = status
+            && new_status != order.status
+        {
+            changed = true;
+            order.status = new_status;
+        }
+
+        if filled_delta != Quantity::ZERO {
+            changed = true;
+            order.filled_quantity = order
+                .filled_quantity
+                .checked_add(filled_delta)
+                .expect("BUG: filled_quantity overflow");
+
+            assert!(
+                order.filled_quantity <= order.quantity,
+                "BUG: filled_quantity {:?} exceeds quantity {:?} for order {:?}",
+                order.filled_quantity,
+                order.quantity,
+                order
+            );
+        }
+        changed
+    }
 }
 
 /// Stored value of [`OrderHistory`]'s primary map: an [`OrderRecord`] paired
@@ -189,38 +228,17 @@ impl<M: Memory> OrderHistory<M> {
     /// `filled_quantity`, and stamps `last_updated_at = Some(now)`. A no-op
     /// update (status absent or equal to the current status, and a zero
     /// `filled_delta`) writes nothing and leaves `last_updated_at` unchanged.
-    ///
-    /// # Panics
-    ///
-    /// `filled_quantity` is monotonic non-decreasing and must never exceed
-    /// `quantity`; this invariant is enforced by an always-on check that traps
-    /// on violation.
     pub fn apply_update(&mut self, id: &OrderId, update: OrderUpdate, now: Timestamp) {
         bench_scopes!("order_history", "order_history::apply_update");
         let mut entry = self
             .orders
             .get(id)
             .unwrap_or_else(|| panic!("BUG: order {id} missing from order_history"));
-        let status_change = update.status.filter(|s| *s != entry.record.status);
-        if status_change.is_none() && update.filled_delta == Quantity::ZERO {
-            return;
+
+        if update.apply(&mut entry.record) {
+            entry.record.last_updated_at = Some(now);
+            self.orders.insert(*id, entry);
         }
-        if let Some(status) = status_change {
-            entry.record.status = status;
-        }
-        let filled = entry
-            .record
-            .filled_quantity
-            .checked_add(update.filled_delta)
-            .expect("BUG: filled_quantity overflow");
-        assert!(
-            filled <= entry.record.quantity,
-            "BUG: filled_quantity {filled:?} exceeds quantity {:?} for order {id}",
-            entry.record.quantity
-        );
-        entry.record.filled_quantity = filled;
-        entry.record.last_updated_at = Some(now);
-        self.orders.insert(*id, entry);
     }
 
     /// Returns up to `length` of `user`'s orders in newest-first order. With
