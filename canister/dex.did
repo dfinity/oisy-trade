@@ -48,7 +48,8 @@ type AddLimitOrderError = variant {
     InvalidQuantity : record { quantity : nat; lot_size : nat };
     // The caller's on-DEX free balance in `token` is below `required`.
     // For a `Sell`, `token` is the base and `required` is `quantity`.
-    // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
+    // For a `Buy`, `token` is the quote and `required` is the scaled quote
+    // amount `price × quantity / 10^base_decimals` (in quote smallest units).
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
     // The order's notional (price × quantity / 10^base_decimals, in quote
     // smallest units) is below `min` or above `max`.
