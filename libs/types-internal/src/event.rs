@@ -31,6 +31,8 @@ pub struct AddTradingPairEvent {
     pub lot_size: Nat,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

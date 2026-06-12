@@ -943,7 +943,18 @@ async fn should_replay_events_on_upgrade() {
     });
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
-    setup.add_trading_pair().await;
+    let request = AddTradingPairRequest {
+        maker_fee_bps: 10,
+        taker_fee_bps: 23,
+        ..setup.add_trading_pair_request()
+    };
+    let maker_fee_bps = request.maker_fee_bps;
+    let taker_fee_bps = request.taker_fee_bps;
+    let result = setup
+        .dex_client_with_caller(setup.controller())
+        .add_trading_pair(request)
+        .await;
+    assert_eq!(result, Ok(()));
     assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
@@ -956,6 +967,8 @@ async fn should_replay_events_on_upgrade() {
                 lot_size: Nat::from(LOT_SIZE),
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+                maker_fee_bps,
+                taker_fee_bps,
             });
         });
     });
@@ -1102,14 +1115,14 @@ async fn should_replay_events_on_upgrade() {
                         to_order: 0,   // seller seq
                         token: dex_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
-                        fee: None,
+                        fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     dex_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
                         token: dex_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                        fee: None,
+                        fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
             });
