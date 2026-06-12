@@ -195,7 +195,7 @@ mod add_limit_order {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, alice_ids[1]);
 
-        // Point lookup by id (R6): each caller resolves only their own orders.
+        // Point lookup by id: each caller resolves only their own orders.
         let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await;
         assert_eq!(alice_by_id.map(|o| o.id), Some(alice_ids[0].clone()));
         // An order owned by another principal is invisible to a foreign caller.
@@ -270,7 +270,7 @@ mod add_limit_order {
     async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
         let setup = Setup::new().await;
 
-        // R7: a well-formed but unknown id resolves to nothing — absence from
+        // A well-formed but unknown id resolves to nothing — absence from
         // the result is the sole not-found signal.
         let not_found = setup
             .dex_client()
@@ -470,7 +470,7 @@ mod cancel_limit_order {
         setup.env().tick().await;
 
         // Buyer: 1M base filled, 2000M quote still reserved for the 2M residual.
-        // R2: partially filled, resting Open with 1M of 3M filled.
+        // Partially filled, resting Open with 1M of 3M filled.
         let resting = buyer_client
             .get_my_order(buy_id.clone())
             .await
@@ -505,7 +505,7 @@ mod cancel_limit_order {
             "submission timestamp {} should fall within the placement window [{before_placement}, {after_placement}]",
             canceled.created_at,
         );
-        // R10: cancel stamps `last_updated_at`; it post-dates placement.
+        // Cancel stamps `last_updated_at`; it post-dates placement.
         assert!(
             canceled
                 .last_updated_at
@@ -514,14 +514,11 @@ mod cancel_limit_order {
             canceled.last_updated_at,
             canceled.created_at,
         );
-        // R5: the canceled record keeps its 1M filled; remaining (2M) is
-        // derived as quantity − filled_quantity. `Canceled` is a unit variant.
+        // The canceled record keeps its 1M filled; remaining (2M) is derived as
+        // quantity − filled_quantity. `Canceled` is a unit variant. The
+        // timestamps are checked in the windows above, so reuse them here.
         assert_eq!(
-            OrderRecord {
-                created_at: 0,
-                last_updated_at: None,
-                ..canceled.clone()
-            },
+            canceled,
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
@@ -529,8 +526,8 @@ mod cancel_limit_order {
                 quantity: Nat::from(3_000_000u64),
                 filled_quantity: Nat::from(1_000_000u64),
                 status: OrderStatus::Canceled,
-                created_at: 0,
-                last_updated_at: None,
+                created_at: canceled.created_at,
+                last_updated_at: canceled.last_updated_at,
             }
         );
 

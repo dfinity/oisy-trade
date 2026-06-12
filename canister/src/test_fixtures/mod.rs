@@ -351,6 +351,18 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
+/// Asserts two [`OrderRecord`]s are equal on every field except the
+/// `created_at` / `last_updated_at` timestamps, which tests assert separately.
+#[track_caller]
+pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &order::OrderRecord) {
+    let normalized = order::OrderRecord {
+        created_at: expected.created_at,
+        last_updated_at: expected.last_updated_at,
+        ..actual.clone()
+    };
+    assert_eq!(&normalized, expected);
+}
+
 pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }
@@ -539,6 +551,10 @@ pub mod arbitrary {
         ]
     }
 
+    pub fn arb_timestamp() -> impl Strategy<Value = Timestamp> {
+        any::<u64>().prop_map(Timestamp::new)
+    }
+
     pub fn arb_order_id() -> impl Strategy<Value = OrderId> {
         (any::<u64>(), any::<u64>())
             .prop_map(|(book, seq)| OrderId::new(OrderBookId::new(book), OrderSeq::new(seq)))
@@ -572,8 +588,8 @@ pub mod arbitrary {
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
             arb_order_status(),
-            any::<u64>(),             // created_at (nanos)
-            option::of(any::<u64>()), // last_updated_at (nanos)
+            arb_timestamp(),             // created_at
+            option::of(arb_timestamp()), // last_updated_at
         )
             .prop_flat_map(
                 move |(owner, side, price_ticks, qty_lots, status, created_at, last_updated_at)| {
@@ -584,8 +600,8 @@ pub mod arbitrary {
                         quantity: Quantity::from(qty_lots * lot),
                         filled_quantity: Quantity::from(filled_lots * lot),
                         status,
-                        created_at: Timestamp::new(created_at),
-                        last_updated_at: last_updated_at.map(Timestamp::new),
+                        created_at,
+                        last_updated_at,
                     })
                 },
             )
@@ -834,10 +850,8 @@ pub mod arbitrary {
     }
 
     pub fn arb_event() -> impl Strategy<Value = Event> {
-        (any::<u64>(), arb_event_type()).prop_map(|(timestamp, payload)| Event {
-            timestamp: Timestamp::new(timestamp),
-            payload,
-        })
+        (arb_timestamp(), arb_event_type())
+            .prop_map(|(timestamp, payload)| Event { timestamp, payload })
     }
 }
 

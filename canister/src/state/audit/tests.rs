@@ -647,7 +647,7 @@ fn should_replay_cancel_partially_filled_order() {
         .assert_balance(seller, TokenId::new(quote()), price * quantity, 0u64)
         .assert_order_status(sell_id, OrderStatus::Filled)
         .assert_order_status(buy_id, OrderStatus::Canceled)
-        // R5: the canceled buy keeps the 1 lot it filled before cancel;
+        // The canceled buy keeps the 1 lot it filled before cancel;
         // remaining (2 lots) is derived as quantity − filled_quantity.
         .assert_filled_quantity(buy_id, quantity)
         .assert_replay_matches();

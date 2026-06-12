@@ -1544,11 +1544,21 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // R2: the maker rests `Open` with `0 < filled_quantity < quantity`.
+            // The maker rests `Open` with `0 < filled_quantity < quantity`.
             let sell = record_of(&state, SELLER, sell_id);
-            assert_eq!(sell.status, OrderStatus::Open);
-            assert_eq!(sell.quantity, Quantity::from(3 * lot));
-            assert_eq!(sell.filled_quantity, Quantity::from(lot));
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &sell,
+                &OrderRecord {
+                    owner: SELLER,
+                    side: Side::Sell,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(3 * lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Open,
+                    created_at: sell.created_at,
+                    last_updated_at: sell.last_updated_at,
+                },
+            );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
         }
 
@@ -1576,15 +1586,36 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // R3: the fully consumed maker reports `filled_quantity == quantity`.
+            // The fully consumed maker reports `filled_quantity == quantity`.
             let sell = record_of(&state, SELLER, sell_id);
-            assert_eq!(sell.status, OrderStatus::Filled);
-            assert_eq!(sell.filled_quantity, sell.quantity);
-            // R2: the taker rests `Open` with one of three lots filled.
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &sell,
+                &OrderRecord {
+                    owner: SELLER,
+                    side: Side::Sell,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Filled,
+                    created_at: sell.created_at,
+                    last_updated_at: sell.last_updated_at,
+                },
+            );
+            // The taker rests `Open` with one of three lots filled.
             let buy = record_of(&state, BUYER, buy_id);
-            assert_eq!(buy.status, OrderStatus::Open);
-            assert_eq!(buy.quantity, Quantity::from(3 * lot));
-            assert_eq!(buy.filled_quantity, Quantity::from(lot));
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &buy,
+                &OrderRecord {
+                    owner: BUYER,
+                    side: Side::Buy,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(3 * lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Open,
+                    created_at: buy.created_at,
+                    last_updated_at: buy.last_updated_at,
+                },
+            );
         }
 
         #[test]
@@ -1613,7 +1644,7 @@ mod settle_fills {
                 lot,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            // R8: across two batches the maker accrued both fills, one write
+            // Across two batches the maker accrued both fills, one write
             // per batch, and now sits at one of two lots filled, still `Open`.
             let sell = record_of(&state, SELLER, sell_id);
             assert_eq!(sell.status, OrderStatus::Open);
@@ -1635,7 +1666,7 @@ mod settle_fills {
             assert_eq!(status_of(&state, BUYER, buy2_id), Some(OrderStatus::Filled));
         }
 
-        /// R8: a taker that sweeps several makers in one batch accrues all its
+        /// A taker that sweeps several makers in one batch accrues all its
         /// per-fill deltas into a single record write — its `filled_quantity`
         /// equals the sum of the fills and the order reaches `Filled`.
         #[test]
@@ -1678,7 +1709,7 @@ mod settle_fills {
             assert_eq!(buy.filled_quantity, Quantity::from(2 * lot));
         }
 
-        /// R10: `created_at` is stamped once at placement and never moves, while
+        /// `created_at` is stamped once at placement and never moves, while
         /// `last_updated_at` advances to the timestamp of the most recent
         /// modifying event. Distinct timestamps pin which event's time is kept.
         #[test]
@@ -1731,7 +1762,7 @@ mod settle_fills {
             assert_eq!(after_second.filled_quantity, after_second.quantity);
         }
 
-        /// R9 durability: a matching event applied under `Skip` (the
+        /// Durability: a matching event applied under `Skip` (the
         /// post-upgrade replay mode, since stable memory already holds the
         /// post-fill record) must not touch order history — `filled_quantity`
         /// and `last_updated_at` stay at their pre-event values, so replay
