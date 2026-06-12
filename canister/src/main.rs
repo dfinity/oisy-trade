@@ -176,7 +176,13 @@ fn halt_trading() -> Result<(), UnauthorizedError> {
 
 #[ic_cdk::update]
 fn resume_trading() -> Result<(), UnauthorizedError> {
-    dex_canister::resume_trading(&dex_canister::IC_RUNTIME)
+    dex_canister::resume_trading(&dex_canister::IC_RUNTIME)?;
+    // Re-arm matching immediately so orders that piled up while halted match now,
+    // without waiting for the periodic timer. Mirrors the add_limit_order kickoff.
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        dex_canister::drive_matching();
+    });
+    Ok(())
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
