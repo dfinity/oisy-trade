@@ -2548,7 +2548,7 @@ mod pair_halt {
         let client = setup.dex_client();
         let controller_client = setup.dex_client_with_caller(setup.controller());
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
 
@@ -2574,7 +2574,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_a,
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2595,7 +2595,7 @@ mod pair_halt {
                 .add_limit_order(LimitOrderRequest {
                     pair: pair_a,
                     side: Side::Buy,
-                    price,
+                    price: Nat::from(price),
                     quantity: Nat::from(quantity),
                 })
                 .await,
@@ -2607,7 +2607,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_b,
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2645,7 +2645,7 @@ mod pair_halt {
         let seller_client = setup.dex_client_with_caller(seller);
         let controller_client = setup.dex_client_with_caller(setup.controller());
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let required_quote = price * quantity;
         let required_base = quantity;
@@ -2697,7 +2697,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_b,
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2706,7 +2706,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_b,
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2724,7 +2724,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_a,
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2733,7 +2733,7 @@ mod pair_halt {
             .add_limit_order(LimitOrderRequest {
                 pair: pair_a,
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -2841,7 +2841,7 @@ mod pair_halt {
         let client = setup.dex_client();
         let controller_client = setup.dex_client_with_caller(setup.controller());
 
-        let price = 100u64;
+        let price = 1000u64;
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
         setup
@@ -2863,7 +2863,7 @@ mod pair_halt {
         let order = LimitOrderRequest {
             pair,
             side: Side::Buy,
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         };
         assert_eq!(
