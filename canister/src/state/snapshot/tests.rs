@@ -330,7 +330,6 @@ fn should_roundtrip_fee_pool_through_snapshot() {
     assert_eq!(state, restored);
 }
 
-// R7: `min_notional` and `max_notional` survive a snapshot round-trip.
 #[test]
 fn should_roundtrip_notional_bounds_through_snapshot() {
     let mut state = fresh_state();
