@@ -1,5 +1,5 @@
 use candid::Principal;
-use dex_types::{TokenId, TokenMetadata};
+use oisy_trade_types::{Token, TokenId, TokenMetadata};
 
 pub enum SupportedTokens {
     ICP,
@@ -51,6 +51,13 @@ impl SupportedTokens {
         TokenMetadata {
             symbol: self.symbol().to_string(),
             decimals: self.decimals(),
+        }
+    }
+
+    pub fn token(&self) -> Token {
+        Token {
+            id: self.token_id(),
+            metadata: self.token_metadata(),
         }
     }
 }

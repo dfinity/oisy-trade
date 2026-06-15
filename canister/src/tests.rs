@@ -1,11 +1,12 @@
 mod add_trading_pair {
+    use crate::test_fixtures::tokens::SupportedTokens;
     use crate::test_fixtures::{
         ckbtc_token_id, icp_ckbtc_trading_pair, icp_token_id, init_state_with_order_book,
         mocks::{MockRuntime, mock_runtime_for},
         trading_pair_request,
     };
     use crate::{add_trading_pair, state};
-    use candid::Principal;
+    use candid::{Nat, Principal};
     use oisy_trade_types::{AddTradingPairError, TokenId, TokenMetadata};
 
     #[test]
@@ -287,7 +288,59 @@ mod add_trading_pair {
         init_state_with_order_book();
         let mut runtime = mock_runtime_for(Principal::anonymous());
         runtime.expect_is_controller().return_const(true);
-        // (pair, base_decimals, quote_decimals, tick_size, lot_size)
+        let ckusdt_quote = oisy_trade_types::AddTradingPairRequest {
+            base: SupportedTokens::CKUSDT.token(),
+            quote: SupportedTokens::CKUSDT.token(),
+            tick_size: Nat::default(),
+            lot_size: Nat::default(),
+            maker_fee_bps: 0,
+            taker_fee_bps: 20,
+            min_notional: Nat::from(5_000_000_u64),
+            max_notional: Some(Nat::from(9_000_000_000_000_u64)),
+        };
+        let pairs = [
+            // ICP/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::ICP.token(),
+                tick_size: Nat::from(1_000_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckBTC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKBTC.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(10_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // VCHF/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::VCHF.token(),
+                tick_size: Nat::from(100_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckUSDC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKUSDC.token(),
+                tick_size: Nat::from(10_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckETH/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKETH.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(100_000_000_000_000_u64),
+                ..ckusdt_quote.clone()
+            },
+        ];
+
+        for pair in pairs {
+            let result = add_trading_pair(pair.clone(), &runtime);
+            assert_eq!(result, Ok(()), "{pair:?} should be accepted");
+        }
+
         let pairs = [
             ("ckBTC/ckUSDT", 8u8, 6u8, 10_000u64, 10_000u64),
             ("ckETH/ckUSDT", 18, 6, 10_000, 100_000_000_000_000),
