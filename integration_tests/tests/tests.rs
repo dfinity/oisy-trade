@@ -2524,9 +2524,9 @@ mod global_halt {
 mod pair_halt {
     use assert_matches::assert_matches;
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_types::{
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_types::{
         AddLimitOrderError, LimitOrderRequest, OrderStatus, PairStatus, SetPairStatusError, Side,
         TradingPair,
     };
@@ -2545,8 +2545,8 @@ mod pair_halt {
         let pair_a = setup.trading_pair();
         let pair_b = setup.second_trading_pair();
         let user = setup.user();
-        let client = setup.dex_client();
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
         let price = 1000u64;
         let quantity = 1_000_000u64;
@@ -2640,10 +2640,10 @@ mod pair_halt {
         let pair_a = setup.trading_pair();
         let pair_b = setup.second_trading_pair();
         let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.dex_client_with_caller(buyer);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
-        let seller_client = setup.dex_client_with_caller(seller);
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
         let price = 1000u64;
         let quantity = 1_000_000u64;
@@ -2755,22 +2755,22 @@ mod pair_halt {
 
         // Pair A's cross has not filled; pair B's has.
         assert_ne!(
-            setup.dex_client().get_order_status(buy_a.clone()).await,
+            setup.oisy_trade_client().get_order_status(buy_a.clone()).await,
             OrderStatus::Filled,
             "halted pair's buy must not fill"
         );
         assert_ne!(
-            setup.dex_client().get_order_status(sell_a.clone()).await,
+            setup.oisy_trade_client().get_order_status(sell_a.clone()).await,
             OrderStatus::Filled,
             "halted pair's sell must not fill"
         );
         assert_eq!(
-            setup.dex_client().get_order_status(buy_b).await,
+            setup.oisy_trade_client().get_order_status(buy_b).await,
             OrderStatus::Filled,
             "unaffected pair's buy must fill"
         );
         assert_eq!(
-            setup.dex_client().get_order_status(sell_b).await,
+            setup.oisy_trade_client().get_order_status(sell_b).await,
             OrderStatus::Filled,
             "unaffected pair's sell must fill"
         );
@@ -2790,11 +2790,11 @@ mod pair_halt {
             setup.env().tick().await;
         }
         assert_eq!(
-            setup.dex_client().get_order_status(buy_a).await,
+            setup.oisy_trade_client().get_order_status(buy_a).await,
             OrderStatus::Filled
         );
         assert_eq!(
-            setup.dex_client().get_order_status(sell_a).await,
+            setup.oisy_trade_client().get_order_status(sell_a).await,
             OrderStatus::Filled
         );
 
@@ -2807,8 +2807,8 @@ mod pair_halt {
     async fn should_reject_non_controller_and_unknown_pair() {
         let setup = Setup::new().await.with_trading_pair().await;
         let pair = setup.trading_pair();
-        let user_client = setup.dex_client_with_caller(Principal::from_slice(&[0x01]));
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
         // Non-controller is rejected before the pair is even resolved.
         assert_eq!(
@@ -2838,8 +2838,8 @@ mod pair_halt {
         let setup = Setup::new().await.with_trading_pair().await;
         let pair = setup.trading_pair();
         let user = setup.user();
-        let client = setup.dex_client();
-        let controller_client = setup.dex_client_with_caller(setup.controller());
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
         let price = 1000u64;
         let quantity = 1_000_000u64;

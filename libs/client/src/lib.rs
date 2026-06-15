@@ -251,7 +251,12 @@ impl<R: Runtime> OisyTradeClient<R> {
         status: PairStatus,
     ) -> Result<(), SetPairStatusError> {
         self.runtime
-            .call(self.dex_canister, "set_pair_status", (pair, status), 0)
+            .call(
+                self.oisy_trade_canister,
+                "set_pair_status",
+                (pair, status),
+                0,
+            )
             .await
             .unwrap()
     }
