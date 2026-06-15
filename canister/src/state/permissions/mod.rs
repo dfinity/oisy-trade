@@ -15,19 +15,6 @@ pub enum UnauthorizedError {
     NotController,
 }
 
-impl From<UnauthorizedError> for oisy_trade_types::UnauthorizedError {
-    fn from(err: UnauthorizedError) -> Self {
-        match err {
-            UnauthorizedError::NotController => oisy_trade_types::UnauthorizedError::NotController,
-            UnauthorizedError::TradingHalted => {
-                unreachable!(
-                    "TradingHalted is surfaced as AddLimitOrderError, not UnauthorizedError"
-                )
-            }
-        }
-    }
-}
-
 /// Proof that a synchronous admission check ran and passed.
 ///
 /// Permit tokens are capability tokens: the recorder *consumes* a permit to

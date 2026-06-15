@@ -547,7 +547,7 @@ pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
 
 fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
     if !runtime.is_controller(&runtime.msg_caller()) {
-        return Err(state::permissions::UnauthorizedError::NotController.into());
+        return Err(UnauthorizedError::NotController);
     }
     state::with_state_mut(|s| {
         let permit = s
