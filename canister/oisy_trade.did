@@ -409,12 +409,6 @@ type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 // Error returned by controller-gated endpoints when the caller is not
 // authorized to perform the requested action.
 type UnauthorizedError = variant {
-    // Trading is globally halted.
-    TradingHalted;
-    // The trading pair is halted.
-    PairHalted;
-    // The account is frozen.
-    AccountFrozen;
     // The caller is not a controller of the canister.
     NotController;
 };

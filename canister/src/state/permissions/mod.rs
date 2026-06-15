@@ -12,18 +12,18 @@ pub struct Permissions {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UnauthorizedError {
     TradingHalted,
-    PairHalted,
-    AccountFrozen,
     NotController,
 }
 
 impl From<UnauthorizedError> for oisy_trade_types::UnauthorizedError {
     fn from(err: UnauthorizedError) -> Self {
         match err {
-            UnauthorizedError::TradingHalted => oisy_trade_types::UnauthorizedError::TradingHalted,
-            UnauthorizedError::PairHalted => oisy_trade_types::UnauthorizedError::PairHalted,
-            UnauthorizedError::AccountFrozen => oisy_trade_types::UnauthorizedError::AccountFrozen,
             UnauthorizedError::NotController => oisy_trade_types::UnauthorizedError::NotController,
+            UnauthorizedError::TradingHalted => {
+                panic!(
+                    "BUG: TradingHalted is surfaced as AddLimitOrderError, not UnauthorizedError"
+                )
+            }
         }
     }
 }

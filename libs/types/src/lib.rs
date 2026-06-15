@@ -104,12 +104,6 @@ pub enum CancelLimitOrderError {
 /// authorized to perform the requested action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum UnauthorizedError {
-    /// Trading is globally halted.
-    TradingHalted,
-    /// The trading pair is halted.
-    PairHalted,
-    /// The account is frozen.
-    AccountFrozen,
     /// The caller is not a controller of the canister.
     NotController,
 }
