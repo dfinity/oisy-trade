@@ -257,8 +257,9 @@ impl StateSnapshot {
 
 impl From<PermissionsSnapshot> for Permissions {
     fn from(snapshot: PermissionsSnapshot) -> Self {
+        let PermissionsSnapshot { trading_halted } = snapshot;
         let mut permissions = Permissions::default();
-        permissions.set_trading_halted(snapshot.trading_halted);
+        permissions.set_trading_halted(trading_halted);
         permissions
     }
 }
