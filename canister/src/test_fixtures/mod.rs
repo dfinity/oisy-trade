@@ -444,8 +444,8 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, OrderStatusTransition, SetPairStatusEvent,
-        SettlingEvent, WithdrawEvent,
+        DepositEvent, Event, EventType, MatchingEvent, SetPairStatusEvent, SettlingEvent,
+        WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;

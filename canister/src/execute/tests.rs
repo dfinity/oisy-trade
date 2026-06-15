@@ -202,8 +202,8 @@ fn should_not_busy_spin_under_global_halt() {
 
     assert_eq!(status, ExecutionStatus::Complete);
     // No matching ran: the crossable orders are still pending.
-    assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
-    assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell_id), Some(OrderStatus::Pending));
     assert!(state.has_pending_orders());
 }
 
@@ -238,10 +238,10 @@ fn should_skip_halted_book_while_matching_others() {
     assert_eq!(status, ExecutionStatus::Complete);
 
     // Book A's orders are left untouched; book B's cross fills.
-    assert_eq!(state.get_order_status(buy_a), Some(OrderStatus::Pending));
-    assert_eq!(state.get_order_status(sell_a), Some(OrderStatus::Pending));
-    assert_eq!(state.get_order_status(buy_b), Some(OrderStatus::Filled));
-    assert_eq!(state.get_order_status(sell_b), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, buy_a), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell_a), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, buy_b), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_b), Some(OrderStatus::Filled));
 
     // Unhalting lets book A's cross fill.
     state
@@ -249,8 +249,8 @@ fn should_skip_halted_book_while_matching_others() {
         .set_pair_halted(OrderBookId::ZERO, false);
     let status = EXECUTOR.run_once(&mut state, &runtime);
     assert_eq!(status, ExecutionStatus::Complete);
-    assert_eq!(state.get_order_status(buy_a), Some(OrderStatus::Filled));
-    assert_eq!(state.get_order_status(sell_a), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, buy_a), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_a), Some(OrderStatus::Filled));
 }
 
 /// Drives the actual `drive_matching` reschedule decision (loop while
@@ -284,16 +284,16 @@ fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
         runs, 1,
         "halted-only state must settle in one run, not spin"
     );
-    assert_eq!(state.get_order_status(buy), Some(OrderStatus::Pending));
-    assert_eq!(state.get_order_status(sell), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, buy), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell), Some(OrderStatus::Pending));
 
     // Unhalt and drive again: the resting cross now fills.
     state
         .permissions_mut()
         .set_pair_halted(OrderBookId::ZERO, false);
     drive_to_completion(&mut state, &runtime);
-    assert_eq!(state.get_order_status(buy), Some(OrderStatus::Filled));
-    assert_eq!(state.get_order_status(sell), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, buy), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell), Some(OrderStatus::Filled));
 }
 
 /// Driving the same workload through a single unlimited [`Executor`] run and

@@ -2614,14 +2614,14 @@ mod pair_halt {
             .unwrap();
         setup.env().tick().await;
         assert_eq!(
-            client.get_order_status(order_b).await,
+            client.get_my_order(order_b).await.unwrap().order.status,
             OrderStatus::Open,
             "orders on the unaffected pair are accepted and rest in the book"
         );
 
         // The resting order on pair A can still be canceled.
         let canceled = client.cancel_limit_order(resting_a).await.unwrap();
-        assert_matches!(canceled.status, OrderStatus::Canceled(_));
+        assert_matches!(canceled.status, OrderStatus::Canceled);
 
         setup.drop().await;
     }
@@ -2755,22 +2755,37 @@ mod pair_halt {
 
         // Pair A's cross has not filled; pair B's has.
         assert_ne!(
-            setup.oisy_trade_client().get_order_status(buy_a.clone()).await,
+            buyer_client
+                .get_my_order(buy_a.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled,
             "halted pair's buy must not fill"
         );
         assert_ne!(
-            setup.oisy_trade_client().get_order_status(sell_a.clone()).await,
+            seller_client
+                .get_my_order(sell_a.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled,
             "halted pair's sell must not fill"
         );
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(buy_b).await,
+            buyer_client.get_my_order(buy_b).await.unwrap().order.status,
             OrderStatus::Filled,
             "unaffected pair's buy must fill"
         );
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(sell_b).await,
+            seller_client
+                .get_my_order(sell_b)
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled,
             "unaffected pair's sell must fill"
         );
@@ -2790,11 +2805,16 @@ mod pair_halt {
             setup.env().tick().await;
         }
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(buy_a).await,
+            buyer_client.get_my_order(buy_a).await.unwrap().order.status,
             OrderStatus::Filled
         );
         assert_eq!(
-            setup.oisy_trade_client().get_order_status(sell_a).await,
+            seller_client
+                .get_my_order(sell_a)
+                .await
+                .unwrap()
+                .order
+                .status,
             OrderStatus::Filled
         );
 
