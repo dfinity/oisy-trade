@@ -55,7 +55,7 @@ icp identity principal --identity "$IDENTITY" --identity-password-file "$PIN_FIL
 icp canister status oisy_trade --environment staging --identity "$IDENTITY" --identity-password-file "$PIN_FILE"
 ```
 
-## 1. Upgrade the canister
+## Upgrade the canister
 
 Upgrades preserve stable memory: balances, open orders, listed pairs, and the event log all survive. The canister's `post_upgrade` takes an `opt OisyTradeArg`; passing `(null)` keeps the current configuration. To change the access mode (`GeneralAvailability` ↔ `RestrictedTo`), pass a structured `Upgrade` arg instead.
 
@@ -85,7 +85,7 @@ icp canister install oisy_trade --mode upgrade --args '(null)' \
     --environment staging -y
 ```
 
-## 2. Add a trading pair
+## Add a trading pair
 
 `add_trading_pair` is an update call restricted to controllers. The request carries both ledger IDs plus the token metadata (`symbol`, `decimals`).
 
@@ -187,8 +187,3 @@ rm -f "$PIN_FILE"
 ```
 
 If you used option **A** (pointed at an existing file), leave it alone.
-
-## What's next
-
-- Every `add_trading_pair` is recorded in the append-only event log — inspect with `get_events` (see `canister/oisy_trade.did`).
-- See [For Users](./for-users.md) for how traders interact with a listed pair (deposit → order → withdraw).
