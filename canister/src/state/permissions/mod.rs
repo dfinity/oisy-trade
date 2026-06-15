@@ -14,6 +14,7 @@ pub struct Permissions {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UnauthorizedError {
     TradingHalted,
+    PairHalted,
     NotController,
 }
 
