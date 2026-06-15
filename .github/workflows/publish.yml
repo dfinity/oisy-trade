@@ -1,14 +1,12 @@
 name: Publish
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   # Tag and create the (draft) GitHub releases for any crates whose version was
-  # bumped by a merged release-plz PR. A no-op on ordinary pushes to main.
+  # bumped by a merged release-plz PR. Triggered manually after the release PR
+  # is merged; a no-op if there is nothing new to release.
   release:
     name: Release-plz tag & release
     runs-on: ubuntu-latest
