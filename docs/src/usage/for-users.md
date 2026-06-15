@@ -1,4 +1,4 @@
-# Interact with the OISY TRADE
+# Interact with OISY TRADE
 
 Walkthrough of the core OISY TRADE flows against the staging canister, using only the [`icp`](https://cli.internetcomputer.org/) CLI:
 
@@ -18,7 +18,7 @@ The walkthrough uses two configurable identities — one for buy-side operations
 
 ## Identities
 
-Export a buyer and a seller identity. The OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
+Export a buyer and a seller identity. OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
 
 ```bash
 export BUYER_IDENTITY=<buyer-name>
@@ -50,7 +50,7 @@ Copy the base and quote ledger principals from the output above and export them.
 ```bash
 export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckDevnetSOL
 export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
-export OISY_TRADE=proc5-daaaa-aaaar-qb5va-cai           # staging OISY TRADE canister
+export OISY_TRADE=proc5-daaaa-aaaar-qb5va-cai    # staging OISY TRADE canister
 
 export TICK_SIZE=10_000
 export LOT_SIZE=1_000_000
@@ -65,7 +65,7 @@ Every limit order reserves one side of the pair before the matching engine can f
 
 So which identity approves and deposits which token depends on the side it plans to trade.
 
-`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so the OISY TRADE must first be approved to spend on the caller's behalf. Two fees are charged to the on-ledger balance:
+`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so OISY TRADE must first be approved to spend on the caller's behalf. Two fees are charged to the on-ledger balance:
 
 1. `icrc2_approve` charges the ledger fee once
 2. `icrc2_transfer_from` (triggered later by `deposit`) charges the ledger fee again, on top of the amount transferred
@@ -82,7 +82,7 @@ icp token "$QUOTE_LEDGER" balance --network ic --identity "$BUYER_IDENTITY"
 icp canister call "$QUOTE_LEDGER" icrc1_fee '()' --query --identity anonymous --network ic
 ```
 
-Then approve and deposit — run each subsection as the appropriate identity. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets the OISY TRADE on staging (`--environment staging`).
+Then approve and deposit — run each subsection as the appropriate identity. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets OISY TRADE on staging (`--environment staging`).
 
 ### Seller — approve + deposit *base*
 
@@ -136,7 +136,7 @@ EOF
 
 ## Check on-OISY-TRADE balances
 
-The OISY TRADE tracks balance per `(caller, token)`:
+OISY TRADE tracks balance per `(caller, token)`:
 
 - `free` — available for new orders or withdrawal
 - `reserved` — locked by open orders

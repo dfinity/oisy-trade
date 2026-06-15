@@ -100,7 +100,7 @@ export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 
 ### Fetch ledger metadata
 
-The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise the OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
+The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc1_symbol '()' --query --network ic --identity anonymous
@@ -132,7 +132,7 @@ curl -sSf "https://api.binance.com/api/v3/exchangeInfo?symbol=SOLETH" \
   | jq '{tickSize: (.symbols[0].filters[] | select(.filterType=="PRICE_FILTER") | .tickSize), stepSize: (.symbols[0].filters[] | select(.filterType=="LOT_SIZE") | .stepSize)}'
 ```
 
-The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to the OISY TRADE's integer base units using the ledger decimals you exported above:
+The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to OISY TRADE's integer base units using the ledger decimals you exported above:
 
 - `tick_size = tickSize_binance × 10^(quote_decimals − base_decimals)`
 - `lot_size  = stepSize_binance × 10^base_decimals`

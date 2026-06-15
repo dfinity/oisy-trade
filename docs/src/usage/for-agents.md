@@ -28,7 +28,7 @@ The Candid `//` doc comments are **binding** — they encode the rules types alo
 
 ## Amount discipline
 
-Users speak human ("0.01 SOL"); the OISY TRADE speaks base units (`10^decimals`). Always:
+Users speak human ("0.01 SOL"); OISY TRADE speaks base units (`10^decimals`). Always:
 
 - Convert with integer math — **never floats**.
 - Query `icrc1_fee` before quoting any amount — fees vary wildly between ledgers (e.g. ckDevnetSOL `50`, ckSepoliaETH `10_000_000_000`).

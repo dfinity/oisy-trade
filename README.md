@@ -44,14 +44,14 @@ See the [design document](https://dfinity.github.io/oisy-trade/development/archi
 <a id="usage"></a>
 ## 📘 Usage
 
-Walk through the main OISY TRADE flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the OISY TRADE as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
+Walk through the main OISY TRADE flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve OISY TRADE as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
 
 See the [Getting Started walkthrough](https://dfinity.github.io/oisy-trade/usage/for-users.html).
 
 
 ### 🤖Agents
 
-Talk to your agent to interact with the OISY TRADE 😎.
+Talk to your agent to interact with OISY TRADE 😎.
 
 > Buy 0.01 SOL at a limit price of 0.037 ETH per SOL
 
