@@ -7,7 +7,7 @@ use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cro
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
-    TradingPairInfo, WithdrawError, WithdrawRequest,
+    TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -676,6 +676,7 @@ async fn should_return_empty_trading_pairs() {
                     decimals: 8,
                 },
             },
+            status: TradingStatus::Trading,
             tick_size: Nat::from(TICK_SIZE),
             lot_size: Nat::from(LOT_SIZE),
             min_notional: Nat::from(1u64),
@@ -2149,9 +2150,26 @@ mod global_halt {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, UnauthorizedError,
-        WithdrawRequest,
+        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingPair,
+        TradingStatus, UnauthorizedError, WithdrawRequest,
     };
+
+    /// Reads the [`TradingStatus`] the canister reports for `pair` through the
+    /// `get_trading_pairs` query.
+    async fn pair_status<R: oisy_trade_client::Runtime>(
+        client: &oisy_trade_client::OisyTradeClient<R>,
+        pair: TradingPair,
+    ) -> TradingStatus {
+        client
+            .get_trading_pairs()
+            .await
+            .into_iter()
+            .find(|info| {
+                info.base.id.ledger_id == pair.base && info.quote.id.ledger_id == pair.quote
+            })
+            .expect("trading pair must be listed")
+            .status
+    }
 
     /// End-to-end global-halt lifecycle on a crossable buy/sell pair placed
     /// before the halt:
@@ -2215,9 +2233,23 @@ mod global_halt {
             .await
             .unwrap();
 
+        // Before the halt the pair reports as trading.
+        assert_eq!(
+            pair_status(&buyer_client, setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading before the halt"
+        );
+
         // Halt right after placement — before any round runs the placement
         // kickoffs — so the cross stays unmatched under the halt.
         assert_eq!(controller_client.halt_trading().await, Ok(()));
+
+        // The halt is reflected on the pair's trading status.
+        assert_eq!(
+            pair_status(&buyer_client, setup.trading_pair()).await,
+            TradingStatus::Halted,
+            "pair must report Halted while halted"
+        );
 
         // The orders are open or pending under the halt; capture that status as
         // the baseline and require it to be preserved across the matching ticks
@@ -2325,6 +2357,13 @@ mod global_halt {
         // Resume and tick WITHOUT advancing time and WITHOUT placing a new
         // order: the resume kickoff alone re-arms matching and drives the fill.
         assert_eq!(controller_client.resume_trading().await, Ok(()));
+
+        // The resume is reflected on the pair's trading status.
+        assert_eq!(
+            pair_status(&buyer_client, setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading again after resume"
+        );
         for _ in 0..3 {
             setup.env().tick().await;
         }

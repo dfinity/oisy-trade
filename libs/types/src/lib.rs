@@ -108,6 +108,15 @@ pub enum UnauthorizedError {
     NotController,
 }
 
+/// Whether trading on a pair is currently active or halted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum TradingStatus {
+    /// Trading on the pair is active.
+    Trading,
+    /// Trading on the pair is halted.
+    Halted,
+}
+
 /// Information about a listed trading pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct TradingPairInfo {
@@ -115,6 +124,8 @@ pub struct TradingPairInfo {
     pub base: Token,
     /// The quote token.
     pub quote: Token,
+    /// Whether trading on this pair is currently active or halted.
+    pub status: TradingStatus,
     /// Minimum price increment.
     pub tick_size: Nat,
     /// Minimum order quantity.

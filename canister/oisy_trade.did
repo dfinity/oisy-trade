@@ -73,11 +73,21 @@ type CancelLimitOrderError = variant {
 };
 
 // Information about a listed trading pair.
+// Whether trading on a pair is currently active or halted.
+type TradingStatus = variant {
+    // Trading on the pair is active.
+    Trading;
+    // Trading on the pair is halted.
+    Halted;
+};
+
 type TradingPairInfo = record {
     // The base token.
     base : Token;
     // The quote token.
     quote : Token;
+    // Whether trading on this pair is currently active or halted.
+    status : TradingStatus;
     // Minimum price increment. All order prices must be a positive multiple of this value.
     tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
