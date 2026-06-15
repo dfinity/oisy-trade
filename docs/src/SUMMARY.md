@@ -6,10 +6,9 @@
 
 # Usage
 
-- [For Users](usage/for-users/index.md)
-  - [Getting Started](usage/for-users/getting-started.md)
-  - [Agents](usage/for-users/agents.md)
-- [For Admins](usage/for-admins/admin.md)
+- [For Users](usage/for-users.md)
+- [For Agents](usage/for-agents.md)
+- [For Admins](usage/for-admins.md)
 
 # Development
 

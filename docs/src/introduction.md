@@ -25,7 +25,7 @@ For the full design, see [Development → Architecture → Design](development/a
 
 ## Where to next?
 
-- New to OISY TRADE? Start with [Getting Started](usage/for-users/getting-started.md).
-- Want your agent to place orders? See [Agents](usage/for-users/agents.md).
-- Operating the canister? See [For Admins](usage/for-admins/admin.md).
+- New to OISY TRADE? Start with [For Users](usage/for-users.md).
+- Want your agent to place orders? See [For Agents](usage/for-agents.md).
+- Operating the canister? See [For Admins](usage/for-admins.md).
 - Contributing or reviewing? See [Architecture](development/architecture/index.md) and [Specs](development/specs/index.md).

@@ -191,4 +191,4 @@ If you used option **A** (pointed at an existing file), leave it alone.
 ## What's next
 
 - Every `add_trading_pair` is recorded in the append-only event log — inspect with `get_events` (see `canister/oisy_trade.did`).
-- See [Getting Started](../for-users/getting-started.md) for how traders interact with a listed pair (deposit → order → withdraw).
+- See [For Users](./for-users.md) for how traders interact with a listed pair (deposit → order → withdraw).
