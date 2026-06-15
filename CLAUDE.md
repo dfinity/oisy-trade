@@ -14,9 +14,10 @@
 
 ## Spec-driven build loop (GitHub PR)
 
-Specs live in `docs/specs/` as `DEFI-XXXX-short-slug.md` and follow the template at
-`docs/specs/TEMPLATE.md`. When I ask you to write a spec, start from that template; the
-build loop below consumes the spec's **Requirements** and its **Delivery / PR sequence**.
+Specs live in `docs/src/development/specs/` as `DEFI-XXXX-short-slug.md` and follow
+the template at `docs/src/development/specs/template.md`. When I ask you to write a
+spec, start from that template; the build loop below consumes the spec's
+**Requirements** and its **Delivery / PR sequence**.
 
 When I give you a specification to build:
 

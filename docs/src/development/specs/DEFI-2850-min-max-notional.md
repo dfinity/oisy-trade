@@ -185,7 +185,7 @@ through getters. `validate_order` is unchanged (tick/lot only).
 
 - `canister/oisy_trade.did`: update `AddTradingPairRequest`, `AddTradingPairError`,
   `AddLimitOrderError`, and `TradingPairInfo`.
-- `docs/design.md`: document the two filters in the pair-parameters section alongside tick/lot.
+- `docs/src/development/architecture/design.md`: document the two filters in the pair-parameters section alongside tick/lot.
 
 ### Test plan
 

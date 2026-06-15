@@ -49,6 +49,14 @@ integration-tests: download-external-wasms _maybe-build
 _maybe-build:
     {{ if env("OISY_TRADE_CANISTER_WASM_PATH", "") == "" { "just build" } else { "true" } }}
 
+# Build the documentation book
+book:
+    mdbook build docs
+
+# Serve the documentation book locally and open it in the browser
+book-serve:
+    mdbook serve docs --open
+
 # Run canbench benchmarks
 bench:
     cd canister && canbench

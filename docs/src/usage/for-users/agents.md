@@ -1,6 +1,6 @@
 # For AI agents
 
-If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into OISY TRADE calls, [`examples/getting_started.md`](getting_started.md) is your command template. A few things it doesn't spell out but you must respect:
+If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into OISY TRADE calls, the [Getting Started](./getting-started.md) walkthrough is your command template. A few things it doesn't spell out but you must respect:
 
 ## Before you start
 

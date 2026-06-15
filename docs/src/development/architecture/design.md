@@ -426,7 +426,7 @@ Based on Binance ICP/USDT data (the most active ICP pair), two numbers drive the
 
 Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load will be addressed in DEFI-2724.
 
-See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
+See the [Trading Data Analysis](./trading-data.md) for the full analysis.
 
 ### Upgrade Strategy
 
