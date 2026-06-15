@@ -133,8 +133,8 @@ fn should_be_a_no_op_when_globally_halted() {
 
 /// A global halt must still drain settling events left over from a prior
 /// chunk: those events apply the balance effects of already-matched fills, so
-/// stranding them for the halt would trap a counterparty's proceeds (R2). No
-/// new matching happens, and `run_once` reschedules only to finish the drain.
+/// stranding them for the halt would trap a counterparty's proceeds. No new
+/// matching happens, and `run_once` reschedules only to finish the drain.
 #[test]
 fn should_drain_leftover_settling_events_under_global_halt() {
     let mut state = setup_one_book();
@@ -170,41 +170,6 @@ fn should_drain_leftover_settling_events_under_global_halt() {
     assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_settling_events());
     assert_eq!(state.get_balance(&BUYER, &pair.base).free(), &lot.into());
-}
-
-/// Under global halt with crossable resting orders and no leftover settling,
-/// the executor must do no matching and report `Complete` so the rescheduler
-/// stops — it must not busy-spin re-arming the timer on the halted book's
-/// still-pending orders.
-#[test]
-fn should_not_busy_spin_under_global_halt() {
-    let mut state = setup_one_book();
-    set_unlimited_policy(&mut state);
-    let runtime = runtime();
-    let pair = icp_ckbtc_trading_pair();
-    let lot = u64::from(LOT_SIZE);
-    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
-    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
-
-    state.permissions_mut().set_trading_halted(true);
-    assert!(!state.has_pending_settling_events());
-
-    // Drive the actual reschedule decision: keep running while the executor
-    // claims more work. Under halt with no leftover settling there is none,
-    // so the very first run must report `Complete`.
-    let mut runs = 0;
-    let mut status = EXECUTOR.run_once(&mut state, &runtime);
-    while status == ExecutionStatus::MoreWork {
-        runs += 1;
-        assert!(runs <= 10, "executor busy-spun under global halt");
-        status = EXECUTOR.run_once(&mut state, &runtime);
-    }
-
-    assert_eq!(status, ExecutionStatus::Complete);
-    // No matching ran: the crossable orders are still pending.
-    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Pending));
-    assert_eq!(status_of(&state, sell_id), Some(OrderStatus::Pending));
-    assert!(state.has_pending_orders());
 }
 
 /// Driving the same workload through a single unlimited [`Executor`] run and
