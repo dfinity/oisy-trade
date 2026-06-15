@@ -2309,8 +2309,7 @@ mod global_halt {
         }
         // Neither order has filled: their statuses are still not `Filled` ...
         assert_ne!(
-            setup
-                .oisy_trade_client()
+            buyer_client
                 .get_my_order(buy_id.clone())
                 .await
                 .unwrap()
@@ -2320,8 +2319,7 @@ mod global_halt {
             "buy must not fill while halted"
         );
         assert_ne!(
-            setup
-                .oisy_trade_client()
+            seller_client
                 .get_my_order(sell_id.clone())
                 .await
                 .unwrap()
@@ -2389,8 +2387,7 @@ mod global_halt {
             setup.env().tick().await;
         }
         assert_eq!(
-            setup
-                .oisy_trade_client()
+            buyer_client
                 .get_my_order(buy_id)
                 .await
                 .unwrap()
@@ -2399,8 +2396,7 @@ mod global_halt {
             OrderStatus::Filled
         );
         assert_eq!(
-            setup
-                .oisy_trade_client()
+            seller_client
                 .get_my_order(sell_id)
                 .await
                 .unwrap()
@@ -2484,8 +2480,7 @@ mod global_halt {
             setup.env().tick().await;
         }
         assert_ne!(
-            setup
-                .oisy_trade_client()
+            buyer_client
                 .get_my_order(buy_id.clone())
                 .await
                 .unwrap()
@@ -2495,8 +2490,7 @@ mod global_halt {
             "buy must not fill while halted"
         );
         assert_ne!(
-            setup
-                .oisy_trade_client()
+            seller_client
                 .get_my_order(sell_id.clone())
                 .await
                 .unwrap()
@@ -2515,8 +2509,7 @@ mod global_halt {
         }
 
         assert_eq!(
-            setup
-                .oisy_trade_client()
+            buyer_client
                 .get_my_order(buy_id)
                 .await
                 .unwrap()
@@ -2526,8 +2519,7 @@ mod global_halt {
             "buy fills from the resume kickoff"
         );
         assert_eq!(
-            setup
-                .oisy_trade_client()
+            seller_client
                 .get_my_order(sell_id)
                 .await
                 .unwrap()
