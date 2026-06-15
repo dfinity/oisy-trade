@@ -63,7 +63,10 @@ pub struct StateSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
-pub struct PermissionsSnapshot {}
+pub struct PermissionsSnapshot {
+    #[n(0)]
+    pub trading_halted: bool,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct TokenEntry {
@@ -156,7 +159,9 @@ impl StateSnapshot {
             permissions: if *permissions == Permissions::default() {
                 None
             } else {
-                Some(PermissionsSnapshot {})
+                Some(PermissionsSnapshot {
+                    trading_halted: permissions.trading_halted(),
+                })
             },
         }
     }
@@ -251,7 +256,10 @@ impl StateSnapshot {
 }
 
 impl From<PermissionsSnapshot> for Permissions {
-    fn from(_snapshot: PermissionsSnapshot) -> Self {
-        Permissions::default()
+    fn from(snapshot: PermissionsSnapshot) -> Self {
+        let PermissionsSnapshot { trading_halted } = snapshot;
+        let mut permissions = Permissions::default();
+        permissions.set_trading_halted(trading_halted);
+        permissions
     }
 }

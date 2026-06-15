@@ -7,7 +7,7 @@ use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cro
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
-    TradingPairInfo, WithdrawError, WithdrawRequest,
+    TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -676,6 +676,7 @@ async fn should_return_empty_trading_pairs() {
                     decimals: 8,
                 },
             },
+            status: TradingStatus::Trading,
             tick_size: Nat::from(TICK_SIZE),
             lot_size: Nat::from(LOT_SIZE),
             min_notional: Nat::from(1u64),
@@ -2138,6 +2139,383 @@ mod get_balances {
             .unwrap();
 
         assert_eq!(no_filter, with_full_filter);
+
+        setup.drop().await;
+    }
+}
+
+mod global_halt {
+    use assert_matches::assert_matches;
+    use candid::{Nat, Principal};
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{
+        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingStatus,
+        UnauthorizedError, WithdrawRequest,
+    };
+
+    /// End-to-end global-halt lifecycle on a crossable buy/sell pair placed
+    /// before the halt:
+    ///
+    /// 1. buyer and seller each fund and place one resting order that crosses;
+    /// 2. trading halts;
+    /// 3. the orders keep the exact status they had before the halt (no
+    ///    transition is driven while halted);
+    /// 4. balances stay fully reserved — no partial fill slips through;
+    /// 5. `resume_trading` re-arms matching from the endpoint, so the cross
+    ///    fills without advancing time past the periodic matching interval and
+    ///    without placing a new order.
+    #[tokio::test]
+    async fn should_freeze_orders_under_halt_then_fill_them_on_resume() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+
+        // 10_000 ckBTC per whole ckSOL (10_000 * PRICE_SCALE), 1M base units.
+        // Reserve = price * quantity / 10^9 = 1_000_000_000 quote units.
+        let price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+        let required_quote = 1_000_000_000u64;
+        let required_base = quantity;
+
+        // Buyer places a buy, seller a crossing sell, while trading is active.
+        // No tick runs in between, so neither placement kickoff has matched yet.
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote + QUOTE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(required_base + 2 * BASE_LEDGER_FEE)
+            .approve(required_base + BASE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+        let sell_id = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+
+        // Before the halt the pair reports as trading.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading before the halt"
+        );
+
+        // Halt right after placement — before any round runs the placement
+        // kickoffs — so the cross stays unmatched under the halt.
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+
+        // The halt is reflected on the pair's trading status.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Halted,
+            "pair must report Halted while halted"
+        );
+
+        // The orders are open or pending under the halt; capture that status as
+        // the baseline and require it to be preserved across the matching ticks
+        // below.
+        let buy_status_under_halt = buyer_client
+            .get_my_order(buy_id.clone())
+            .await
+            .unwrap()
+            .order
+            .status;
+        let sell_status_under_halt = seller_client
+            .get_my_order(sell_id.clone())
+            .await
+            .unwrap()
+            .order
+            .status;
+        assert_matches!(
+            buy_status_under_halt,
+            OrderStatus::Open | OrderStatus::Pending
+        );
+        assert_matches!(
+            sell_status_under_halt,
+            OrderStatus::Open | OrderStatus::Pending
+        );
+
+        // Advance past the matching interval and tick: matching must make no
+        // progress.
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+
+        // The orders keep the exact status they had when the halt took effect.
+        assert_eq!(
+            buyer_client
+                .get_my_order(buy_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            buy_status_under_halt,
+            "buy status must be unchanged while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_my_order(sell_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            sell_status_under_halt,
+            "sell status must be unchanged while halted"
+        );
+        // `OrderStatus` cannot express a partial fill, so pin the exact
+        // balances too: every committed token is still fully reserved and no
+        // fill proceeds have been credited.
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_quote.into()
+            },
+            "buy's quote stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "buyer received no base (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_base.into()
+            },
+            "sell's base stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "seller received no quote (no partial fill) while halted"
+        );
+
+        // Resume and tick WITHOUT advancing time and WITHOUT placing a new
+        // order: the resume kickoff alone re-arms matching and drives the fill.
+        assert_eq!(controller_client.resume_trading().await, Ok(()));
+
+        // The resume is reflected on the pair's trading status.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading again after resume"
+        );
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+        assert_eq!(
+            buyer_client
+                .get_my_order(buy_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "buy fills from the resume kickoff"
+        );
+        assert_eq!(
+            seller_client
+                .get_my_order(sell_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "sell fills from the resume kickoff"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required_base.into(),
+                reserved: 0u64.into()
+            },
+        );
+
+        setup.drop().await;
+    }
+
+    /// While trading is globally halted, the halt itself blocks only new
+    /// orders: `add_limit_order` is rejected with `TradingHalted`, but a
+    /// resting order placed pre-halt still cancels and a withdrawal of
+    /// available balance still succeeds.
+    #[tokio::test]
+    async fn should_block_new_orders_but_allow_cancel_and_withdraw_under_halt() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        // Fund the user with enough quote to place a resting buy order and keep
+        // a free balance to withdraw.
+        let price = 1000u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        let free_to_withdraw = 10_000_000u64;
+        let deposit_amount = order_cost + free_to_withdraw;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(deposit_amount + 2 * QUOTE_LEDGER_FEE)
+            .approve(deposit_amount + QUOTE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        };
+
+        // Place a resting buy order before the halt.
+        let resting_id = client.add_limit_order(order.clone()).await.unwrap();
+        setup.env().tick().await;
+        assert_eq!(
+            client
+                .get_my_order(resting_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open
+        );
+
+        // Halt trading.
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+
+        // New orders are rejected.
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::TradingHalted)
+        );
+
+        // The resting order can still be canceled.
+        let canceled = client.cancel_limit_order(resting_id.clone()).await.unwrap();
+        assert_matches!(canceled.status, OrderStatus::Canceled);
+
+        // A withdrawal of available balance still succeeds.
+        client
+            .withdraw(WithdrawRequest {
+                token_id: quote.clone(),
+                amount: Nat::from(free_to_withdraw),
+            })
+            .await
+            .expect("withdrawal should succeed under global halt");
+
+        setup.drop().await;
+    }
+
+    /// `halt_trading` and `resume_trading` reject non-controller callers with
+    /// `NotController`.
+    #[tokio::test]
+    async fn should_reject_non_controller_callers() {
+        let setup = Setup::new().await;
+        let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
+
+        assert_eq!(
+            user_client.halt_trading().await,
+            Err(UnauthorizedError::NotController)
+        );
+        assert_eq!(
+            user_client.resume_trading().await,
+            Err(UnauthorizedError::NotController)
+        );
+
+        setup.drop().await;
+    }
+
+    /// The global-halt flag is part of the upgrade snapshot: after halting and
+    /// upgrading, new orders remain rejected until trading is resumed.
+    #[tokio::test]
+    async fn should_preserve_halt_state_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        let price = 1000u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        setup.upgrade(None).await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        };
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::TradingHalted),
+            "halt must survive the upgrade"
+        );
+
+        assert_eq!(controller_client.resume_trading().await, Ok(()));
+        client
+            .add_limit_order(order)
+            .await
+            .expect("orders accepted after resume");
 
         setup.drop().await;
     }

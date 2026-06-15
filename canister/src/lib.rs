@@ -4,8 +4,8 @@ use oisy_trade_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    PriceLevel, Token, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -69,7 +69,7 @@ pub fn add_limit_order(
         let permit = s
             .permissions()
             .permit_trading(caller, order_id.book_id())
-            .expect("BUG: trading is never gated in this build");
+            .map_err(|e| AddLimitOrderError::from(state::AddLimitOrderError::from(e)))?;
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
@@ -83,7 +83,8 @@ pub fn add_limit_order(
             permit.into(),
             runtime,
         );
-    });
+        Ok::<(), AddLimitOrderError>(())
+    })?;
     Ok(order_id.to_string())
 }
 
@@ -180,6 +181,7 @@ fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLe
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| {
+        let global_halt = s.permissions().trading_halted();
         s.trading_pairs()
             .iter()
             .map(|(pair, book_id)| {
@@ -192,6 +194,9 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 let quote_meta = s
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
+                // Halted when the global switch is on; a per-pair switch will
+                // be OR-ed in here.
+                let halted = global_halt;
                 TradingPairInfo {
                     base: oisy_trade_types::Token {
                         id: oisy_trade_types::TokenId::from(pair.base),
@@ -200,6 +205,11 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     quote: oisy_trade_types::Token {
                         id: oisy_trade_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
+                    },
+                    status: if halted {
+                        oisy_trade_types::TradingStatus::Halted
+                    } else {
+                        oisy_trade_types::TradingStatus::Trading
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
@@ -525,6 +535,33 @@ pub fn add_trading_pair(
         );
         Ok(())
     })
+}
+
+pub fn halt_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    set_global_halt(true, runtime)
+}
+
+pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    set_global_halt(false, runtime)
+}
+
+fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
+        return Err(UnauthorizedError::NotController);
+    }
+    state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_admin()
+            .expect("BUG: admin is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::SetGlobalHalt(halted),
+            permit.into(),
+            runtime,
+        );
+    });
+    Ok(())
 }
 
 fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {
