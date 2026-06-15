@@ -17,7 +17,9 @@ use ic_http_types::{HttpRequest, HttpResponse};
 pub use ic_metrics_assert::{AsyncCanisterHttpQuery, MetricsAssert};
 use icrc_ledger_types::icrc1::account::Account;
 use oisy_trade_client::{OisyTradeClient, Runtime};
-use oisy_trade_types::{AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair};
+use oisy_trade_types::{
+    AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair, TradingStatus,
+};
 use oisy_trade_types_internal::{InitArg, Mode, OisyTradeArg, UpgradeArg, log::Priority};
 use pocket_ic::{
     CanisterId, CanisterSettings, PocketIcBuilder, RejectResponse, nonblocking::PocketIc,
@@ -153,6 +155,20 @@ impl Setup {
             base: self.base_ledger_id,
             quote: self.quote_ledger_id,
         }
+    }
+
+    /// Reads the [`TradingStatus`] the canister reports for `pair` through the
+    /// `get_trading_pairs` query, called from the anonymous principal.
+    pub async fn pair_status(&self, pair: TradingPair) -> TradingStatus {
+        self.oisy_trade_client_with_caller(Principal::anonymous())
+            .get_trading_pairs()
+            .await
+            .into_iter()
+            .find(|info| {
+                info.base.id.ledger_id == pair.base && info.quote.id.ledger_id == pair.quote
+            })
+            .expect("trading pair must be listed")
+            .status
     }
 
     pub fn base_token_id(&self) -> TokenId {

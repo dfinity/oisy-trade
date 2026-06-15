@@ -2150,26 +2150,9 @@ mod global_halt {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingPair,
-        TradingStatus, UnauthorizedError, WithdrawRequest,
+        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingStatus,
+        UnauthorizedError, WithdrawRequest,
     };
-
-    /// Reads the [`TradingStatus`] the canister reports for `pair` through the
-    /// `get_trading_pairs` query.
-    async fn pair_status<R: oisy_trade_client::Runtime>(
-        client: &oisy_trade_client::OisyTradeClient<R>,
-        pair: TradingPair,
-    ) -> TradingStatus {
-        client
-            .get_trading_pairs()
-            .await
-            .into_iter()
-            .find(|info| {
-                info.base.id.ledger_id == pair.base && info.quote.id.ledger_id == pair.quote
-            })
-            .expect("trading pair must be listed")
-            .status
-    }
 
     /// End-to-end global-halt lifecycle on a crossable buy/sell pair placed
     /// before the halt:
@@ -2235,7 +2218,7 @@ mod global_halt {
 
         // Before the halt the pair reports as trading.
         assert_eq!(
-            pair_status(&buyer_client, setup.trading_pair()).await,
+            setup.pair_status(setup.trading_pair()).await,
             TradingStatus::Trading,
             "pair must report Trading before the halt"
         );
@@ -2246,7 +2229,7 @@ mod global_halt {
 
         // The halt is reflected on the pair's trading status.
         assert_eq!(
-            pair_status(&buyer_client, setup.trading_pair()).await,
+            setup.pair_status(setup.trading_pair()).await,
             TradingStatus::Halted,
             "pair must report Halted while halted"
         );
@@ -2360,7 +2343,7 @@ mod global_halt {
 
         // The resume is reflected on the pair's trading status.
         assert_eq!(
-            pair_status(&buyer_client, setup.trading_pair()).await,
+            setup.pair_status(setup.trading_pair()).await,
             TradingStatus::Trading,
             "pair must report Trading again after resume"
         );
