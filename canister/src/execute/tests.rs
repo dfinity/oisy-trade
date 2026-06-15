@@ -103,6 +103,75 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
+#[test]
+fn should_be_a_no_op_when_globally_halted() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    state.permissions_mut().set_trading_halted(true);
+
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+
+    // Crossable orders are left untouched: no matching, no settling.
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell_id), Some(OrderStatus::Pending));
+    assert!(state.has_pending_orders());
+
+    // Resuming lets the same orders fill.
+    state.permissions_mut().set_trading_halted(false);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_id), Some(OrderStatus::Filled));
+}
+
+/// A global halt must still drain settling events left over from a prior
+/// chunk: those events apply the balance effects of already-matched fills, so
+/// stranding them for the halt would trap a counterparty's proceeds. No new
+/// matching happens, and `run_once` reschedules only to finish the drain.
+#[test]
+fn should_drain_leftover_settling_events_under_global_halt() {
+    let mut state = setup_one_book();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+
+    // Stage a settling event without draining it by recording the matching
+    // event directly — that's the producer side of the settling queue.
+    test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+    let pending: Vec<_> = state
+        .order_book(&OrderBookId::ZERO)
+        .unwrap()
+        .pending_order_seqs()
+        .collect();
+    state.record_matching_event(
+        &crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: pending,
+        },
+        crate::Timestamp::EPOCH,
+        crate::state::StableMemoryOptions::Write,
+    );
+    assert!(state.has_pending_settling_events());
+    assert!(!state.has_pending_orders());
+
+    state.permissions_mut().set_trading_halted(true);
+
+    set_unlimited_policy(&mut state);
+    let status = EXECUTOR.run_once(&mut state, &runtime());
+
+    // The leftover settling was applied despite the halt; no new matching ran.
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert!(!state.has_pending_settling_events());
+    assert_eq!(state.get_balance(&BUYER, &pair.base).free(), &lot.into());
+}
+
 /// Driving the same workload through a single unlimited [`Executor`] run and
 /// through many chunk-size-1 runs must end in the same canister state.
 #[test]

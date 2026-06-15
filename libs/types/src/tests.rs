@@ -2,7 +2,7 @@ use crate::{
     AddLimitOrderError, Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage,
     GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
     OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata,
-    TradingPair, TradingPairInfo,
+    TradingPair, TradingPairInfo, TradingStatus,
 };
 use candid::{Nat, Principal};
 
@@ -61,6 +61,7 @@ fn should_serialize_trading_pair_info() {
                 decimals: 8,
             },
         },
+        status: TradingStatus::Trading,
         tick_size: Nat::from(10u64),
         lot_size: Nat::from(1_000_000u64),
         min_notional: Nat::from(5_000_000u64),

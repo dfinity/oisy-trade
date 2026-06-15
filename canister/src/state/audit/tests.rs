@@ -301,6 +301,18 @@ impl Scenario {
         self
     }
 
+    /// Applies a `SetGlobalHalt` mutation on the primary path and records the
+    /// matching `SetGlobalHalt` event as the expected replay payload.
+    fn with_set_global_halt(mut self, halted: bool) -> Self {
+        self.state.permissions_mut().set_trading_halted(halted);
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::SetGlobalHalt(halted),
+        });
+        self
+    }
+
     fn assert_replay_matches(self) {
         // Replay into *fresh* stable structures (not clones of `normal`'s) so
         // the assertion also validates that replay reconstructs stable memory,
@@ -653,6 +665,25 @@ fn should_replay_cancel_partially_filled_order() {
         // remaining (2 lots) is derived as quantity − filled_quantity.
         .assert_filled_quantity(buy_id, quantity)
         .assert_replay_matches();
+}
+
+#[test]
+fn should_apply_set_global_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_global_halt(true);
+    assert!(scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_resume_after_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_global_halt(true)
+        .with_set_global_halt(false);
+    assert!(!scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
 }
 
 #[test]

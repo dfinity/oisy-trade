@@ -428,6 +428,29 @@ fn should_roundtrip_empty_permissions_through_snapshot() {
     assert_eq!(state, restored);
 }
 
+/// A non-default `Permissions` (global trading halt set) round-trips through
+/// the snapshot, and the restored state compares equal to the original.
+#[test]
+fn should_roundtrip_global_halt_through_snapshot() {
+    let mut state = fresh_state();
+    state.permissions_mut().set_trading_halted(true);
+
+    let snapshot = StateSnapshot::from_state(&state);
+    assert!(snapshot.permissions.is_some());
+
+    let mut buf = vec![];
+    minicbor::encode(&snapshot, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+
+    assert!(restored.permissions().trading_halted());
+    assert_eq!(state, restored);
+}
+
 /// A snapshot written before the `permissions` field existed (the `#[n(10)]`
 /// slot absent) decodes into a snapshot whose `permissions` is `None`, which
 /// rebuilds the default `Permissions` on `into_state`.

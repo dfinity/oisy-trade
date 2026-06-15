@@ -141,6 +141,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self.permissions
     }
 
+    pub fn permissions_mut(&mut self) -> &mut Permissions {
+        &mut self.permissions
+    }
+
     pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
         if let Mode::RestrictedTo(ref allowed) = self.mode {
             let caller = runtime.msg_caller();
@@ -1093,6 +1097,7 @@ pub enum AddLimitOrderError {
         min: Quantity,
         max: Option<Quantity>,
     },
+    TradingHalted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1117,6 +1122,17 @@ impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
             }
             CancelLimitOrderError::OrderAlreadyCanceled => {
                 oisy_trade_types::CancelLimitOrderError::OrderAlreadyCanceled
+            }
+        }
+    }
+}
+
+impl From<permissions::UnauthorizedError> for AddLimitOrderError {
+    fn from(err: permissions::UnauthorizedError) -> Self {
+        match err {
+            permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
+            permissions::UnauthorizedError::NotController => {
+                unreachable!("permit_trading is not controller-gated")
             }
         }
     }
@@ -1160,6 +1176,9 @@ impl From<AddLimitOrderError> for oisy_trade_types::AddLimitOrderError {
                     min: min.into(),
                     max: max.map(Into::into),
                 }
+            }
+            AddLimitOrderError::TradingHalted => {
+                oisy_trade_types::AddLimitOrderError::TradingHalted
             }
         }
     }

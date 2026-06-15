@@ -56,6 +56,8 @@ type AddLimitOrderError = variant {
     // The order's notional (price × quantity / 10^base_decimals, in quote
     // smallest units) is below `min` or above `max`.
     InvalidNotional : record { notional : nat; min : nat; max : opt nat };
+    // Trading is globally halted; no new orders are accepted.
+    TradingHalted;
 };
 
 /// Error returned when canceling a limit order fails.
@@ -71,11 +73,21 @@ type CancelLimitOrderError = variant {
 };
 
 // Information about a listed trading pair.
+// Whether trading on a pair is currently active or halted.
+type TradingStatus = variant {
+    // Trading on the pair is active.
+    Trading;
+    // Trading on the pair is halted.
+    Halted;
+};
+
 type TradingPairInfo = record {
     // The base token.
     base : Token;
     // The quote token.
     quote : Token;
+    // Whether trading on this pair is currently active or halted.
+    status : TradingStatus;
     // Minimum price increment. All order prices must be a positive multiple of this value.
     tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
@@ -404,6 +416,15 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
+// Error returned by controller-gated endpoints when the caller is not
+// authorized to perform the requested action.
+type UnauthorizedError = variant {
+    // The caller is not a controller of the canister.
+    NotController;
+};
+
+type UnauthorizedResult = variant { Ok : null; Err : UnauthorizedError };
+
 // Controls who may call update endpoints on the canister.
 type Mode = variant {
     // Anyone may call update endpoints.
@@ -533,6 +554,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
+    SetGlobalHalt : bool;
 };
 
 // A canister event with a timestamp.
@@ -638,6 +660,16 @@ service : (OisyTradeArg) -> {
 
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
+
+    // Globally halt trading: reject all new orders and stop the matching
+    // engine. Cancels and withdrawals remain open. Only callable by a
+    // controller. Idempotent — halting an already-halted DEX succeeds.
+    halt_trading : () -> (UnauthorizedResult);
+
+    // Resume trading after a global halt: re-enable new orders and matching.
+    // Only callable by a controller. Idempotent — resuming an already-active
+    // DEX succeeds.
+    resume_trading : () -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.
