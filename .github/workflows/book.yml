@@ -8,12 +8,16 @@ on:
       - 'docs/**'
       - 'canister/CHANGELOG.md'
       - 'release_notes.md'
+      - 'mise.toml'
+      - 'justfile'
       - '.github/workflows/book.yml'
   pull_request:
     paths:
       - 'docs/**'
       - 'canister/CHANGELOG.md'
       - 'release_notes.md'
+      - 'mise.toml'
+      - 'justfile'
       - '.github/workflows/book.yml'
   workflow_dispatch:
 
