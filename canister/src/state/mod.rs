@@ -1131,7 +1131,9 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
     fn from(err: permissions::UnauthorizedError) -> Self {
         match err {
             permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
-            other => panic!("BUG: permit_trading returned unexpected error: {other:?}"),
+            permissions::UnauthorizedError::NotController => {
+                unreachable!("permit_trading is not controller-gated")
+            }
         }
     }
 }

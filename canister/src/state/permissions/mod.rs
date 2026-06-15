@@ -20,8 +20,8 @@ impl From<UnauthorizedError> for oisy_trade_types::UnauthorizedError {
         match err {
             UnauthorizedError::NotController => oisy_trade_types::UnauthorizedError::NotController,
             UnauthorizedError::TradingHalted => {
-                panic!(
-                    "BUG: TradingHalted is surfaced as AddLimitOrderError, not UnauthorizedError"
+                unreachable!(
+                    "TradingHalted is surfaced as AddLimitOrderError, not UnauthorizedError"
                 )
             }
         }
