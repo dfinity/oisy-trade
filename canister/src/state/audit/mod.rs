@@ -9,8 +9,8 @@ use crate::state::permissions::Permit;
 use crate::storage;
 use crate::user::UserRegistry;
 use crate::{Runtime, Timestamp};
-use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::UpgradeArg;
 use std::collections::VecDeque;
 
 #[cfg(test)]

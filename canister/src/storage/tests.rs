@@ -1,6 +1,6 @@
 use super::state_snapshot;
 use crate::state::StateSnapshot;
-use dex_types_internal::Mode;
+use oisy_trade_types_internal::Mode;
 
 fn empty_snapshot() -> StateSnapshot {
     StateSnapshot {

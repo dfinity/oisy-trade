@@ -1,7 +1,7 @@
 [package]
-name = "dex_canister"
+name = "oisy_trade_canister"
 version = "0.1.0"
-description = "DEX canister on the Internet Computer."
+description = "OISY TRADE canister on the Internet Computer."
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -9,7 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "dex_canister"
+name = "oisy_trade_canister"
 path = "src/main.rs"
 
 [features]
@@ -22,8 +22,6 @@ bimap = { version = "0.6.3", default-features = false }
 canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true }
-dex_types = { path = "../libs/types" }
-dex_types_internal = { path = "../libs/types-internal", features = ["event", "log"] }
 ic-cdk = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
@@ -33,6 +31,8 @@ icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-bigint = { workspace = true }
+oisy_trade_types = { path = "../libs/types" }
+oisy_trade_types_internal = { path = "../libs/types-internal", features = ["event", "log"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }

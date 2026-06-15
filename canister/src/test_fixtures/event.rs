@@ -8,7 +8,7 @@ use crate::state::event::{
     Event, EventType, MatchingEvent, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
-use dex_types_internal::{InitArg, Mode, UpgradeArg};
+use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
 use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
 
@@ -17,8 +17,8 @@ pub fn init_event(mode: Mode) -> Event {
         timestamp: Timestamp::EPOCH,
         payload: EventType::Init(InitArg {
             mode,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         }),
     }
 }

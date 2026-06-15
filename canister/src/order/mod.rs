@@ -40,26 +40,26 @@ pub enum Side {
     Sell,
 }
 
-impl From<dex_types::Side> for Side {
-    fn from(side: dex_types::Side) -> Self {
+impl From<oisy_trade_types::Side> for Side {
+    fn from(side: oisy_trade_types::Side) -> Self {
         match side {
-            dex_types::Side::Buy => Side::Buy,
-            dex_types::Side::Sell => Side::Sell,
+            oisy_trade_types::Side::Buy => Side::Buy,
+            oisy_trade_types::Side::Sell => Side::Sell,
         }
     }
 }
 
-impl From<Side> for dex_types::Side {
+impl From<Side> for oisy_trade_types::Side {
     fn from(side: Side) -> Self {
         match side {
-            Side::Buy => dex_types::Side::Buy,
-            Side::Sell => dex_types::Side::Sell,
+            Side::Buy => oisy_trade_types::Side::Buy,
+            Side::Sell => oisy_trade_types::Side::Sell,
         }
     }
 }
 
 /// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
-/// states of [`dex_types::OrderStatus`].
+/// states of [`oisy_trade_types::OrderStatus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub enum OrderStatus {
     #[n(0)]
@@ -72,13 +72,13 @@ pub enum OrderStatus {
     Canceled,
 }
 
-impl From<OrderStatus> for dex_types::OrderStatus {
+impl From<OrderStatus> for oisy_trade_types::OrderStatus {
     fn from(status: OrderStatus) -> Self {
         match status {
-            OrderStatus::Pending => dex_types::OrderStatus::Pending,
-            OrderStatus::Open => dex_types::OrderStatus::Open,
-            OrderStatus::Filled => dex_types::OrderStatus::Filled,
-            OrderStatus::Canceled => dex_types::OrderStatus::Canceled,
+            OrderStatus::Pending => oisy_trade_types::OrderStatus::Pending,
+            OrderStatus::Open => oisy_trade_types::OrderStatus::Open,
+            OrderStatus::Filled => oisy_trade_types::OrderStatus::Filled,
+            OrderStatus::Canceled => oisy_trade_types::OrderStatus::Canceled,
         }
     }
 }
@@ -263,13 +263,13 @@ impl TokenId {
     }
 }
 
-impl From<dex_types::TokenId> for TokenId {
-    fn from(value: dex_types::TokenId) -> Self {
+impl From<oisy_trade_types::TokenId> for TokenId {
+    fn from(value: oisy_trade_types::TokenId) -> Self {
         Self(value.ledger_id)
     }
 }
 
-impl From<TokenId> for dex_types::TokenId {
+impl From<TokenId> for oisy_trade_types::TokenId {
     fn from(value: TokenId) -> Self {
         Self { ledger_id: value.0 }
     }
@@ -283,8 +283,8 @@ pub struct TokenMetadata {
     pub decimals: u8,
 }
 
-impl From<dex_types::TokenMetadata> for TokenMetadata {
-    fn from(value: dex_types::TokenMetadata) -> Self {
+impl From<oisy_trade_types::TokenMetadata> for TokenMetadata {
+    fn from(value: oisy_trade_types::TokenMetadata) -> Self {
         Self {
             symbol: value.symbol,
             decimals: value.decimals,
@@ -292,7 +292,7 @@ impl From<dex_types::TokenMetadata> for TokenMetadata {
     }
 }
 
-impl From<TokenMetadata> for dex_types::TokenMetadata {
+impl From<TokenMetadata> for oisy_trade_types::TokenMetadata {
     fn from(value: TokenMetadata) -> Self {
         Self {
             symbol: value.symbol,
@@ -320,8 +320,8 @@ impl TradingPair {
     }
 }
 
-impl From<dex_types::TradingPair> for TradingPair {
-    fn from(pair: dex_types::TradingPair) -> Self {
+impl From<oisy_trade_types::TradingPair> for TradingPair {
+    fn from(pair: oisy_trade_types::TradingPair) -> Self {
         Self {
             base: TokenId::new(pair.base),
             quote: TokenId::new(pair.quote),
@@ -329,9 +329,9 @@ impl From<dex_types::TradingPair> for TradingPair {
     }
 }
 
-impl From<TradingPair> for dex_types::TradingPair {
+impl From<TradingPair> for oisy_trade_types::TradingPair {
     fn from(value: TradingPair) -> Self {
-        dex_types::TradingPair {
+        oisy_trade_types::TradingPair {
             base: value.base.0,
             quote: value.quote.0,
         }
@@ -817,10 +817,10 @@ pub struct PendingOrder {
     pub quantity: Quantity,
 }
 
-impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
+impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
     type Error = QuantityOverflowError;
 
-    fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
+    fn try_from(request: oisy_trade_types::LimitOrderRequest) -> Result<Self, Self::Error> {
         Ok(Self {
             side: Side::from(request.side),
             price: Price::from(

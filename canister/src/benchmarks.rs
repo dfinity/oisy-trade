@@ -10,7 +10,7 @@ use crate::state::{StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
 use candid::Principal;
-use dex_types_internal::{InitArg, Mode};
+use oisy_trade_types_internal::{InitArg, Mode};
 use serde::Deserialize;
 use std::num::{NonZeroU64, NonZeroU128};
 
@@ -177,14 +177,14 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
 
 /// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
 /// snapshot. Only the first entry of each side is read, but the returned
-/// [`dex_types::PriceLevel::quantity`] aggregates across every resting order at that
+/// [`oisy_trade_types::PriceLevel::quantity`] aggregates across every resting order at that
 /// price — so cost scales with the number of orders at the best bid and best
 /// ask, not with total depth. In this fixture each level holds a single order,
 /// so the benchmark measures the minimal constant-overhead path.
 #[bench(raw)]
 fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
     install_populated_state();
-    let pair = dex_types::TradingPair::from(trading_pair());
+    let pair = oisy_trade_types::TradingPair::from(trading_pair());
     canbench_rs::bench_fn(|| {
         let _ticker = crate::get_order_book_ticker(pair);
     })
@@ -196,8 +196,8 @@ fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
     install_populated_state();
-    let request = dex_types::GetOrderBookDepthRequest {
-        trading_pair: dex_types::TradingPair::from(trading_pair()),
+    let request = oisy_trade_types::GetOrderBookDepthRequest {
+        trading_pair: oisy_trade_types::TradingPair::from(trading_pair()),
         limit: None,
     };
     canbench_rs::bench_fn(|| {
@@ -212,8 +212,8 @@ fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     install_populated_state();
-    let request = dex_types::GetOrderBookDepthRequest {
-        trading_pair: dex_types::TradingPair::from(trading_pair()),
+    let request = oisy_trade_types::GetOrderBookDepthRequest {
+        trading_pair: oisy_trade_types::TradingPair::from(trading_pair()),
         limit: Some(crate::MAX_DEPTH_LIMIT),
     };
     canbench_rs::bench_fn(|| {
@@ -255,13 +255,16 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
     crate::state::init_state(state);
 
     let total = trades.len();
-    let page = dex_types::MAX_ORDERS_PER_RESPONSE;
+    let page = oisy_trade_types::MAX_ORDERS_PER_RESPONSE;
     canbench_rs::bench_fn(|| {
-        let mut after: Option<dex_types::OrderId> = None;
+        let mut after: Option<oisy_trade_types::OrderId> = None;
         let mut retrieved = 0usize;
         loop {
             let orders = crate::get_my_orders(
-                Some(dex_types::GetMyOrdersArgs::by_page(after.clone(), page)),
+                Some(oisy_trade_types::GetMyOrdersArgs::by_page(
+                    after.clone(),
+                    page,
+                )),
                 trader,
             )
             .expect("benchmark cursor is always a valid order id");
@@ -353,8 +356,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         OrderHistory::new(
             storage::order_history_memory(),

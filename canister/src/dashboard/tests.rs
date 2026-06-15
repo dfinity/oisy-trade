@@ -20,7 +20,7 @@ fn should_render_metadata() {
     let dom = render(&fresh_state(), 42);
 
     let title = text(&dom, "h1");
-    assert_eq!(title, "DEX Dashboard");
+    assert_eq!(title, "OISY TRADE Dashboard");
 
     let metadata = text(&dom, "h2 + dl");
     assert!(

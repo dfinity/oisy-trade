@@ -30,26 +30,26 @@ allow_dirty = false
 publish_allow_dirty = false
 
 [[package]]
-name = "dex_canister"
+name = "oisy_trade_canister"
 semver_check = false # binary canister, no public Rust API to guard
 publish = false # the canister is released as a wasm asset, never to crates.io
 
 [[package]]
-name = "dex_client"
+name = "oisy_trade_client"
 # not released yet; set `release = true` + `publish = true` to start publishing to crates.io
 release = false
 
 [[package]]
-name = "dex_types"
-# published to crates.io so dex_client can depend on the released version;
+name = "oisy_trade_types"
+# published to crates.io so oisy_trade_client can depend on the released version;
 # no separate GitHub release (the crates.io publish + git tag is enough)
 publish = true
 git_release_enable = false
 
 [[package]]
-name = "dex_types_internal"
+name = "oisy_trade_types_internal"
 release = false # internal init-arg types, not released
 
 [[package]]
-name = "dex_int_tests"
+name = "oisy_trade_int_tests"
 release = false # test crate, not released

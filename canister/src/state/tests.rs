@@ -2,7 +2,7 @@ mod assert_caller_is_allowed {
     use crate::state::State;
     use crate::test_fixtures::mocks::MockRuntime;
     use candid::Principal;
-    use dex_types_internal::Mode;
+    use oisy_trade_types_internal::Mode;
 
     #[test]
     fn should_allow_any_caller_in_general_availability_mode() {
@@ -52,10 +52,10 @@ mod assert_caller_is_allowed {
         mode: Mode,
     ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
         State::new(
-            dex_types_internal::InitArg {
+            oisy_trade_types_internal::InitArg {
                 mode,
-                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(
                 ic_stable_structures::VectorMemory::default(),
@@ -2362,8 +2362,8 @@ mod execution_policy {
     use crate::balance::TokenBalance;
     use crate::order::OrderHistory;
     use crate::state::{ExecutionPolicy, State};
-    use dex_types_internal::{InitArg, Mode};
     use ic_stable_structures::VectorMemory;
+    use oisy_trade_types_internal::{InitArg, Mode};
 
     #[test]
     fn should_thread_init_arg_fields_through_to_execution_policy() {
@@ -2391,7 +2391,7 @@ mod get_balances {
     use crate::state::StableMemoryOptions;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
-    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+    use oisy_trade_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
 
@@ -2594,7 +2594,7 @@ mod get_balances {
         reserved: u64,
     ) -> Result<UserTokenBalance, GetBalancesError> {
         Ok(UserTokenBalance {
-            token: dex_types::Token {
+            token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
             },
@@ -2610,7 +2610,7 @@ mod get_fee_balances {
     use crate::order::TokenId;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
-    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+    use oisy_trade_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
 
     #[test]
     fn should_return_empty_when_no_fees_accrued_and_no_filter() {
@@ -2706,7 +2706,7 @@ mod get_fee_balances {
         amount: u64,
     ) -> Result<UserTokenBalance, GetBalancesError> {
         Ok(UserTokenBalance {
-            token: dex_types::Token {
+            token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
             },

@@ -1,4 +1,4 @@
-//! Candid types used by the candid interface of the DEX canister.
+//! Candid types used by the candid interface of the OISY TRADE canister.
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
@@ -152,7 +152,7 @@ pub const MAX_DEPTH_LIMIT: u32 = 1_000;
 /// Error returned by the `get_order_book_ticker` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookTickerError {
-    /// The requested trading pair is not registered on the DEX.
+    /// The requested trading pair is not registered on the OISY TRADE.
     UnknownTradingPair,
 }
 
@@ -172,13 +172,13 @@ pub struct GetOrderBookDepthRequest {
 /// Error returned by the `get_order_book_depth` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookDepthError {
-    /// The requested trading pair is not registered on the DEX.
+    /// The requested trading pair is not registered on the OISY TRADE.
     UnknownTradingPair,
     /// The requested depth limit exceeds [`MAX_DEPTH_LIMIT`].
     LimitTooLarge {
         /// The rejected limit.
         requested: u32,
-        /// The maximum limit the DEX will serve.
+        /// The maximum limit the OISY TRADE will serve.
         max: u32,
     },
 }
@@ -196,7 +196,7 @@ pub enum OrderStatus {
     Canceled,
 }
 
-/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
 /// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
 /// saving the caller a follow-up status/metadata query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -331,7 +331,7 @@ pub struct Token {
     pub metadata: TokenMetadata,
 }
 
-/// Request to deposit tokens into the DEX.
+/// Request to deposit tokens into the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct DepositRequest {
     /// The token to deposit.
@@ -345,7 +345,7 @@ pub struct DepositRequest {
 pub enum DepositError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the DEX.
+    /// The token is not part of any trading pair on the OISY TRADE.
     UnsupportedToken {
         /// The unsupported token.
         token_id: TokenId,
@@ -424,7 +424,7 @@ pub struct UserTokenBalance {
 /// Per-entry error reported in [`get_balances`] responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesError {
-    /// The filter referenced a token that the DEX does not support.
+    /// The filter referenced a token that the OISY TRADE does not support.
     TokenNotSupported(FilterToken),
 }
 
@@ -441,7 +441,7 @@ pub enum GetBalancesRequestError {
     },
 }
 
-/// Request to add a new trading pair to the DEX.
+/// Request to add a new trading pair to the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct AddTradingPairRequest {
     /// The base token of the pair (e.g. ckSOL).
@@ -463,7 +463,7 @@ pub struct AddTradingPairRequest {
     pub max_notional: Option<Nat>,
 }
 
-/// Request to withdraw tokens from the DEX.
+/// Request to withdraw tokens from the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct WithdrawRequest {
     /// The token to withdraw.
@@ -486,7 +486,7 @@ pub struct WithdrawResponse {
 pub enum WithdrawError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the DEX.
+    /// The token is not part of any trading pair on the OISY TRADE.
     UnsupportedToken {
         /// The unsupported token.
         token_id: TokenId,

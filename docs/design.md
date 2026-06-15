@@ -1,6 +1,6 @@
-# DEX: Fully Onchain Order Book
+# OISY TRADE: Fully Onchain Order Book
 
-High-level design for an order book DEX running entirely onchain as an Internet Computer canister.
+High-level design for OISY TRADE, an order-book DEX running entirely onchain as an Internet Computer canister.
 
 ## Table of Contents
 
@@ -13,22 +13,22 @@ High-level design for an order book DEX running entirely onchain as an Internet 
 
 ## Overview
 
-The DEX canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
+The OISY TRADE canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
 
 There are three distinct flows:
 
 ### 1. Deposit
 
-The user moves tokens from their wallet into the DEX canister. This is a prerequisite for trading.
+The user moves tokens from their wallet into the OISY TRADE canister. This is a prerequisite for trading.
 
 ```
-User                    DEX Canister                  ICRC-2 Ledger
+User                    OISY TRADE                   ICRC-2 Ledger
  |                          |                              |
  |-- icrc2_approve ---------------------------------------->|
  |                          |                              |
  |-- deposit(token, amt) -->|                              |
  |                          |-- icrc2_transfer_from ------>|
- |                          |   (user -> DEX canister)     |
+ |                          |   (user -> OISY TRADE)       |
  |                          |                              |
  |                          | credit user's internal       |
  |                          | balance                      |
@@ -40,7 +40,7 @@ User                    DEX Canister                  ICRC-2 Ledger
 The user places orders using their deposited balance. Matching and settlement are purely internal bookkeeping — no token transfers occur, no asynchronous calls.
 
 ```
-User                    DEX Canister
+User                    OISY TRADE
  |                          |
  |-- add_limit_order ------>|
  |                          | debit user's available balance
@@ -60,16 +60,16 @@ User                    DEX Canister
 
 ### 3. Withdrawal
 
-The user moves tokens from the DEX canister back to their wallet.
+The user moves tokens from the OISY TRADE canister back to their wallet.
 
 ```
-User                    DEX Canister                  ICRC-2 Ledger
+User                    OISY TRADE                   ICRC-2 Ledger
  |                          |                              |
  |-- withdraw(token, amt) ->|                              |
  |                          | debit user's internal        |
  |                          | balance                      |
  |                          |-- icrc1_transfer ----------->|
- |                          |   (DEX canister -> user)     |
+ |                          |   (OISY TRADE -> user)       |
  |<-- ok -------------------|                              |
 ```
 
@@ -192,7 +192,7 @@ Estimated memory per order book side:
 **Real-world reference: Binance ICP/BTC order book snapshot** (retrieved via `GET /api/v3/depth?symbol=ICPBTC&limit=5000`):
 
 - 135 bid price levels, 1,310 ask price levels (1,445 total).
-- Binance aggregates all orders at a price into a single entry. Assuming ~10 individual orders per price level on a DEX (no aggregation), the estimated memory for this pair would be:
+- Binance aggregates all orders at a price into a single entry. Assuming ~10 individual orders per price level on OISY TRADE (no aggregation), the estimated memory for this pair would be:
 
 ```
 1,445 levels × 112 B  +  14,450 orders × 64 B  ≈  1 MiB
@@ -306,7 +306,7 @@ Actual token transfers (inter-canister calls) only happen during deposits and wi
 
 ### Deposits
 
-Deposits are independent from order placement. The user first approves the DEX canister on the ICRC-2 ledger, then calls `deposit(token, amount)`. The canister executes `icrc2_transfer_from` to move tokens into its custody and credits the user's internal balance.
+Deposits are independent from order placement. The user first approves the OISY TRADE canister on the ICRC-2 ledger, then calls `deposit(token, amount)`. The canister executes `icrc2_transfer_from` to move tokens into its custody and credits the user's internal balance.
 
 ### Withdrawals
 
@@ -314,7 +314,7 @@ Users call `withdraw(token, amount)` to transfer tokens from their available bal
 
 ### Balance Memory Estimates
 
-Assume **1M users with non-zero balances**, and that almost all quantities fit in a `u128` (per [#59](https://github.com/dfinity/dex/pull/59): `Quantity` is a stack-allocated `(u128, u128)` — 32 B — encoded as a plain CBOR integer when the value fits in `u64` and as a PosBignum Tag 2 otherwise). Balances are stored token-first (per [#60](https://github.com/dfinity/dex/pull/60): `BTreeMap<TokenId, BTreeMap<Principal, Balance>>`).
+Assume **1M users with non-zero balances**, and that almost all quantities fit in a `u128` (per [#59](https://github.com/dfinity/oisy-trade/pull/59): `Quantity` is a stack-allocated `(u128, u128)` — 32 B — encoded as a plain CBOR integer when the value fits in `u64` and as a PosBignum Tag 2 otherwise). Balances are stored token-first (per [#60](https://github.com/dfinity/oisy-trade/pull/60): `BTreeMap<TokenId, BTreeMap<Principal, Balance>>`).
 
 Per-entry sizes:
 
@@ -335,7 +335,7 @@ Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 
 
 ## Order History
 
-Every order submitted to the DEX is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
+Every order submitted to the OISY TRADE is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
@@ -414,8 +414,8 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 **Query calls** (read-only):
 
 - **`get_my_orders(opt GetMyOrdersArgs)`**: returns the caller's orders, each with its current status. The argument is optional; when absent it defaults to the first page (newest first, `length = MAX_ORDERS_PER_RESPONSE`). When present, `GetMyOrdersArgs.filter` selects the mode: `ById` performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
-- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the DEX, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
-- **`list_supported_tokens()`**: returns the full list of tokens registered with the DEX. Time: O(n) over the registered tokens.
+- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
+- **`list_supported_tokens()`**: returns the full list of tokens registered with the OISY TRADE. Time: O(n) over the registered tokens.
 
 ### Expected Load
 
@@ -451,7 +451,7 @@ Stored typically in a `StableBTreeMap`; per-op durability at the cost of a stabl
   - Zero upgrade cost.
   - Size bounded only by the 2 TiB per-subnet stable budget.
 - Cons:
-  - Roughly ~20× slower per operation (see [#57](https://github.com/dfinity/dex/pull/57)), driven by:
+  - Roughly ~20× slower per operation (see [#57](https://github.com/dfinity/oisy-trade/pull/57)), driven by:
     - Every tree hop crosses the Wasm-to-host boundary to read or write stable memory — orders of magnitude more expensive than a heap pointer chase.
     - Keys and values are serialized bytes, so each access pays a decode (and, on writes, a re-encode) of the full value.
     - No in-place mutation: unlike heap `BTreeMap::get_mut`, `StableBTreeMap` exposes only `get` / `insert`, so even a single-field update (e.g. incrementing a `Balance`) requires a full read-modify-write of the entire value.
@@ -487,8 +487,8 @@ At-a-glance viability of each placement per data structure (🟢 = viable choice
 
 | Data structure  | Stable memory                                                                                                               | Heap + event replay                                                                                                                                                                                     | Heap + pre-upgrade snapshot                                                                                                                                                                                                                                                                                 |
 |-----------------|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `order_books`   | 🔴 21×-29x the number of instructions for matching as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)) | 🔴 replay complexity is O(matching) in the worst-case, e.g. insert resting orders which involves only tree operation that would need to be replayed.<br>Over 22 M events / yr exceeds the upgrade budget | 🟢 Once per upgrade per order book: 60M instructions for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)), about 2 bps of the 300 B instructions upgrade budget.<br>Even snapshotting 1_000 order books would be ~60 B instructions (~20% of the budget)                                   |
-| `balances`      | 🟠 15× the number of instructions for settling as when done on the heap ([#57](https://github.com/dfinity/dex/pull/57)).                                                   | 🔴 replay complexity is O(settling): need to update balances according to the fills.<br>Over 22 M events / yr exceeds the upgrade budget                                                                    | 🔴 Once per upgrade per traded token: 150M for balances needed for Binance ICP/USDT ([#58](https://github.com/dfinity/dex/pull/58)).<br>Doesn't scale well:<br> - Long tail: many users will have various tokens with small balances.<br> - Adding a new trading pair adds 2 token balances to snapshot |
+| `order_books`   | 🔴 21×-29x the number of instructions for matching as when done on the heap ([#57](https://github.com/dfinity/oisy-trade/pull/57)) | 🔴 replay complexity is O(matching) in the worst-case, e.g. insert resting orders which involves only tree operation that would need to be replayed.<br>Over 22 M events / yr exceeds the upgrade budget | 🟢 Once per upgrade per order book: 60M instructions for Binance ICP/USDT ([#58](https://github.com/dfinity/oisy-trade/pull/58)), about 2 bps of the 300 B instructions upgrade budget.<br>Even snapshotting 1_000 order books would be ~60 B instructions (~20% of the budget)                                   |
+| `balances`      | 🟠 15× the number of instructions for settling as when done on the heap ([#57](https://github.com/dfinity/oisy-trade/pull/57)).                                                   | 🔴 replay complexity is O(settling): need to update balances according to the fills.<br>Over 22 M events / yr exceeds the upgrade budget                                                                    | 🔴 Once per upgrade per traded token: 150M for balances needed for Binance ICP/USDT ([#58](https://github.com/dfinity/oisy-trade/pull/58)).<br>Doesn't scale well:<br> - Long tail: many users will have various tokens with small balances.<br> - Adding a new trading pair adds 2 token balances to snapshot |
 | `order_history` | 🟢 no efficiency concern                                                                                                    | 🔴 heap limit crossed at ~2 yr; replay blows the 300 B budget                                                                                                                                           | 🔴 snapshot blows the 300 B budget at ~22 M records                                                                                                                                                                                                                                                         |
 
 ### Auditability

@@ -1,6 +1,6 @@
 use crate::{InitArg, UpgradeArg};
 use candid::{CandidType, Nat, Principal};
-use dex_types::{TokenId, TokenMetadata};
+use oisy_trade_types::{TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -56,7 +56,7 @@ pub struct WithdrawEvent {
 pub struct AddLimitOrderEvent {
     pub user: Principal,
     pub order_id: OrderId,
-    pub side: dex_types::Side,
+    pub side: oisy_trade_types::Side,
     pub price: Nat,
     pub quantity: Nat,
 }

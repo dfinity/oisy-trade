@@ -15,8 +15,8 @@ use crate::test_fixtures::{
     order_history, quote_metadata, state, user_registry,
 };
 use candid::Principal;
-use dex_types_internal::Mode;
 use ic_stable_structures::VectorMemory;
+use oisy_trade_types_internal::Mode;
 
 const BASE: [u8; 1] = [0x01];
 const QUOTE: [u8; 1] = [0x02];

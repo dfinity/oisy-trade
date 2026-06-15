@@ -116,7 +116,7 @@ applies a matching event to the live `OrderBook` and, **only under
 runs with `Skip`, since the stable map is preserved across upgrades. All new persistence
 must respect that `Write` gate so replay does not re-apply it.
 
-### Types — `libs/types` and `canister/dex.did`
+### Types — `libs/types` and `canister/oisy_trade.did`
 
 - `OrderRecord` gains `filled_quantity: Nat` (cumulative base-token amount filled), renames
   `timestamp` to `created_at`, and gains `last_updated_at: Option<Timestamp>` (R10).
@@ -241,8 +241,8 @@ Verification:
 ```
 cargo fmt --all
 just lint
-cargo test -p dex_canister
-cargo test -p dex_int_tests
+cargo test -p oisy_trade_canister
+cargo test -p oisy_trade_int_tests
 # + the repo's candid equality check (see justfile / CI)
 ```
 

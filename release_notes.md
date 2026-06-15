@@ -1,13 +1,13 @@
-- SHA-256 hash: `${DEX_CANISTER_WASM_GZ_SHA256}`
+- SHA-256 hash: `${OISY_TRADE_CANISTER_WASM_GZ_SHA256}`
 
 ## Reproducible build
 
-The attached `dex_canister.wasm.gz` is built reproducibly. To verify the hash matches:
+The attached `oisy_trade_canister.wasm.gz` is built reproducibly. To verify the hash matches:
 
 ```bash
 git checkout ${RELEASE_TAG}
 just docker-build
-sha256sum wasms/dex_canister.wasm.gz
+sha256sum wasms/oisy_trade_canister.wasm.gz
 ```
 
 ## Deployments

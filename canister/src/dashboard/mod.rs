@@ -5,8 +5,8 @@ use crate::order::{OrderBook, Price, Quantity};
 use crate::state::State;
 use askama::Template;
 use candid::Principal;
-use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::Mode;
 
 const DEPTH_LEVELS: usize = 20;
 

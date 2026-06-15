@@ -1,4 +1,4 @@
-//! Client to interact with the DEX canister
+//! Client to interact with the OISY TRADE canister
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
@@ -6,7 +6,8 @@
 use async_trait::async_trait;
 use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
-use dex_types::{
+use ic_cdk::call::{Call, CallFailed, RejectCode};
+use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
@@ -14,7 +15,6 @@ use dex_types::{
     OrderRecord, Token, TokenId, TradingPair, TradingPairInfo, UserOrder, UserTokenBalance,
     WithdrawError, WithdrawRequest, WithdrawResponse,
 };
-use ic_cdk::call::{Call, CallFailed, RejectCode};
 use serde::de::DeserializeOwned;
 
 /// Abstract the canister runtime so that the client code can be reused:
@@ -36,43 +36,43 @@ pub trait Runtime {
         Out: CandidType + DeserializeOwned + 'static;
 }
 
-/// Client to interact with the DEX canister.
+/// Client to interact with the OISY TRADE canister.
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct DexClient<R: Runtime> {
+pub struct OisyTradeClient<R: Runtime> {
     runtime: R,
-    dex_canister: Principal,
+    oisy_trade_canister: Principal,
 }
 
-impl DexClient<IcRuntime> {
+impl OisyTradeClient<IcRuntime> {
     /// Instantiate a new client to be used by a canister on the Internet Computer.
     ///
     /// To use another runtime, see [`Self::new`].
-    pub fn new_for_ic(dex_canister: Principal) -> Self {
+    pub fn new_for_ic(oisy_trade_canister: Principal) -> Self {
         Self {
             runtime: IcRuntime {},
-            dex_canister,
+            oisy_trade_canister,
         }
     }
 }
 
-impl<R: Runtime> DexClient<R> {
+impl<R: Runtime> OisyTradeClient<R> {
     /// Instantiate a new client with a specific runtime.
     ///
-    /// To use the client inside a canister, see [`DexClient<IcRuntime>::new_for_ic`].
-    pub fn new(runtime: R, dex_canister: Principal) -> Self {
+    /// To use the client inside a canister, see [`OisyTradeClient<IcRuntime>::new_for_ic`].
+    pub fn new(runtime: R, oisy_trade_canister: Principal) -> Self {
         Self {
             runtime,
-            dex_canister,
+            oisy_trade_canister,
         }
     }
 
-    /// Place a new limit order on the DEX canister.
+    /// Place a new limit order on the OISY TRADE canister.
     pub async fn add_limit_order(
         &self,
         request: LimitOrderRequest,
     ) -> Result<OrderId, AddLimitOrderError> {
         self.runtime
-            .call(self.dex_canister, "add_limit_order", (request,), 0)
+            .call(self.oisy_trade_canister, "add_limit_order", (request,), 0)
             .await
             .unwrap()
     }
@@ -83,7 +83,12 @@ impl<R: Runtime> DexClient<R> {
         order_id: OrderId,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.runtime
-            .call(self.dex_canister, "cancel_limit_order", (order_id,), 0)
+            .call(
+                self.oisy_trade_canister,
+                "cancel_limit_order",
+                (order_id,),
+                0,
+            )
             .await
             .unwrap()
     }
@@ -92,7 +97,7 @@ impl<R: Runtime> DexClient<R> {
     /// depending on the `GetMyOrdersArgs` filter.
     pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
         self.runtime
-            .call(self.dex_canister, "get_my_orders", (Some(args),), 0)
+            .call(self.oisy_trade_canister, "get_my_orders", (Some(args),), 0)
             .await
             .unwrap()
     }
@@ -106,51 +111,61 @@ impl<R: Runtime> DexClient<R> {
             .next()
     }
 
-    /// Query all listed trading pairs on the DEX canister.
+    /// Query all listed trading pairs on the OISY TRADE canister.
     pub async fn get_trading_pairs(&self) -> Vec<TradingPairInfo> {
         self.runtime
-            .call(self.dex_canister, "get_trading_pairs", (), 0)
+            .call(self.oisy_trade_canister, "get_trading_pairs", (), 0)
             .await
             .unwrap()
     }
 
-    /// Query the top-of-book for a trading pair on the DEX canister.
+    /// Query the top-of-book for a trading pair on the OISY TRADE canister.
     pub async fn get_order_book_ticker(
         &self,
         pair: TradingPair,
     ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
         self.runtime
-            .call(self.dex_canister, "get_order_book_ticker", (pair,), 0)
+            .call(
+                self.oisy_trade_canister,
+                "get_order_book_ticker",
+                (pair,),
+                0,
+            )
             .await
             .unwrap()
     }
 
-    /// Query price-aggregated depth for a trading pair on the DEX canister.
+    /// Query price-aggregated depth for a trading pair on the OISY TRADE canister.
     pub async fn get_order_book_depth(
         &self,
         request: GetOrderBookDepthRequest,
     ) -> Result<OrderBookDepth, GetOrderBookDepthError> {
         self.runtime
-            .call(self.dex_canister, "get_order_book_depth", (request,), 0)
+            .call(
+                self.oisy_trade_canister,
+                "get_order_book_depth",
+                (request,),
+                0,
+            )
             .await
             .unwrap()
     }
 
-    /// Deposit tokens into the DEX canister.
+    /// Deposit tokens into the OISY TRADE canister.
     pub async fn deposit(&self, request: DepositRequest) -> Result<DepositResponse, DepositError> {
         self.runtime
-            .call(self.dex_canister, "deposit", (request,), 0)
+            .call(self.oisy_trade_canister, "deposit", (request,), 0)
             .await
             .unwrap()
     }
 
-    /// Withdraw tokens from the DEX canister.
+    /// Withdraw tokens from the OISY TRADE canister.
     pub async fn withdraw(
         &self,
         request: WithdrawRequest,
     ) -> Result<WithdrawResponse, WithdrawError> {
         self.runtime
-            .call(self.dex_canister, "withdraw", (request,), 0)
+            .call(self.oisy_trade_canister, "withdraw", (request,), 0)
             .await
             .unwrap()
     }
@@ -164,7 +179,7 @@ impl<R: Runtime> DexClient<R> {
         filter: Option<Vec<FilterToken>>,
     ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
         self.runtime
-            .call(self.dex_canister, "get_balances", (filter,), 0)
+            .call(self.oisy_trade_canister, "get_balances", (filter,), 0)
             .await
             .unwrap()
     }
@@ -177,14 +192,14 @@ impl<R: Runtime> DexClient<R> {
         filter: Option<Vec<FilterToken>>,
     ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
         self.runtime
-            .call(self.dex_canister, "get_fee_balances", (filter,), 0)
+            .call(self.oisy_trade_canister, "get_fee_balances", (filter,), 0)
             .await
             .unwrap()
     }
 
     /// Client-side convenience: query the caller's balance for a single
     /// token via [`Self::get_balances`]. Returns `TokenNotSupported` when
-    /// the DEX does not know the token.
+    /// the OISY TRADE does not know the token.
     pub async fn get_balance(&self, token_id: TokenId) -> Result<Balance, GetBalancesError> {
         let mut result = self
             .get_balances(Some(vec![FilterToken::ById(token_id)]))
@@ -193,21 +208,21 @@ impl<R: Runtime> DexClient<R> {
         result.remove(0).map(|entry| entry.balance)
     }
 
-    /// List every token registered with the DEX.
+    /// List every token registered with the OISY TRADE.
     pub async fn list_supported_tokens(&self) -> Vec<Token> {
         self.runtime
-            .call(self.dex_canister, "list_supported_tokens", (), 0)
+            .call(self.oisy_trade_canister, "list_supported_tokens", (), 0)
             .await
             .unwrap()
     }
 
-    /// Add a new trading pair to the DEX. Only callable by a controller.
+    /// Add a new trading pair to the OISY TRADE. Only callable by a controller.
     pub async fn add_trading_pair(
         &self,
         request: AddTradingPairRequest,
     ) -> Result<(), AddTradingPairError> {
         self.runtime
-            .call(self.dex_canister, "add_trading_pair", (request,), 0)
+            .call(self.oisy_trade_canister, "add_trading_pair", (request,), 0)
             .await
             .unwrap()
     }

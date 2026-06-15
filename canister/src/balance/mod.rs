@@ -122,7 +122,7 @@ impl Balance {
     }
 }
 
-impl From<Balance> for dex_types::Balance {
+impl From<Balance> for oisy_trade_types::Balance {
     fn from(b: Balance) -> Self {
         Self {
             free: b.free.into(),
@@ -131,7 +131,7 @@ impl From<Balance> for dex_types::Balance {
     }
 }
 
-impl From<&Balance> for dex_types::Balance {
+impl From<&Balance> for oisy_trade_types::Balance {
     fn from(b: &Balance) -> Self {
         Self {
             free: b.free.into(),

@@ -175,7 +175,7 @@ through getters. `validate_order` is unchanged (tick/lot only).
 - `validate_limit_order`: after computing `amount` (the scaled notional), reject with the new
   internal `AddLimitOrderError::InvalidNotional` when `amount < min_notional` (R1) or, with
   `max_notional` set, when `amount > max_notional` (R2); `==` passes (R3). Extend the internal
-  `AddLimitOrderError` enum and its `From` mapping to `dex_types::AddLimitOrderError`.
+  `AddLimitOrderError` enum and its `From` mapping to `oisy_trade_types::AddLimitOrderError`.
 
 ### Persistence — `canister/src/state/snapshot/mod.rs`
 
@@ -183,7 +183,7 @@ through getters. `validate_order` is unchanged (tick/lot only).
 
 ### Interface & docs
 
-- `canister/dex.did`: update `AddTradingPairRequest`, `AddTradingPairError`,
+- `canister/oisy_trade.did`: update `AddTradingPairRequest`, `AddTradingPairError`,
   `AddLimitOrderError`, and `TradingPairInfo`.
 - `docs/design.md`: document the two filters in the pair-parameters section alongside tick/lot.
 

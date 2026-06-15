@@ -1,6 +1,6 @@
-# DEX admin
+# OISY TRADE admin
 
-Administrative operations that require the caller to be a **controller** of the DEX canister:
+Administrative operations that require the caller to be a **controller** of the OISY TRADE canister:
 
 1. Upgrade the canister to a new WASM
 2. Add a new trading pair
@@ -12,8 +12,8 @@ Run every command below from the same shell — steps share `export`ed variables
 ## Prerequisites
 
 - [`icp` CLI](https://cli.internetcomputer.org/) installed and on `PATH`
-- Run these commands from the **project root** so `--environment staging` resolves the `dex` canister name (defined in `icp.yaml`)
-- An identity that is a controller of the DEX canister. The repo convention is the `hsm` identity — adjust `IDENTITY` below if you use a different one.
+- Run these commands from the **project root** so `--environment staging` resolves the `oisy_trade` canister name (defined in `icp.yaml`)
+- An identity that is a controller of the OISY TRADE canister. The repo convention is the `hsm` identity — adjust `IDENTITY` below if you use a different one.
 - Optional: `curl` and `jq` — only needed for the Binance sizing sanity check in §2.
 
 ## Setup
@@ -52,16 +52,16 @@ unset pin
 
 ```bash
 icp identity principal --identity "$IDENTITY" --identity-password-file "$PIN_FILE"
-icp canister status dex --environment staging --identity "$IDENTITY" --identity-password-file "$PIN_FILE"
+icp canister status oisy_trade --environment staging --identity "$IDENTITY" --identity-password-file "$PIN_FILE"
 ```
 
 ## 1. Upgrade the canister
 
-Upgrades preserve stable memory: balances, open orders, listed pairs, and the event log all survive. The canister's `post_upgrade` takes an `opt DexArg`; passing `(null)` keeps the current configuration. To change the access mode (`GeneralAvailability` ↔ `RestrictedTo`), pass a structured `Upgrade` arg instead.
+Upgrades preserve stable memory: balances, open orders, listed pairs, and the event log all survive. The canister's `post_upgrade` takes an `opt OisyTradeArg`; passing `(null)` keeps the current configuration. To change the access mode (`GeneralAvailability` ↔ `RestrictedTo`), pass a structured `Upgrade` arg instead.
 
 ### Build the WASM
 
-`just build` compiles `dex_canister` to `wasm32-unknown-unknown` in release mode and produces `wasms/dex_canister.wasm.gz`. The `icp` CLI picks up that artifact automatically via the recipe declared in `icp.yaml`.
+`just build` compiles `oisy_trade_canister` to `wasm32-unknown-unknown` in release mode and produces `wasms/oisy_trade_canister.wasm.gz`. The `icp` CLI picks up that artifact automatically via the recipe declared in `icp.yaml`.
 
 ```bash
 just build
@@ -80,7 +80,7 @@ just deploy "$IDENTITY" "$PIN_FILE"
 **B. Full command** — gives you control over the upgrade arg:
 
 ```bash
-icp canister install dex --mode upgrade --args '(null)' \
+icp canister install oisy_trade --mode upgrade --args '(null)' \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging -y
 ```
@@ -100,7 +100,7 @@ export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 
 ### Fetch ledger metadata
 
-The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise the DEX rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
+The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise the OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc1_symbol '()' --query --network ic --identity anonymous
@@ -132,7 +132,7 @@ curl -sSf "https://api.binance.com/api/v3/exchangeInfo?symbol=SOLETH" \
   | jq '{tickSize: (.symbols[0].filters[] | select(.filterType=="PRICE_FILTER") | .tickSize), stepSize: (.symbols[0].filters[] | select(.filterType=="LOT_SIZE") | .stepSize)}'
 ```
 
-The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to the DEX's integer base units using the ledger decimals you exported above:
+The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to the OISY TRADE's integer base units using the ledger decimals you exported above:
 
 - `tick_size = tickSize_binance × 10^(quote_decimals − base_decimals)`
 - `lot_size  = stepSize_binance × 10^base_decimals`
@@ -150,7 +150,7 @@ export LOT_SIZE=1_000_000
 ### Call `add_trading_pair`
 
 ```bash
-icp canister call dex add_trading_pair --args-file /dev/stdin \
+icp canister call oisy_trade add_trading_pair --args-file /dev/stdin \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging <<EOF
 (
@@ -173,7 +173,7 @@ EOF
 ### Verify the listing
 
 ```bash
-icp canister call dex get_trading_pairs '()' --environment staging --query --identity anonymous
+icp canister call oisy_trade get_trading_pairs '()' --environment staging --query --identity anonymous
 ```
 
 The new pair should appear in the output.
@@ -190,5 +190,5 @@ If you used option **A** (pointed at an existing file), leave it alone.
 
 ## What's next
 
-- Every `add_trading_pair` is recorded in the append-only event log — inspect with `get_events` (see `canister/dex.did`).
+- Every `add_trading_pair` is recorded in the append-only event log — inspect with `get_events` (see `canister/oisy_trade.did`).
 - See [`examples/getting_started.md`](getting_started.md) for how traders interact with a listed pair (deposit → order → withdraw).

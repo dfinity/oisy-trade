@@ -9,8 +9,8 @@ use crate::state::StableMemoryOptions;
 use crate::user::{UserId, UserRegistry};
 use crate::{Timestamp, order, state};
 use candid::Principal;
-use dex_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use ic_stable_structures::{Memory, VectorMemory};
+use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::{NonZeroU64, NonZeroU128};
 
@@ -72,10 +72,10 @@ pub fn quote_metadata() -> TokenMetadata {
 
 pub fn state() -> state::State<VectorMemory, VectorMemory> {
     state::State::new(
-        dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+        oisy_trade_types_internal::InitArg {
+            mode: oisy_trade_types_internal::Mode::GeneralAvailability,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
         user_registry(),
@@ -88,10 +88,10 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
 /// tests that go through `state::init_state` (i.e. the canister thread_local).
 pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> {
     state::State::new(
-        dex_types_internal::InitArg {
-            mode: dex_types_internal::Mode::GeneralAvailability,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+        oisy_trade_types_internal::InitArg {
+            mode: oisy_trade_types_internal::Mode::GeneralAvailability,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order::OrderHistory::new(
             crate::storage::order_history_memory(),
@@ -106,17 +106,17 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
 pub fn limit_order_request() -> LimitOrderRequest {
     LimitOrderRequest {
         pair: icp_ckbtc_trading_pair().into(),
-        side: dex_types::Side::Buy,
+        side: oisy_trade_types::Side::Buy,
         price: candid::Nat::from(100 * PRICE_SCALE),
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
     }
 }
 
 pub fn trading_pair_request(
-    base_id: impl Into<dex_types::TokenId>,
-    base_meta: dex_types::TokenMetadata,
-    quote_id: impl Into<dex_types::TokenId>,
-    quote_meta: dex_types::TokenMetadata,
+    base_id: impl Into<oisy_trade_types::TokenId>,
+    base_meta: oisy_trade_types::TokenMetadata,
+    quote_id: impl Into<oisy_trade_types::TokenId>,
+    quote_meta: oisy_trade_types::TokenMetadata,
 ) -> AddTradingPairRequest {
     AddTradingPairRequest {
         base: Token {
@@ -262,10 +262,10 @@ pub fn init_state_with_order_book() {
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
-            dex_types_internal::InitArg {
-                mode: dex_types_internal::Mode::GeneralAvailability,
-                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            oisy_trade_types_internal::InitArg {
+                mode: oisy_trade_types_internal::Mode::GeneralAvailability,
+                max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
             user_registry,
@@ -357,7 +357,12 @@ where
 }
 
 #[cfg(test)]
-pub fn place_limit_order(user: Principal, side: dex_types::Side, price: u128, quantity: u64) {
+pub fn place_limit_order(
+    user: Principal,
+    side: oisy_trade_types::Side,
+    price: u128,
+    quantity: u64,
+) {
     crate::add_limit_order(
         LimitOrderRequest {
             pair: icp_ckbtc_trading_pair().into(),
@@ -443,8 +448,8 @@ pub mod arbitrary {
     };
     use crate::user::UserId;
     use candid::Principal;
-    use dex_types::FilterToken;
-    use dex_types_internal::{InitArg, Mode, UpgradeArg};
+    use oisy_trade_types::FilterToken;
+    use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::{SizeRange, btree_set, vec};
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};

@@ -1,4 +1,4 @@
-use dex_types::{
+use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
@@ -193,12 +193,12 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
                 TradingPairInfo {
-                    base: dex_types::Token {
-                        id: dex_types::TokenId::from(pair.base),
+                    base: oisy_trade_types::Token {
+                        id: oisy_trade_types::TokenId::from(pair.base),
                         metadata: base_meta.clone().into(),
                     },
-                    quote: dex_types::Token {
-                        id: dex_types::TokenId::from(pair.quote),
+                    quote: oisy_trade_types::Token {
+                        id: oisy_trade_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
@@ -377,7 +377,7 @@ pub fn get_my_orders(
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
     let filter = args.unwrap_or_default().filter;
     let results = match filter {
-        dex_types::GetMyOrdersFilter::ById(id) => {
+        oisy_trade_types::GetMyOrdersFilter::ById(id) => {
             let id = id
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
@@ -385,7 +385,7 @@ pub fn get_my_orders(
                 .into_iter()
                 .collect()
         }
-        dex_types::GetMyOrdersFilter::ByPage(page) => {
+        oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
             let after = page
                 .after
                 .map(|id| id.parse::<order::OrderId>())
