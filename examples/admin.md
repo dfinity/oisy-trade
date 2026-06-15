@@ -87,9 +87,9 @@ icp canister install oisy_trade --mode upgrade --args '(null)' \
 
 ## 2. Add a trading pair
 
-`add_trading_pair` is an update call restricted to controllers. The request carries both ledger IDs plus the token metadata (`symbol`, `decimals`).
+`add_trading_pair` is an update call restricted to controllers. The request multiple parameters that are explained below.
 
-### Choose the ledgers
+### Ledger parameters
 
 Base is the asset being bought/sold; quote is the asset prices are denominated in.
 
@@ -98,9 +98,7 @@ export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckDevnetSOL
 export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 ```
 
-### Fetch ledger metadata
-
-The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise the OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
+The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc1_symbol '()' --query --network ic --identity anonymous
@@ -118,12 +116,49 @@ export QUOTE_SYMBOL=ckSepoliaETH
 export QUOTE_DECIMALS=18
 ```
 
-### Choose tick size and lot size
+### Tick and lot sizes
 
 - `tick_size` — the minimum price increment (in quote-token base units per base-token base unit). All order prices must be a positive multiple.
 - `lot_size` — the minimum quantity (in base-token base units). All order quantities must be a positive multiple.
 
-Both are `nat64`, both must be > 0, and both are **fixed for the lifetime of the pair**.
+
+Constraints:
+
+- Both are `nat` and must be > 0.
+- Currently, both are **fixed for the lifetime of the pair**.
+- **`tick_size × lot_size` must be a multiple of `10^base_decimals`**. This ensures that a fill with notional `price × quantity / 10^base_decimals`, where price is a multiple of `tick_size` and quantity is a multiple of `lot_size`, is exact (no rounding).
+
+#### Guidelines for picking values
+
+**Tick size — aim for ~1 basis point (0.01%) of the asset's price**, with a healthy range of **0.1 bp to 10 bp**:
+
+- The tick should sit **below the typical bid-ask spread** so the spread can be wider than one tick — otherwise the book is always one-tick wide and there is no price competition.
+- It should sit **above noise** (typical tick-by-tick volatility) so a quote at a given level carries meaning.
+- Higher-priced assets tolerate larger absolute ticks (e.g. $0.01 on a $100k asset is 0.00001%); stablecoins need ultra-fine ticks because the whole interesting range lives within ±0.1% of peg.
+
+Mapping back to the formula above (`tick_size = price_increment × 10^quote_decimals`):
+
+| Asset price | Typical price increment | Sample tick at 1 bp |
+|---|---|---|
+| ~$1 (stablecoin) | $0.00001 – $0.0001 | 0.1 bp – 1 bp |
+| ~$10 (mid-cap) | $0.001 | 1 bp |
+| ~$1,000 | $0.1 | 1 bp |
+| ~$100,000 (BTC) | $0.01 – $1 | 0.0001 bp – 0.01 bp |
+
+**Lot size — aim for the minimum order (1 lot × current price) to be roughly $0.10–$1 in notional.**
+
+- That keeps the smallest possible trade non-dust (worth settling) but small enough that a retail user can place "1 lot" without thinking about it.
+- Powers of 10 only (`10^-n`) — traders expect base-10 grids; fractional lot increments like 0.5 are unusual.
+- Coarser lots for cheaper tokens, finer for expensive ones (same scaling principle as tick).
+- Coinbase intentionally sets very fine lots (down to satoshi-level) and relies on `min_notional` (see below) to do the dust filtering. You can pick a fine lot and let the notional floor enforce the no-dust rule.
+
+**General**
+
+- Both values should be powers of 10. Off-grid values (e.g. `tick_size = 7`) work mechanically but break trader UX.
+- Reconsider both when the asset's price has moved by more than ~5× since listing — what was a $1 minimum order at listing can become a $5 minimum (or $0.20, with no way to fix it short of relisting since these are immutable).
+- When in doubt, copy a major centralized exchange and convert to integer base units using the formulas above.
+
+#### Sanity check against Binance
 
 Centralized exchanges have already picked these parameters for most major pairs, balancing price precision against spam-order resistance. Binance's public REST endpoint is a convenient sanity check:
 
@@ -132,19 +167,54 @@ curl -sSf "https://api.binance.com/api/v3/exchangeInfo?symbol=SOLETH" \
   | jq '{tickSize: (.symbols[0].filters[] | select(.filterType=="PRICE_FILTER") | .tickSize), stepSize: (.symbols[0].filters[] | select(.filterType=="LOT_SIZE") | .stepSize)}'
 ```
 
-The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to the OISY TRADE's integer base units using the ledger decimals you exported above:
+The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to OISY TRADE's integer units using the ledger decimals you exported above:
 
-- `tick_size = tickSize_binance × 10^(quote_decimals − base_decimals)`
-- `lot_size  = stepSize_binance × 10^base_decimals`
+- `tick_size = tickSize_binance × 10^quote_decimals` — `tick_size` is the price increment in **quote base units per 1 whole base token**, so only the quote scale enters.
+- `lot_size  = stepSize_binance × 10^base_decimals` — `lot_size` is the quantity increment in **base base units**, so only the base scale enters.
 
 For `SOLETH` at the time of writing: `tickSize = 0.00001 ETH/SOL`, `stepSize = 0.001 SOL`. Plugging into the formulas above (ckDevnetSOL `base_decimals = 9`, ckSepoliaETH `quote_decimals = 18`):
 
-- `tick_size = 0.00001 × 10^(18 − 9) = 0.00001 × 10^9 = 10^4 = 10_000`
-- `lot_size  = 0.001   × 10^9        = 10^6             = 1_000_000`
+- `tick_size = 0.00001 × 10^18 = 10^13`
+- `lot_size  = 0.001   × 10^9  = 10^6 = 1_000_000`
 
 ```bash
-export TICK_SIZE=10_000
+export TICK_SIZE=10_000_000_000_000
 export LOT_SIZE=1_000_000
+```
+
+### Min and max notional
+
+- `min_notional` — minimum order value, in **quote-token base units**. Avoid dust orders. Must be > 0.
+- `max_notional` — optional ceiling on order value, in quote-token base units. Avoid fat-finger errors. When set, must be ≥ `min_notional`. Pass `null` to disable.
+
+#### Guidelines
+
+Convert dollar amounts using `quote_decimals`:
+
+- `min_notional ≈ $1` in quote-token base units — i.e. `1 × 10^quote_decimals` for a USD-pegged quote token (e.g. `1_000_000` for a 6-dp stablecoin). Reuses Binance's `NOTIONAL.minNotional` of $5 if you want a more conservative floor; below ~$0.50 the order becomes uneconomic to settle.
+- `max_notional` — a fat-finger guardrail. Binance defaults to `$9,000,000` (`9_000_000 × 10^quote_decimals`). Pass `null` if you don't want a ceiling; pass a value if your pair has enough volatility risk that single large orders could move the book sharply.
+
+```bash
+export MIN_NOTIONAL=1_000_000                         # ≈ $1 — replace per pair
+export MAX_NOTIONAL='opt (9_000_000_000_000 : nat)'   # or 'null' for no ceiling
+```
+
+### Fees
+
+- `maker_fee_bps` — fee charged to the resting (maker) side of a match, in basis points (`nat16`, `0..=10_000`, where `10_000 = 100%`).
+- `taker_fee_bps` — fee charged to the incoming (taker) side, same scale.
+
+#### Guidelines
+
+Major centralized exchanges sit at roughly **10 bps maker / 10 bps taker** at the entry tier (Binance, Coinbase, Kraken VIP 0). Conventions:
+
+- **Maker ≤ taker** — incentivizes liquidity provision. A common pattern is `0 maker / 10–20 taker` to court market makers; `10 / 10` is the neutral default.
+- **Round numbers** (5, 10, 20 bps) are typical and easier to communicate.
+- Maker rebates (negative fees) are not supported — the field is unsigned.
+
+```bash
+export MAKER_FEE_BPS=10
+export TAKER_FEE_BPS=10
 ```
 
 ### Call `add_trading_pair`
@@ -163,8 +233,12 @@ icp canister call oisy_trade add_trading_pair --args-file /dev/stdin \
             id = record { ledger_id = principal "$QUOTE_LEDGER" };
             metadata = record { symbol = "$QUOTE_SYMBOL"; decimals = $QUOTE_DECIMALS : nat8 }
         };
-        tick_size = $TICK_SIZE : nat64;
-        lot_size  = $LOT_SIZE  : nat64
+        tick_size      = $TICK_SIZE      : nat;
+        lot_size       = $LOT_SIZE       : nat;
+        maker_fee_bps  = $MAKER_FEE_BPS  : nat16;
+        taker_fee_bps  = $TAKER_FEE_BPS  : nat16;
+        min_notional   = $MIN_NOTIONAL   : nat;
+        max_notional   = $MAX_NOTIONAL
     }
 )
 EOF
