@@ -179,7 +179,7 @@ icp canister call oisy_trade get_trading_pairs '()' --environment staging --quer
 
 The new pair should appear in the output.
 
-## 3. Halt and resume trading
+## Halt and resume trading
 
 The canister exposes a controller-gated **global trading halt**: a soft circuit
 breaker that pauses new orders and the matching engine across every pair while
