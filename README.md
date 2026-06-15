@@ -31,7 +31,7 @@
 - **Synchronous matching engine**: token transfers only happen at the deposit/withdrawal edges; the matching engine operates entirely on internal balances, with no async complexity.
 - **Event-sourced state**: every state change is recorded in an append-only log in stable memory and replayed on upgrade, providing full auditability and simpler upgrades.
 
-See the [design document](https://dfinity.github.io/oisy-trade/development/architecture/design.html) for the full architecture.
+See the [design document](https://dfinity.github.io/oisy-trade/development/design.html) for the full architecture.
 
 <a id="deployment"></a>
 ## 🚀 Deployment

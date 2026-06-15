@@ -14,7 +14,7 @@
 - **Synchronous matching engine.** Token transfers only happen at the deposit and withdrawal edges; the matching engine operates entirely on internal balances, with no async complexity.
 - **Event-sourced state.** Every state change is recorded in an append-only log in stable memory and replayed on upgrade, providing full auditability and simpler upgrades.
 
-For the full design, see [Development → Architecture → Design](development/architecture/design.md).
+For the full design, see [Design](development/design.md).
 
 ## Deployment
 
@@ -28,4 +28,4 @@ For the full design, see [Development → Architecture → Design](development/a
 - New to OISY TRADE? Start with [For Users](usage/for-users.md).
 - Want your agent to place orders? See [For Agents](usage/for-agents.md).
 - Operating the canister? See [For Admins](usage/for-admins.md).
-- Contributing or reviewing? See [Architecture](development/architecture/index.md) and [Specs](development/specs/index.md).
+- Contributing or reviewing? See [Design](development/design.md) and [Specs](development/specs/index.md).

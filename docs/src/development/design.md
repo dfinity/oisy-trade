@@ -2,15 +2,6 @@
 
 High-level design for OISY TRADE, an order-book DEX running entirely onchain as an Internet Computer canister.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Trading](#trading)
-- [Balances](#balances)
-- [Architecture](#architecture)
-- [Monitoring](#monitoring)
-- [Potential Additional Features](#potential-additional-features)
-
 ## Overview
 
 The OISY TRADE canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.

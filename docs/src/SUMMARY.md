@@ -12,9 +12,8 @@
 
 # Development
 
-- [Architecture](development/architecture/index.md)
-  - [Design](development/architecture/design.md)
-  - [Trading Data Analysis](development/architecture/trading-data.md)
+- [Design](development/design.md)
+- [Trading Data Analysis](development/trading-data.md)
 - [Specs](development/specs/index.md)
   - [Template](development/specs/template.md)
   - [DEFI-2849 — Circuit Breaker](development/specs/DEFI-2849-circuit-breaker.md)
