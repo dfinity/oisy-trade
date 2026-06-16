@@ -456,6 +456,7 @@ pub mod arbitrary {
     use proptest::prop_oneof;
     use std::num::{NonZeroU64, NonZeroU128};
 
+    use super::event::MAX_HALT_BOOKS;
     use super::{LOT_SIZE, TICK_SIZE};
 
     /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
@@ -870,7 +871,10 @@ pub mod arbitrary {
     }
 
     pub fn arb_set_halt_event() -> impl Strategy<Value = SetHaltEvent> {
-        let book_ids = option::of(vec(any::<u64>().prop_map(order::OrderBookId::new), 0..10));
+        let book_ids = option::of(vec(
+            any::<u64>().prop_map(order::OrderBookId::new),
+            0..=MAX_HALT_BOOKS,
+        ));
         (book_ids, any::<bool>()).prop_map(|(book_ids, halted)| SetHaltEvent { book_ids, halted })
     }
 

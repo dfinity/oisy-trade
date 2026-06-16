@@ -94,6 +94,10 @@ impl From<&EventType> for WorstCaseEvent {
 /// `bench_process_pending_orders_1000` benchmark workload.
 pub const MAX_ORDERS_PER_MATCHING_ROUND: usize = 1_000;
 
+/// Upper bound on books carried by a single `SetHalt` event, used to size the
+/// worst-case `SetHalt` fixture and the `arb_set_halt_event` generator.
+pub const MAX_HALT_BOOKS: usize = 100;
+
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.
     pub fn worst_case_memory_event(&self) -> Event {
@@ -108,7 +112,11 @@ impl WorstCaseEvent {
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::SetHalt => EventType::SetHalt(SetHaltEvent {
-                book_ids: Some(vec![OrderBookId::new(u64::MAX)]),
+                book_ids: Some(
+                    (0..MAX_HALT_BOOKS as u64)
+                        .map(|i| OrderBookId::new(u64::MAX - i))
+                        .collect(),
+                ),
                 halted: true,
             }),
         })
@@ -131,7 +139,7 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => 36,
             Self::Matching => 10_028,
             Self::Settling => 127_328,
-            Self::SetHalt => 27,
+            Self::SetHalt => 1_018,
         }
     }
 }
