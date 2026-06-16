@@ -25,9 +25,9 @@ branches, or PR state beyond posting your review.
 - Check every acceptance criterion in the spec.
 - Account for each Maintainability category below — duplication, unused derives,
   primitive-obsession parameters, divergent invariant handling, and silent failure
-  fallbacks: in your review, explicitly state whether you found an instance or
-  cleared it (e.g. "duplication: none found", "silent fallbacks: none"). A category
-  silently omitted is not cleared.
+  fallbacks. In the review-summary body, explicitly state for each whether you found
+  an instance or cleared it (e.g. "duplication: none found", "silent fallbacks:
+  none"). A category silently omitted is not cleared.
 
 ## Review rules
 
@@ -57,7 +57,7 @@ branches, or PR state beyond posting your review.
 - Flag code duplication; point to easy refactorings that reduce it. Substantial
   duplication — a copy-pasted module, test block, or setup repeated across cases,
   not a one-line repeat; as a rule of thumb, roughly 10+ near-identical lines or the
-  same block repeated at 2+ sites — is at least 🟠 Medium and gates the verdict;
+  same multi-line block repeated at 2+ sites — is at least 🟠 Medium and gates the verdict;
   name the parameterization, helper, or proptest that removes it.
 - For new types, every derived trait (`Hash`, `Ord`, `PartialOrd`, `Default`, …)
   must be used somewhere. Unused derives are dead capability and can mislead future
