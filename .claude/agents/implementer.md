@@ -24,6 +24,7 @@ You implement code against a specification.
   solves and the behaviour it changes — not implementation details: do not name
   structs/fields/functions or walk the diff. Summarize what the spec/task asked for
   and link to the spec. Do NOT include a "Test plan" section.
+- Then give a bullet list summary of how specification requirements are covered.
 - Only when the stack has more than one PR, end the PR description with a PR stack
   overview under a section titled exactly "📚 PR stack": all PRs in the stack listed in
   merge order (bottom to top), with a "you are here" marker on the current one. Keep it
