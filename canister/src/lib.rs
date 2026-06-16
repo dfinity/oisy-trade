@@ -181,7 +181,6 @@ fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLe
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| {
-        let global_halt = s.permissions().trading_halted();
         s.trading_pairs()
             .iter()
             .map(|(pair, book_id)| {
@@ -194,7 +193,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 let quote_meta = s
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
-                let halted = global_halt || s.permissions().is_pair_halted(book_id);
+                let halted = s.permissions().is_halted(book_id);
                 TradingPairInfo {
                     base: oisy_trade_types::Token {
                         id: oisy_trade_types::TokenId::from(pair.base),

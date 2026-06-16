@@ -265,9 +265,11 @@ impl From<PermissionsSnapshot> for Permissions {
             halted_pairs,
         } = snapshot;
         let mut permissions = Permissions::default();
-        permissions.set_trading_halted(trading_halted);
+        if trading_halted {
+            permissions.halt_trading_globally();
+        }
         for book_id in halted_pairs {
-            permissions.set_pair_halted(book_id, true);
+            permissions.halt_trading(book_id);
         }
         permissions
     }

@@ -99,28 +99,29 @@ impl PreAsyncPermit {
 }
 
 impl Permissions {
-    pub fn set_trading_halted(&mut self, halted: bool) {
-        self.trading_halted = halted;
+    pub fn halt_trading_globally(&mut self) {
+        self.trading_halted = true;
+    }
+
+    pub fn resume_trading_globally(&mut self) {
+        self.trading_halted = false;
+        self.halted_pairs.clear();
     }
 
     pub fn trading_halted(&self) -> bool {
         self.trading_halted
     }
 
-    pub fn set_pair_halted(&mut self, book: OrderBookId, halted: bool) {
-        if halted {
-            self.halted_pairs.insert(book);
-        } else {
-            self.halted_pairs.remove(&book);
-        }
+    pub fn halt_trading(&mut self, book: OrderBookId) {
+        self.halted_pairs.insert(book);
     }
 
-    pub fn is_pair_halted(&self, book: &OrderBookId) -> bool {
-        self.halted_pairs.contains(book)
+    pub fn resume_trading(&mut self, book: OrderBookId) {
+        self.halted_pairs.remove(&book);
     }
 
-    pub fn clear_halted_pairs(&mut self) {
-        self.halted_pairs.clear();
+    pub fn is_halted(&self, book: &OrderBookId) -> bool {
+        self.trading_halted || self.halted_pairs.contains(book)
     }
 
     pub fn halted_pairs(&self) -> impl Iterator<Item = &OrderBookId> {
@@ -132,14 +133,14 @@ impl Permissions {
         _caller: Principal,
         book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted || self.is_pair_halted(&book) {
+        if self.is_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
         }
         Ok(SyncPermit(()))
     }
 
     pub fn permit_matching(&self, book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted || self.is_pair_halted(&book) {
+        if self.is_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
         }
         Ok(SyncPermit(()))

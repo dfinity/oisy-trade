@@ -309,14 +309,19 @@ impl Scenario {
         let permissions = self.state.permissions_mut();
         match &book_ids {
             None => {
-                permissions.set_trading_halted(halted);
-                if !halted {
-                    permissions.clear_halted_pairs();
+                if halted {
+                    permissions.halt_trading_globally();
+                } else {
+                    permissions.resume_trading_globally();
                 }
             }
             Some(book_ids) => {
                 for book_id in book_ids {
-                    permissions.set_pair_halted(*book_id, halted);
+                    if halted {
+                        permissions.halt_trading(*book_id);
+                    } else {
+                        permissions.resume_trading(*book_id);
+                    }
                 }
             }
         }
@@ -706,12 +711,7 @@ fn should_apply_pair_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
         .with_set_halt(Some(vec![OrderBookId::ZERO]), true);
-    assert!(
-        scenario
-            .state
-            .permissions()
-            .is_pair_halted(&OrderBookId::ZERO)
-    );
+    assert!(scenario.state.permissions().is_halted(&OrderBookId::ZERO));
     scenario.assert_replay_matches();
 }
 
@@ -721,12 +721,7 @@ fn should_apply_pair_resume_after_pair_halt() {
         .with_trading_pair()
         .with_set_halt(Some(vec![OrderBookId::ZERO]), true)
         .with_set_halt(Some(vec![OrderBookId::ZERO]), false);
-    assert!(
-        !scenario
-            .state
-            .permissions()
-            .is_pair_halted(&OrderBookId::ZERO)
-    );
+    assert!(!scenario.state.permissions().is_halted(&OrderBookId::ZERO));
     scenario.assert_replay_matches();
 }
 
@@ -738,12 +733,7 @@ fn should_clear_every_pair_halt_on_global_resume() {
         .with_set_halt(None, true)
         .with_set_halt(None, false);
     assert!(!scenario.state.permissions().trading_halted());
-    assert!(
-        !scenario
-            .state
-            .permissions()
-            .is_pair_halted(&OrderBookId::ZERO)
-    );
+    assert!(!scenario.state.permissions().is_halted(&OrderBookId::ZERO));
     scenario.assert_replay_matches();
 }
 
