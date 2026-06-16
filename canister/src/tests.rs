@@ -1982,3 +1982,34 @@ mod process_pending_orders {
         assert_eq!(status, ExecutionStatus::AlreadyRunning);
     }
 }
+
+mod set_halt {
+    use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
+    use crate::test_fixtures::{ckbtc_token_id, icp_token_id, init_state_with_order_book};
+    use crate::{MAX_HALT_BOOKS, halt_trading, resume_trading};
+    use candid::Principal;
+    use oisy_trade_types::TradingPair;
+
+    #[test]
+    fn should_accept_max_halt_books_pairs() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let pairs = vec![registered_pair(); MAX_HALT_BOOKS];
+
+        assert_eq!(halt_trading(Some(pairs.clone()), &runtime), Ok(()));
+        assert_eq!(resume_trading(Some(pairs), &runtime), Ok(()));
+    }
+
+    fn registered_pair() -> TradingPair {
+        TradingPair {
+            base: *icp_token_id().as_principal(),
+            quote: *ckbtc_token_id().as_principal(),
+        }
+    }
+
+    fn controller_runtime() -> MockRuntime {
+        let mut mock = mock_runtime_for(Principal::anonymous());
+        mock.expect_is_controller().return_const(true);
+        mock
+    }
+}

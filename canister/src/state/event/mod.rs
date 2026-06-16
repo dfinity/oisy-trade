@@ -42,7 +42,7 @@ pub enum EventType {
     #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
     #[n(9)]
-    SetGlobalHalt(#[n(0)] bool),
+    SetHalt(#[n(0)] SetHaltEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -172,6 +172,14 @@ pub enum BalanceOperation {
 pub struct CancelLimitOrderEvent {
     #[n(0)]
     pub order_id: OrderId,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct SetHaltEvent {
+    #[n(0)]
+    pub book_ids: Option<Vec<OrderBookId>>,
+    #[n(1)]
+    pub halted: bool,
 }
 
 impl Storable for Event {

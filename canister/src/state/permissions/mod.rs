@@ -1,5 +1,6 @@
 use crate::order::OrderBookId;
 use candid::Principal;
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 mod tests;
@@ -7,6 +8,7 @@ mod tests;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Permissions {
     trading_halted: bool,
+    halted_pairs: BTreeSet<OrderBookId>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -97,27 +99,48 @@ impl PreAsyncPermit {
 }
 
 impl Permissions {
-    pub fn set_trading_halted(&mut self, halted: bool) {
-        self.trading_halted = halted;
+    pub fn halt_trading_globally(&mut self) {
+        self.trading_halted = true;
+    }
+
+    pub fn resume_trading_globally(&mut self) {
+        self.trading_halted = false;
+        self.halted_pairs.clear();
     }
 
     pub fn trading_halted(&self) -> bool {
         self.trading_halted
     }
 
+    pub fn halt_trading(&mut self, book: OrderBookId) {
+        self.halted_pairs.insert(book);
+    }
+
+    pub fn resume_trading(&mut self, book: OrderBookId) {
+        self.halted_pairs.remove(&book);
+    }
+
+    pub fn is_halted(&self, book: &OrderBookId) -> bool {
+        self.trading_halted || self.halted_pairs.contains(book)
+    }
+
+    pub fn halted_pairs(&self) -> impl Iterator<Item = &OrderBookId> {
+        self.halted_pairs.iter()
+    }
+
     pub fn permit_trading(
         &self,
         _caller: Principal,
-        _book: OrderBookId,
+        book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted {
+        if self.is_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
         }
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_matching(&self, _book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted {
+    pub fn permit_matching(&self, book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
+        if self.is_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
         }
         Ok(SyncPermit(()))

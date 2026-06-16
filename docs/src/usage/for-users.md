@@ -1,4 +1,4 @@
-# Interact with the OISY TRADE
+# Interact with OISY TRADE
 
 Walkthrough of the core OISY TRADE flows against the staging canister, using only the [`icp`](https://cli.internetcomputer.org/) CLI:
 
@@ -18,7 +18,7 @@ The walkthrough uses two configurable identities — one for buy-side operations
 
 ## Identities
 
-Export a buyer and a seller identity. The OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
+Export a buyer and a seller identity. OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
 
 ```bash
 export BUYER_IDENTITY=<buyer-name>
@@ -35,7 +35,7 @@ icp identity principal --identity "$SELLER_IDENTITY"
 - **Price** — *quote* base units per one *base* base unit (an integer ratio, no decimals). Must be a positive multiple of `tick_size`. A fill of `quantity` at `price` settles `price × quantity` quote-token base units.
 - **Side** — `Buy` (bid) reserves `price × quantity` of the *quote* token from your free balance; `Sell` (ask) reserves `quantity` of the *base* token. The order fills when a crossing order arrives, otherwise it rests in the book until canceled.
 
-## 1. List trading pairs
+## List trading pairs
 
 `get_trading_pairs` returns every listed pair along with its `tick_size` (price must be a positive multiple) and `lot_size` (quantity must be a positive multiple, in base-token base units).
 
@@ -43,20 +43,20 @@ icp identity principal --identity "$SELLER_IDENTITY"
 icp canister call oisy_trade get_trading_pairs '()' --environment staging --query --identity anonymous
 ```
 
-## 2. Pick a pair
+## Pick a pair
 
 Copy the base and quote ledger principals from the output above and export them. The values below are the ckDevnetSOL / ckSepoliaETH pair listed on staging — adjust if you picked a different pair.
 
 ```bash
 export BASE_LEDGER=la34w-haaaa-aaaar-qb5na-cai   # ckDevnetSOL
 export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
-export OISY_TRADE=proc5-daaaa-aaaar-qb5va-cai           # staging OISY TRADE canister
+export OISY_TRADE=proc5-daaaa-aaaar-qb5va-cai    # staging OISY TRADE canister
 
 export TICK_SIZE=10_000
 export LOT_SIZE=1_000_000
 ```
 
-## 3. Approve and deposit
+## Approve and deposit
 
 Every limit order reserves one side of the pair before the matching engine can fill it:
 
@@ -65,7 +65,7 @@ Every limit order reserves one side of the pair before the matching engine can f
 
 So which identity approves and deposits which token depends on the side it plans to trade.
 
-`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so the OISY TRADE must first be approved to spend on the caller's behalf. Two fees are charged to the on-ledger balance:
+`deposit` moves tokens by calling [`icrc2_transfer_from`](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-2) on the token ledger, so OISY TRADE must first be approved to spend on the caller's behalf. Two fees are charged to the on-ledger balance:
 
 1. `icrc2_approve` charges the ledger fee once
 2. `icrc2_transfer_from` (triggered later by `deposit`) charges the ledger fee again, on top of the amount transferred
@@ -82,7 +82,7 @@ icp token "$QUOTE_LEDGER" balance --network ic --identity "$BUYER_IDENTITY"
 icp canister call "$QUOTE_LEDGER" icrc1_fee '()' --query --identity anonymous --network ic
 ```
 
-Then approve and deposit — run each subsection as the appropriate identity. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets the OISY TRADE on staging (`--environment staging`).
+Then approve and deposit — run each subsection as the appropriate identity. `icrc2_approve` calls the token ledger directly (`--network ic`); `deposit` targets OISY TRADE on staging (`--environment staging`).
 
 ### Seller — approve + deposit *base*
 
@@ -134,9 +134,9 @@ EOF
 
 > Candid's record literals use `{` / `}`, which collide with bash variable-expansion rules. Passing the candid via `--args-file /dev/stdin` and a heredoc sidesteps every shell-quoting pitfall — the unquoted `EOF` terminator still expands `$VAR` inside the body.
 
-## 4. Check on-OISY-TRADE balances
+## Check on-OISY-TRADE balances
 
-The OISY TRADE tracks balance per `(caller, token)`:
+OISY TRADE tracks balance per `(caller, token)`:
 
 - `free` — available for new orders or withdrawal
 - `reserved` — locked by open orders
@@ -153,7 +153,7 @@ icp canister call oisy_trade get_balances --args-file /dev/stdin --environment s
 EOF
 ```
 
-## 5. Place a limit order
+## Place a limit order
 
 `price` must be a positive multiple of `TICK_SIZE`; `quantity` a positive multiple of `LOT_SIZE`.
 
@@ -201,7 +201,7 @@ EOF
 export BUY_ORDER_ID=<paste-the-order-id-here>
 ```
 
-## 6. Check order status
+## Check order status
 
 ```bash
 icp canister call oisy_trade get_my_orders --args-file /dev/stdin --environment staging --query --identity "$SELLER_IDENTITY" <<EOF
@@ -237,7 +237,7 @@ icp canister call oisy_trade get_balances --args-file /dev/stdin --environment s
 EOF
 ```
 
-## 7. Withdraw
+## Withdraw
 
 Debits `amount` from your on-OISY-TRADE *free* balance and sends `amount − ledger_fee` to your principal on the ledger. `amount` must be **strictly greater** than the current ledger fee — otherwise the call returns `AmountTooSmall`; re-check `icrc1_fee` if unsure. Only `free` funds are eligible; `reserved` funds (locked by open orders) aren't withdrawable until the order fills or is canceled.
 
@@ -272,8 +272,3 @@ icp canister call oisy_trade withdraw --args-file /dev/stdin --environment stagi
 )
 EOF
 ```
-
-## What's next
-
-- Inspect the append-only event log via `get_events` — every state change (listings, deposits, orders) is recorded. See `canister/oisy_trade.did` for the full schema.
-- See `integration_tests/` for end-to-end scenarios that exercise every endpoint programmatically.

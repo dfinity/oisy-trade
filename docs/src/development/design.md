@@ -2,15 +2,6 @@
 
 High-level design for OISY TRADE, an order-book DEX running entirely onchain as an Internet Computer canister.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Trading](#trading)
-- [Balances](#balances)
-- [Architecture](#architecture)
-- [Monitoring](#monitoring)
-- [Potential Additional Features](#potential-additional-features)
-
 ## Overview
 
 The OISY TRADE canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
@@ -335,7 +326,7 @@ Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 
 
 ## Order History
 
-Every order submitted to the OISY TRADE is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
+Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
@@ -414,8 +405,8 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 **Query calls** (read-only):
 
 - **`get_my_orders(opt GetMyOrdersArgs)`**: returns the caller's orders, each with its current status. The argument is optional; when absent it defaults to the first page (newest first, `length = MAX_ORDERS_PER_RESPONSE`). When present, `GetMyOrdersArgs.filter` selects the mode: `ById` performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
-- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
-- **`list_supported_tokens()`**: returns the full list of tokens registered with the OISY TRADE. Time: O(n) over the registered tokens.
+- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
+- **`list_supported_tokens()`**: returns the full list of tokens registered with OISY TRADE. Time: O(n) over the registered tokens.
 
 ### Expected Load
 
@@ -426,7 +417,7 @@ Based on Binance ICP/USDT data (the most active ICP pair), two numbers drive the
 
 Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load will be addressed in DEFI-2724.
 
-See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
+See the [Trading Data Analysis](./trading-data.md) for the full analysis.
 
 ### Upgrade Strategy
 

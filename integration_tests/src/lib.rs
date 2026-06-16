@@ -171,6 +171,28 @@ impl Setup {
             .status
     }
 
+    /// Register a second, distinct trading pair reusing the two ledgers with
+    /// base and quote swapped. It has its own order book, so per-pair controls
+    /// can be exercised independently of [`Self::trading_pair`].
+    pub async fn with_second_trading_pair(self) -> Self {
+        let controller_client = self.oisy_trade_client_with_caller(self.controller());
+        let request = self.add_trading_pair_request();
+        let swapped = AddTradingPairRequest {
+            base: request.quote,
+            quote: request.base,
+            ..request
+        };
+        assert_eq!(controller_client.add_trading_pair(swapped).await, Ok(()));
+        self
+    }
+
+    pub fn second_trading_pair(&self) -> TradingPair {
+        TradingPair {
+            base: self.quote_ledger_id,
+            quote: self.base_ledger_id,
+        }
+    }
+
     pub fn base_token_id(&self) -> TokenId {
         TokenId {
             ledger_id: self.base_ledger_id,
