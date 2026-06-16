@@ -48,7 +48,8 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 - **R3**: `message` is **advisory** human-readable text. Its purpose is the forward-compat case: when a
   client hits an error it cannot decode — a future leaf that decodes to `null`, or a reserved/empty arm
   — `message` still gives operators/UI something actionable and signals that the client should be
-  updated. The canister populates it for every error; clients **must not** parse it — programmatic
+  updated. The canister populates it for every error from the underlying leaf's `Display` /
+  `to_string()`; clients **must not** parse it — programmatic
   handling is on `kind` and the inner leaf only.
 - **R4**: Each leaf error is assigned to exactly one arm per [Disposition membership](#disposition-membership).
 - **R5**: Each arm's payload is `opt variant`. A client built against an older interface decodes an
@@ -76,6 +77,9 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   matching on it (R3). It is not localized and its exact text may change.
 - **Admin endpoints are out of scope** (e.g. `add_trading_pair`): controller-only, not part of the
   multi-language client surface this targets.
+- **Deferred to a follow-up PR**: reshaping `get_my_orders` to the `get_balances` pattern (outer result
+  + per-item inner results, via a `ByIds : vec OrderId` selector). This PR keeps the single-`Result`
+  `get_my_orders` (R8); the batch/per-item form is future work.
 - **No changes to internal/state-layer error types** (`canister/src/state`, `order`, `lib`,
   `ledger` — incl. the internal `GetMyOrdersError` / `OrderIdParseError`) beyond mapping them to the
   disposition-tagged public types at the boundary.
@@ -112,6 +116,11 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 - **D6 — Malformed `order_id` ⇒ a bare `InvalidOrderId` leaf under `RequestError`**, on
   `cancel_limit_order` and `get_my_orders` (`get_order_status` was removed in #133). `get_my_orders`
   becomes non-trapping by returning a result (R8).
+- **D7 — Enforce the shape with a generic `Error<Request, Temporary, Internal>`.** Every public error is
+  an instantiation of one generic struct (`{ kind: ErrorKind<…>, message }`), so the three-arm shape is
+  structurally identical across the whole surface and can't drift. The `impl` bounds each leaf on
+  `std::error::Error` and derives `message` from the leaf's `to_string()`, so the human text is produced
+  uniformly rather than hand-set per call site.
 
 ## Implementation
 
@@ -134,41 +143,45 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 
 ### `dex_types` (`libs/types/src/lib.rs`)
 
-Pattern (DepositError shown; the rest follow):
+A single **generic** shape enforces the structure for every user-facing error (D7); each endpoint
+instantiates it with three leaf enums:
 
 ```rust
-pub struct DepositError {
-    pub kind: DepositErrorKind,
+pub struct Error<Request, Temporary, Internal> {
+    pub kind: ErrorKind<Request, Temporary, Internal>,
     pub message: Option<String>,   // advisory; clients must not parse (R3)
 }
-pub enum DepositErrorKind {
-    RequestError(Option<DepositRequestError>),
-    TemporaryError(Option<DepositTemporaryError>),
-    InternalError(Option<DepositInternalError>),
+pub enum ErrorKind<Request, Temporary, Internal> {
+    RequestError(Option<Request>),
+    TemporaryError(Option<Temporary>),
+    InternalError(Option<Internal>),
 }
-pub enum DepositRequestError {
-    AmountExceedsMaximum,
-    UnsupportedToken { token_id: TokenId },
-    InsufficientFunds { balance: Nat },
-    InsufficientAllowance { allowance: Nat },
-}
-pub enum DepositTemporaryError {
-    OperationInProgress,
-    LedgerTemporarilyUnavailable,
-    CallFailed { ledger: Principal, method: String, reason: String },
-}
+
+// Per-endpoint instantiation (DepositError shown; the rest follow):
+pub type DepositError = Error<DepositRequestError, DepositTemporaryError, DepositInternalError>;
+pub enum DepositRequestError { AmountExceedsMaximum, UnsupportedToken { token_id: TokenId },
+                               InsufficientFunds { balance: Nat }, InsufficientAllowance { allowance: Nat } }
+pub enum DepositTemporaryError { OperationInProgress, LedgerTemporarilyUnavailable,
+                                 CallFailed { ledger: Principal, method: String, reason: String } }
 pub enum DepositInternalError { LedgerError { reason: String } }
 ```
 
-Provide constructors so call sites read cleanly and set `message` (e.g. from an internal error's
-`Display`). The internal→public conversions (`canister/src/state`, `lib`, `ledger`) and direct
-construction sites now target these types — placing each leaf into its arm and supplying `message` is
-the only behavioral change; internal flat enums are untouched (Non-goals).
+- The `impl` block bounds `Request: Error`, `Temporary: Error`, `Internal: Error` (each leaf enum
+  implements `std::error::Error`), and the constructors set `message` from the underlying leaf's
+  `to_string()` — e.g. `Error::request(leaf)` ⇒ `{ kind: RequestError(Some(leaf)), message: Some(leaf.to_string()) }`.
+- Arms an endpoint can't produce are instantiated with an **empty leaf enum** (e.g.
+  `enum AddLimitOrderInternalError {}`, or a shared uninhabited type), rendering as an empty
+  `opt variant {}` (R1).
+- Candid renders each `Error<…>` instantiation structurally as
+  `record { kind : variant { RequestError : opt variant {…}; TemporaryError : opt variant {…}; InternalError : opt variant {…} }; message : opt text }`.
 
-The order-id fix adds a **public** `GetMyOrdersError` (the existing `GetMyOrdersError` in
-`canister/src/lib.rs` stays internal): `kind : RequestError(Option<GetMyOrdersRequestError>)` with a
-bare `InvalidOrderId` leaf, plus `message`. The internal `InvalidOrderId(OrderIdParseError)` maps to the
-bare public `InvalidOrderId` leaf.
+The internal→public conversions (`canister/src/state`, `lib`, `ledger`) and construction sites build
+these via the constructors; internal flat enums are untouched (Non-goals).
+
+The order-id fix adds a **public** `GetMyOrdersError = Error<GetMyOrdersRequestError, ∅, ∅>` (the
+internal `GetMyOrdersError` in `canister/src/lib.rs` stays internal): a single `RequestError` arm with a
+bare `InvalidOrderId` leaf and empty Temporary/Internal arms. The internal
+`InvalidOrderId(OrderIdParseError)` maps to the bare public `InvalidOrderId` leaf.
 
 ### Disposition membership
 
@@ -201,8 +214,8 @@ is intentional transient unavailability ("retry when trading resumes", like a le
 ### Candid (`canister/oisy_trade.did`)
 
 - Top-of-file comment documenting the R2 disposition contract and the R3 `message` rule.
-- Each error renders as `record { kind : variant { RequestError : opt variant {…}; … }; message : opt text }`,
-  declaring only the arms it produces.
+- Each error renders as `record { kind : variant { RequestError : opt variant {…}; TemporaryError : opt variant {…}; InternalError : opt variant {…} }; message : opt text }`,
+  declaring all three arms — uninhabited ones as an empty `opt variant {}` (R1).
 - `get_my_orders` signature becomes a result; new `GetMyOrdersError`; new bare `InvalidOrderId` leaf on
   `CancelLimitOrderError`.
 
