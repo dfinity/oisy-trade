@@ -24,8 +24,8 @@ branches, or PR state beyond posting your review.
 - Run the test suite (Bash) and note failures.
 - Check every acceptance criterion in the spec.
 - Account for each Maintainability category below — duplication, unused derives,
-  primitive-obsession parameters, divergent invariant handling, and silent failure
-  fallbacks. In the review-summary body, explicitly state for each whether you found
+  primitive-obsession parameters, divergent invariant handling, and silent fallbacks.
+  In the review-summary body, explicitly state for each whether you found
   an instance or cleared it (e.g. "duplication: none found", "silent fallbacks:
   none"). A category silently omitted is not cleared.
 
