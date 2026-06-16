@@ -1,12 +1,16 @@
-use dex_types::{
+use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, OrderStatus, PriceLevel, Token, TradingPair,
-    TradingPairInfo, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
-use std::{num::NonZeroU64, time::Duration};
+use std::{
+    num::{NonZeroU64, NonZeroU128},
+    time::Duration,
+};
 
 pub use execute::EXECUTOR;
 pub use runtime::{IC_RUNTIME, Runtime, Timestamp};
@@ -62,6 +66,10 @@ pub fn add_limit_order(
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_trading(caller, order_id.book_id())
+            .map_err(|e| AddLimitOrderError::from(state::AddLimitOrderError::from(e)))?;
         let event = state::event::AddLimitOrderEvent {
             user: caller,
             order_id,
@@ -69,8 +77,14 @@ pub fn add_limit_order(
             price: order.price(),
             quantity: *order.remaining_quantity(),
         };
-        state::audit::process_event(s, state::event::EventType::AddLimitOrder(event), runtime);
-    });
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddLimitOrder(event),
+            permit.into(),
+            runtime,
+        );
+        Ok::<(), AddLimitOrderError>(())
+    })?;
     Ok(order_id.to_string())
 }
 
@@ -117,15 +131,6 @@ pub fn drive_matching() {
     }
 }
 
-pub fn get_order_status(order_id: dex_types::OrderId) -> OrderStatus {
-    match order_id.parse::<order::OrderId>() {
-        Ok(id) => state::with_state(|s| s.get_order_status(id))
-            .map(Into::into)
-            .unwrap_or(OrderStatus::NotFound),
-        Err(e) => panic!("ERROR: invalid order id: {}", e),
-    }
-}
-
 pub fn get_order_book_ticker(
     pair: TradingPair,
 ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
@@ -169,13 +174,14 @@ pub fn get_order_book_depth(
 
 fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLevel {
     PriceLevel {
-        price: price.get(),
+        price: candid::Nat::from(price),
         quantity: quantity.into(),
     }
 }
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| {
+        let global_halt = s.permissions().trading_halted();
         s.trading_pairs()
             .iter()
             .map(|(pair, book_id)| {
@@ -188,17 +194,27 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 let quote_meta = s
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
+                // Halted when the global switch is on; a per-pair switch will
+                // be OR-ed in here.
+                let halted = global_halt;
                 TradingPairInfo {
-                    base: dex_types::Token {
-                        id: dex_types::TokenId::from(pair.base),
+                    base: oisy_trade_types::Token {
+                        id: oisy_trade_types::TokenId::from(pair.base),
                         metadata: base_meta.clone().into(),
                     },
-                    quote: dex_types::Token {
-                        id: dex_types::TokenId::from(pair.quote),
+                    quote: oisy_trade_types::Token {
+                        id: oisy_trade_types::TokenId::from(pair.quote),
                         metadata: quote_meta.clone().into(),
                     },
-                    tick_size: book.tick_size().get(),
-                    lot_size: book.lot_size().get(),
+                    status: if halted {
+                        oisy_trade_types::TradingStatus::Halted
+                    } else {
+                        oisy_trade_types::TradingStatus::Trading
+                    },
+                    tick_size: candid::Nat::from(book.tick_size()),
+                    lot_size: candid::Nat::from(book.lot_size()),
+                    min_notional: book.min_notional().into(),
+                    max_notional: book.max_notional().map(Into::into),
                 }
             })
             .collect()
@@ -232,14 +248,23 @@ pub async fn deposit(
         return Err(DepositError::AmountExceedsMaximum);
     }
 
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
+        .expect("BUG: deposit is never gated in this build");
+
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
         user: caller,
         token: order::TokenId::from(token_id),
         amount,
     };
+    let post = state::with_state(|s| pre.reconcile(s.permissions()));
     state::with_state_mut(|s| {
-        state::audit::process_event(s, state::event::EventType::Deposit(event), runtime)
+        state::audit::process_event(
+            s,
+            state::event::EventType::Deposit(event),
+            post.into(),
+            runtime,
+        )
     });
 
     Ok(deposit_response)
@@ -277,6 +302,9 @@ pub async fn withdraw(
         }
     })?;
 
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
+        .expect("BUG: withdraw is never gated in this build");
+
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
 
@@ -301,7 +329,12 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            state::audit::record_event(state::event::EventType::Withdraw(event), runtime);
+            let post = state::with_state(|s| pre.reconcile(s.permissions()));
+            state::audit::record_event(
+                state::event::EventType::Withdraw(event),
+                post.into(),
+                runtime,
+            );
             Ok(response)
         }
         Err(e) => {
@@ -338,6 +371,50 @@ pub fn get_fee_balances(
     Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
 }
 
+/// Why a [`get_my_orders`] call could not be served.
+///
+/// Typically those errors indicate a client bug.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetMyOrdersError {
+    /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
+    /// not a well-formed order id.
+    InvalidOrderId(order::OrderIdParseError),
+}
+
+pub fn get_my_orders(
+    args: Option<GetMyOrdersArgs>,
+    caller: candid::Principal,
+) -> Result<Vec<UserOrder>, GetMyOrdersError> {
+    let filter = args.unwrap_or_default().filter;
+    let results = match filter {
+        oisy_trade_types::GetMyOrdersFilter::ById(id) => {
+            let id = id
+                .parse::<order::OrderId>()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            state::with_state(|s| s.get_user_order(&caller, id))
+                .into_iter()
+                .collect()
+        }
+        oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
+            let after = page
+                .after
+                .map(|id| id.parse::<order::OrderId>())
+                .transpose()
+                .map_err(GetMyOrdersError::InvalidOrderId)?;
+            let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
+            state::with_state(|s| s.get_user_orders(&caller, after, length))
+        }
+    };
+    Ok(results
+        .into_iter()
+        .map(|(id, pair, record)| UserOrder {
+            id: id.into(),
+            pair: pair.into(),
+            order: record.into(),
+        })
+        .collect())
+}
+
 pub fn list_supported_tokens() -> Vec<Token> {
     state::with_state(|s| {
         s.tokens()
@@ -360,17 +437,40 @@ pub fn add_trading_pair(
     if request.base.id == request.quote.id {
         return Err(AddTradingPairError::BaseEqualsQuote);
     }
+    let tick_size_u128 =
+        u128::try_from(&request.tick_size.0).map_err(|_| AddTradingPairError::InvalidTickSize)?;
     let tick_size = order::TickSize::new(
-        NonZeroU64::new(request.tick_size).ok_or(AddTradingPairError::InvalidTickSize)?,
+        NonZeroU128::new(tick_size_u128).ok_or(AddTradingPairError::InvalidTickSize)?,
     );
+    let lot_size_u64 =
+        u64::try_from(&request.lot_size.0).map_err(|_| AddTradingPairError::InvalidLotSize)?;
     let lot_size = order::LotSize::new(
-        NonZeroU64::new(request.lot_size).ok_or(AddTradingPairError::InvalidLotSize)?,
+        NonZeroU64::new(lot_size_u64).ok_or(AddTradingPairError::InvalidLotSize)?,
     );
     let maker = order::BasisPoint::new(request.maker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.maker_fee_bps))?;
     let taker = order::BasisPoint::new(request.taker_fee_bps)
         .map_err(|_| AddTradingPairError::InvalidBasisPoint(request.taker_fee_bps))?;
     let fee_rates = order::FeeRates { maker, taker };
+    let invalid_notional = || AddTradingPairError::InvalidNotional {
+        min_notional: request.min_notional.clone(),
+        max_notional: request.max_notional.clone(),
+    };
+    let min_notional =
+        order::Quantity::try_from(request.min_notional.clone()).map_err(|_| invalid_notional())?;
+    if min_notional.is_zero() {
+        return Err(invalid_notional());
+    }
+    let max_notional = match &request.max_notional {
+        None => None,
+        Some(max) => {
+            let max = order::Quantity::try_from(max.clone()).map_err(|_| invalid_notional())?;
+            if max < min_notional {
+                return Err(invalid_notional());
+            }
+            Some(max)
+        }
+    };
     state::with_state_mut(|s| -> Result<(), AddTradingPairError> {
         let pair = order::TradingPair {
             base: order::TokenId::from(request.base.id),
@@ -395,12 +495,18 @@ pub fn add_trading_pair(
                 decimals: base_decimals,
             },
         )?;
-        // `tick_size` and `lot_size` are u64, so their product fits u128.
-        let tick_lot = tick_size.get() as u128 * lot_size.get() as u128;
-        if !tick_lot.is_multiple_of(base_scale as u128) {
+        // `tick_size` is u128 and `lot_size` is u64; their product is computed
+        // as a u256 to avoid overflow before checking divisibility.
+        let tick_lot = order::Quantity::from_u128(tick_size.get())
+            .checked_mul_u64(lot_size.get())
+            .expect("BUG: u128 × u64 always fits u256");
+        let (_, remainder) = tick_lot
+            .checked_div_rem_u64(base_scale)
+            .expect("base_scale is a nonzero power of ten");
+        if remainder != 0 {
             return Err(AddTradingPairError::IndivisibleTickLotForBaseDecimals {
-                tick_size: tick_size.get(),
-                lot_size: lot_size.get(),
+                tick_size: candid::Nat::from(tick_size),
+                lot_size: candid::Nat::from(lot_size),
                 base_decimals,
             });
         }
@@ -414,10 +520,48 @@ pub fn add_trading_pair(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         };
-        state::audit::process_event(s, state::event::EventType::AddTradingPair(event), runtime);
+        let permit = s
+            .permissions()
+            .permit_add_trading_pair()
+            .expect("BUG: add_trading_pair is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddTradingPair(event),
+            permit.into(),
+            runtime,
+        );
         Ok(())
     })
+}
+
+pub fn halt_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    set_global_halt(true, runtime)
+}
+
+pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    set_global_halt(false, runtime)
+}
+
+fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+    if !runtime.is_controller(&runtime.msg_caller()) {
+        return Err(UnauthorizedError::NotController);
+    }
+    state::with_state_mut(|s| {
+        let permit = s
+            .permissions()
+            .permit_admin()
+            .expect("BUG: admin is never gated in this build");
+        state::audit::process_event(
+            s,
+            state::event::EventType::SetGlobalHalt(halted),
+            permit.into(),
+            runtime,
+        );
+    });
+    Ok(())
 }
 
 fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {

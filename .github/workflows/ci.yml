@@ -1,4 +1,4 @@
-name: 'DEX'
+name: 'OISY TRADE'
 
 on:
   pull_request:
@@ -65,13 +65,13 @@ jobs:
         # SHA-256 is shown in the job summary below.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          path: ./wasms/dex_canister.wasm.gz
+          path: ./wasms/oisy_trade_canister.wasm.gz
           if-no-files-found: error
           archive: false
 
       - name: 'Add summary'
         run: |
-          hash=`sha256sum ./wasms/dex_canister.wasm.gz`
+          hash=`sha256sum ./wasms/oisy_trade_canister.wasm.gz`
           echo "SHA-256 :hash: ${hash}" >> $GITHUB_STEP_SUMMARY
 
   # Independently rebuild the canister on a different runner image and assert
@@ -98,13 +98,13 @@ jobs:
       - name: 'Download canonical artifact'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dex_canister.wasm.gz
+          name: oisy_trade_canister.wasm.gz
           path: ./canonical
 
       - name: 'Compare hashes'
         run: |
-          canonical_hash=$(sha256sum ./canonical/dex_canister.wasm.gz | awk '{print $1}')
-          local_hash=$(sha256sum ./wasms/dex_canister.wasm.gz | awk '{print $1}')
+          canonical_hash=$(sha256sum ./canonical/oisy_trade_canister.wasm.gz | awk '{print $1}')
+          local_hash=$(sha256sum ./wasms/oisy_trade_canister.wasm.gz | awk '{print $1}')
           echo "Canonical: $canonical_hash"
           echo "Local:     $local_hash"
           if [[ "$canonical_hash" != "$local_hash" ]]; then
@@ -147,11 +147,11 @@ jobs:
       - name: 'Download Artifacts'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dex_canister.wasm.gz
+          name: oisy_trade_canister.wasm.gz
 
-      - name: 'Set DEX_CANISTER_WASM_PATH for load_wasm'
+      - name: 'Set OISY_TRADE_CANISTER_WASM_PATH for load_wasm'
         run: |
-          echo "DEX_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/dex_canister.wasm.gz" >> "$GITHUB_ENV"
+          echo "OISY_TRADE_CANISTER_WASM_PATH=$GITHUB_WORKSPACE/oisy_trade_canister.wasm.gz" >> "$GITHUB_ENV"
 
       - name: 'Install PocketIC server'
         uses: dfinity/pocketic@20c33db1aa87cc6ece50857ac632c37acf5e0322 # main
@@ -171,7 +171,7 @@ jobs:
       - name: 'Download WASM'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dex_canister.wasm.gz
+          name: oisy_trade_canister.wasm.gz
 
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -182,9 +182,9 @@ jobs:
 
       - name: 'Check canister endpoints'
         run: |
-          ic-wasm "$GITHUB_WORKSPACE/dex_canister.wasm.gz" check-endpoints \
+          ic-wasm "$GITHUB_WORKSPACE/oisy_trade_canister.wasm.gz" check-endpoints \
             --hidden ./canister/hidden_endpoints.conf \
-            --candid ./canister/dex.did
+            --candid ./canister/oisy_trade.did
 
   benchmark:
     if: github.event_name == 'pull_request'

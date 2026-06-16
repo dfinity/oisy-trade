@@ -8,17 +8,17 @@ use crate::state::event::{
     Event, EventType, MatchingEvent, SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
-use dex_types_internal::{InitArg, Mode, UpgradeArg};
+use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
-use super::{LOT_SIZE, TICK_SIZE, base_metadata, quote_metadata};
+use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
         timestamp: Timestamp::EPOCH,
         payload: EventType::Init(InitArg {
             mode,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         }),
     }
 }
@@ -50,6 +50,8 @@ pub fn add_trading_pair_event(base: Principal, quote: Principal) -> Event {
             base_metadata: base_metadata(),
             quote_metadata: quote_metadata(),
             fee_rates: FeeRates::default(),
+            min_notional: MIN_NOTIONAL,
+            max_notional: Some(MAX_NOTIONAL),
         }),
     }
 }
@@ -67,6 +69,7 @@ pub enum WorstCaseEvent {
     CancelLimitOrder,
     Matching,
     Settling,
+    SetGlobalHalt,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -81,6 +84,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::CancelLimitOrder(_) => Self::CancelLimitOrder,
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
+            EventType::SetGlobalHalt(_) => Self::SetGlobalHalt,
         }
     }
 }
@@ -103,6 +107,7 @@ impl WorstCaseEvent {
             Self::CancelLimitOrder => cancel_limit_order(),
             Self::Matching => matching(MAX_ORDERS_PER_MATCHING_ROUND),
             Self::Settling => settling(MAX_ORDERS_PER_MATCHING_ROUND),
+            Self::SetGlobalHalt => EventType::SetGlobalHalt(true),
         })
     }
 
@@ -116,13 +121,14 @@ impl WorstCaseEvent {
         match self {
             Self::Init => 343,
             Self::Upgrade => 343,
-            Self::AddTradingPair => 146,
+            Self::AddTradingPair => 225,
             Self::Deposit => 96,
             Self::Withdraw => 105,
-            Self::AddLimitOrder => 98,
+            Self::AddLimitOrder => 107,
             Self::CancelLimitOrder => 36,
             Self::Matching => 10_028,
             Self::Settling => 127_328,
+            Self::SetGlobalHalt => 15,
         }
     }
 }
@@ -159,7 +165,7 @@ fn add_trading_pair() -> EventType {
         book_id: OrderBookId::new(u64::MAX),
         base: TokenId::new(max_principal(0)),
         quote: TokenId::new(max_principal(1)),
-        tick_size: TickSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
+        tick_size: TickSize::new(std::num::NonZeroU128::new(u128::MAX).unwrap()),
         lot_size: LotSize::new(std::num::NonZeroU64::new(u64::MAX).unwrap()),
         base_metadata: TokenMetadata {
             symbol: max_symbol(),
@@ -173,6 +179,8 @@ fn add_trading_pair() -> EventType {
             maker: crate::order::BasisPoint::MAX,
             taker: crate::order::BasisPoint::MAX,
         },
+        min_notional: Quantity::MAX,
+        max_notional: Some(Quantity::MAX),
     })
 }
 
@@ -181,7 +189,7 @@ fn add_limit_order() -> EventType {
         user: max_principal(0),
         order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
         side: Side::Buy,
-        price: Price::new(u64::MAX),
+        price: Price::new(u128::MAX),
         quantity: max_quantity(),
     })
 }

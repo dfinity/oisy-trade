@@ -1,2 +1,2 @@
-# Crate `dex_types`
+# Crate `oisy_trade_types`
 

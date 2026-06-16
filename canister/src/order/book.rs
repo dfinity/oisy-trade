@@ -22,6 +22,10 @@ pub struct OrderBook {
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
     lot_size: LotSize,
+    /// Minimum order notional (quote smallest units). Enforced at the state layer.
+    min_notional: Quantity,
+    /// Maximum order notional (quote smallest units), if any. Enforced at the state layer.
+    max_notional: Option<Quantity>,
     /// Maker/taker fee rates applied at fill-time.
     fee_rates: FeeRates,
     /// Orders awaiting matching, processed by the timer.
@@ -42,6 +46,8 @@ impl OrderBook {
         id: OrderBookId,
         tick_size: TickSize,
         lot_size: LotSize,
+        min_notional: Quantity,
+        max_notional: Option<Quantity>,
         fee_rates: FeeRates,
     ) -> Self {
         Self {
@@ -49,6 +55,8 @@ impl OrderBook {
             next_seq: OrderSeq::default(),
             tick_size,
             lot_size,
+            min_notional,
+            max_notional,
             fee_rates,
             pending_orders: VecDeque::new(),
             bids: BTreeMap::new(),
@@ -81,6 +89,14 @@ impl OrderBook {
 
     pub fn lot_size(&self) -> LotSize {
         self.lot_size
+    }
+
+    pub fn min_notional(&self) -> Quantity {
+        self.min_notional
+    }
+
+    pub fn max_notional(&self) -> Option<Quantity> {
+        self.max_notional
     }
 
     pub fn fee_rates(&self) -> FeeRates {
@@ -184,6 +200,19 @@ impl OrderBook {
             return Err(MatchOrderError::InvalidLotSize {
                 quantity: *quantity,
                 lot_size: self.lot_size,
+            });
+        }
+        Ok(())
+    }
+
+    /// Check that `notional` (the scaled `price × quantity`, in quote smallest
+    /// units) lies within the book's `[min_notional, max_notional]` bounds.
+    pub fn check_notional(&self, notional: &Quantity) -> Result<(), NotionalError> {
+        if *notional < self.min_notional || self.max_notional.is_some_and(|max| *notional > max) {
+            return Err(NotionalError {
+                notional: *notional,
+                min: self.min_notional,
+                max: self.max_notional,
             });
         }
         Ok(())
@@ -522,6 +551,14 @@ pub enum MatchOrderError {
     },
 }
 
+/// The order notional lies outside the book's `[min_notional, max_notional]` bounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotionalError {
+    pub notional: Quantity,
+    pub min: Quantity,
+    pub max: Option<Quantity>,
+}
+
 /// CBOR-encoded view of [`OrderBook`] used for pre/post-upgrade persistence.
 /// The derived `resting_orders` index is intentionally omitted and rebuilt
 /// from `bids` + `asks` in `From<OrderBookSnapshot> for OrderBook`.
@@ -547,6 +584,10 @@ pub struct OrderBookSnapshot {
     pub filled_orders: Vec<OrderSeq>,
     #[n(8)]
     pub fee_rates: FeeRates,
+    #[n(9)]
+    pub min_notional: Quantity,
+    #[n(10)]
+    pub max_notional: Option<Quantity>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -583,6 +624,8 @@ impl From<&OrderBook> for OrderBookSnapshot {
                 .collect(),
             filled_orders: book.filled_orders.iter().copied().collect(),
             fee_rates: book.fee_rates,
+            min_notional: book.min_notional,
+            max_notional: book.max_notional,
         }
     }
 }
@@ -636,6 +679,8 @@ impl From<OrderBookSnapshot> for OrderBook {
             next_seq: snapshot.next_seq,
             tick_size: snapshot.tick_size,
             lot_size: snapshot.lot_size,
+            min_notional: snapshot.min_notional,
+            max_notional: snapshot.max_notional,
             fee_rates: snapshot.fee_rates,
             pending_orders,
             bids,

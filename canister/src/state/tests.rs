@@ -2,7 +2,7 @@ mod assert_caller_is_allowed {
     use crate::state::State;
     use crate::test_fixtures::mocks::MockRuntime;
     use candid::Principal;
-    use dex_types_internal::Mode;
+    use oisy_trade_types_internal::Mode;
 
     #[test]
     fn should_allow_any_caller_in_general_availability_mode() {
@@ -52,10 +52,10 @@ mod assert_caller_is_allowed {
         mode: Mode,
     ) -> State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory> {
         State::new(
-            dex_types_internal::InitArg {
+            oisy_trade_types_internal::InitArg {
                 mode,
-                max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-                instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             crate::state::OrderHistory::new(
                 ic_stable_structures::VectorMemory::default(),
@@ -72,8 +72,8 @@ mod record_trading_pair {
     use crate::order::{FeeRates, OrderBookId, TokenId, TokenMetadata, TradingPair};
     use crate::test_fixtures;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata,
-        icp_token_id,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, ckbtc_token_id,
+        icp_ckbtc_trading_pair, icp_metadata, icp_token_id,
     };
     use candid::Principal;
 
@@ -87,6 +87,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -114,6 +116,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -128,6 +132,8 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
     }
@@ -148,6 +154,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state.record_trading_pair(
@@ -160,6 +168,8 @@ mod record_trading_pair {
             token_c_metadata,
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -178,6 +188,8 @@ mod record_trading_pair {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -194,6 +206,8 @@ mod record_trading_pair {
             },
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -208,7 +222,8 @@ mod add_limit_order {
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use assert_matches::assert_matches;
     use candid::Principal;
@@ -224,6 +239,8 @@ mod add_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         let user = Principal::from_slice(&[0x01]);
@@ -241,14 +258,12 @@ mod add_limit_order {
 mod cancel_limit_order {
     use crate::EXECUTOR;
     use crate::balance::Balance;
-    use crate::order::{
-        CanceledOrderInfo, FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side,
-    };
+    use crate::order::{FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
-        self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, balances_pair, ckbtc_metadata,
-        icp_ckbtc_trading_pair, icp_metadata, place_order,
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -256,11 +271,22 @@ mod cancel_limit_order {
     const OWNER: Principal = Principal::from_slice(&[0x01]);
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
 
+    /// Status of `order_id` as `OWNER` would see it via `get_user_order`, or
+    /// `None` if absent / not owned by `OWNER`.
+    fn owner_status(
+        state: &State<VectorMemory, VectorMemory>,
+        order_id: OrderId,
+    ) -> Option<OrderStatus> {
+        state
+            .get_user_order(&OWNER, order_id)
+            .map(|(_, _, record)| record.status)
+    }
+
     #[test]
     fn should_refund_full_reserved_quote_for_pending_buy() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
@@ -270,7 +296,7 @@ mod cancel_limit_order {
     fn should_refund_base_for_pending_sell() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot);
 
         assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
@@ -280,10 +306,10 @@ mod cancel_limit_order {
     fn should_refund_resting_buy_after_matching_runs() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
     }
@@ -292,10 +318,10 @@ mod cancel_limit_order {
     fn should_refund_resting_sell_after_matching_runs() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+        assert_eq!(owner_status(&state, sell_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
     }
@@ -304,7 +330,7 @@ mod cancel_limit_order {
     fn should_refund_residual_of_partially_filled_buy() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
         place_order(
             &mut state,
@@ -323,7 +349,7 @@ mod cancel_limit_order {
             3 * lot,
         );
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-        assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(
             &mut state,
@@ -339,7 +365,7 @@ mod cancel_limit_order {
     fn should_refund_residual_of_partially_filled_sell() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         // Maker buys 1 lot; taker sells 3 lots — taker partially fills and rests with 2 lots.
         place_order(
             &mut state,
@@ -358,7 +384,7 @@ mod cancel_limit_order {
             3 * lot,
         );
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-        assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+        assert_eq!(owner_status(&state, sell_id), Some(OrderStatus::Open));
 
         assert_cancel_refunds(
             &mut state,
@@ -376,7 +402,7 @@ mod cancel_limit_order {
 
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Crossing pair: both fully fill when matched.
         let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
@@ -403,6 +429,7 @@ mod cancel_limit_order {
                 book_id: OrderBookId::ZERO,
                 orders,
             },
+            crate::Timestamp::EPOCH,
             crate::state::StableMemoryOptions::Write,
         );
         assert!(state.has_pending_settling_events());
@@ -414,8 +441,9 @@ mod cancel_limit_order {
 
     /// Cancels `order_id` owned by `user` and asserts that exactly
     /// `expected_amount` units of `refund_token` move from reserved to free;
-    /// the other token's balance is unchanged and the order status becomes
-    /// `Canceled(CanceledOrderInfo { remaining_quantity: expected_remaining })`.
+    /// the other token's balance is unchanged and the order status becomes the
+    /// unit `Canceled`, with remaining (`quantity − filled_quantity`) equal to
+    /// `expected_remaining`.
     fn assert_cancel_refunds(
         state: &mut State<VectorMemory, VectorMemory>,
         user: Principal,
@@ -432,17 +460,18 @@ mod cancel_limit_order {
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
         let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
-        assert!(
-            matches!(order.status, OrderStatus::Canceled( info ) if info.remaining_quantity == expected_remaining )
+        assert_eq!(order.status, OrderStatus::Canceled);
+        assert_eq!(
+            order.quantity.checked_sub(order.filled_quantity),
+            Some(expected_remaining),
+            "remaining (quantity − filled_quantity) differed from expected",
         );
 
         let (base_after, quote_after) = balances_pair(state, &user, &pair);
-        assert_eq!(
-            state.get_order_status(order_id),
-            Some(OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: expected_remaining,
-            })),
-        );
+        let persisted = state
+            .get_user_order(&user, order_id)
+            .map(|(_, _, record)| record.status);
+        assert_eq!(persisted, Some(OrderStatus::Canceled));
         let (refunded_before, refunded_after, untouched_before, untouched_after) =
             match refund_token {
                 PairToken::Base => (base_before, base_after, quote_before, quote_after),
@@ -474,6 +503,8 @@ mod cancel_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -484,8 +515,8 @@ mod record_limit_order {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side};
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
-        self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
-        icp_metadata, place_order,
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -501,6 +532,8 @@ mod record_limit_order {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -510,7 +543,7 @@ mod record_limit_order {
     fn stores_the_submission_timestamp_on_the_record() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         state.deposit(OWNER, pair.base, lot.into(), StableMemoryOptions::Write);
         let (order_id, order) = state
             .validate_limit_order(
@@ -534,7 +567,7 @@ mod record_limit_order {
         );
 
         assert_eq!(
-            state.order_history.get(&order_id).unwrap().timestamp,
+            state.order_history.get(&order_id).unwrap().created_at,
             timestamp
         );
     }
@@ -543,7 +576,7 @@ mod record_limit_order {
     fn populates_the_per_user_index_newest_first() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
         let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
@@ -556,13 +589,75 @@ mod record_limit_order {
     }
 }
 
+mod get_user_orders {
+    use crate::order::{FeeRates, OrderBookId, Side};
+    use crate::state::State;
+    use crate::test_fixtures::{
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, place_order,
+    };
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
+            FeeRates::default(),
+        );
+        state
+    }
+
+    #[test]
+    fn joins_pair_and_record_newest_first() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let stranger = Principal::from_slice(&[0x02]);
+
+        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
+        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+
+        let orders = state.get_user_orders(&OWNER, None, 10);
+        let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, vec![second, first], "newest first");
+        for (_, joined_pair, record) in &orders {
+            assert_eq!(*joined_pair, pair, "each entry carries its trading pair");
+            assert_eq!(record.owner, OWNER, "each record is owned by the caller");
+        }
+
+        // Cursor pagination: resume after the newest → the older order.
+        assert_eq!(
+            state
+                .get_user_orders(&OWNER, Some(second), 10)
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect::<Vec<_>>(),
+            vec![first]
+        );
+        // Caller isolation, and an unknown cursor yields nothing.
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
+        assert!(state.get_user_orders(&OWNER, Some(first), 10).is_empty());
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::arbitrary::arb_side;
     use crate::test_fixtures::{
-        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair,
+        icp_metadata,
     };
     use candid::Principal;
     use proptest::prelude::{Strategy, any};
@@ -570,7 +665,7 @@ mod validate_overflow_invariant {
 
     fn arb_tick_aligned_price() -> impl Strategy<Value = Price> {
         let tick = TICK_SIZE.get();
-        (1u64..=u64::MAX / tick).prop_map(move |ticks| Price::new(ticks * tick))
+        (1u128..=u128::MAX / tick).prop_map(move |ticks| Price::new(ticks * tick))
     }
 
     fn arb_lot_aligned_quantity() -> impl Strategy<Value = Quantity> {
@@ -605,6 +700,8 @@ mod validate_overflow_invariant {
                 ckbtc_metadata(),
                 TICK_SIZE,
                 LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
                 FeeRates::default(),
             );
 
@@ -635,15 +732,154 @@ mod validate_overflow_invariant {
     }
 }
 
+mod validate_limit_order {
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::state::AddLimitOrderError;
+    use crate::state::State;
+    use crate::test_fixtures;
+    use crate::test_fixtures::{
+        LOT_SIZE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+    };
+    use assert_matches::assert_matches;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const USER: Principal = Principal::from_slice(&[0x01]);
+
+    /// Registers ICP/ckBTC with the given notional bounds. With `TICK_SIZE`,
+    /// `LOT_SIZE` and 8 base decimals, an order of `t` ticks and `q` lots has
+    /// notional `price × quantity / 10^8 = t × q` quote units, so notionals
+    /// are easy to dial in.
+    fn state_with_notional_bounds(
+        min_notional: Quantity,
+        max_notional: Option<Quantity>,
+    ) -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            min_notional,
+            max_notional,
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn validate(
+        state: &State<VectorMemory, VectorMemory>,
+        ticks: u128,
+        lots: u64,
+    ) -> Result<(), AddLimitOrderError> {
+        let pending = PendingOrder {
+            side: Side::Buy,
+            price: Price::new(ticks * TICK_SIZE.get()),
+            quantity: Quantity::from(lots * LOT_SIZE.get()),
+        };
+        state
+            .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
+            .map(|_| ())
+    }
+
+    #[test]
+    fn should_reject_notional_below_min() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
+            validate(&state, 2, 2),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_notional_above_max() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_eq!(
+            validate(&state, 9, 1),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(9),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+    }
+
+    #[test]
+    fn should_accept_notional_equal_to_min() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        // notional == 5 == min: not an `InvalidNotional` rejection.
+        assert_matches!(
+            validate(&state, 5, 1),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_accept_notional_equal_to_max() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+        assert_matches!(
+            validate(&state, 8, 1),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_not_enforce_upper_bound_when_max_unset() {
+        let state = state_with_notional_bounds(Quantity::from_u128(5), None);
+        assert_matches!(
+            validate(&state, 1_000, 1_000),
+            Err(AddLimitOrderError::InsufficientBalance { .. })
+        );
+    }
+
+    #[test]
+    fn should_enforce_tick_lot_and_notional_independently() {
+        let state =
+            state_with_notional_bounds(Quantity::from_u128(5), Some(Quantity::from_u128(8)));
+
+        assert_eq!(
+            validate(&state, 2, 2),
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Quantity::from_u128(4),
+                min: Quantity::from_u128(5),
+                max: Some(Quantity::from_u128(8)),
+            })
+        );
+
+        // Off tick (price not a multiple of TICK_SIZE) but notional within
+        // bounds: rejected for tick, not notional.
+        let off_tick = PendingOrder {
+            side: Side::Buy,
+            price: Price::new(TICK_SIZE.get() + 1),
+            quantity: Quantity::from(6 * LOT_SIZE.get()),
+        };
+        assert_matches!(
+            state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
+            Err(AddLimitOrderError::InvalidOrder(_))
+        );
+    }
+}
+
 mod settle_fills {
     use crate::EXECUTOR;
     use crate::balance::Balance;
     use crate::order::{FeeRates, OrderBookId, Price, Quantity, Side};
     use crate::state::State;
     use crate::test_fixtures;
-    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::mocks::{self, mock_runtime_for};
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -659,8 +895,8 @@ mod settle_fills {
     fn should_settle_exact_match_at_same_price() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
+        let lot = u128::from(LOT_SIZE.get());
+        let price = 100u128;
 
         test_fixtures::place_order(
             &mut state,
@@ -683,13 +919,13 @@ mod settle_fills {
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
-        assert_eq!(buyer_base, balance(lot, 0));
-        assert_eq!(buyer_quote, balance(0, 0));
+        assert_eq!(buyer_base, balance(lot, 0u64));
+        assert_eq!(buyer_quote, balance(0u64, 0u64));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
-        assert_eq!(seller_quote, balance(price * lot, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
+        assert_eq!(seller_quote, balance(price * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -700,7 +936,7 @@ mod settle_fills {
     #[test]
     fn should_settle_realistic_cketh_ckusdc_fill() {
         use crate::order::{LotSize, TickSize, TokenId, TokenMetadata, TradingPair};
-        use std::num::NonZeroU64;
+        use std::num::{NonZeroU64, NonZeroU128};
 
         let mut state = test_fixtures::state();
         let pair = TradingPair {
@@ -720,15 +956,17 @@ mod settle_fills {
                 symbol: "ckUSDC".to_string(),
                 decimals: 6,
             },
-            TickSize::new(NonZeroU64::new(10_000).unwrap()),
+            TickSize::new(NonZeroU128::new(10_000).unwrap()),
             LotSize::new(NonZeroU64::new(100_000_000_000_000).unwrap()),
+            MIN_NOTIONAL,
+            None,
             FeeRates::default(),
         );
 
         // 3000.50 USDC/ETH × 10^6 = 3_000_500_000 quote units per whole ETH.
-        let price = 3_000_500_000u64;
+        let price = 3_000_500_000u128;
         // 0.5 ETH = 5 × 10^17 wei.
-        let quantity = 500_000_000_000_000_000u64;
+        let quantity = 500_000_000_000_000_000u128;
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, quantity);
 
@@ -736,21 +974,120 @@ mod settle_fills {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
         // Buyer receives 0.5 ETH; seller receives exactly 1500.25 USDC.
-        assert_eq!(state.get_balance(&BUYER, &pair.base), balance(quantity, 0));
-        assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(0, 0));
-        assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.base),
+            balance(quantity, 0u64)
+        );
+        assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(0u64, 0u64));
+        assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, 0u64));
         assert_eq!(
             state.get_balance(&SELLER, &pair.quote),
-            balance(1_500_250_000, 0)
+            balance(1_500_250_000u64, 0u64)
         );
         assert_token_conservation(&state, &totals_before);
+    }
+
+    /// ckBTC(8)/18-decimal-stablecoin pair priced at 6_000_000 whole quote per
+    /// whole BTC: the per-whole-base price is 6 × 10^24, far above `u64::MAX`.
+    /// The fill must settle to exactly `price × quantity / 10^8`, a quote amount
+    /// that the old `u64` price representation could not even hold.
+    #[test]
+    fn should_settle_fill_with_price_exceeding_u64() {
+        use crate::Timestamp;
+        use crate::order::{LotSize, PendingOrder, TickSize, TokenId, TokenMetadata, TradingPair};
+        use crate::state::StableMemoryOptions;
+        use std::num::{NonZeroU64, NonZeroU128};
+
+        let mut state = test_fixtures::state();
+        let pair = TradingPair {
+            base: TokenId::new(Principal::from_slice(&[0xbc])),
+            quote: TokenId::new(Principal::from_slice(&[0x5b])),
+        };
+        // tick = 10^18, lot = 1; tick × lot = 10^18 is a multiple of
+        // 10^base_decimals = 10^8, so every fill settles exactly.
+        let tick = 1_000_000_000_000_000_000u128;
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair.clone(),
+            TokenMetadata {
+                symbol: "ckBTC".to_string(),
+                decimals: 8,
+            },
+            TokenMetadata {
+                symbol: "ckUSD18".to_string(),
+                decimals: 18,
+            },
+            TickSize::new(NonZeroU128::new(tick).unwrap()),
+            LotSize::new(NonZeroU64::new(1).unwrap()),
+            MIN_NOTIONAL,
+            None,
+            FeeRates::default(),
+        );
+
+        // 6_000_000 whole quote per whole BTC = 6_000_000 × 10^18 = 6 × 10^24,
+        // a multiple of `tick` and well beyond u64::MAX (~1.8 × 10^19).
+        let price = Price::new(6_000_000_000_000_000_000_000_000u128);
+        assert!(price.get() > u64::MAX as u128);
+        // 1 whole BTC = 10^8 base units.
+        let quantity = Quantity::from(100_000_000u64);
+        // Expected settled quote = price × quantity / 10^8 = 6 × 10^24.
+        let expected_quote = Quantity::from_u128(6_000_000_000_000_000_000_000_000u128);
+
+        let mut place = |user: Principal, side: Side, deposit_token, deposit_amount| {
+            state.deposit(
+                user,
+                deposit_token,
+                deposit_amount,
+                StableMemoryOptions::Write,
+            );
+            let (order_id, order) = state
+                .validate_limit_order(
+                    user,
+                    pair.clone(),
+                    PendingOrder {
+                        side,
+                        price,
+                        quantity,
+                    },
+                )
+                .expect("validate_limit_order failed");
+            state.record_limit_order(
+                user,
+                order_id.book_id(),
+                order,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+        };
+        place(BUYER, Side::Buy, pair.quote, expected_quote);
+        place(SELLER, Side::Sell, pair.base, quantity);
+
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+        // Buyer receives the full 1 BTC; seller receives exactly 6 × 10^24 quote.
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.base),
+            Balance::new(quantity, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.quote),
+            Balance::new(Quantity::ZERO, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&SELLER, &pair.base),
+            Balance::new(Quantity::ZERO, Quantity::ZERO)
+        );
+        assert_eq!(
+            state.get_balance(&SELLER, &pair.quote),
+            Balance::new(expected_quote, Quantity::ZERO)
+        );
     }
 
     #[test]
     fn should_unreserve_surplus_when_buy_taker_fills_at_lower_price() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Sell rests at 90, buy taker at 100 → fills at maker's 90
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot);
@@ -761,13 +1098,13 @@ mod settle_fills {
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*lot quote, paid 90*lot, surplus 10*lot returned to free
-        assert_eq!(buyer_base, balance(lot, 0));
-        assert_eq!(buyer_quote, balance(10 * lot, 0));
+        assert_eq!(buyer_base, balance(lot, 0u64));
+        assert_eq!(buyer_quote, balance(10 * lot, 0u64));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
-        assert_eq!(seller_quote, balance(90 * lot, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
+        assert_eq!(seller_quote, balance(90 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -776,7 +1113,7 @@ mod settle_fills {
     fn should_settle_sell_taker_at_higher_maker_price() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Buy rests at 110, sell taker at 100 → fills at maker's 110
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110 * PRICE_SCALE, lot);
@@ -793,14 +1130,14 @@ mod settle_fills {
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
-        assert_eq!(buyer_base, balance(lot, 0));
-        assert_eq!(buyer_quote, balance(0, 0));
+        assert_eq!(buyer_base, balance(lot, 0u64));
+        assert_eq!(buyer_quote, balance(0u64, 0u64));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
         // Seller gets 110*lot quote (better than their limit of 100)
-        assert_eq!(seller_quote, balance(110 * lot, 0));
+        assert_eq!(seller_quote, balance(110 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -809,7 +1146,7 @@ mod settle_fills {
     fn should_settle_partial_fill() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Buy 3 lots at 100, only 1 lot of sell available
         test_fixtures::place_order(
@@ -834,13 +1171,13 @@ mod settle_fills {
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer filled 1 lot, 2 lots remain reserved
-        assert_eq!(buyer_base, balance(lot, 0));
-        assert_eq!(buyer_quote, balance(0, 200 * lot));
+        assert_eq!(buyer_base, balance(lot, 0u64));
+        assert_eq!(buyer_quote, balance(0u64, 200 * lot));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
-        assert_eq!(seller_quote, balance(100 * lot, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
+        assert_eq!(seller_quote, balance(100 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -849,7 +1186,7 @@ mod settle_fills {
     fn should_settle_multiple_fills_across_price_levels() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Two sells at different prices, buy taker sweeps both
         test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot);
@@ -876,8 +1213,8 @@ mod settle_fills {
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*2*lot = 200*lot quote
         // Paid 90*lot + 100*lot = 190*lot, surplus = 10*lot
-        assert_eq!(buyer_base, balance(2 * lot, 0));
-        assert_eq!(buyer_quote, balance(10 * lot, 0));
+        assert_eq!(buyer_base, balance(2 * lot, 0u64));
+        assert_eq!(buyer_quote, balance(10 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -886,7 +1223,7 @@ mod settle_fills {
     fn should_settle_buy_taker_partial_fill_with_price_improvement() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Sell rests at 90 for 1 lot, buy taker at 100 for 3 lots
         // Fills 1 lot at 90, rests 2 lots
@@ -906,13 +1243,13 @@ mod settle_fills {
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Surplus: (100-90)*lot = 10*lot returned to free
         // Remaining reserved: 100*2*lot = 200*lot
-        assert_eq!(buyer_base, balance(lot, 0));
+        assert_eq!(buyer_base, balance(lot, 0u64));
         assert_eq!(buyer_quote, balance(10 * lot, 200 * lot));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
-        assert_eq!(seller_quote, balance(90 * lot, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
+        assert_eq!(seller_quote, balance(90 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -921,7 +1258,7 @@ mod settle_fills {
     fn should_settle_sell_taker_partial_fill() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Buy rests 1 lot at 100, sell taker 3 lots at 100
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
@@ -938,14 +1275,14 @@ mod settle_fills {
 
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
-        assert_eq!(buyer_base, balance(lot, 0));
-        assert_eq!(buyer_quote, balance(0, 0));
+        assert_eq!(buyer_base, balance(lot, 0u64));
+        assert_eq!(buyer_quote, balance(0u64, 0u64));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
         // 1 lot filled, 2 lots remain reserved
-        assert_eq!(seller_base, balance(0, 2 * lot));
-        assert_eq!(seller_quote, balance(100 * lot, 0));
+        assert_eq!(seller_base, balance(0u64, 2 * lot));
+        assert_eq!(seller_quote, balance(100 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -954,7 +1291,7 @@ mod settle_fills {
     fn should_settle_sell_taker_multi_level_sweep() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         // Two buys at different prices, sell taker sweeps both
         // Sell at 100 matches buy at 110 first, then buy at 100
@@ -974,14 +1311,14 @@ mod settle_fills {
         let buyer_base = state.get_balance(&BUYER, &pair.base);
         let buyer_quote = state.get_balance(&BUYER, &pair.quote);
         // Buyer deposited 100*lot + 110*lot = 210*lot quote, all consumed
-        assert_eq!(buyer_base, balance(2 * lot, 0));
-        assert_eq!(buyer_quote, balance(0, 0));
+        assert_eq!(buyer_base, balance(2 * lot, 0u64));
+        assert_eq!(buyer_quote, balance(0u64, 0u64));
 
         let seller_base = state.get_balance(&SELLER, &pair.base);
         let seller_quote = state.get_balance(&SELLER, &pair.quote);
-        assert_eq!(seller_base, balance(0, 0));
+        assert_eq!(seller_base, balance(0u64, 0u64));
         // Seller receives 110*lot + 100*lot = 210*lot quote
-        assert_eq!(seller_quote, balance(210 * lot, 0));
+        assert_eq!(seller_quote, balance(210 * lot, 0u64));
 
         assert_token_conservation(&state, &totals_before);
     }
@@ -990,7 +1327,7 @@ mod settle_fills {
     fn should_settle_self_trade() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
         let user = Principal::from_slice(&[0x42]);
 
         // Same user places both buy and sell
@@ -1027,15 +1364,15 @@ mod settle_fills {
             "quote token total changed"
         );
         // After self-trade: all reserved released, net balances same as deposited
-        assert_eq!(base_after, balance(lot, 0));
-        assert_eq!(quote_after, balance(100 * lot, 0));
+        assert_eq!(base_after, balance(lot, 0u64));
+        assert_eq!(quote_after, balance(100 * lot, 0u64));
     }
 
     #[test]
     fn should_settle_taker_against_multiple_different_makers() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         let seller_a = Principal::from_slice(&[0x0A]);
         let seller_b = Principal::from_slice(&[0x0B]);
@@ -1072,21 +1409,33 @@ mod settle_fills {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
         // Buyer: received 2 lots, paid 90*lot + 100*lot, surplus 10*lot
-        assert_eq!(state.get_balance(&BUYER, &pair.base), balance(2 * lot, 0));
-        assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(10 * lot, 0));
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.base),
+            balance(2 * lot, 0u64)
+        );
+        assert_eq!(
+            state.get_balance(&BUYER, &pair.quote),
+            balance(10 * lot, 0u64)
+        );
 
         // Seller A: sold 1 lot at 90
-        assert_eq!(state.get_balance(&seller_a, &pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(&seller_a, &pair.base),
+            balance(0u64, 0u64)
+        );
         assert_eq!(
             state.get_balance(&seller_a, &pair.quote),
-            balance(90 * lot, 0)
+            balance(90 * lot, 0u64)
         );
 
         // Seller B: sold 1 lot at 100
-        assert_eq!(state.get_balance(&seller_b, &pair.base), balance(0, 0));
+        assert_eq!(
+            state.get_balance(&seller_b, &pair.base),
+            balance(0u64, 0u64)
+        );
         assert_eq!(
             state.get_balance(&seller_b, &pair.quote),
-            balance(100 * lot, 0)
+            balance(100 * lot, 0u64)
         );
 
         assert_token_conservation(&state, &totals_before);
@@ -1096,7 +1445,7 @@ mod settle_fills {
     fn should_settle_trade_with_quantity_exceeding_u64_max() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
-        let price = 100u64 * PRICE_SCALE;
+        let price = 100 * PRICE_SCALE;
         // quantity = LOT_SIZE * u64::MAX, guaranteed to be a valid lot multiple and > u64::MAX
         let quantity = Quantity::from(u64::from(LOT_SIZE))
             .checked_mul_u64(u64::MAX)
@@ -1134,8 +1483,8 @@ mod settle_fills {
         use crate::order::{FeeRates, TokenId, TokenMetadata, TradingPair};
 
         let mut state = test_fixtures::state();
-        let lot = u64::from(LOT_SIZE);
-        let price = 100u64;
+        let lot = u128::from(LOT_SIZE.get());
+        let price = 100u128;
 
         // Pair A: ICP/ckBTC (book 0).
         let pair_a = icp_ckbtc_trading_pair();
@@ -1146,6 +1495,8 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         // Pair B: a distinct base/quote token pair on a second book.
@@ -1168,6 +1519,8 @@ mod settle_fills {
             },
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
 
@@ -1215,15 +1568,21 @@ mod settle_fills {
         // book's SettlingEvent were silently dropped, buyer_b would
         // still have `price * lot` reserved and seller_b would still hold
         // `lot` reserved.
-        assert_eq!(state.get_balance(&buyer_a, &pair_a.base), balance(lot, 0));
+        assert_eq!(
+            state.get_balance(&buyer_a, &pair_a.base),
+            balance(lot, 0u64)
+        );
         assert_eq!(
             state.get_balance(&seller_a, &pair_a.quote),
-            balance(price * lot, 0),
+            balance(price * lot, 0u64),
         );
-        assert_eq!(state.get_balance(&buyer_b, &pair_b.base), balance(lot, 0));
+        assert_eq!(
+            state.get_balance(&buyer_b, &pair_b.base),
+            balance(lot, 0u64)
+        );
         assert_eq!(
             state.get_balance(&seller_b, &pair_b.quote),
-            balance(price * lot, 0),
+            balance(price * lot, 0u64),
         );
     }
 
@@ -1237,6 +1596,8 @@ mod settle_fills {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state
@@ -1244,12 +1605,35 @@ mod settle_fills {
 
     mod order_status {
         use super::*;
-        use crate::order::OrderStatus;
+        use crate::order::{OrderRecord, OrderStatus};
+
+        /// The persisted record for `order_id` as `owner` sees it via
+        /// `get_user_order`.
+        fn record_of(
+            state: &State<VectorMemory, VectorMemory>,
+            owner: Principal,
+            order_id: crate::order::OrderId,
+        ) -> OrderRecord {
+            state
+                .get_user_order(&owner, order_id)
+                .map(|(_, _, record)| record)
+                .expect("order record present")
+        }
+
+        fn status_of(
+            state: &State<VectorMemory, VectorMemory>,
+            owner: Principal,
+            order_id: crate::order::OrderId,
+        ) -> Option<OrderStatus> {
+            state
+                .get_user_order(&owner, order_id)
+                .map(|(_, _, record)| record.status)
+        }
 
         #[test]
         fn should_return_pending_before_matching() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             let buy_id = test_fixtures::place_order(
                 &mut state,
@@ -1260,13 +1644,13 @@ mod settle_fills {
                 lot,
             );
 
-            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Pending));
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Pending));
         }
 
         #[test]
         fn should_return_open_for_resting_order() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             let buy_id = test_fixtures::place_order(
                 &mut state,
@@ -1278,13 +1662,13 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Open));
         }
 
         #[test]
         fn should_return_filled_after_exact_match() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             let buy_id = test_fixtures::place_order(
                 &mut state,
@@ -1304,14 +1688,17 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
+            assert_eq!(
+                status_of(&state, SELLER, sell_id),
+                Some(OrderStatus::Filled)
+            );
         }
 
         #[test]
         fn should_return_open_for_partially_filled_maker() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
             let sell_id = test_fixtures::place_order(
@@ -1332,14 +1719,28 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
-            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Filled));
+            // The maker rests `Open` with `0 < filled_quantity < quantity`.
+            let sell = record_of(&state, SELLER, sell_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &sell,
+                &OrderRecord {
+                    owner: SELLER,
+                    side: Side::Sell,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(3 * lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Open,
+                    created_at: sell.created_at,
+                    last_updated_at: sell.last_updated_at,
+                },
+            );
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
         }
 
         #[test]
         fn should_return_open_for_partially_filled_taker() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
             let sell_id = test_fixtures::place_order(
@@ -1360,14 +1761,42 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
-            assert_eq!(state.get_order_status(buy_id), Some(OrderStatus::Open));
+            // The fully consumed maker reports `filled_quantity == quantity`.
+            let sell = record_of(&state, SELLER, sell_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &sell,
+                &OrderRecord {
+                    owner: SELLER,
+                    side: Side::Sell,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Filled,
+                    created_at: sell.created_at,
+                    last_updated_at: sell.last_updated_at,
+                },
+            );
+            // The taker rests `Open` with one of three lots filled.
+            let buy = record_of(&state, BUYER, buy_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &buy,
+                &OrderRecord {
+                    owner: BUYER,
+                    side: Side::Buy,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(3 * lot),
+                    filled_quantity: Quantity::from(lot),
+                    status: OrderStatus::Open,
+                    created_at: buy.created_at,
+                    last_updated_at: buy.last_updated_at,
+                },
+            );
         }
 
         #[test]
         fn should_return_filled_after_multi_fill_maker_depletion() {
             let mut state = setup();
-            let lot = u64::from(LOT_SIZE);
+            let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell rests with 2 lots; two successive buys deplete it
             let sell_id = test_fixtures::place_order(
@@ -1379,7 +1808,7 @@ mod settle_fills {
                 2 * lot,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
+            assert_eq!(status_of(&state, SELLER, sell_id), Some(OrderStatus::Open));
 
             let buy1_id = test_fixtures::place_order(
                 &mut state,
@@ -1390,8 +1819,12 @@ mod settle_fills {
                 lot,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Open));
-            assert_eq!(state.get_order_status(buy1_id), Some(OrderStatus::Filled));
+            // Across two batches the maker accrued both fills, one write
+            // per batch, and now sits at one of two lots filled, still `Open`.
+            let sell = record_of(&state, SELLER, sell_id);
+            assert_eq!(sell.status, OrderStatus::Open);
+            assert_eq!(sell.filled_quantity, Quantity::from(lot));
+            assert_eq!(status_of(&state, BUYER, buy1_id), Some(OrderStatus::Filled));
 
             let buy2_id = test_fixtures::place_order(
                 &mut state,
@@ -1402,8 +1835,158 @@ mod settle_fills {
                 lot,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            assert_eq!(state.get_order_status(sell_id), Some(OrderStatus::Filled));
-            assert_eq!(state.get_order_status(buy2_id), Some(OrderStatus::Filled));
+            let sell = record_of(&state, SELLER, sell_id);
+            assert_eq!(sell.status, OrderStatus::Filled);
+            assert_eq!(sell.filled_quantity, sell.quantity);
+            assert_eq!(status_of(&state, BUYER, buy2_id), Some(OrderStatus::Filled));
+        }
+
+        /// A taker that sweeps several makers in one batch accrues all its
+        /// per-fill deltas into a single record write — its `filled_quantity`
+        /// equals the sum of the fills and the order reaches `Filled`.
+        #[test]
+        fn should_write_once_for_taker_spanning_multiple_fills() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // Two resting makers at different prices; one crossing taker sweeps
+            // both in a single matching batch (two `Fill`s for the taker seq).
+            test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                101 * PRICE_SCALE,
+                lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buy_id = test_fixtures::place_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                101 * PRICE_SCALE,
+                2 * lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buy = record_of(&state, BUYER, buy_id);
+            assert_eq!(buy.status, OrderStatus::Filled);
+            assert_eq!(buy.filled_quantity, Quantity::from(2 * lot));
+        }
+
+        /// `created_at` is stamped once at placement and never moves, while
+        /// `last_updated_at` advances to the timestamp of the most recent
+        /// modifying event. Distinct timestamps pin which event's time is kept.
+        #[test]
+        fn created_at_is_stable_while_last_updated_at_advances() {
+            use crate::Timestamp;
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // place_order stamps created_at at Timestamp::EPOCH (0).
+            let sell_id = test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                3 * lot,
+            );
+            let placed = record_of(&state, SELLER, sell_id);
+            assert_eq!(placed.created_at, Timestamp::EPOCH);
+            assert_eq!(placed.last_updated_at, None);
+
+            // First fill at t = 100: partial, maker stays Open.
+            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+            EXECUTOR.run_once(
+                &mut state,
+                &mocks::mock_runtime_at(BUYER, Timestamp::new(100)),
+            );
+            let after_first = record_of(&state, SELLER, sell_id);
+            assert_eq!(after_first.created_at, Timestamp::EPOCH);
+            assert_eq!(after_first.last_updated_at, Some(Timestamp::new(100)));
+            assert_eq!(after_first.filled_quantity, Quantity::from(lot));
+
+            // Second fill at t = 200: last_updated_at advances, created_at holds.
+            test_fixtures::place_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                2 * lot,
+            );
+            EXECUTOR.run_once(
+                &mut state,
+                &mocks::mock_runtime_at(BUYER, Timestamp::new(200)),
+            );
+            let after_second = record_of(&state, SELLER, sell_id);
+            assert_eq!(after_second.created_at, Timestamp::EPOCH);
+            assert_eq!(after_second.last_updated_at, Some(Timestamp::new(200)));
+            assert_eq!(after_second.status, OrderStatus::Filled);
+            assert_eq!(after_second.filled_quantity, after_second.quantity);
+        }
+
+        /// Durability: a matching event applied under `Skip` (the
+        /// post-upgrade replay mode, since stable memory already holds the
+        /// post-fill record) must not touch order history — `filled_quantity`
+        /// and `last_updated_at` stay at their pre-event values, so replay
+        /// never double-counts a fill.
+        #[test]
+        fn replay_under_skip_does_not_write_history() {
+            use crate::state::StableMemoryOptions;
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // Two crossing orders left pending on the book; history holds them
+            // at `Pending` with `filled_quantity == 0`.
+            test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            let buy_id = test_fixtures::place_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            let orders: Vec<_> = state
+                .order_book(&OrderBookId::ZERO)
+                .unwrap()
+                .pending_order_seqs()
+                .collect();
+
+            // Matching under Skip consumes the book's pending orders (producing
+            // fills) but must leave order history untouched.
+            state.record_matching_event(
+                &crate::state::event::MatchingEvent {
+                    book_id: OrderBookId::ZERO,
+                    orders,
+                },
+                crate::Timestamp::new(999),
+                StableMemoryOptions::Skip,
+            );
+
+            let buy = record_of(&state, BUYER, buy_id);
+            assert_eq!(buy.status, OrderStatus::Pending);
+            assert_eq!(buy.filled_quantity, Quantity::ZERO);
+            assert_eq!(buy.last_updated_at, None);
         }
     }
 
@@ -1434,7 +2017,7 @@ mod settle_fills {
             let ops = super::super::compute_balance_operations(
                 &output,
                 FeeRates::default(),
-                std::num::NonZeroU64::new(PRICE_SCALE).unwrap(),
+                std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
             );
             let fills_len = output.fills.len();
 
@@ -1494,9 +2077,9 @@ mod settle_fills {
             let taker_bps = 25; // 0.25 %
             let mut state = setup_with_fees(maker_bps, taker_bps);
             let pair = icp_ckbtc_trading_pair();
-            let price = 100u64;
+            let price = 100u128;
             // qty chosen so the two fees are exact (no ceiling rounding).
-            let qty = u64::from(LOT_SIZE) * 1_000_000;
+            let qty = u128::from(LOT_SIZE.get()) * 1_000_000;
 
             // Maker rests first, taker crosses. SELLER always sells, BUYER
             // always buys.
@@ -1533,10 +2116,10 @@ mod settle_fills {
                 Side::Buy => (taker_bps, maker_bps),
                 Side::Sell => (maker_bps, taker_bps),
             };
-            let base_fee_num = qty as u128 * buyer_role_bps as u128;
-            let quote_fee_num = notional as u128 * seller_role_bps as u128;
-            let base_fee = (base_fee_num / 10_000) as u64;
-            let quote_fee = (quote_fee_num / 10_000) as u64;
+            let base_fee_num = qty * buyer_role_bps as u128;
+            let quote_fee_num = notional * seller_role_bps as u128;
+            let base_fee = base_fee_num / 10_000;
+            let quote_fee = quote_fee_num / 10_000;
             // Workload picks qty/price so the fees are exact (no ceiling
             // rounding) and strictly positive — keeps the equality
             // assertions below tight.
@@ -1547,11 +2130,11 @@ mod settle_fills {
 
             assert_eq!(
                 state.get_balance(&BUYER, &pair.base),
-                balance(qty - base_fee, 0),
+                balance(qty - base_fee, 0u64),
             );
             assert_eq!(
                 state.get_balance(&SELLER, &pair.quote),
-                balance(notional - quote_fee, 0),
+                balance(notional - quote_fee, 0u64),
             );
             assert_eq!(
                 state.balances.fee_balance(&pair.base),
@@ -1570,8 +2153,8 @@ mod settle_fills {
         fn zero_rates_create_no_fee_pool_entries() {
             let mut state = setup_with_fees(0, 0);
             let pair = icp_ckbtc_trading_pair();
-            let price = 100u64;
-            let qty = u64::from(LOT_SIZE);
+            let price = 100u128;
+            let qty = u128::from(LOT_SIZE.get());
 
             test_fixtures::place_order(
                 &mut state,
@@ -1591,10 +2174,10 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(qty, 0));
+            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(qty, 0u64));
             assert_eq!(
                 state.get_balance(&SELLER, &pair.quote),
-                balance(price * qty, 0),
+                balance(price * qty, 0u64),
             );
             assert_eq!(state.balances.fee_balance(&pair.base), None);
             assert_eq!(state.balances.fee_balance(&pair.quote), None);
@@ -1632,12 +2215,15 @@ mod settle_fills {
             // on base side), surplus of 10*qty returns to free.
             assert_eq!(
                 state.get_balance(&BUYER, &pair.base),
-                balance(qty - base_fee, 0),
+                balance(qty - base_fee, 0u64),
             );
-            assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(10 * qty, 0),);
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.quote),
+                balance(10 * qty, 0u64),
+            );
             assert_eq!(
                 state.get_balance(&SELLER, &pair.quote),
-                balance(notional - quote_fee, 0),
+                balance(notional - quote_fee, 0u64),
             );
         }
 
@@ -1648,7 +2234,7 @@ mod settle_fills {
             let taker_bps = 100; // 1 %
             let mut state = setup_with_fees(0, taker_bps);
             let pair = icp_ckbtc_trading_pair();
-            let price = 100u64;
+            let price = 100u128;
             let qty = u64::from(LOT_SIZE) * 1_000_000;
 
             // Two fills, each at qty.
@@ -1706,6 +2292,8 @@ mod settle_fills {
                 ckbtc_metadata(),
                 TICK_SIZE,
                 LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
                 FeeRates {
                     maker: BasisPoint::new(maker_bps).unwrap(),
                     taker: BasisPoint::new(taker_bps).unwrap(),
@@ -1715,7 +2303,7 @@ mod settle_fills {
         }
     }
 
-    fn balance(free: u64, reserved: u64) -> Balance {
+    fn balance(free: impl Into<Quantity>, reserved: impl Into<Quantity>) -> Balance {
         Balance::new(free, reserved)
     }
 
@@ -1774,8 +2362,8 @@ mod execution_policy {
     use crate::balance::TokenBalance;
     use crate::order::OrderHistory;
     use crate::state::{ExecutionPolicy, State};
-    use dex_types_internal::{InitArg, Mode};
     use ic_stable_structures::VectorMemory;
+    use oisy_trade_types_internal::{InitArg, Mode};
 
     #[test]
     fn should_thread_init_arg_fields_through_to_execution_policy() {
@@ -1803,7 +2391,7 @@ mod get_balances {
     use crate::state::StableMemoryOptions;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
-    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+    use oisy_trade_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
 
@@ -1831,6 +2419,7 @@ mod get_balances {
             state.get_balance(&stranger, &a_id),
             crate::balance::Balance::zero()
         );
+        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
 
         assert_eq!(
             state.user_registry, registry_before,
@@ -2005,7 +2594,7 @@ mod get_balances {
         reserved: u64,
     ) -> Result<UserTokenBalance, GetBalancesError> {
         Ok(UserTokenBalance {
-            token: dex_types::Token {
+            token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
             },
@@ -2021,7 +2610,7 @@ mod get_fee_balances {
     use crate::order::TokenId;
     use crate::test_fixtures;
     use candid::{Nat, Principal};
-    use dex_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
+    use oisy_trade_types::{Balance, FilterToken, GetBalancesError, UserTokenBalance};
 
     #[test]
     fn should_return_empty_when_no_fees_accrued_and_no_filter() {
@@ -2117,7 +2706,7 @@ mod get_fee_balances {
         amount: u64,
     ) -> Result<UserTokenBalance, GetBalancesError> {
         Ok(UserTokenBalance {
-            token: dex_types::Token {
+            token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
             },
@@ -2135,7 +2724,8 @@ mod pending_state_predicates {
     use crate::test_fixtures;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
-        LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata,
+        LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
 
@@ -2153,7 +2743,7 @@ mod pending_state_predicates {
     fn should_clear_pending_predicates_after_matching_drains() {
         let mut state = setup_one_book();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
         test_fixtures::place_order(
@@ -2176,7 +2766,7 @@ mod pending_state_predicates {
     fn should_report_settling_events_present_between_match_and_drain() {
         let mut state = setup_one_book();
         let pair = icp_ckbtc_trading_pair();
-        let lot = u64::from(LOT_SIZE);
+        let lot = u128::from(LOT_SIZE.get());
 
         test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
         test_fixtures::place_order(
@@ -2195,7 +2785,11 @@ mod pending_state_predicates {
             book_id: OrderBookId::ZERO,
             orders: book.pending_order_seqs().collect(),
         };
-        state.record_matching_event(&matching_event, crate::state::StableMemoryOptions::Write);
+        state.record_matching_event(
+            &matching_event,
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
 
         assert!(state.has_pending_settling_events());
     }
@@ -2211,6 +2805,8 @@ mod pending_state_predicates {
             ckbtc_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         state

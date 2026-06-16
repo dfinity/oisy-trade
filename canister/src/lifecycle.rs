@@ -5,13 +5,13 @@ use crate::state::event::EventType;
 use crate::state::{State, StateSnapshot};
 use crate::user::UserRegistry;
 use crate::{MATCHING_INTERVAL, Runtime, state, storage};
-use dex_types_internal::DexArg;
-use dex_types_internal::log::Priority;
+use oisy_trade_types_internal::OisyTradeArg;
+use oisy_trade_types_internal::log::Priority;
 
-pub fn init(arg: DexArg, runtime: &impl Runtime) {
+pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
     let init_arg = match arg {
-        DexArg::Init(init_arg) => init_arg,
-        DexArg::Upgrade(_) => {
+        OisyTradeArg::Init(init_arg) => init_arg,
+        OisyTradeArg::Upgrade(_) => {
             panic!("ERROR: expected Init argument");
         }
     };
@@ -27,7 +27,7 @@ pub fn init(arg: DexArg, runtime: &impl Runtime) {
     );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
-    canlog::log!(Priority::Info, "[init]: DEX canister initialized");
+    canlog::log!(Priority::Info, "[init]: OISY TRADE canister initialized");
 }
 
 pub fn pre_upgrade(runtime: &impl Runtime) {
@@ -51,7 +51,7 @@ pub fn pre_upgrade(runtime: &impl Runtime) {
     );
 }
 
-pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
+pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
     #[cfg(feature = "canbench-rs")]
     let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
@@ -84,15 +84,19 @@ pub fn post_upgrade(arg: Option<DexArg>, runtime: &impl Runtime) {
     }
 
     match arg {
-        Some(DexArg::Init(_)) => {
+        Some(OisyTradeArg::Init(_)) => {
             panic!("ERROR: expected Upgrade argument");
         }
-        Some(DexArg::Upgrade(Some(upgrade_arg))) => {
+        Some(OisyTradeArg::Upgrade(Some(upgrade_arg))) => {
             state::with_state_mut(|s| {
-                audit::process_event(s, EventType::Upgrade(upgrade_arg), runtime)
+                let permit = s
+                    .permissions()
+                    .permit_admin()
+                    .expect("BUG: admin events are never gated in this build");
+                audit::process_event(s, EventType::Upgrade(upgrade_arg), permit.into(), runtime)
             });
         }
-        Some(DexArg::Upgrade(None)) | None => {}
+        Some(OisyTradeArg::Upgrade(None)) | None => {}
     }
 
     let instructions_used = runtime.instruction_counter() - start;

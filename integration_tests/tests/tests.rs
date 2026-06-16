@@ -1,15 +1,15 @@
 use assert_matches::assert_matches;
 use candid::{Nat, Principal};
-use dex_client::{DexClient, Runtime};
-use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-use dex_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
-use dex_types::{
+use icrc_ledger_types::icrc1::account::Account;
+use oisy_trade_client::{OisyTradeClient, Runtime};
+use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
+use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
     LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
-    TradingPairInfo, WithdrawError, WithdrawRequest,
+    TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
 };
-use dex_types_internal::log::Priority;
-use icrc_ledger_types::icrc1::account::Account;
+use oisy_trade_types_internal::log::Priority;
 
 fn expected_balance(free: u64) -> Balance {
     Balance {
@@ -20,8 +20,8 @@ fn expected_balance(free: u64) -> Balance {
 
 #[allow(clippy::too_many_arguments)]
 async fn assert_balances<R: Runtime>(
-    client1: &DexClient<R>,
-    client2: &DexClient<R>,
+    client1: &OisyTradeClient<R>,
+    client2: &OisyTradeClient<R>,
     cksol: &TokenId,
     ckbtc: &TokenId,
     expected_user1_cksol: u64,
@@ -53,16 +53,24 @@ async fn assert_balances<R: Runtime>(
 
 mod add_limit_order {
     use assert_matches::assert_matches;
-    use candid::{Encode, Principal};
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{PRICE_SCALE, Setup};
-    use dex_types::{AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side};
+    use candid::{Encode, Nat, Principal};
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
+    use oisy_trade_types::{
+        AddLimitOrderError, AddTradingPairRequest, Balance, GetMyOrdersArgs, LimitOrderRequest,
+        OrderId, OrderStatus, Side,
+    };
     use pocket_ic::{RejectCode, RejectResponse};
+
+    /// A `ByPage` filter, matching the previous flat `after`/`length` args.
+    fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
+        GetMyOrdersArgs::by_page(after, length)
+    }
 
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
+        let client = setup.oisy_trade_client();
         let token_id = setup.quote_token_id();
         let fee = QUOTE_LEDGER_FEE;
         // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
@@ -70,7 +78,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
 
@@ -102,7 +110,108 @@ mod add_limit_order {
         );
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
-        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+        assert_eq!(
+            client.get_my_order(order_id).await.map(|o| o.order.status),
+            Some(OrderStatus::Open)
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_my_orders_newest_first_paginated() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let alice = setup.oisy_trade_client();
+        let bob_principal = Principal::from_slice(&[0xBB]);
+        let bob = setup.oisy_trade_client_with_caller(bob_principal);
+        let pair = setup.trading_pair();
+
+        // Fund both callers for three resting buys of 1M @ 1000 (1B each).
+        let per_order = 1_000_000_000u64;
+        let total = 3 * per_order;
+        for who in [setup.user(), bob_principal] {
+            setup
+                .deposit_flow(who, setup.quote_token_id())
+                .mint(total + 2 * QUOTE_LEDGER_FEE)
+                .approve(total + QUOTE_LEDGER_FEE)
+                .deposit(total)
+                .execute()
+                .await;
+        }
+
+        // Interleave alice's and bob's placements so a correct per-user index
+        // can't rely on a caller's orders being inserted contiguously.
+        let buy = LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price: 1000u64.into(),
+            quantity: 1_000_000u64.into(),
+        };
+        let before_placement = setup.time_nanos().await;
+        let mut alice_ids = vec![];
+        let mut bob_ids = vec![];
+        for _ in 0..3 {
+            alice_ids.push(alice.add_limit_order(buy.clone()).await.unwrap());
+            bob_ids.push(bob.add_limit_order(buy.clone()).await.unwrap());
+        }
+        let after_placement = setup.time_nanos().await;
+
+        // Alice sees only her own orders, newest first — bob's interleaved
+        // orders don't leak in.
+        let orders = alice.get_my_orders(by_page(None, 10)).await;
+        assert_eq!(
+            orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![
+                alice_ids[2].clone(),
+                alice_ids[1].clone(),
+                alice_ids[0].clone()
+            ]
+        );
+        for o in &orders {
+            assert_eq!(o.pair, pair);
+            assert_eq!(o.order.owner, setup.user());
+            assert_eq!(o.order.side, Side::Buy);
+            assert_eq!(o.order.price, candid::Nat::from(1000u64));
+            assert!(
+                before_placement <= o.order.created_at && o.order.created_at <= after_placement,
+                "submission timestamp {} outside placement window [{}, {}]",
+                o.order.created_at,
+                before_placement,
+                after_placement
+            );
+        }
+
+        // Bob likewise sees only his own.
+        let bob_orders = bob.get_my_orders(by_page(None, 10)).await;
+        assert_eq!(
+            bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
+            vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
+        );
+        assert!(bob_orders.iter().all(|o| o.order.owner == bob_principal));
+
+        // Cursor pagination: resume after the newest, take one → the next order.
+        let page = alice
+            .get_my_orders(by_page(Some(alice_ids[2].clone()), 1))
+            .await;
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, alice_ids[1]);
+
+        // Point lookup by id: each caller resolves only their own orders.
+        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await;
+        assert_eq!(alice_by_id.map(|o| o.id), Some(alice_ids[0].clone()));
+        // An order owned by another principal is invisible to a foreign caller.
+        assert!(alice.get_my_order(bob_ids[0].clone()).await.is_none());
+        // An unknown (but well-formed) id resolves to nothing.
+        assert!(
+            alice
+                .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
+                .await
+                .is_none()
+        );
+
+        // A caller that placed nothing sees none.
+        let stranger = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0xAB]));
+        assert!(stranger.get_my_orders(by_page(None, 10)).await.is_empty());
 
         setup.drop().await;
     }
@@ -110,7 +219,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_add_limit_sell_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
+        let client = setup.oisy_trade_client();
         let token_id = setup.base_token_id();
         let fee = BASE_LEDGER_FEE;
         // Sell 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
@@ -118,7 +227,7 @@ mod add_limit_order {
         let order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
 
@@ -150,36 +259,41 @@ mod add_limit_order {
         );
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
-        assert_eq!(client.get_order_status(order_id).await, OrderStatus::Open);
+        assert_eq!(
+            client.get_my_order(order_id).await.map(|o| o.order.status),
+            Some(OrderStatus::Open)
+        );
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_fail_to_get_order_status() {
+    async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
         let setup = Setup::new().await;
 
-        // Valid hex format but non-existent order
+        // A well-formed but unknown id resolves to nothing — absence from
+        // the result is the sole not-found signal.
         let not_found = setup
-            .dex_client()
-            .get_order_status("ffffffffffffffffffffffffffffffff".to_string())
+            .oisy_trade_client()
+            .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
             .await;
-        assert_eq!(not_found, OrderStatus::NotFound);
+        assert!(not_found.is_none());
 
+        // A malformed id traps, consistent with the existing id/cursor parsing.
         let result = setup
             .env()
             .query_call(
-                setup.dex_id(),
+                setup.oisy_trade_id(),
                 Principal::anonymous(),
-                "get_order_status",
-                Encode!(&"not-a-valid-id".to_string()).unwrap(),
+                "get_my_orders",
+                Encode!(&Some(by_page(Some("not-a-valid-id".to_string()), 10))).unwrap(),
             )
             .await;
 
         assert_matches!(
             result,
             Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
-            if reject_message.contains("invalid order ID")
+            if reject_message.contains("invalid order id")
         );
 
         setup.drop().await;
@@ -189,16 +303,16 @@ mod add_limit_order {
     async fn should_match_crossing_orders() {
         let setup = Setup::new().await.with_trading_pair().await;
         let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.dex_client_with_caller(buyer);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
-        let seller_client = setup.dex_client_with_caller(seller);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
 
         // Buy 1_000_000 ckSOL base units at 10_000 ckBTC per whole ckSOL
         // (10_000 * PRICE_SCALE). Reserve = price * quantity / 10^9 = 1_000_000_000.
         let buy_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
         let required_quote_amount = 1_000_000_000u64;
@@ -219,7 +333,7 @@ mod add_limit_order {
         let sell_order = LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         };
         let required_base_amount = 1_000_000u64;
@@ -234,14 +348,21 @@ mod add_limit_order {
 
         setup.env().tick().await;
 
-        // Both orders are fully filled
+        // Both orders are fully filled. Lookup is owner-scoped, so each side is
+        // queried with its own client.
         assert_eq!(
-            setup.dex_client().get_order_status(buy_order_id).await,
-            OrderStatus::Filled
+            buyer_client
+                .get_my_order(buy_order_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Filled)
         );
         assert_eq!(
-            setup.dex_client().get_order_status(sell_order_id).await,
-            OrderStatus::Filled
+            seller_client
+                .get_my_order(sell_order_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Filled)
         );
 
         // Buyer: received 1M base tokens, spent 1000M quote tokens
@@ -290,24 +411,86 @@ mod add_limit_order {
 
         setup.drop().await;
     }
+
+    #[tokio::test]
+    async fn should_enforce_notional_bounds_at_placement() {
+        let setup = Setup::new().await;
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+        // notional = price * quantity / 10^9. With price = 10_000 * PRICE_SCALE
+        // and 1 lot (LOT_SIZE base units), one lot is worth 1_000_000_000 quote
+        // units, so notional = lots * 1_000_000_000.
+        let min_notional = 2_000_000_000u64;
+        let max_notional = 5_000_000_000u64;
+        let result = controller_client
+            .add_trading_pair(AddTradingPairRequest {
+                min_notional: Nat::from(min_notional),
+                max_notional: Some(Nat::from(max_notional)),
+                ..setup.add_trading_pair_request()
+            })
+            .await;
+        assert_eq!(result, Ok(()));
+
+        let client = setup.oisy_trade_client();
+        let pair = setup.trading_pair();
+        let price = Nat::from(10_000 * PRICE_SCALE);
+        let order = |lots: u64| LimitOrderRequest {
+            pair,
+            side: Side::Buy,
+            price: price.clone(),
+            quantity: Nat::from(lots * LOT_SIZE),
+        };
+
+        // 1 lot -> notional 1_000_000_000 < min: rejected.
+        assert_eq!(
+            client.add_limit_order(order(1)).await,
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Nat::from(1_000_000_000u64),
+                min: Nat::from(min_notional),
+                max: Some(Nat::from(max_notional)),
+            })
+        );
+
+        // 6 lots -> notional 6_000_000_000 > max: rejected.
+        assert_eq!(
+            client.add_limit_order(order(6)).await,
+            Err(AddLimitOrderError::InvalidNotional {
+                notional: Nat::from(6_000_000_000u64),
+                min: Nat::from(min_notional),
+                max: Some(Nat::from(max_notional)),
+            })
+        );
+
+        // 3 lots -> notional 3_000_000_000 within [min, max]: accepted once funded.
+        let required = 3_000_000_000u64;
+        let fee = QUOTE_LEDGER_FEE;
+        setup
+            .deposit_flow(setup.user(), setup.quote_token_id())
+            .mint(required + 2 * fee)
+            .approve(required + fee)
+            .deposit(required)
+            .execute()
+            .await;
+        client.add_limit_order(order(3)).await.unwrap();
+
+        setup.drop().await;
+    }
 }
 
 mod cancel_limit_order {
     use candid::{Nat, Principal};
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{PRICE_SCALE, Setup};
-    use dex_types::{
-        Balance, CancelLimitOrderError, CanceledOrderInfo, LimitOrderRequest, OrderRecord,
-        OrderStatus, Side,
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{
+        Balance, CancelLimitOrderError, LimitOrderRequest, OrderRecord, OrderStatus, Side,
     };
 
     #[tokio::test]
     async fn should_cancel_partially_filled_buy_and_refund_residual() {
         let setup = Setup::new().await.with_trading_pair().await;
         let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.dex_client_with_caller(buyer);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
-        let seller_client = setup.dex_client_with_caller(seller);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
 
         // Buyer wants 3M base @ 1000 → reserves 3000M quote.
         // Seller supplies only 1M base @ 1000 → fills 1M, 2M residual on buy.
@@ -333,7 +516,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 3_000_000u64.into(),
             })
             .await
@@ -343,7 +526,7 @@ mod cancel_limit_order {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 1_000_000u64.into(),
             })
             .await
@@ -351,10 +534,13 @@ mod cancel_limit_order {
         setup.env().tick().await;
 
         // Buyer: 1M base filled, 2000M quote still reserved for the 2M residual.
-        assert_eq!(
-            buyer_client.get_order_status(buy_id.clone()).await,
-            OrderStatus::Open
-        );
+        // Partially filled, resting Open with 1M of 3M filled.
+        let resting = buyer_client
+            .get_my_order(buy_id.clone())
+            .await
+            .expect("buyer owns the order");
+        assert_eq!(resting.order.status, OrderStatus::Open);
+        assert_eq!(resting.order.filled_quantity, Nat::from(1_000_000u64));
         assert_eq!(
             buyer_client
                 .get_balance(setup.quote_token_id())
@@ -376,35 +562,45 @@ mod cancel_limit_order {
             .cancel_limit_order(buy_id.clone())
             .await
             .unwrap();
-        // The record must carry the order's *submission* time, not the cancel
+        // `created_at` must carry the order's *submission* time, not the cancel
         // time (a tick ran in between), so pin it to the placement window.
         assert!(
-            before_placement <= canceled.timestamp && canceled.timestamp <= after_placement,
+            before_placement <= canceled.created_at && canceled.created_at <= after_placement,
             "submission timestamp {} should fall within the placement window [{before_placement}, {after_placement}]",
-            canceled.timestamp,
+            canceled.created_at,
         );
+        // Cancel stamps `last_updated_at`; it post-dates placement.
+        assert!(
+            canceled
+                .last_updated_at
+                .is_some_and(|t| t >= canceled.created_at),
+            "last_updated_at {:?} should be set at/after created_at {}",
+            canceled.last_updated_at,
+            canceled.created_at,
+        );
+        // The canceled record keeps its 1M filled; remaining (2M) is derived as
+        // quantity − filled_quantity. `Canceled` is a unit variant. The
+        // timestamps are checked in the windows above, so reuse them here.
         assert_eq!(
-            OrderRecord {
-                timestamp: 0,
-                ..canceled.clone()
-            },
+            canceled,
             OrderRecord {
                 owner: buyer,
                 side: Side::Buy,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(3_000_000u64),
-                status: OrderStatus::Canceled(CanceledOrderInfo {
-                    remaining_quantity: Nat::from(2_000_000u64),
-                }),
-                timestamp: 0,
+                filled_quantity: Nat::from(1_000_000u64),
+                status: OrderStatus::Canceled,
+                created_at: canceled.created_at,
+                last_updated_at: canceled.last_updated_at,
             }
         );
 
         assert_eq!(
-            buyer_client.get_order_status(buy_id).await,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Nat::from(2_000_000u64),
-            })
+            buyer_client
+                .get_my_order(buy_id)
+                .await
+                .map(|o| o.order.status),
+            Some(OrderStatus::Canceled)
         );
         assert_eq!(
             buyer_client
@@ -433,7 +629,7 @@ mod cancel_limit_order {
     #[tokio::test]
     async fn should_reject_cancel_of_unknown_order() {
         let setup = Setup::new().await.with_trading_pair().await;
-        let client = setup.dex_client();
+        let client = setup.oisy_trade_client();
 
         // Valid hex format but refers to a non-existent book/seq.
         assert_eq!(
@@ -457,11 +653,11 @@ mod cancel_limit_order {
 #[tokio::test]
 async fn should_return_empty_trading_pairs() {
     let setup = Setup::new().await;
-    let client = setup.dex_client();
+    let client = setup.oisy_trade_client();
     assert_eq!(client.get_trading_pairs().await, vec![]);
 
     let setup = setup.with_trading_pair().await;
-    let client = setup.dex_client();
+    let client = setup.oisy_trade_client();
 
     assert_eq!(
         client.get_trading_pairs().await,
@@ -480,8 +676,11 @@ async fn should_return_empty_trading_pairs() {
                     decimals: 8,
                 },
             },
-            tick_size: TICK_SIZE,
-            lot_size: LOT_SIZE,
+            status: TradingStatus::Trading,
+            tick_size: Nat::from(TICK_SIZE),
+            lot_size: Nat::from(LOT_SIZE),
+            min_notional: Nat::from(1u64),
+            max_notional: None,
         }]
     );
 
@@ -519,8 +718,8 @@ async fn should_deposit_and_track_balances() {
         ledger_id: setup.quote_ledger_id(),
     };
 
-    let dex_account = Account {
-        owner: setup.dex_id(),
+    let oisy_trade_account = Account {
+        owner: setup.oisy_trade_id(),
         subaccount: None,
     };
 
@@ -538,24 +737,24 @@ async fn should_deposit_and_track_balances() {
         .mint_quote_tokens(user2, Nat::from(20_000_000u64))
         .await;
 
-    // Approve DEX canister to spend on behalf of users
+    // Approve OISY TRADE canister to spend on behalf of users
     let base_ledger = setup.base_token_ledger();
     let quote_ledger = setup.quote_token_ledger();
     base_ledger
-        .icrc2_approve(user1, dex_account, Nat::from(5_000_000u64))
+        .icrc2_approve(user1, oisy_trade_account, Nat::from(5_000_000u64))
         .await;
     base_ledger
-        .icrc2_approve(user2, dex_account, Nat::from(5_000_000u64))
+        .icrc2_approve(user2, oisy_trade_account, Nat::from(5_000_000u64))
         .await;
     quote_ledger
-        .icrc2_approve(user1, dex_account, Nat::from(5_000_000u64))
+        .icrc2_approve(user1, oisy_trade_account, Nat::from(5_000_000u64))
         .await;
     quote_ledger
-        .icrc2_approve(user2, dex_account, Nat::from(5_000_000u64))
+        .icrc2_approve(user2, oisy_trade_account, Nat::from(5_000_000u64))
         .await;
 
-    let client1 = setup.dex_client_with_caller(user1);
-    let client2 = setup.dex_client_with_caller(user2);
+    let client1 = setup.oisy_trade_client_with_caller(user1);
+    let client2 = setup.oisy_trade_client_with_caller(user2);
 
     // Verify initial balances are zero
     assert_balances(&client1, &client2, &cksol, &ckbtc, 0, 0, 0, 0).await;
@@ -624,8 +823,8 @@ async fn test_deposit_failure(case: DepositFailureCase) {
     let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
-    let dex_account = Account {
-        owner: setup.dex_id(),
+    let oisy_trade_account = Account {
+        owner: setup.oisy_trade_id(),
         subaccount: None,
     };
     let fee = setup.base_token_ledger().icrc1_fee().await;
@@ -635,11 +834,11 @@ async fn test_deposit_failure(case: DepositFailureCase) {
         .await;
     setup
         .base_token_ledger()
-        .icrc2_approve(user, dex_account, Nat::from(case.approve_amount))
+        .icrc2_approve(user, oisy_trade_account, Nat::from(case.approve_amount))
         .await;
 
     let result = setup
-        .dex_client_with_caller(user)
+        .oisy_trade_client_with_caller(user)
         .deposit(DepositRequest {
             token_id: cksol,
             amount: Nat::from(case.deposit_amount),
@@ -688,11 +887,11 @@ async fn should_fail_deposit_with_unsupported_token() {
 
     let user = Principal::from_slice(&[0x05]);
     let fake_token = TokenId {
-        ledger_id: setup.dex_id(),
+        ledger_id: setup.oisy_trade_id(),
     };
 
     let result = setup
-        .dex_client_with_caller(user)
+        .oisy_trade_client_with_caller(user)
         .deposit(DepositRequest {
             token_id: fake_token.clone(),
             amount: Nat::from(1_000_000u64),
@@ -725,7 +924,7 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
         .expect("Failed to stop canister");
 
     let result = setup
-        .dex_client_with_caller(user)
+        .oisy_trade_client_with_caller(user)
         .deposit(DepositRequest {
             token_id: TokenId { ledger_id },
             amount: Nat::from(1_000_000u64),
@@ -743,9 +942,9 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
 #[tokio::test]
 async fn should_fail_add_trading_pair() {
     let setup = Setup::new().await;
-    let controller_client = setup.dex_client_with_caller(setup.controller());
+    let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
     let user = Principal::from_slice(&[0x01]);
-    let user_client = setup.dex_client_with_caller(user);
+    let user_client = setup.oisy_trade_client_with_caller(user);
 
     // not controller
     let result = user_client
@@ -782,7 +981,7 @@ async fn should_fail_add_trading_pair() {
     // zero tick size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            tick_size: 0,
+            tick_size: Nat::from(0u64),
             ..setup.add_trading_pair_request()
         })
         .await;
@@ -791,7 +990,7 @@ async fn should_fail_add_trading_pair() {
     // zero lot size
     let result = controller_client
         .add_trading_pair(AddTradingPairRequest {
-            lot_size: 0,
+            lot_size: Nat::from(0u64),
             ..setup.add_trading_pair_request()
         })
         .await;
@@ -813,7 +1012,7 @@ async fn should_fail_add_trading_pair() {
 
 #[tokio::test]
 async fn should_replay_events_on_upgrade() {
-    use dex_types_internal::event::EventType;
+    use oisy_trade_types_internal::event::EventType;
 
     /// Asserts that the values produced by each `$observe` expression are unchanged after
     /// a single canister upgrade. Accepts one or more expressions separated by commas.
@@ -828,26 +1027,41 @@ async fn should_replay_events_on_upgrade() {
 
     // 1) Init -> Upgrade -> no trading pairs
     let setup = Setup::new().await;
-    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
+    assert_preserved_after_upgrade!(setup, setup.oisy_trade_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 1);
         assert_matches!(&events[0], EventType::Init(_));
     });
 
     // 2) Add trading pair -> Upgrade -> trading pair preserved
-    setup.add_trading_pair().await;
-    assert_preserved_after_upgrade!(setup, setup.dex_client().get_trading_pairs());
+    let request = AddTradingPairRequest {
+        maker_fee_bps: 10,
+        taker_fee_bps: 23,
+        ..setup.add_trading_pair_request()
+    };
+    let maker_fee_bps = request.maker_fee_bps;
+    let taker_fee_bps = request.taker_fee_bps;
+    let result = setup
+        .oisy_trade_client_with_caller(setup.controller())
+        .add_trading_pair(request)
+        .await;
+    assert_eq!(result, Ok(()));
+    assert_preserved_after_upgrade!(setup, setup.oisy_trade_client().get_trading_pairs());
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 2);
         assert_matches!(&events[1], EventType::AddTradingPair(e) => {
-            assert_eq!(*e, dex_types_internal::event::AddTradingPairEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::AddTradingPairEvent {
                 book_id: 0,
                 base: setup.base_token_id(),
                 quote: setup.quote_token_id(),
-                tick_size: TICK_SIZE,
-                lot_size: LOT_SIZE,
+                tick_size: Nat::from(TICK_SIZE),
+                lot_size: Nat::from(LOT_SIZE),
                 base_metadata: TokenMetadata { symbol: "ckSOL".to_string(), decimals: 9 },
                 quote_metadata: TokenMetadata { symbol: "ckBTC".to_string(), decimals: 8 },
+                maker_fee_bps,
+                taker_fee_bps,
+                min_notional: Nat::from(1u64),
+                max_notional: None,
             });
         });
     });
@@ -861,11 +1075,14 @@ async fn should_replay_events_on_upgrade() {
         .deposit(deposit_amount)
         .execute()
         .await;
-    assert_preserved_after_upgrade!(setup, setup.dex_client().get_balance(setup.base_token_id()));
+    assert_preserved_after_upgrade!(
+        setup,
+        setup.oisy_trade_client().get_balance(setup.base_token_id())
+    );
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 3);
         assert_matches!(&events[2], EventType::Deposit(e) => {
-            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::DepositEvent {
                 user: setup.user(),
                 token: setup.base_token_id(),
                 amount: Nat::from(deposit_amount),
@@ -876,11 +1093,11 @@ async fn should_replay_events_on_upgrade() {
     // 4) AddLimitOrder -> Upgrade -> order status and reserved balance preserved
     // Reuse the base token deposit from step 3 to place a sell order.
     let order_id = setup
-        .dex_client()
-        .add_limit_order(dex_types::LimitOrderRequest {
+        .oisy_trade_client()
+        .add_limit_order(oisy_trade_types::LimitOrderRequest {
             pair: setup.trading_pair(),
-            side: dex_types::Side::Sell,
-            price: 10_000 * PRICE_SCALE,
+            side: oisy_trade_types::Side::Sell,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -892,8 +1109,8 @@ async fn should_replay_events_on_upgrade() {
     setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
-        setup.dex_client().get_order_status(order_id.clone()),
-        setup.dex_client().get_balance(setup.base_token_id()),
+        setup.oisy_trade_client().get_my_order(order_id.clone()),
+        setup.oisy_trade_client().get_balance(setup.base_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
         // Init + AddTradingPair + Deposit + AddLimitOrder + Matching.
@@ -902,16 +1119,16 @@ async fn should_replay_events_on_upgrade() {
         // (no balance ops, so no `Settling` event is emitted).
         assert_eq!(events.len(), 5);
         assert_matches!(&events[3], EventType::AddLimitOrder(e) => {
-            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::AddLimitOrderEvent {
                 user: setup.user(),
-                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 0 },
-                side: dex_types::Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                order_id: oisy_trade_types_internal::event::OrderId { book_id: 0, seq: 0 },
+                side: oisy_trade_types::Side::Sell,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
             });
         });
         assert_matches!(&events[4], EventType::Matching(e) => {
-            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::MatchingEvent {
                 book_id: 0,
                 orders: vec![0],
             });
@@ -934,11 +1151,11 @@ async fn should_replay_events_on_upgrade() {
         .execute()
         .await;
     let buy_order_id = setup
-        .dex_client_with_caller(buyer)
-        .add_limit_order(dex_types::LimitOrderRequest {
+        .oisy_trade_client_with_caller(buyer)
+        .add_limit_order(oisy_trade_types::LimitOrderRequest {
             pair: setup.trading_pair(),
-            side: dex_types::Side::Buy,
-            price,
+            side: oisy_trade_types::Side::Buy,
+            price: Nat::from(price),
             quantity: Nat::from(deposit_amount),
         })
         .await
@@ -948,15 +1165,19 @@ async fn should_replay_events_on_upgrade() {
     setup.env().tick().await;
     assert_preserved_after_upgrade!(
         setup,
-        setup.dex_client().get_order_status(order_id.clone()),
-        setup.dex_client().get_order_status(buy_order_id.clone()),
-        setup.dex_client().get_balance(setup.base_token_id()),
-        setup.dex_client().get_balance(setup.quote_token_id()),
+        setup.oisy_trade_client().get_my_order(order_id.clone()),
         setup
-            .dex_client_with_caller(buyer)
+            .oisy_trade_client_with_caller(buyer)
+            .get_my_order(buy_order_id.clone()),
+        setup.oisy_trade_client().get_balance(setup.base_token_id()),
+        setup
+            .oisy_trade_client()
+            .get_balance(setup.quote_token_id()),
+        setup
+            .oisy_trade_client_with_caller(buyer)
             .get_balance(setup.base_token_id()),
         setup
-            .dex_client_with_caller(buyer)
+            .oisy_trade_client_with_caller(buyer)
             .get_balance(setup.quote_token_id()),
     );
     setup.assert_that_events().await.satisfy(|events| {
@@ -964,44 +1185,44 @@ async fn should_replay_events_on_upgrade() {
         // + Matching + Settling.
         assert_eq!(events.len(), 9);
         assert_matches!(&events[5], EventType::Deposit(e) => {
-            assert_eq!(*e, dex_types_internal::event::DepositEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::DepositEvent {
                 user: buyer,
                 token: setup.quote_token_id(),
                 amount: Nat::from(quote_reserved),
             });
         });
         assert_matches!(&events[6], EventType::AddLimitOrder(e) => {
-            assert_eq!(*e, dex_types_internal::event::AddLimitOrderEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::AddLimitOrderEvent {
                 user: buyer,
-                order_id: dex_types_internal::event::OrderId { book_id: 0, seq: 1 },
-                side: dex_types::Side::Buy,
-                price,
+                order_id: oisy_trade_types_internal::event::OrderId { book_id: 0, seq: 1 },
+                side: oisy_trade_types::Side::Buy,
+                price: Nat::from(price),
                 quantity: Nat::from(deposit_amount),
             });
         });
         assert_matches!(&events[7], EventType::Matching(e) => {
-            assert_eq!(*e, dex_types_internal::event::MatchingEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::MatchingEvent {
                 book_id: 0,
                 orders: vec![1],
             });
         });
         assert_matches!(&events[8], EventType::Settling(e) => {
-            assert_eq!(*e, dex_types_internal::event::SettlingEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::SettlingEvent {
                 book_id: 0,
                 balance_operations: vec![
-                    dex_types_internal::event::BalanceOperation::Transfer {
+                    oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 1, // buyer seq
                         to_order: 0,   // seller seq
-                        token: dex_types_internal::event::PairToken::Quote,
+                        token: oisy_trade_types_internal::event::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
-                        fee: None,
+                        fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
-                    dex_types_internal::event::BalanceOperation::Transfer {
+                    oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
-                        token: dex_types_internal::event::PairToken::Base,
+                        token: oisy_trade_types_internal::event::PairToken::Base,
                         amount: Nat::from(deposit_amount),
-                        fee: None,
+                        fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
             });
@@ -1013,11 +1234,11 @@ async fn should_replay_events_on_upgrade() {
 
 #[tokio::test]
 async fn should_withdraw_and_receive_tokens_on_ledger() {
-    use dex_types_internal::event::EventType;
+    use oisy_trade_types_internal::event::EventType;
 
     let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x01]);
-    let client = setup.dex_client_with_caller(user);
+    let client = setup.oisy_trade_client_with_caller(user);
     let cksol = TokenId {
         ledger_id: setup.base_ledger_id(),
     };
@@ -1049,7 +1270,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     let expected_block_index =
         u64::try_from(&response.block_index.0).expect("ledger block_index fits in u64");
 
-    // DEX balance decreased by the full withdraw amount
+    // OISY TRADE balance decreased by the full withdraw amount
     assert_eq!(
         client.get_balance(cksol.clone()).await.unwrap(),
         expected_balance(deposit_amount - withdraw_amount)
@@ -1067,7 +1288,7 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
             .find(|e| matches!(e, EventType::Withdraw(_)))
             .expect("expected a Withdraw event in the log");
         assert_matches!(withdraw, EventType::Withdraw(e) => {
-            assert_eq!(*e, dex_types_internal::event::WithdrawEvent {
+            assert_eq!(*e, oisy_trade_types_internal::event::WithdrawEvent {
                 block_index: expected_block_index,
                 user,
                 token: cksol.clone(),
@@ -1091,7 +1312,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             ledger_id: Principal::from_slice(&[0xFF]),
         };
         let result = setup
-            .dex_client_with_caller(Principal::from_slice(&[0x0F]))
+            .oisy_trade_client_with_caller(Principal::from_slice(&[0x0F]))
             .withdraw(WithdrawRequest {
                 token_id: unknown_token.clone(),
                 amount: Nat::from(1_000_000u64),
@@ -1109,7 +1330,7 @@ async fn should_fail_withdraw_on_negative_cases() {
     // --- Zero balance: withdraw should fail with InsufficientBalance ---
     {
         let user = Principal::from_slice(&[0x10]);
-        let client = setup.dex_client_with_caller(user);
+        let client = setup.oisy_trade_client_with_caller(user);
 
         // Withdraw an amount larger than the fee so the AmountTooSmall check passes,
         // and the balance check is reached.
@@ -1131,7 +1352,7 @@ async fn should_fail_withdraw_on_negative_cases() {
     // --- Insufficient balance: withdraw more than deposited ---
     {
         let user = Principal::from_slice(&[0x11]);
-        let client = setup.dex_client_with_caller(user);
+        let client = setup.oisy_trade_client_with_caller(user);
 
         let deposit_amount = 1_000_000u64;
         setup
@@ -1165,7 +1386,7 @@ async fn should_fail_withdraw_on_negative_cases() {
     // --- Amount too small: withdraw exactly the fee ---
     {
         let user = Principal::from_slice(&[0x12]);
-        let client = setup.dex_client_with_caller(user);
+        let client = setup.oisy_trade_client_with_caller(user);
 
         let deposit_amount = fee.clone();
         setup
@@ -1194,7 +1415,7 @@ async fn should_fail_withdraw_on_negative_cases() {
     // --- Reserved balance: all funds locked in an open order ---
     {
         let user = Principal::from_slice(&[0x13]);
-        let client = setup.dex_client_with_caller(user);
+        let client = setup.oisy_trade_client_with_caller(user);
 
         let deposit_amount = 1_000_000u64;
         setup
@@ -1209,7 +1430,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price: 10_000 * PRICE_SCALE,
+                price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
             })
             .await
@@ -1266,7 +1487,7 @@ async fn should_fail_withdraw_on_negative_cases() {
             .expect("Failed to stop canister");
 
         let result = setup
-            .dex_client_with_caller(user)
+            .oisy_trade_client_with_caller(user)
             .withdraw(WithdrawRequest {
                 token_id: cksol.clone(),
                 amount: Nat::from(500_000u64),
@@ -1280,7 +1501,7 @@ async fn should_fail_withdraw_on_negative_cases() {
 
         assert_eq!(
             setup
-                .dex_client_with_caller(user)
+                .oisy_trade_client_with_caller(user)
                 .get_balance(cksol)
                 .await
                 .unwrap(),
@@ -1297,7 +1518,10 @@ async fn should_get_events() {
 
     setup.assert_that_events().await.satisfy(|events| {
         assert_eq!(events.len(), 1);
-        assert_matches!(events[0], dex_types_internal::event::EventType::Init(_));
+        assert_matches!(
+            events[0],
+            oisy_trade_types_internal::event::EventType::Init(_)
+        );
     });
 
     setup.drop().await;
@@ -1321,9 +1545,12 @@ async fn should_get_dashboard() {
 
     let body = setup.fetch_dashboard().await;
 
-    assert!(body.contains("DEX Dashboard"), "missing title in: {body}");
     assert!(
-        body.contains(&setup.dex_id().to_string()),
+        body.contains("OISY TRADE Dashboard"),
+        "missing title in: {body}"
+    );
+    assert!(
+        body.contains(&setup.oisy_trade_id().to_string()),
         "missing canister id in: {body}",
     );
     assert!(
@@ -1352,9 +1579,9 @@ async fn should_get_dashboard() {
 
 mod order_book {
     use candid::{Nat, Principal};
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_int_tests::{PRICE_SCALE, Setup};
-    use dex_types::{
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{
         GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
         Side,
     };
@@ -1384,7 +1611,7 @@ mod order_book {
         setup.env().tick().await;
 
         let pair = setup.trading_pair();
-        let client = setup.dex_client();
+        let client = setup.oisy_trade_client();
 
         assert_eq!(
             client.get_order_book_ticker(pair).await,
@@ -1428,11 +1655,11 @@ mod order_book {
             .execute()
             .await;
         setup
-            .dex_client_with_caller(user)
+            .oisy_trade_client_with_caller(user)
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Buy,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -1449,11 +1676,11 @@ mod order_book {
             .execute()
             .await;
         setup
-            .dex_client_with_caller(user)
+            .oisy_trade_client_with_caller(user)
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
                 side: Side::Sell,
-                price,
+                price: Nat::from(price),
                 quantity: Nat::from(quantity),
             })
             .await
@@ -1462,7 +1689,7 @@ mod order_book {
 
     fn level(price: u64, quantity: u64) -> PriceLevel {
         PriceLevel {
-            price,
+            price: Nat::from(price),
             quantity: Nat::from(quantity),
         }
     }
@@ -1470,10 +1697,10 @@ mod order_book {
 
 mod chunked_matching {
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
-    use dex_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
-    use dex_types::{GetOrderBookDepthRequest, LimitOrderRequest, Side};
-    use dex_types_internal::{InitArg, Mode};
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use oisy_trade_types::{GetOrderBookDepthRequest, LimitOrderRequest, Side};
+    use oisy_trade_types_internal::{InitArg, Mode};
 
     const MAX_ORDERS_PER_CHUNK: u32 = 5;
     const N_ORDERS: u32 = MAX_ORDERS_PER_CHUNK + 1; // forces ≥ 2 chunks
@@ -1528,7 +1755,7 @@ mod chunked_matching {
         assert_eq!(depth_quantity(&setup).await, Nat::from(0u64));
 
         setup
-            .upgrade(Some(dex_types_internal::UpgradeArg {
+            .upgrade(Some(oisy_trade_types_internal::UpgradeArg {
                 mode: None,
                 max_orders_per_chunk: None,
                 instruction_budget: Some(1_000_000_000),
@@ -1582,13 +1809,13 @@ mod chunked_matching {
             .execute()
             .await;
 
-        let client = setup.dex_client_with_caller(user);
+        let client = setup.oisy_trade_client_with_caller(user);
         for _ in 0..N_ORDERS {
             client
                 .add_limit_order(LimitOrderRequest {
                     pair,
                     side: Side::Buy,
-                    price: PRICE,
+                    price: Nat::from(PRICE),
                     quantity: Nat::from(QUANTITY),
                 })
                 .await
@@ -1598,7 +1825,7 @@ mod chunked_matching {
 
     async fn depth_quantity(setup: &Setup) -> Nat {
         setup
-            .dex_client()
+            .oisy_trade_client()
             .get_order_book_depth(GetOrderBookDepthRequest {
                 trading_pair: setup.trading_pair(),
                 limit: None,
@@ -1635,7 +1862,7 @@ mod chunked_matching {
             .filter(|event| {
                 matches!(
                     event.payload,
-                    dex_types_internal::event::EventType::Matching(_),
+                    oisy_trade_types_internal::event::EventType::Matching(_),
                 )
             })
             .count();
@@ -1670,11 +1897,11 @@ async fn should_expose_metrics() {
         .execute()
         .await;
     setup
-        .dex_client()
+        .oisy_trade_client()
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price: 10_000 * PRICE_SCALE,
+            price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1687,11 +1914,11 @@ async fn should_expose_metrics() {
         .execute()
         .await;
     setup
-        .dex_client()
+        .oisy_trade_client()
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price: 20_000 * PRICE_SCALE,
+            price: Nat::from(20_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
         })
         .await
@@ -1741,8 +1968,8 @@ async fn should_expose_fee_balance_metric() {
 
 mod get_fee_balances {
     use candid::Nat;
-    use dex_int_tests::fill_one_cross_with_fees;
-    use dex_types::{Balance, FilterToken, UserTokenBalance};
+    use oisy_trade_int_tests::fill_one_cross_with_fees;
+    use oisy_trade_types::{Balance, FilterToken, UserTokenBalance};
 
     /// Stand up a trading pair with non-zero maker/taker fees and run one
     /// cross so both sides accrue into the canister-owned fee pool. Asserts
@@ -1751,11 +1978,15 @@ mod get_fee_balances {
     async fn should_report_accrued_fees_after_a_fill() {
         let (fills, setup) = fill_one_cross_with_fees().await;
 
-        let no_filter = setup.dex_client().get_fee_balances(None).await.unwrap();
+        let no_filter = setup
+            .oisy_trade_client()
+            .get_fee_balances(None)
+            .await
+            .unwrap();
         assert_eq!(no_filter.len(), 2);
 
         let with_filter = setup
-            .dex_client()
+            .oisy_trade_client()
             .get_fee_balances(Some(vec![
                 FilterToken::ById(fills.base.id.clone()),
                 FilterToken::ById(fills.quote.id.clone()),
@@ -1787,16 +2018,22 @@ mod get_fee_balances {
 }
 
 mod list_supported_tokens {
-    use dex_int_tests::Setup;
+    use oisy_trade_int_tests::Setup;
 
     #[tokio::test]
     async fn should_return_empty_then_pair_tokens() {
         let setup = Setup::new().await;
-        assert!(setup.dex_client().list_supported_tokens().await.is_empty());
+        assert!(
+            setup
+                .oisy_trade_client()
+                .list_supported_tokens()
+                .await
+                .is_empty()
+        );
 
         let setup = setup.with_trading_pair().await;
         let request = setup.add_trading_pair_request();
-        let tokens = setup.dex_client().list_supported_tokens().await;
+        let tokens = setup.oisy_trade_client().list_supported_tokens().await;
         assert_eq!(tokens.len(), 2);
         assert!(tokens.contains(&request.base));
         assert!(tokens.contains(&request.quote));
@@ -1807,14 +2044,14 @@ mod list_supported_tokens {
 
 mod get_balances {
     use candid::{Nat, Principal};
-    use dex_int_tests::Setup;
-    use dex_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use dex_types::{FilterToken, GetBalancesError, TokenId};
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_types::{FilterToken, GetBalancesError, TokenId};
 
     #[tokio::test]
     async fn should_return_empty_without_filter_for_fresh_user() {
         let setup = Setup::new().await.with_trading_pair().await;
-        let result = setup.dex_client().get_balances(None).await.unwrap();
+        let result = setup.oisy_trade_client().get_balances(None).await.unwrap();
         assert!(result.is_empty());
         setup.drop().await;
     }
@@ -1833,7 +2070,7 @@ mod get_balances {
             .await;
 
         let result = setup
-            .dex_client()
+            .oisy_trade_client()
             .get_balances(Some(vec![FilterToken::ById(token.clone())]))
             .await
             .unwrap();
@@ -1853,7 +2090,7 @@ mod get_balances {
         };
 
         let result = setup
-            .dex_client()
+            .oisy_trade_client()
             .get_balances(Some(vec![FilterToken::ById(unknown.clone())]))
             .await
             .unwrap();
@@ -1888,20 +2125,397 @@ mod get_balances {
             .execute()
             .await;
 
-        let supported = setup.dex_client().list_supported_tokens().await;
+        let supported = setup.oisy_trade_client().list_supported_tokens().await;
         let full_filter: Vec<FilterToken> = supported
             .iter()
             .map(|t| FilterToken::ById(t.id.clone()))
             .collect();
 
-        let no_filter = setup.dex_client().get_balances(None).await.unwrap();
+        let no_filter = setup.oisy_trade_client().get_balances(None).await.unwrap();
         let with_full_filter = setup
-            .dex_client()
+            .oisy_trade_client()
             .get_balances(Some(full_filter))
             .await
             .unwrap();
 
         assert_eq!(no_filter, with_full_filter);
+
+        setup.drop().await;
+    }
+}
+
+mod global_halt {
+    use assert_matches::assert_matches;
+    use candid::{Nat, Principal};
+    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{
+        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingStatus,
+        UnauthorizedError, WithdrawRequest,
+    };
+
+    /// End-to-end global-halt lifecycle on a crossable buy/sell pair placed
+    /// before the halt:
+    ///
+    /// 1. buyer and seller each fund and place one resting order that crosses;
+    /// 2. trading halts;
+    /// 3. the orders keep the exact status they had before the halt (no
+    ///    transition is driven while halted);
+    /// 4. balances stay fully reserved — no partial fill slips through;
+    /// 5. `resume_trading` re-arms matching from the endpoint, so the cross
+    ///    fills without advancing time past the periodic matching interval and
+    ///    without placing a new order.
+    #[tokio::test]
+    async fn should_freeze_orders_under_halt_then_fill_them_on_resume() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+
+        // 10_000 ckBTC per whole ckSOL (10_000 * PRICE_SCALE), 1M base units.
+        // Reserve = price * quantity / 10^9 = 1_000_000_000 quote units.
+        let price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+        let required_quote = 1_000_000_000u64;
+        let required_base = quantity;
+
+        // Buyer places a buy, seller a crossing sell, while trading is active.
+        // No tick runs in between, so neither placement kickoff has matched yet.
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote + QUOTE_LEDGER_FEE)
+            .deposit(required_quote)
+            .execute()
+            .await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(required_base + 2 * BASE_LEDGER_FEE)
+            .approve(required_base + BASE_LEDGER_FEE)
+            .deposit(required_base)
+            .execute()
+            .await;
+        let sell_id = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .unwrap();
+
+        // Before the halt the pair reports as trading.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading before the halt"
+        );
+
+        // Halt right after placement — before any round runs the placement
+        // kickoffs — so the cross stays unmatched under the halt.
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+
+        // The halt is reflected on the pair's trading status.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Halted,
+            "pair must report Halted while halted"
+        );
+
+        // The orders are open or pending under the halt; capture that status as
+        // the baseline and require it to be preserved across the matching ticks
+        // below.
+        let buy_status_under_halt = buyer_client
+            .get_my_order(buy_id.clone())
+            .await
+            .unwrap()
+            .order
+            .status;
+        let sell_status_under_halt = seller_client
+            .get_my_order(sell_id.clone())
+            .await
+            .unwrap()
+            .order
+            .status;
+        assert_matches!(
+            buy_status_under_halt,
+            OrderStatus::Open | OrderStatus::Pending
+        );
+        assert_matches!(
+            sell_status_under_halt,
+            OrderStatus::Open | OrderStatus::Pending
+        );
+
+        // Advance past the matching interval and tick: matching must make no
+        // progress.
+        setup
+            .env()
+            .advance_time(std::time::Duration::from_secs(120))
+            .await;
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+
+        // The orders keep the exact status they had when the halt took effect.
+        assert_eq!(
+            buyer_client
+                .get_my_order(buy_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            buy_status_under_halt,
+            "buy status must be unchanged while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_my_order(sell_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            sell_status_under_halt,
+            "sell status must be unchanged while halted"
+        );
+        // `OrderStatus` cannot express a partial fill, so pin the exact
+        // balances too: every committed token is still fully reserved and no
+        // fill proceeds have been credited.
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_quote.into()
+            },
+            "buy's quote stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "buyer received no base (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: required_base.into()
+            },
+            "sell's base stays fully reserved (no partial fill) while halted"
+        );
+        assert_eq!(
+            seller_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 0u64.into()
+            },
+            "seller received no quote (no partial fill) while halted"
+        );
+
+        // Resume and tick WITHOUT advancing time and WITHOUT placing a new
+        // order: the resume kickoff alone re-arms matching and drives the fill.
+        assert_eq!(controller_client.resume_trading().await, Ok(()));
+
+        // The resume is reflected on the pair's trading status.
+        assert_eq!(
+            setup.pair_status(setup.trading_pair()).await,
+            TradingStatus::Trading,
+            "pair must report Trading again after resume"
+        );
+        for _ in 0..3 {
+            setup.env().tick().await;
+        }
+        assert_eq!(
+            buyer_client
+                .get_my_order(buy_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "buy fills from the resume kickoff"
+        );
+        assert_eq!(
+            seller_client
+                .get_my_order(sell_id)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled,
+            "sell fills from the resume kickoff"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required_base.into(),
+                reserved: 0u64.into()
+            },
+        );
+
+        setup.drop().await;
+    }
+
+    /// While trading is globally halted, the halt itself blocks only new
+    /// orders: `add_limit_order` is rejected with `TradingHalted`, but a
+    /// resting order placed pre-halt still cancels and a withdrawal of
+    /// available balance still succeeds.
+    #[tokio::test]
+    async fn should_block_new_orders_but_allow_cancel_and_withdraw_under_halt() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        // Fund the user with enough quote to place a resting buy order and keep
+        // a free balance to withdraw.
+        let price = 1000u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        let free_to_withdraw = 10_000_000u64;
+        let deposit_amount = order_cost + free_to_withdraw;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(deposit_amount + 2 * QUOTE_LEDGER_FEE)
+            .approve(deposit_amount + QUOTE_LEDGER_FEE)
+            .deposit(deposit_amount)
+            .execute()
+            .await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        };
+
+        // Place a resting buy order before the halt.
+        let resting_id = client.add_limit_order(order.clone()).await.unwrap();
+        setup.env().tick().await;
+        assert_eq!(
+            client
+                .get_my_order(resting_id.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open
+        );
+
+        // Halt trading.
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+
+        // New orders are rejected.
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::TradingHalted)
+        );
+
+        // The resting order can still be canceled.
+        let canceled = client.cancel_limit_order(resting_id.clone()).await.unwrap();
+        assert_matches!(canceled.status, OrderStatus::Canceled);
+
+        // A withdrawal of available balance still succeeds.
+        client
+            .withdraw(WithdrawRequest {
+                token_id: quote.clone(),
+                amount: Nat::from(free_to_withdraw),
+            })
+            .await
+            .expect("withdrawal should succeed under global halt");
+
+        setup.drop().await;
+    }
+
+    /// `halt_trading` and `resume_trading` reject non-controller callers with
+    /// `NotController`.
+    #[tokio::test]
+    async fn should_reject_non_controller_callers() {
+        let setup = Setup::new().await;
+        let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
+
+        assert_eq!(
+            user_client.halt_trading().await,
+            Err(UnauthorizedError::NotController)
+        );
+        assert_eq!(
+            user_client.resume_trading().await,
+            Err(UnauthorizedError::NotController)
+        );
+
+        setup.drop().await;
+    }
+
+    /// The global-halt flag is part of the upgrade snapshot: after halting and
+    /// upgrading, new orders remain rejected until trading is resumed.
+    #[tokio::test]
+    async fn should_preserve_halt_state_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let user = setup.user();
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+        let quote = setup.quote_token_id();
+
+        let price = 1000u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        setup
+            .deposit_flow(user, quote.clone())
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        setup.upgrade(None).await;
+
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        };
+        assert_eq!(
+            client.add_limit_order(order.clone()).await,
+            Err(AddLimitOrderError::TradingHalted),
+            "halt must survive the upgrade"
+        );
+
+        assert_eq!(controller_client.resume_trading().await, Ok(()));
+        client
+            .add_limit_order(order)
+            .await
+            .expect("orders accepted after resume");
 
         setup.drop().await;
     }

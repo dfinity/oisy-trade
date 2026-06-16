@@ -5,8 +5,8 @@ use crate::order::{OrderBook, Price, Quantity};
 use crate::state::State;
 use askama::Template;
 use candid::Principal;
-use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::Mode;
 
 const DEPTH_LEVELS: usize = 20;
 
@@ -30,7 +30,7 @@ pub struct DashboardPair {
     pub book_id: u64,
     pub base_symbol: String,
     pub quote_symbol: String,
-    pub tick_size: u64,
+    pub tick_size: u128,
     pub lot_size: u64,
     pub bids_len: usize,
     pub asks_len: usize,
@@ -38,12 +38,12 @@ pub struct DashboardPair {
     pub resting_orders_len: usize,
     pub best_bid: Option<DashboardLevel>,
     pub best_ask: Option<DashboardLevel>,
-    pub spread: Option<u64>,
+    pub spread: Option<u128>,
     pub depth: DashboardDepth,
 }
 
 pub struct DashboardLevel {
-    pub price: u64,
+    pub price: u128,
     pub quantity: String,
 }
 
@@ -59,7 +59,7 @@ impl DashboardDepth {
 }
 
 pub struct DashboardDepthLevel {
-    pub price: u64,
+    pub price: u128,
     pub quantity: String,
     pub bar_width_percent: u8,
 }

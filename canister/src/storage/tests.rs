@@ -1,6 +1,6 @@
 use super::state_snapshot;
 use crate::state::StateSnapshot;
-use dex_types_internal::Mode;
+use oisy_trade_types_internal::Mode;
 
 fn empty_snapshot() -> StateSnapshot {
     StateSnapshot {
@@ -14,6 +14,7 @@ fn empty_snapshot() -> StateSnapshot {
         max_orders_per_chunk: None,
         instruction_budget: None,
         fee_pool: None,
+        permissions: None,
     }
 }
 

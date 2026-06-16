@@ -2,10 +2,12 @@ pub mod audit;
 pub mod event;
 pub mod execution_policy;
 mod map;
+pub mod permissions;
 pub mod snapshot;
 
 pub use execution_policy::ExecutionPolicy;
 pub use map::TradingPairMap;
+pub use permissions::Permissions;
 pub use snapshot::StateSnapshot;
 
 #[cfg(test)]
@@ -16,15 +18,15 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CanceledOrderInfo, FeeRates, LotSize, MatchOrderError, MatchingOutput, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+    self, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PairToken,
     PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
-use dex_types_internal::{InitArg, Mode};
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::{InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
@@ -93,6 +95,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// operations. Entries live only for the duration of a single async
     /// request and are reset on upgrade.
     in_flight_user_ops: BTreeSet<(Principal, TokenId)>,
+    permissions: Permissions,
 }
 
 impl<MH: Memory, MB: Memory> State<MH, MB> {
@@ -118,6 +121,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
             in_flight_user_ops: BTreeSet::default(),
+            permissions: Permissions::default(),
         })
     }
 
@@ -131,6 +135,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn set_execution_policy(&mut self, policy: ExecutionPolicy) {
         self.execution_policy = policy;
+    }
+
+    pub fn permissions(&self) -> &Permissions {
+        &self.permissions
+    }
+
+    pub fn permissions_mut(&mut self) -> &mut Permissions {
+        &mut self.permissions
     }
 
     pub fn assert_caller_is_allowed(&self, runtime: &impl Runtime) {
@@ -173,6 +185,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .price
             .checked_mul_quantity_scaled(&pending.quantity, self.base_scale(&pair.base))
             .ok_or(AddLimitOrderError::AmountExceedsMaximum)?;
+
+        book.check_notional(&amount)
+            .map_err(|NotionalError { notional, min, max }| {
+                AddLimitOrderError::InvalidNotional { notional, min, max }
+            })?;
 
         let (token, required) = match pending.side {
             Side::Buy => (pair.quote, amount),
@@ -247,8 +264,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     side: order.side(),
                     price: order.price(),
                     quantity: *order.remaining_quantity(),
+                    filled_quantity: Quantity::ZERO,
                     status: OrderStatus::Pending,
-                    timestamp,
+                    created_at: timestamp,
+                    last_updated_at: None,
                 },
             );
         }
@@ -263,19 +282,33 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.validate_cancel_limit_order(user, &order_id)?;
 
+        let permit = self
+            .permissions()
+            .permit_cancel()
+            .expect("BUG: cancel is never gated in this build");
         audit::process_event(
             self,
             event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            permit.into(),
             runtime,
         );
 
-        // TODO(DEFI-2743): once PR #89's chunked execution lets matching
+        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
         // leave settling events queued across messages, draining the whole
         // queue here lets an unrelated cancel apply balance ops from a
         // previous matching round and inherit its instruction debt. Pop
         // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
-            audit::process_event(self, event::EventType::Settling(event), runtime);
+            let permit = self
+                .permissions()
+                .permit_settling()
+                .expect("BUG: settling is never gated in this build");
+            audit::process_event(
+                self,
+                event::EventType::Settling(event),
+                permit.into(),
+                runtime,
+            );
         }
 
         let order = self
@@ -283,7 +316,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get(&order_id)
             .unwrap_or_else(|| panic!("BUG: order {order_id} not found after validation"));
         assert!(
-            matches!(order.status, OrderStatus::Canceled(_)),
+            matches!(order.status, OrderStatus::Canceled),
             "BUG: order {order_id} not canceled"
         );
         Ok(order)
@@ -304,13 +337,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
             OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled(_) => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
         }
     }
 
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         let (book_id, seq) = order_id.into_parts();
@@ -336,9 +370,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Sell => (PairToken::Base, remaining_quantity),
         };
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.set_status(
+            self.order_history.apply_update(
                 &order_id,
-                OrderStatus::Canceled(CanceledOrderInfo { remaining_quantity }),
+                OrderUpdate::status(OrderStatus::Canceled),
+                now,
             );
         }
         self.pending_settling_events
@@ -361,6 +396,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
+        now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         #[cfg(feature = "canbench-rs")]
@@ -375,9 +411,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if matches!(persistence, StableMemoryOptions::Write) {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("status");
-            for transition in compute_order_status_transitions(&output) {
-                let order_id = OrderId::new(event.book_id, transition.seq);
-                self.order_history.set_status(&order_id, transition.status);
+            // Fold the batch into one update per touched order, then write each
+            // once: a single batch can fill one order across many `Fill`s (a
+            // taker sweeping several makers, or a maker hit repeatedly) and an
+            // order can both change status and accrue fills in the same batch.
+            let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
+            for fill in &output.fills {
+                for seq in [fill.taker_order_seq, fill.maker_order_seq] {
+                    let entry = updates.entry(seq).or_default();
+                    entry.filled_delta = entry
+                        .filled_delta
+                        .checked_add(fill.quantity)
+                        .expect("BUG: filled_delta overflow");
+                }
+            }
+            for seq in &output.resting_orders {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+            }
+            for seq in &output.filled_orders {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+            }
+            for (seq, update) in updates {
+                let order_id = OrderId::new(event.book_id, seq);
+                self.order_history.apply_update(&order_id, update, now);
             }
         }
         let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
@@ -449,8 +505,55 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    pub fn get_order_status(&self, order_id: OrderId) -> Option<OrderStatus> {
-        self.order_history.get(&order_id).map(|r| r.status)
+    /// Returns up to `length` of `owner`'s orders, newest first, resuming
+    /// strictly after the `after` order (a cursor from a prior page) — each
+    /// paired with its trading pair and full record. An `after` that names a
+    /// non-existent order yields an empty page.
+    pub fn get_user_orders(
+        &self,
+        owner: &Principal,
+        after: Option<OrderId>,
+        length: usize,
+    ) -> Vec<(OrderId, TradingPair, OrderRecord)> {
+        let Some(user_id) = self.user_registry.lookup(*owner) else {
+            return Vec::new();
+        };
+        self.order_history
+            .orders_after(user_id, after, length)
+            .into_iter()
+            .map(|id| {
+                let record = self
+                    .order_history
+                    .get(&id)
+                    .expect("BUG: per-user index references a missing order record");
+                let pair = self
+                    .trading_pairs
+                    .get_pair(&id.book_id())
+                    .expect("BUG: order references an unknown trading pair")
+                    .clone();
+                (id, pair, record)
+            })
+            .collect()
+    }
+
+    /// Returns the single order `id` paired with its trading pair and full
+    /// record when `owner` placed it, or `None` if the id is unknown or owned
+    /// by another principal.
+    pub fn get_user_order(
+        &self,
+        owner: &Principal,
+        id: OrderId,
+    ) -> Option<(OrderId, TradingPair, OrderRecord)> {
+        let record = self.order_history.get(&id)?;
+        if &record.owner != owner {
+            return None;
+        }
+        let pair = self
+            .trading_pairs
+            .get_pair(&id.book_id())
+            .expect("BUG: order references an unknown trading pair")
+            .clone();
+        Some((id, pair, record))
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -470,12 +573,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         quote_metadata: TokenMetadata,
         tick_size: TickSize,
         lot_size: LotSize,
+        min_notional: Quantity,
+        max_notional: Option<Quantity>,
         fee_rates: FeeRates,
     ) {
         self.record_token(pair.base, base_metadata);
         self.record_token(pair.quote, quote_metadata);
         assert_eq!(book_id, self.next_book_id, "BUG: order book ID mismatch");
-        let book = OrderBook::new(book_id, tick_size, lot_size, fee_rates);
+        let book = OrderBook::new(
+            book_id,
+            tick_size,
+            lot_size,
+            min_notional,
+            max_notional,
+            fee_rates,
+        );
         self.trading_pairs.insert(pair, book_id);
         assert_eq!(self.order_books.insert(book_id, book), None);
         self.next_book_id.increment();
@@ -492,15 +604,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self,
         token_id: TokenId,
         submitted: &TokenMetadata,
-    ) -> Result<(), dex_types::AddTradingPairError> {
+    ) -> Result<(), oisy_trade_types::AddTradingPairError> {
         if let Some(existing) = self.tokens.get(&token_id)
             && existing != submitted
         {
-            return Err(dex_types::AddTradingPairError::InconsistentTokenMetadata {
-                token: token_id.into(),
-                expected: existing.clone().into(),
-                submitted: submitted.clone().into(),
-            });
+            return Err(
+                oisy_trade_types::AddTradingPairError::InconsistentTokenMetadata {
+                    token: token_id.into(),
+                    expected: existing.clone().into(),
+                    submitted: submitted.clone().into(),
+                },
+            );
         }
         Ok(())
     }
@@ -578,12 +692,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Returns the canister-owned fee pool, shaped like [`get_balances`].
     /// - `None`: every token with a non-zero fee pool entry.
     /// - `Some(filter)`: each filter entry resolved per-entry; unsupported
-    ///   tokens are reported as [`dex_types::GetBalancesError::TokenNotSupported`].
+    ///   tokens are reported as [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
     ///   Registered tokens with no accrual return `Balance::ZERO`.
     pub fn get_fee_balances(
         &self,
-        filter: Option<&[dex_types::FilterToken]>,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        filter: Option<&[oisy_trade_types::FilterToken]>,
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
                 fee_only_balance(self.balances.fee_balance(t).unwrap_or_default())
@@ -598,8 +712,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                         .get(&token)
                         .expect("BUG: fee pool entry for unregistered token")
                         .clone();
-                    Ok(dex_types::UserTokenBalance {
-                        token: dex_types::Token {
+                    Ok(oisy_trade_types::UserTokenBalance {
+                        token: oisy_trade_types::Token {
                             id: token.into(),
                             metadata: metadata.into(),
                         },
@@ -614,27 +728,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// and [`Self::get_fee_balances`]: dedupe filter entries, look up the
     /// token in `self.tokens`, and resolve each entry's balance via the
     /// caller-supplied `balance_lookup`. Unknown tokens are reported as
-    /// [`dex_types::GetBalancesError::TokenNotSupported`].
+    /// [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
     fn apply_filter<F>(
         &self,
-        filter: &[dex_types::FilterToken],
+        filter: &[oisy_trade_types::FilterToken],
         balance_lookup: F,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>>
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>>
     where
-        F: Fn(&TokenId) -> dex_types::Balance,
+        F: Fn(&TokenId) -> oisy_trade_types::Balance,
     {
-        let mut seen: BTreeSet<dex_types::FilterToken> = BTreeSet::new();
+        let mut seen: BTreeSet<oisy_trade_types::FilterToken> = BTreeSet::new();
         filter
             .iter()
             .filter(|ft| seen.insert((*ft).clone()))
             .map(|ft| {
                 let internal_token = match ft {
-                    dex_types::FilterToken::ById(t) => TokenId::from(t.clone()),
+                    oisy_trade_types::FilterToken::ById(t) => TokenId::from(t.clone()),
                 };
                 match self.tokens.get(&internal_token) {
-                    None => Err(dex_types::GetBalancesError::TokenNotSupported(ft.clone())),
-                    Some(metadata) => Ok(dex_types::UserTokenBalance {
-                        token: dex_types::Token {
+                    None => Err(oisy_trade_types::GetBalancesError::TokenNotSupported(
+                        ft.clone(),
+                    )),
+                    Some(metadata) => Ok(oisy_trade_types::UserTokenBalance {
+                        token: oisy_trade_types::Token {
                             id: internal_token.into(),
                             metadata: metadata.clone().into(),
                         },
@@ -680,8 +796,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_balances(
         &self,
         user: &Principal,
-        filter: Option<&[dex_types::FilterToken]>,
-    ) -> Vec<Result<dex_types::UserTokenBalance, dex_types::GetBalancesError>> {
+        filter: Option<&[oisy_trade_types::FilterToken]>,
+    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
         // `lookup` (not `intern`) so mere queriers don't pollute the registry.
         // `None` ⇒ the user has never held a balance, so every balance is zero.
         let user_id = self.user_registry.lookup(*user);
@@ -703,8 +819,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                             .get_balance(user_id, t)
                             .filter(|b| !b.is_zero())
                             .map(|b| {
-                                Ok(dex_types::UserTokenBalance {
-                                    token: dex_types::Token {
+                                Ok(oisy_trade_types::UserTokenBalance {
+                                    token: oisy_trade_types::Token {
                                         id: (*t).into(),
                                         metadata: metadata.clone().into(),
                                     },
@@ -862,36 +978,15 @@ fn nonzero(q: Quantity) -> Option<Quantity> {
     if q.is_zero() { None } else { Some(q) }
 }
 
-/// `dex_types::Balance` carrying a fee amount in `free` and zero in
+/// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in
 /// `reserved`. Fees have no reserved concept; the `Balance` shape is
 /// reused to keep the `get_fee_balances` response identical in shape to
 /// `get_balances`.
-fn fee_only_balance(amount: Quantity) -> dex_types::Balance {
-    dex_types::Balance {
+fn fee_only_balance(amount: Quantity) -> oisy_trade_types::Balance {
+    oisy_trade_types::Balance {
         free: amount.into(),
         reserved: candid::Nat::from(0u64),
     }
-}
-
-fn compute_order_status_transitions(
-    output: &MatchingOutput,
-) -> impl Iterator<Item = event::OrderStatusTransition> + '_ {
-    output
-        .resting_orders
-        .iter()
-        .map(|seq| event::OrderStatusTransition {
-            seq: *seq,
-            status: OrderStatus::Open,
-        })
-        .chain(
-            output
-                .filled_orders
-                .iter()
-                .map(|seq| event::OrderStatusTransition {
-                    seq: *seq,
-                    status: OrderStatus::Filled,
-                }),
-        )
 }
 
 #[cfg(test)]
@@ -911,6 +1006,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_history,
             pending_settling_events,
             in_flight_user_ops,
+            permissions,
         } = self;
         Self {
             mode: mode.clone(),
@@ -926,6 +1022,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_history: order_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
+            permissions: permissions.clone(),
         }
     }
 }
@@ -947,6 +1044,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_history,
             pending_settling_events,
             in_flight_user_ops,
+            permissions,
         } = self;
         let Self {
             mode: other_mode,
@@ -962,6 +1060,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_history: other_order_history,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
+            permissions: other_permissions,
         } = other;
         mode == other_mode
             && execution_policy == other_execution_policy
@@ -976,6 +1075,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && order_history == other_order_history
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
+            && permissions == other_permissions
     }
 }
 
@@ -992,6 +1092,12 @@ pub enum AddLimitOrderError {
         available: Quantity,
         required: Quantity,
     },
+    InvalidNotional {
+        notional: Quantity,
+        min: Quantity,
+        max: Option<Quantity>,
+    },
+    TradingHalted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1002,53 +1108,78 @@ pub enum CancelLimitOrderError {
     OrderAlreadyCanceled,
 }
 
-impl From<CancelLimitOrderError> for dex_types::CancelLimitOrderError {
+impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
     fn from(err: CancelLimitOrderError) -> Self {
         match err {
-            CancelLimitOrderError::OrderNotFound => dex_types::CancelLimitOrderError::OrderNotFound,
-            CancelLimitOrderError::NotOrderOwner => dex_types::CancelLimitOrderError::NotOrderOwner,
+            CancelLimitOrderError::OrderNotFound => {
+                oisy_trade_types::CancelLimitOrderError::OrderNotFound
+            }
+            CancelLimitOrderError::NotOrderOwner => {
+                oisy_trade_types::CancelLimitOrderError::NotOrderOwner
+            }
             CancelLimitOrderError::OrderAlreadyFilled => {
-                dex_types::CancelLimitOrderError::OrderAlreadyFilled
+                oisy_trade_types::CancelLimitOrderError::OrderAlreadyFilled
             }
             CancelLimitOrderError::OrderAlreadyCanceled => {
-                dex_types::CancelLimitOrderError::OrderAlreadyCanceled
+                oisy_trade_types::CancelLimitOrderError::OrderAlreadyCanceled
             }
         }
     }
 }
 
-impl From<AddLimitOrderError> for dex_types::AddLimitOrderError {
+impl From<permissions::UnauthorizedError> for AddLimitOrderError {
+    fn from(err: permissions::UnauthorizedError) -> Self {
+        match err {
+            permissions::UnauthorizedError::TradingHalted => AddLimitOrderError::TradingHalted,
+            permissions::UnauthorizedError::NotController => {
+                unreachable!("permit_trading is not controller-gated")
+            }
+        }
+    }
+}
+
+impl From<AddLimitOrderError> for oisy_trade_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
         match err {
             AddLimitOrderError::AmountExceedsMaximum => {
-                dex_types::AddLimitOrderError::AmountExceedsMaximum
+                oisy_trade_types::AddLimitOrderError::AmountExceedsMaximum
             }
             AddLimitOrderError::UnknownTradingPair => {
-                dex_types::AddLimitOrderError::UnknownTradingPair
+                oisy_trade_types::AddLimitOrderError::UnknownTradingPair
             }
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
                 price,
                 tick_size,
-            }) => dex_types::AddLimitOrderError::InvalidPrice {
-                price: price.get(),
-                tick_size: tick_size.get(),
+            }) => oisy_trade_types::AddLimitOrderError::InvalidPrice {
+                price: candid::Nat::from(price),
+                tick_size: candid::Nat::from(tick_size),
             },
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
                 quantity,
                 lot_size,
-            }) => dex_types::AddLimitOrderError::InvalidQuantity {
+            }) => oisy_trade_types::AddLimitOrderError::InvalidQuantity {
                 quantity: quantity.into(),
-                lot_size: lot_size.get(),
+                lot_size: candid::Nat::from(lot_size),
             },
             AddLimitOrderError::InsufficientBalance {
                 token,
                 available,
                 required,
-            } => dex_types::AddLimitOrderError::InsufficientBalance {
-                token: dex_types::TokenId::from(token),
+            } => oisy_trade_types::AddLimitOrderError::InsufficientBalance {
+                token: oisy_trade_types::TokenId::from(token),
                 available: available.into(),
                 required: required.into(),
             },
+            AddLimitOrderError::InvalidNotional { notional, min, max } => {
+                oisy_trade_types::AddLimitOrderError::InvalidNotional {
+                    notional: notional.into(),
+                    min: min.into(),
+                    max: max.map(Into::into),
+                }
+            }
+            AddLimitOrderError::TradingHalted => {
+                oisy_trade_types::AddLimitOrderError::TradingHalted
+            }
         }
     }
 }

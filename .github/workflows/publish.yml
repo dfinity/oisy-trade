@@ -1,14 +1,12 @@
 name: Publish
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   # Tag and create the (draft) GitHub releases for any crates whose version was
-  # bumped by a merged release-plz PR. A no-op on ordinary pushes to main.
+  # bumped by a merged release-plz PR. Triggered manually after the release PR
+  # is merged; a no-op if there is nothing new to release.
   release:
     name: Release-plz tag & release
     runs-on: ubuntu-latest
@@ -50,16 +48,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 'Resolve dex_canister release'
+      - name: 'Resolve oisy_trade_canister release'
         id: meta
         env:
           RELEASES: ${{ needs.release.outputs.releases }}
         run: |
           set -euo pipefail
-          tag=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "dex_canister") | .tag')
-          version=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "dex_canister") | .version')
+          tag=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "oisy_trade_canister") | .tag')
+          version=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "oisy_trade_canister") | .version')
           if [[ -z "$tag" || "$tag" == "null" ]]; then
-            echo "dex_canister was not released in this run; skipping artifact publish."
+            echo "oisy_trade_canister was not released in this run; skipping artifact publish."
             echo "has_canister=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_canister=true" >> "$GITHUB_OUTPUT"
@@ -91,9 +89,9 @@ jobs:
         if: steps.meta.outputs.has_canister == 'true'
         run: |
           set -euo pipefail
-          SHA256=$(sha256sum ./wasms/dex_canister.wasm.gz | cut -d ' ' -f1)
-          echo "SHA256 of dex_canister.wasm.gz: $SHA256"
-          echo "DEX_CANISTER_WASM_GZ_SHA256=$SHA256" >> "$GITHUB_ENV"
+          SHA256=$(sha256sum ./wasms/oisy_trade_canister.wasm.gz | cut -d ' ' -f1)
+          echo "SHA256 of oisy_trade_canister.wasm.gz: $SHA256"
+          echo "OISY_TRADE_CANISTER_WASM_GZ_SHA256=$SHA256" >> "$GITHUB_ENV"
 
       - name: 'Install parse-changelog'
         if: steps.meta.outputs.has_canister == 'true'
@@ -112,8 +110,8 @@ jobs:
           # Restrict substitution to our known placeholders so stray `$VAR`
           # sequences in the changelog text are left untouched.
           CHANGELOG="$notes" RELEASE_TAG="$RELEASE_TAG" \
-            DEX_CANISTER_WASM_GZ_SHA256="$DEX_CANISTER_WASM_GZ_SHA256" \
-            envsubst '$DEX_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
+            OISY_TRADE_CANISTER_WASM_GZ_SHA256="$OISY_TRADE_CANISTER_WASM_GZ_SHA256" \
+            envsubst '$OISY_TRADE_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
             < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
 
       - name: 'Publish GitHub release'
@@ -124,5 +122,5 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           body_path: ${{ github.workspace }}-RELEASE.txt
           files: |
-            wasms/dex_canister.wasm.gz
-            canister/dex.did
+            wasms/oisy_trade_canister.wasm.gz
+            canister/oisy_trade.did

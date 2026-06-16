@@ -1,6 +1,6 @@
 use crate::{InitArg, UpgradeArg};
 use candid::{CandidType, Nat, Principal};
-use dex_types::{TokenId, TokenMetadata};
+use oisy_trade_types::{TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -20,6 +20,7 @@ pub enum EventType {
     Settling(SettlingEvent),
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
+    SetGlobalHalt(bool),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -27,10 +28,14 @@ pub struct AddTradingPairEvent {
     pub book_id: u64,
     pub base: TokenId,
     pub quote: TokenId,
-    pub tick_size: u64,
-    pub lot_size: u64,
+    pub tick_size: Nat,
+    pub lot_size: Nat,
     pub base_metadata: TokenMetadata,
     pub quote_metadata: TokenMetadata,
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
+    pub min_notional: Nat,
+    pub max_notional: Option<Nat>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -52,8 +57,8 @@ pub struct WithdrawEvent {
 pub struct AddLimitOrderEvent {
     pub user: Principal,
     pub order_id: OrderId,
-    pub side: dex_types::Side,
-    pub price: u64,
+    pub side: oisy_trade_types::Side,
+    pub price: Nat,
     pub quantity: Nat,
 }
 

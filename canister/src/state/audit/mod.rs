@@ -5,11 +5,12 @@ use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
     WithdrawEvent,
 };
+use crate::state::permissions::Permit;
 use crate::storage;
 use crate::user::UserRegistry;
 use crate::{Runtime, Timestamp};
-use dex_types_internal::UpgradeArg;
 use ic_stable_structures::Memory;
+use oisy_trade_types_internal::UpgradeArg;
 use std::collections::VecDeque;
 
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod tests;
 pub fn process_event<MH: Memory, MB: Memory>(
     state: &mut State<MH, MB>,
     payload: EventType,
+    _permit: Permit,
     runtime: &impl Runtime,
 ) {
     let timestamp = runtime.time();
@@ -35,7 +37,7 @@ pub fn process_event<MH: Memory, MB: Memory>(
 /// Unlike [`process_event`], the timestamp is read inline rather than captured
 /// into a local: this path applies no state transition, so there is no
 /// shared-timestamp invariant between a mutation and its event-log entry.
-pub fn record_event(payload: EventType, runtime: &impl Runtime) {
+pub fn record_event(payload: EventType, _permit: Permit, runtime: &impl Runtime) {
     storage::record_event(runtime.time(), payload);
 }
 
@@ -78,6 +80,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             base_metadata,
             quote_metadata,
             fee_rates,
+            min_notional,
+            max_notional,
         }) => {
             let pair = order::TradingPair {
                 base: *base,
@@ -90,6 +94,8 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 quote_metadata.clone(),
                 *tick_size,
                 *lot_size,
+                *min_notional,
+                *max_notional,
                 *fee_rates,
             );
         }
@@ -129,13 +135,16 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_limit_order(*user, book_id, order, timestamp, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
-            state.record_cancel_limit_order(*order_id, persistence);
+            state.record_cancel_limit_order(*order_id, timestamp, persistence);
         }
         EventType::Matching(event) => {
-            state.record_matching_event(event, persistence);
+            state.record_matching_event(event, timestamp, persistence);
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);
+        }
+        EventType::SetGlobalHalt(halted) => {
+            state.permissions_mut().set_trading_halted(*halted);
         }
     }
 }

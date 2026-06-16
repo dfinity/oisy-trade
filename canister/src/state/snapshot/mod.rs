@@ -16,13 +16,14 @@ use crate::order::{
     OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::ExecutionPolicy;
+use crate::state::Permissions;
 use crate::state::TradingPairMap;
 use crate::state::event::SettlingEvent;
 use crate::user::UserRegistry;
 use candid::Nat;
-use dex_types_internal::Mode;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
+use oisy_trade_types_internal::Mode;
 use std::collections::{BTreeMap, VecDeque};
 
 #[cfg(test)]
@@ -55,6 +56,16 @@ pub struct StateSnapshot {
     /// when the pool is empty.
     #[n(9)]
     pub fee_pool: Option<Vec<FeeEntry>>,
+    /// Controller-managed permissions. Encoded as `None` when all-default;
+    /// an absent field (e.g. a pre-change snapshot) decodes to the default.
+    #[n(10)]
+    pub permissions: Option<PermissionsSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PermissionsSnapshot {
+    #[n(0)]
+    pub trading_halted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -103,6 +114,7 @@ impl StateSnapshot {
             pending_settling_events,
             // ignored: per-request guard set, reset upon upgrades
             in_flight_user_ops: _,
+            permissions,
         } = state;
         Self {
             mode: mode.clone(),
@@ -143,6 +155,13 @@ impl StateSnapshot {
                 } else {
                     Some(snapshot)
                 }
+            },
+            permissions: if *permissions == Permissions::default() {
+                None
+            } else {
+                Some(PermissionsSnapshot {
+                    trading_halted: permissions.trading_halted(),
+                })
             },
         }
     }
@@ -200,6 +219,8 @@ impl StateSnapshot {
 
         balances.restore_fee_pool(self.fee_pool.unwrap_or_default());
 
+        let permissions = self.permissions.map(Permissions::from).unwrap_or_default();
+
         let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
             (Some(max), Some(budget)) => ExecutionPolicy::try_new(max, budget)
                 .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
@@ -229,6 +250,16 @@ impl StateSnapshot {
             ledger_fee_cache,
             pending_settling_events,
             in_flight_user_ops: Default::default(),
+            permissions,
         }
+    }
+}
+
+impl From<PermissionsSnapshot> for Permissions {
+    fn from(snapshot: PermissionsSnapshot) -> Self {
+        let PermissionsSnapshot { trading_halted } = snapshot;
+        let mut permissions = Permissions::default();
+        permissions.set_trading_halted(trading_halted);
+        permissions
     }
 }

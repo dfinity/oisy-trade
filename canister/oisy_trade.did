@@ -1,3 +1,5 @@
+// OISY TRADE canister: an order book DEX on the Internet Computer.
+
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
 // Encoded as a 32-character hex string.
@@ -6,10 +8,10 @@ type OrderId = text;
 // Side of an order.
 type Side = variant {
     // Buy order (bid). On submission reserves `price × quantity` of the
-    // *quote* token from the caller's on-DEX free balance.
+    // *quote* token from the caller's free balance.
     Buy;
     // Sell order (ask). On submission reserves `quantity` of the *base*
-    // token from the caller's on-DEX free balance.
+    // token from the caller's free balance.
     Sell;
 };
 
@@ -27,9 +29,9 @@ type LimitOrderRequest = record {
     pair : TradingPair;
     // Whether this is a buy or sell order.
     side : Side;
-    // Limit price in quote token units per base token unit.
+    // Limit price in quote token smallest units per one whole base token.
     // Must be a positive multiple of the pair's `tick_size`.
-    price : nat64;
+    price : nat;
     // Order quantity in base token units.
     // Must be a positive multiple of the pair's `lot_size`.
     quantity : nat;
@@ -43,13 +45,19 @@ type AddLimitOrderError = variant {
     // The requested trading pair is not registered.
     UnknownTradingPair;
     // The price is not a positive multiple of the tick size.
-    InvalidPrice : record { price : nat64; tick_size : nat64 };
+    InvalidPrice : record { price : nat; tick_size : nat };
     // The quantity is not a positive multiple of the lot size.
-    InvalidQuantity : record { quantity : nat; lot_size : nat64 };
-    // The caller's on-DEX free balance in `token` is below `required`.
+    InvalidQuantity : record { quantity : nat; lot_size : nat };
+    // The caller's free balance in `token` is below `required`.
     // For a `Sell`, `token` is the base and `required` is `quantity`.
-    // For a `Buy`, `token` is the quote and `required` is `price × quantity`.
+    // For a `Buy`, `token` is the quote and `required` is the scaled quote
+    // amount `price × quantity / 10^base_decimals` (in quote smallest units).
     InsufficientBalance : record { token : TokenId; available : nat; required : nat };
+    // The order's notional (price × quantity / 10^base_decimals, in quote
+    // smallest units) is below `min` or above `max`.
+    InvalidNotional : record { notional : nat; min : nat; max : opt nat };
+    // Trading is globally halted; no new orders are accepted.
+    TradingHalted;
 };
 
 /// Error returned when canceling a limit order fails.
@@ -65,21 +73,35 @@ type CancelLimitOrderError = variant {
 };
 
 // Information about a listed trading pair.
+// Whether trading on a pair is currently active or halted.
+type TradingStatus = variant {
+    // Trading on the pair is active.
+    Trading;
+    // Trading on the pair is halted.
+    Halted;
+};
+
 type TradingPairInfo = record {
     // The base token.
     base : Token;
     // The quote token.
     quote : Token;
+    // Whether trading on this pair is currently active or halted.
+    status : TradingStatus;
     // Minimum price increment. All order prices must be a positive multiple of this value.
-    tick_size : nat64;
+    tick_size : nat;
     // Minimum order quantity. All order quantities must be a positive multiple of this value.
-    lot_size : nat64;
+    lot_size : nat;
+    // Minimum order notional in quote token smallest units.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any.
+    max_notional : opt nat;
 };
 
 // A single price level in an order book, aggregated across all resting orders at that price.
 type PriceLevel = record {
-    // Price in quote token units per base token unit.
-    price : nat64;
+    // Price in quote token smallest units per one whole base token.
+    price : nat;
     // Total quantity in base token units across all resting orders at this price.
     quantity : nat;
 };
@@ -102,7 +124,7 @@ type OrderBookDepth = record {
 
 // Error returned by the `get_order_book_ticker` query.
 type GetOrderBookTickerError = variant {
-    // The requested trading pair is not registered on the DEX.
+    // The requested trading pair is not registered.
     UnknownTradingPair;
 };
 
@@ -112,7 +134,7 @@ type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBo
 type GetOrderBookDepthRequest = record {
     // The trading pair whose depth should be returned.
     trading_pair : TradingPair;
-    // Maximum number of price levels returned per side. When absent, the DEX
+    // Maximum number of price levels returned per side. When absent, the canister
     // returns 100 levels per side. The maximum accepted value is 1000; above
     // that the query returns `LimitTooLarge`. `opt 0` is accepted and returns
     // empty `bids`/`asks` vectors.
@@ -121,7 +143,7 @@ type GetOrderBookDepthRequest = record {
 
 // Error returned by the `get_order_book_depth` query.
 type GetOrderBookDepthError = variant {
-    // The requested trading pair is not registered on the DEX.
+    // The requested trading pair is not registered.
     UnknownTradingPair;
     // The requested depth limit exceeds the maximum supported value (1000).
     LimitTooLarge : record { requested : nat32; max : nat32 };
@@ -131,8 +153,6 @@ type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBook
 
 // Status of an order.
 type OrderStatus = variant {
-    // The order was not found.
-    NotFound;
     // The order is pending processing.
     Pending;
     // The order is open and resting in the order book.
@@ -140,34 +160,55 @@ type OrderStatus = variant {
     // The order has been fully filled.
     Filled;
     /// The order has been canceled.
-    Canceled : CanceledOrderInfo;
+    Canceled;
 };
 
-/// Details about a canceled order. The refund (token + amount) is derivable
-/// from the order's placement details + `remaining_quantity`, so it is not
-/// duplicated here.
-type CanceledOrderInfo = record {
-    /// Quantity that was still open on the book at the moment of cancel.
-    /// Equals the original placed quantity for a never-matched order, and
-    /// `original − filled` for a partially-filled one.
-    remaining_quantity : nat;
-};
-
-/// Full view of an order as stored by the DEX. Returned by endpoints that
-/// have the whole record already loaded (e.g. `cancel_limit_order`).
+/// Full view of an order as stored by the canister.
 type OrderRecord = record {
     /// Principal that placed the order.
     owner : principal;
     /// Whether the order is a buy or a sell.
     side : Side;
-    /// Limit price in quote units per base unit, as originally placed.
-    price : nat64;
+    /// Limit price in quote token smallest units per one whole base token, as originally placed.
+    price : nat;
     /// Quantity originally placed, in base token units.
     quantity : nat;
-    /// Current lifecycle state; `Canceled` carries a `CanceledOrderInfo`.
+    /// Cumulative quantity filled so far, in base token units.
+    /// Remaining is `quantity − filled_quantity`.
+    filled_quantity : nat;
+    /// Current lifecycle state.
     status : OrderStatus;
     /// Submission time in nanoseconds since the Unix epoch.
-    timestamp : nat64;
+    created_at : nat64;
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel) in nanoseconds since the Unix epoch; null until first modified.
+    last_updated_at : opt nat64;
+};
+
+/// Request for `get_my_orders`.
+type GetMyOrdersArgs = record {
+    /// How to select the caller's orders.
+    filter : GetMyOrdersFilter;
+};
+
+/// Selector for `get_my_orders`: a point lookup by id or a page.
+type GetMyOrdersFilter = variant {
+    /// Return the single matching order if the caller owns it, else empty.
+    ById : OrderId;
+    /// Return a page over the caller's orders, newest first. `length` is capped
+    /// at 100. Pages via a cursor: pass the previous page's last order id as
+    /// `after`; null starts from the newest order.
+    ByPage : record { after : opt OrderId; length : nat32 };
+};
+
+/// One entry in a `get_my_orders` response: an order the caller placed.
+type UserOrder = record {
+    /// The order's unique identifier.
+    id : OrderId;
+    /// The trading pair the order was placed on.
+    pair : TradingPair;
+    /// The full order record.
+    order : OrderRecord;
 };
 
 // A token identified by its ledger canister ID.
@@ -204,7 +245,7 @@ type LedgerTransferFromError = variant {
 type DepositError = variant {
     // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    // The token is not part of any trading pair on the DEX.
+    // The token is not part of any registered trading pair.
     UnsupportedToken : record { token_id : TokenId };
     // Another deposit or withdrawal is already in flight for this
     // (caller, token). Retry once the previous operation completes.
@@ -215,12 +256,12 @@ type DepositError = variant {
     LedgerError : LedgerTransferFromError;
 };
 
-// Request to deposit tokens into the DEX.
+// Request to deposit tokens into the canister.
 type DepositRequest = record {
     // The token to deposit.
     token_id : TokenId;
     // The amount to deposit, in the token's base units.
-    // The caller's ICRC-2 allowance to the DEX on the token ledger must cover
+    // The caller's ICRC-2 allowance to the canister on the token ledger must cover
     // `amount + ledger_fee` (the `icrc2_transfer_from` fee is charged against
     // the allowance on top of the transferred amount).
     amount : nat;
@@ -234,11 +275,11 @@ type DepositResponse = record {
 
 type DepositResult = variant { Ok : DepositResponse; Err : DepositError };
 
-// Request to withdraw tokens from the DEX.
+// Request to withdraw tokens from the canister.
 type WithdrawRequest = record {
     // The token to withdraw.
     token_id : TokenId;
-    // The amount to withdraw from the caller's on-DEX free balance, in the
+    // The amount to withdraw from the caller's free balance, in the
     // token's base units. The ledger transfer fee is deducted from this
     // amount, so the caller receives `amount - ledger_fee` on the ledger;
     // `amount` must therefore be ≥ `ledger_fee` (otherwise the call rejects
@@ -263,7 +304,7 @@ type LedgerTransferError = variant {
 type WithdrawError = variant {
     // The amount exceeds the maximum supported value.
     AmountExceedsMaximum;
-    // The token is not part of any trading pair on the DEX.
+    // The token is not part of any registered trading pair.
     UnsupportedToken : record { token_id : TokenId };
     // The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
@@ -324,20 +365,25 @@ type GetBalancesResponse = variant {
     Err : GetBalancesRequestError;
 };
 
-// Request to add a new trading pair to the DEX.
+// Request to add a new trading pair to the canister.
 type AddTradingPairRequest = record {
     // The base token of the pair.
     base : Token;
     // The quote token of the pair.
     quote : Token;
     // Minimum price increment. Must be greater than zero.
-    tick_size : nat64;
+    tick_size : nat;
     // Minimum order quantity. Must be greater than zero.
-    lot_size : nat64;
+    lot_size : nat;
     // Maker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
     maker_fee_bps : nat16;
     // Taker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
     taker_fee_bps : nat16;
+    // Minimum order notional in quote token smallest units. Must be greater than zero.
+    min_notional : nat;
+    // Maximum order notional in quote token smallest units, if any. When set,
+    // must be greater than or equal to min_notional.
+    max_notional : opt nat;
 };
 
 // Error returned by the add_trading_pair endpoint.
@@ -361,12 +407,25 @@ type AddTradingPairError = variant {
     BaseDecimalsTooLarge : record { decimals : nat8 };
     // tick_size * lot_size is not a multiple of 10^base_decimals, so some fills
     // could not settle to an exact quote amount. Choose a coarser tick or lot.
-    IndivisibleTickLotForBaseDecimals : record { tick_size : nat64; lot_size : nat64; base_decimals : nat8 };
+    IndivisibleTickLotForBaseDecimals : record { tick_size : nat; lot_size : nat; base_decimals : nat8 };
+    // The notional bounds are invalid: min_notional is zero, a bound is too
+    // large to fit the 256-bit quantity representation, or max_notional is set
+    // and smaller than min_notional.
+    InvalidNotional : record { min_notional : nat; max_notional : opt nat };
 };
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
-// Controls who may call update endpoints on the DEX canister.
+// Error returned by controller-gated endpoints when the caller is not
+// authorized to perform the requested action.
+type UnauthorizedError = variant {
+    // The caller is not a controller of the canister.
+    NotController;
+};
+
+type UnauthorizedResult = variant { Ok : null; Err : UnauthorizedError };
+
+// Controls who may call update endpoints on the canister.
 type Mode = variant {
     // Anyone may call update endpoints.
     GeneralAvailability;
@@ -394,18 +453,22 @@ type UpgradeArg = record {
     instruction_budget : opt nat64;
 };
 
-// Argument passed to the DEX canister on init or upgrade.
-type DexArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
+// Argument passed to the canister on init or upgrade.
+type OisyTradeArg = variant { Init : InitArg; Upgrade : opt UpgradeArg };
 
 // Event payload for adding a trading pair.
 type AddTradingPairEvent = record {
     book_id : nat64;
     base : TokenId;
     quote : TokenId;
-    tick_size : nat64;
-    lot_size : nat64;
+    tick_size : nat;
+    lot_size : nat;
     base_metadata : TokenMetadata;
     quote_metadata : TokenMetadata;
+    maker_fee_bps : nat16;
+    taker_fee_bps : nat16;
+    min_notional : nat;
+    max_notional : opt nat;
 };
 
 // Structured order identifier used in events.
@@ -419,7 +482,7 @@ type AddLimitOrderEvent = record {
     user : principal;
     order_id : EventOrderId;
     side : Side;
-    price : nat64;
+    price : nat;
     quantity : nat;
 };
 
@@ -491,6 +554,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
+    SetGlobalHalt : bool;
 };
 
 // A canister event with a timestamp.
@@ -511,20 +575,17 @@ type GetEventsResult = record {
     total_event_count : nat64;
 };
 
-service : (DexArg) -> {
+service : (OisyTradeArg) -> {
     // Submit a new limit order. The order is queued for *asynchronous*
     // processing by the matching engine; an `OrderId` is returned
     // immediately. An `Ok` response means the order was accepted into the
-    // queue, not that it filled — poll `get_order_status` to observe the
-    // actual lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
+    // queue, not that it filled — call `get_my_orders` to observe the actual
+    // lifecycle (`Pending` → `Open` / `Filled` / `Canceled`).
     add_limit_order : (LimitOrderRequest) -> (variant { Ok : OrderId; Err : AddLimitOrderError });
 
     /// Cancel a limit order previously submitted by the caller. Any remaining
     /// reserved balance is credited back to the caller's free balance.
     cancel_limit_order : (OrderId) -> (variant { Ok : OrderRecord; Err : CancelLimitOrderError });
-
-    // Query the status of an order by its ID.
-    get_order_status : (OrderId) -> (OrderStatus) query;
 
     // Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;
@@ -541,18 +602,18 @@ service : (DexArg) -> {
     // Returns `UnknownTradingPair` if the pair is not registered.
     get_order_book_depth : (GetOrderBookDepthRequest) -> (GetOrderBookDepthResult) query;
 
-    // Deposit tokens into the DEX. Calls `icrc2_transfer_from` on the token
-    // ledger to pull `amount` from the caller to the DEX canister, then
-    // credits the caller's on-DEX free balance.
+    // Deposit tokens into the canister. Calls `icrc2_transfer_from` on the token
+    // ledger to pull `amount` from the caller to the canister, then
+    // credits the caller's free balance.
     //
-    // The caller must have previously called `icrc2_approve` authorizing the
-    // DEX as spender. The ledger charges its fee on both `icrc2_approve` and
+    // The caller must have previously called `icrc2_approve` authorizing the canister
+    // as spender. The ledger charges its fee on both `icrc2_approve` and
     // `icrc2_transfer_from`, so:
     // - the allowance must cover `amount + ledger_fee`;
     // - the caller's on-ledger balance must cover `amount + 2 × ledger_fee`.
     deposit : (DepositRequest) -> (DepositResult);
 
-    // Withdraw tokens from the DEX. Debits `amount` from the caller's on-DEX
+    // Withdraw tokens from the canister. Debits `amount` from the caller's
     // free balance and transfers `amount - ledger_fee` to the caller via
     // `icrc1_transfer` on the token ledger.
     //
@@ -587,13 +648,28 @@ service : (DexArg) -> {
     // `reserved` is always zero (fees have no reserved concept).
     get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
-    // List every token registered with the DEX. Intended as a primitive
+    // Return the caller's orders, either a single order by id or a page,
+    // newest first. The argument is optional: an absent argument is equivalent
+    // to a page from the newest order with the maximum length.
+    get_my_orders : (opt GetMyOrdersArgs) -> (vec UserOrder) query;
+
+    // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
 
-    // Add a new trading pair to the DEX. Only callable by a controller.
+    // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
+
+    // Globally halt trading: reject all new orders and stop the matching
+    // engine. Cancels and withdrawals remain open. Only callable by a
+    // controller. Idempotent — halting an already-halted DEX succeeds.
+    halt_trading : () -> (UnauthorizedResult);
+
+    // Resume trading after a global halt: re-enable new orders and matching.
+    // Only callable by a controller. Idempotent — resuming an already-active
+    // DEX succeeds.
+    resume_trading : () -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

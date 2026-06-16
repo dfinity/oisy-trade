@@ -1,13 +1,13 @@
 use crate::Timestamp;
 use crate::order::{
-    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, OrderStatus, PairToken, Price, Quantity,
-    Side, TickSize, TokenId, TokenMetadata,
+    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
+    TokenId, TokenMetadata,
 };
 use candid::Principal;
-use dex_types_internal::{InitArg, UpgradeArg};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use minicbor::{Decode, Encode};
+use oisy_trade_types_internal::{InitArg, UpgradeArg};
 use std::borrow::Cow;
 
 #[cfg(test)]
@@ -41,6 +41,8 @@ pub enum EventType {
     Withdraw(#[n(0)] WithdrawEvent),
     #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
+    #[n(9)]
+    SetGlobalHalt(#[n(0)] bool),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -61,6 +63,10 @@ pub struct AddTradingPairEvent {
     pub quote_metadata: TokenMetadata,
     #[n(7)]
     pub fee_rates: FeeRates,
+    #[n(8)]
+    pub min_notional: Quantity,
+    #[n(9)]
+    pub max_notional: Option<Quantity>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -160,14 +166,6 @@ pub enum BalanceOperation {
         #[n(2)]
         amount: Quantity,
     },
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
-pub struct OrderStatusTransition {
-    #[n(0)]
-    pub seq: OrderSeq,
-    #[n(1)]
-    pub status: OrderStatus,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]

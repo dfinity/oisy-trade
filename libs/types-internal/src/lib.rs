@@ -1,4 +1,4 @@
-//! Internal types used by the DEX canister.
+//! Internal types used by the OISY TRADE canister.
 //!
 //! Types in this module are unstable and breaking changes do not break the canister API.
 
@@ -14,9 +14,9 @@ pub mod event;
 #[cfg(feature = "log")]
 pub mod log;
 
-/// Argument passed to the DEX canister on init or upgrade.
+/// Argument passed to the OISY TRADE canister on init or upgrade.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum DexArg {
+pub enum OisyTradeArg {
     /// Argument used when the canister is first installed.
     Init(InitArg),
     /// Argument used when the canister is upgraded.
@@ -64,7 +64,7 @@ pub struct UpgradeArg {
     pub instruction_budget: Option<u64>,
 }
 
-/// Controls who may call update endpoints on the DEX canister.
+/// Controls who may call update endpoints on the OISY TRADE canister.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
 pub enum Mode {

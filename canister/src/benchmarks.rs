@@ -10,12 +10,12 @@ use crate::state::{StableMemoryOptions, State};
 use crate::storage;
 use canbench_rs::bench;
 use candid::Principal;
-use dex_types_internal::{InitArg, Mode};
+use oisy_trade_types_internal::{InitArg, Mode};
 use serde::Deserialize;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 
 /// Minimum price increment for ICP/USDT on Binance: 0.001 USDT with 8 decimal places.
-const TICK_SIZE: TickSize = TickSize::new(NonZeroU64::new(100_000).unwrap());
+const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
@@ -39,7 +39,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
         PendingOrder {
             side: Side::Sell,
             price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-            quantity: Quantity::from(100_000_000_000_000), // 1,000,000 ICP
+            quantity: Quantity::from(100_000_000_000_000u64), // 1,000,000 ICP
         },
     );
 
@@ -98,7 +98,7 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
             PendingOrder {
                 side: if trade.m { Side::Sell } else { Side::Buy },
                 price: Price::new(parse_decimal_8(&trade.p)),
-                quantity: Quantity::from(parse_decimal_8(&trade.q)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
             },
         );
     }
@@ -177,14 +177,14 @@ fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canben
 
 /// Benchmark the top-of-book query against a fully populated Binance ICP/USDT
 /// snapshot. Only the first entry of each side is read, but the returned
-/// [`dex_types::PriceLevel::quantity`] aggregates across every resting order at that
+/// [`oisy_trade_types::PriceLevel::quantity`] aggregates across every resting order at that
 /// price — so cost scales with the number of orders at the best bid and best
 /// ask, not with total depth. In this fixture each level holds a single order,
 /// so the benchmark measures the minimal constant-overhead path.
 #[bench(raw)]
 fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
     install_populated_state();
-    let pair = dex_types::TradingPair::from(trading_pair());
+    let pair = oisy_trade_types::TradingPair::from(trading_pair());
     canbench_rs::bench_fn(|| {
         let _ticker = crate::get_order_book_ticker(pair);
     })
@@ -196,8 +196,8 @@ fn bench_get_order_book_ticker() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
     install_populated_state();
-    let request = dex_types::GetOrderBookDepthRequest {
-        trading_pair: dex_types::TradingPair::from(trading_pair()),
+    let request = oisy_trade_types::GetOrderBookDepthRequest {
+        trading_pair: oisy_trade_types::TradingPair::from(trading_pair()),
         limit: None,
     };
     canbench_rs::bench_fn(|| {
@@ -212,12 +212,72 @@ fn bench_get_order_book_depth_default() -> canbench_rs::BenchResult {
 #[bench(raw)]
 fn bench_get_order_book_depth_max() -> canbench_rs::BenchResult {
     install_populated_state();
-    let request = dex_types::GetOrderBookDepthRequest {
-        trading_pair: dex_types::TradingPair::from(trading_pair()),
+    let request = oisy_trade_types::GetOrderBookDepthRequest {
+        trading_pair: oisy_trade_types::TradingPair::from(trading_pair()),
         limit: Some(crate::MAX_DEPTH_LIMIT),
     };
     canbench_rs::bench_fn(|| {
         let _depth = crate::get_order_book_depth(request.clone());
+    })
+}
+
+/// Benchmark paginating through *all* of a user's orders via `get_my_orders`,
+/// for the user holding the most orders. Reuses the
+/// `bench_process_pending_orders_1000` setup (fully populated Binance book) but
+/// places all 1000 trade orders under a single user, then walks every page
+/// (capped at `MAX_ORDERS_PER_RESPONSE`) until the history is exhausted.
+#[bench(raw)]
+fn bench_get_my_orders() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let trades = load_trades();
+    let mut state = new_state();
+    populate_state(&mut state, &depth);
+
+    let trader = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, trader);
+    for trade in &trades {
+        place_order(
+            &mut state,
+            trader,
+            PendingOrder {
+                side: if trade.m { Side::Sell } else { Side::Buy },
+                price: Price::new(parse_decimal_8(&trade.p)),
+                quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
+            },
+        );
+    }
+    assert_eq!(
+        state.get_user_orders(&trader, None, trades.len() * 2).len(),
+        trades.len()
+    );
+
+    crate::state::reset_state();
+    crate::state::init_state(state);
+
+    let total = trades.len();
+    let page = oisy_trade_types::MAX_ORDERS_PER_RESPONSE;
+    canbench_rs::bench_fn(|| {
+        let mut after: Option<oisy_trade_types::OrderId> = None;
+        let mut retrieved = 0usize;
+        loop {
+            let orders = crate::get_my_orders(
+                Some(oisy_trade_types::GetMyOrdersArgs::by_page(
+                    after.clone(),
+                    page,
+                )),
+                trader,
+            )
+            .expect("benchmark cursor is always a valid order id");
+            retrieved += orders.len();
+            // Stop once the known total is reached; checking the count rather
+            // than waiting for a short page avoids one extra empty call when
+            // the total is an exact multiple of the page size.
+            if retrieved >= total {
+                break;
+            }
+            after = orders.last().map(|o| o.id.clone());
+        }
+        assert_eq!(retrieved, total);
     })
 }
 
@@ -252,20 +312,20 @@ struct AggTrade {
     m: bool,
 }
 
-/// Parse a Binance decimal string (e.g. "2.30400000") into a u64 assuming 8 decimal places.
+/// Parse a Binance decimal string (e.g. "2.30400000") into a u128 assuming 8 decimal places.
 /// Uses only integer arithmetic to avoid floating-point imprecision.
-fn parse_decimal_8(s: &str) -> u64 {
+fn parse_decimal_8(s: &str) -> u128 {
     let (integer_part, fractional_part) = match s.split_once('.') {
         Some((i, f)) => (i, f),
         None => (s, ""),
     };
-    let integer: u64 = integer_part.parse().expect("invalid integer part");
+    let integer: u128 = integer_part.parse().expect("invalid integer part");
     // Pad or truncate fractional part to exactly 8 digits.
     let mut frac_digits = [b'0'; 8];
     for (i, byte) in fractional_part.bytes().take(8).enumerate() {
         frac_digits[i] = byte;
     }
-    let fractional: u64 = std::str::from_utf8(&frac_digits)
+    let fractional: u128 = std::str::from_utf8(&frac_digits)
         .expect("ascii digits")
         .parse()
         .expect("invalid fractional part");
@@ -296,8 +356,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
     let mut state = State::new(
         InitArg {
             mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: dex_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: dex_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         OrderHistory::new(
             storage::order_history_memory(),
@@ -320,6 +380,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
         },
         TICK_SIZE,
         LOT_SIZE,
+        Quantity::from_u128(1),
+        None,
         fee_rates,
     );
     state
@@ -346,7 +408,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             PendingOrder {
                 side: Side::Buy,
                 price: Price::new(parse_decimal_8(price_str)),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }
@@ -359,7 +421,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
             PendingOrder {
                 side: Side::Sell,
                 price: Price::new(parse_decimal_8(price_str)),
-                quantity: Quantity::from(parse_decimal_8(qty_str)),
+                quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
             },
         );
     }

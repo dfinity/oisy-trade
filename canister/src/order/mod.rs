@@ -5,11 +5,11 @@ mod history;
 mod tests;
 
 pub use book::{
-    Fill, MatchOrderError, MatchResult, MatchingOutput, OrderBook, OrderBookSnapshot, PriceLevel,
-    RemovedOrder,
+    Fill, MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook,
+    OrderBookSnapshot, PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use history::OrderHistory;
+pub use history::{OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
@@ -19,7 +19,7 @@ use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
 use std::borrow::Cow;
 use std::fmt;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU128};
 use std::str::FromStr;
 
 /// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
@@ -40,27 +40,26 @@ pub enum Side {
     Sell,
 }
 
-impl From<dex_types::Side> for Side {
-    fn from(side: dex_types::Side) -> Self {
+impl From<oisy_trade_types::Side> for Side {
+    fn from(side: oisy_trade_types::Side) -> Self {
         match side {
-            dex_types::Side::Buy => Side::Buy,
-            dex_types::Side::Sell => Side::Sell,
+            oisy_trade_types::Side::Buy => Side::Buy,
+            oisy_trade_types::Side::Sell => Side::Sell,
         }
     }
 }
 
-impl From<Side> for dex_types::Side {
+impl From<Side> for oisy_trade_types::Side {
     fn from(side: Side) -> Self {
         match side {
-            Side::Buy => dex_types::Side::Buy,
-            Side::Sell => dex_types::Side::Sell,
+            Side::Buy => oisy_trade_types::Side::Buy,
+            Side::Sell => oisy_trade_types::Side::Sell,
         }
     }
 }
 
 /// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
-/// states of [`dex_types::OrderStatus`]; the public `NotFound` variant is
-/// synthesized at the canister boundary when no record exists.
+/// states of [`oisy_trade_types::OrderStatus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub enum OrderStatus {
     #[n(0)]
@@ -70,32 +69,16 @@ pub enum OrderStatus {
     #[n(2)]
     Filled,
     #[n(3)]
-    Canceled(#[n(0)] CanceledOrderInfo),
+    Canceled,
 }
 
-/// Fill information captured when an order transitions to `Canceled`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct CanceledOrderInfo {
-    /// Quantity that was still open on the book at the moment of cancel and will never be filled.
-    #[n(0)]
-    pub remaining_quantity: Quantity,
-}
-
-impl From<OrderStatus> for dex_types::OrderStatus {
+impl From<OrderStatus> for oisy_trade_types::OrderStatus {
     fn from(status: OrderStatus) -> Self {
         match status {
-            OrderStatus::Pending => dex_types::OrderStatus::Pending,
-            OrderStatus::Open => dex_types::OrderStatus::Open,
-            OrderStatus::Filled => dex_types::OrderStatus::Filled,
-            OrderStatus::Canceled(info) => dex_types::OrderStatus::Canceled(info.into()),
-        }
-    }
-}
-
-impl From<CanceledOrderInfo> for dex_types::CanceledOrderInfo {
-    fn from(info: CanceledOrderInfo) -> Self {
-        dex_types::CanceledOrderInfo {
-            remaining_quantity: info.remaining_quantity.into(),
+            OrderStatus::Pending => oisy_trade_types::OrderStatus::Pending,
+            OrderStatus::Open => oisy_trade_types::OrderStatus::Open,
+            OrderStatus::Filled => oisy_trade_types::OrderStatus::Filled,
+            OrderStatus::Canceled => oisy_trade_types::OrderStatus::Canceled,
         }
     }
 }
@@ -280,13 +263,13 @@ impl TokenId {
     }
 }
 
-impl From<dex_types::TokenId> for TokenId {
-    fn from(value: dex_types::TokenId) -> Self {
+impl From<oisy_trade_types::TokenId> for TokenId {
+    fn from(value: oisy_trade_types::TokenId) -> Self {
         Self(value.ledger_id)
     }
 }
 
-impl From<TokenId> for dex_types::TokenId {
+impl From<TokenId> for oisy_trade_types::TokenId {
     fn from(value: TokenId) -> Self {
         Self { ledger_id: value.0 }
     }
@@ -300,8 +283,8 @@ pub struct TokenMetadata {
     pub decimals: u8,
 }
 
-impl From<dex_types::TokenMetadata> for TokenMetadata {
-    fn from(value: dex_types::TokenMetadata) -> Self {
+impl From<oisy_trade_types::TokenMetadata> for TokenMetadata {
+    fn from(value: oisy_trade_types::TokenMetadata) -> Self {
         Self {
             symbol: value.symbol,
             decimals: value.decimals,
@@ -309,7 +292,7 @@ impl From<dex_types::TokenMetadata> for TokenMetadata {
     }
 }
 
-impl From<TokenMetadata> for dex_types::TokenMetadata {
+impl From<TokenMetadata> for oisy_trade_types::TokenMetadata {
     fn from(value: TokenMetadata) -> Self {
         Self {
             symbol: value.symbol,
@@ -337,8 +320,8 @@ impl TradingPair {
     }
 }
 
-impl From<dex_types::TradingPair> for TradingPair {
-    fn from(pair: dex_types::TradingPair) -> Self {
+impl From<oisy_trade_types::TradingPair> for TradingPair {
+    fn from(pair: oisy_trade_types::TradingPair) -> Self {
         Self {
             base: TokenId::new(pair.base),
             quote: TokenId::new(pair.quote),
@@ -346,9 +329,9 @@ impl From<dex_types::TradingPair> for TradingPair {
     }
 }
 
-impl From<TradingPair> for dex_types::TradingPair {
+impl From<TradingPair> for oisy_trade_types::TradingPair {
     fn from(value: TradingPair) -> Self {
-        dex_types::TradingPair {
+        oisy_trade_types::TradingPair {
             base: value.base.0,
             quote: value.quote.0,
         }
@@ -358,16 +341,16 @@ impl From<TradingPair> for dex_types::TradingPair {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
 )]
-pub struct Price(#[n(0)] u64);
+pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_via_quantity")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
 
-    pub fn new(value: u64) -> Self {
+    pub fn new(value: u128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0
     }
 
@@ -396,7 +379,7 @@ impl Price {
         base_scale: NonZeroU64,
     ) -> Option<Quantity> {
         let (quote, remainder) = quantity
-            .checked_mul_u64(self.0)?
+            .checked_mul_u128(self.0)?
             .checked_div_rem_u64(base_scale.get())?;
         assert_eq!(
             remainder, 0,
@@ -408,19 +391,19 @@ impl Price {
 
 /// Minimum price increment for a trading pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
-pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u64")] NonZeroU64);
+pub struct TickSize(#[cbor(n(0), with = "crate::cbor::non_zero_u128_via_quantity")] NonZeroU128);
 
 impl TickSize {
-    pub const fn new(value: NonZeroU64) -> Self {
+    pub const fn new(value: NonZeroU128) -> Self {
         Self(value)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn get(self) -> u128 {
         self.0.get()
     }
 }
 
-impl From<TickSize> for u64 {
+impl From<TickSize> for u128 {
     fn from(tick_size: TickSize) -> Self {
         tick_size.get()
     }
@@ -446,15 +429,33 @@ impl From<LotSize> for u64 {
     }
 }
 
-impl From<u64> for Price {
-    fn from(value: u64) -> Self {
+impl From<u128> for Price {
+    fn from(value: u128) -> Self {
         Self(value)
     }
 }
 
-impl From<Price> for u64 {
+impl From<Price> for u128 {
     fn from(price: Price) -> Self {
         price.0
+    }
+}
+
+impl From<Price> for Nat {
+    fn from(price: Price) -> Self {
+        Nat::from(price.get())
+    }
+}
+
+impl From<TickSize> for Nat {
+    fn from(tick_size: TickSize) -> Self {
+        Nat::from(tick_size.get())
+    }
+}
+
+impl From<LotSize> for Nat {
+    fn from(lot_size: LotSize) -> Self {
+        Nat::from(lot_size.get())
     }
 }
 
@@ -485,6 +486,11 @@ impl Quantity {
             high: 0,
             low: value,
         }
+    }
+
+    /// The value as a `u128`, or `None` if it exceeds `u128::MAX`.
+    pub const fn as_u128(self) -> Option<u128> {
+        if self.high == 0 { Some(self.low) } else { None }
     }
 
     pub(crate) fn high(&self) -> u128 {
@@ -579,6 +585,12 @@ impl From<u64> for Quantity {
     }
 }
 
+impl From<u128> for Quantity {
+    fn from(value: u128) -> Self {
+        Self::from_u128(value)
+    }
+}
+
 /// Error returned when a `Nat` value exceeds the 256-bit capacity of `Quantity`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantityOverflowError;
@@ -615,6 +627,35 @@ impl Quantity {
             .checked_add(rhs.high)?
             .checked_add(carry as u128)?;
         Some(Self { high, low })
+    }
+
+    /// Multiply this u256 by a `u128`, checked for overflow past 256 bits.
+    ///
+    /// Fast path: when `rhs` fits a `u64`, delegate to [`Self::checked_mul_u64`]
+    /// (the common case — settlement multiplies by prices well under `u64`).
+    /// Otherwise split `rhs` into two 64-bit limbs and reuse `checked_mul_u64`:
+    /// `self · rhs = self·rhs_lo + (self·rhs_hi)·2^64`.
+    pub fn checked_mul_u128(self, rhs: u128) -> Option<Self> {
+        bench_scopes!("qty", "qty::mul_u128");
+        if let Ok(rhs) = u64::try_from(rhs) {
+            return self.checked_mul_u64(rhs);
+        }
+        let lo = self.checked_mul_u64(rhs as u64)?;
+        let hi = self.checked_mul_u64((rhs >> 64) as u64)?;
+        lo.checked_add(hi.checked_shl_64()?)
+    }
+
+    /// Multiply this u256 by `2^64` (left-shift by 64 bits), checked for
+    /// overflow past 256 bits.
+    fn checked_shl_64(self) -> Option<Self> {
+        // Overflows iff the top 64 bits of `high` would shift past bit 255.
+        if self.high >> 64 != 0 {
+            return None;
+        }
+        Some(Self {
+            high: (self.high << 64) | (self.low >> 64),
+            low: self.low << 64,
+        })
     }
 
     pub fn checked_mul_u64(self, rhs: u64) -> Option<Self> {
@@ -776,13 +817,15 @@ pub struct PendingOrder {
     pub quantity: Quantity,
 }
 
-impl TryFrom<dex_types::LimitOrderRequest> for PendingOrder {
+impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
     type Error = QuantityOverflowError;
 
-    fn try_from(request: dex_types::LimitOrderRequest) -> Result<Self, Self::Error> {
+    fn try_from(request: oisy_trade_types::LimitOrderRequest) -> Result<Self, Self::Error> {
         Ok(Self {
             side: Side::from(request.side),
-            price: Price::from(request.price),
+            price: Price::from(
+                u128::try_from(&request.price.0).map_err(|_| QuantityOverflowError)?,
+            ),
             quantity: Quantity::try_from(request.quantity)?,
         })
     }

@@ -11,8 +11,8 @@ members = [
 [workspace.package]
 authors = ["DFINITY Stiftung"]
 edition = "2024"
-repository = "https://github.com/dfinity/dex"
-homepage = "https://github.com/dfinity/dex#readme"
+repository = "https://github.com/dfinity/oisy-trade"
+homepage = "https://github.com/dfinity/oisy-trade#readme"
 license = "Apache-2.0"
 readme = "README.md"
 

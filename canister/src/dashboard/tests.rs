@@ -5,8 +5,8 @@ use crate::order::{
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
 use crate::test_fixtures::{
-    self, LOT_SIZE, PRICE_SCALE, TICK_SIZE, ckbtc_metadata, ckbtc_token_id, icp_ckbtc_trading_pair,
-    icp_metadata, icp_token_id,
+    self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
+    ckbtc_token_id, icp_ckbtc_trading_pair, icp_metadata, icp_token_id,
 };
 use askama::Template;
 use candid::Principal;
@@ -20,7 +20,7 @@ fn should_render_metadata() {
     let dom = render(&fresh_state(), 42);
 
     let title = text(&dom, "h1");
-    assert_eq!(title, "DEX Dashboard");
+    assert_eq!(title, "OISY TRADE Dashboard");
 
     let metadata = text(&dom, "h2 + dl");
     assert!(
@@ -198,6 +198,8 @@ fn record_pair(state: &mut State<VectorMemory, VectorMemory>) {
         ckbtc_metadata(),
         TICK_SIZE,
         LOT_SIZE,
+        MIN_NOTIONAL,
+        Some(MAX_NOTIONAL),
         FeeRates::default(),
     );
 }
@@ -213,7 +215,7 @@ fn place(
     state: &mut State<VectorMemory, VectorMemory>,
     user: Principal,
     side: Side,
-    price: u64,
+    price: u128,
     quantity: u64,
 ) -> OrderId {
     let pair: TradingPair = icp_ckbtc_trading_pair();

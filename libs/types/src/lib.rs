@@ -1,4 +1,4 @@
-//! Candid types used by the candid interface of the DEX canister.
+//! Candid types used by the candid interface of the OISY TRADE canister.
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
@@ -37,8 +37,8 @@ pub struct LimitOrderRequest {
     pub pair: TradingPair,
     /// Whether this is a buy or sell order.
     pub side: Side,
-    /// Limit price in quote token units per base token unit.
-    pub price: u64,
+    /// Limit price in quote token smallest units per one whole base token.
+    pub price: Nat,
     /// Order quantity in base token units.
     pub quantity: Nat,
 }
@@ -53,16 +53,16 @@ pub enum AddLimitOrderError {
     /// The price is not a positive multiple of the tick size.
     InvalidPrice {
         /// The rejected price.
-        price: u64,
+        price: Nat,
         /// The required tick size.
-        tick_size: u64,
+        tick_size: Nat,
     },
     /// The quantity is not a positive multiple of the lot size.
     InvalidQuantity {
         /// The rejected quantity.
         quantity: Nat,
         /// The required lot size.
-        lot_size: u64,
+        lot_size: Nat,
     },
     /// The user does not have enough balance to place the order.
     InsufficientBalance {
@@ -73,6 +73,18 @@ pub enum AddLimitOrderError {
         /// The balance required to place the order.
         required: Nat,
     },
+    /// The order's notional (`price × quantity / 10^base_decimals`, in quote
+    /// smallest units) is below `min` or above `max`.
+    InvalidNotional {
+        /// The order's notional in quote token smallest units.
+        notional: Nat,
+        /// The configured minimum notional.
+        min: Nat,
+        /// The configured maximum notional, if any.
+        max: Option<Nat>,
+    },
+    /// Trading is globally halted; no new orders are accepted.
+    TradingHalted,
 }
 
 /// Error returned when canceling a limit order fails.
@@ -88,6 +100,23 @@ pub enum CancelLimitOrderError {
     OrderAlreadyCanceled,
 }
 
+/// Error returned by controller-gated endpoints when the caller is not
+/// authorized to perform the requested action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum UnauthorizedError {
+    /// The caller is not a controller of the canister.
+    NotController,
+}
+
+/// Whether trading on a pair is currently active or halted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum TradingStatus {
+    /// Trading on the pair is active.
+    Trading,
+    /// Trading on the pair is halted.
+    Halted,
+}
+
 /// Information about a listed trading pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct TradingPairInfo {
@@ -95,17 +124,23 @@ pub struct TradingPairInfo {
     pub base: Token,
     /// The quote token.
     pub quote: Token,
+    /// Whether trading on this pair is currently active or halted.
+    pub status: TradingStatus,
     /// Minimum price increment.
-    pub tick_size: u64,
+    pub tick_size: Nat,
     /// Minimum order quantity.
-    pub lot_size: u64,
+    pub lot_size: Nat,
+    /// Minimum order notional in quote token smallest units.
+    pub min_notional: Nat,
+    /// Maximum order notional in quote token smallest units, if any.
+    pub max_notional: Option<Nat>,
 }
 
 /// A single price level in an order book, aggregated across all resting orders at that price.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct PriceLevel {
-    /// Price in quote token units per base token unit.
-    pub price: u64,
+    /// Price in quote token smallest units per one whole base token.
+    pub price: Nat,
     /// Total quantity in base token units across all resting orders at this price.
     pub quantity: Nat,
 }
@@ -138,7 +173,7 @@ pub const MAX_DEPTH_LIMIT: u32 = 1_000;
 /// Error returned by the `get_order_book_ticker` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookTickerError {
-    /// The requested trading pair is not registered on the DEX.
+    /// The requested trading pair is not registered on the OISY TRADE.
     UnknownTradingPair,
 }
 
@@ -158,13 +193,13 @@ pub struct GetOrderBookDepthRequest {
 /// Error returned by the `get_order_book_depth` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookDepthError {
-    /// The requested trading pair is not registered on the DEX.
+    /// The requested trading pair is not registered on the OISY TRADE.
     UnknownTradingPair,
     /// The requested depth limit exceeds [`MAX_DEPTH_LIMIT`].
     LimitTooLarge {
         /// The rejected limit.
         requested: u32,
-        /// The maximum limit the DEX will serve.
+        /// The maximum limit the OISY TRADE will serve.
         max: u32,
     },
 }
@@ -172,8 +207,6 @@ pub enum GetOrderBookDepthError {
 /// Status of an order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum OrderStatus {
-    /// The order was not found.
-    NotFound,
     /// The order is pending processing.
     Pending,
     /// The order is open and resting in the order book.
@@ -181,26 +214,10 @@ pub enum OrderStatus {
     /// The order has been fully filled.
     Filled,
     /// The order has been canceled.
-    Canceled(CanceledOrderInfo),
+    Canceled,
 }
 
-/// Details about a canceled order.
-///
-/// Refund token and amount are derivable from the order's placement
-/// details + `remaining_quantity`, so they are not duplicated here —
-/// only the non-derivable piece is stored. Using `remaining_quantity`
-/// rather than `filled_quantity` lets the state-layer produce this
-/// value from `OrderBook::remove_order` alone, without a follow-up
-/// lookup in stable-memory order history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub struct CanceledOrderInfo {
-    /// Quantity that was still open on the book at the moment of cancel.
-    /// Equals the original placed quantity for a never-matched order, and
-    /// `original − filled` for a partially-filled one.
-    pub remaining_quantity: Nat,
-}
-
-/// Full view of an order as stored by the DEX. Returned by endpoints that
+/// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
 /// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
 /// saving the caller a follow-up status/metadata query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -209,14 +226,103 @@ pub struct OrderRecord {
     pub owner: Principal,
     /// Whether the order is a buy or a sell.
     pub side: Side,
-    /// Limit price in quote units per base unit, as originally placed.
-    pub price: u64,
+    /// Limit price in quote token smallest units per one whole base token, as originally placed.
+    pub price: Nat,
     /// Quantity originally placed, in base token units.
     pub quantity: Nat,
-    /// Current lifecycle state; `Canceled` carries a [`CanceledOrderInfo`].
+    /// Cumulative quantity filled so far, in base token units. Remaining is
+    /// `quantity − filled_quantity`.
+    pub filled_quantity: Nat,
+    /// Current lifecycle state.
     pub status: OrderStatus,
     /// Submission time in nanoseconds since the Unix epoch.
-    pub timestamp: u64,
+    pub created_at: u64,
+    /// Time of the most recent modifying event (fill, status transition, or
+    /// cancel) in nanoseconds since the Unix epoch; `None` until first modified.
+    pub last_updated_at: Option<u64>,
+}
+
+/// Maximum number of orders returned by a single `get_my_orders` call.
+/// Requests for more are silently capped to this many.
+pub const MAX_ORDERS_PER_RESPONSE: u32 = 100;
+
+/// Request for the `get_my_orders` query.
+///
+/// The endpoint takes an `opt GetMyOrdersArgs`; an absent argument is
+/// equivalent to [`GetMyOrdersArgs::default()`], the first page from the
+/// newest order with the maximum length.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyOrdersArgs {
+    /// How to select the caller's orders.
+    pub filter: GetMyOrdersFilter,
+}
+
+impl GetMyOrdersArgs {
+    /// A point lookup by order id.
+    pub fn by_id(id: OrderId) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ById(id),
+        }
+    }
+
+    /// A page over the caller's orders, newest first.
+    pub fn by_page(after: Option<OrderId>, length: u32) -> Self {
+        Self {
+            filter: GetMyOrdersFilter::ByPage(GetMyOrdersPage { after, length }),
+        }
+    }
+}
+
+/// Selector for `get_my_orders`: either a point lookup by id or a page. The
+/// two modes are mutually exclusive by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum GetMyOrdersFilter {
+    /// Return the single matching order if the caller owns it, else empty.
+    ById(OrderId),
+    /// Return a page over the caller's orders, newest first.
+    ByPage(GetMyOrdersPage),
+}
+
+impl Default for GetMyOrdersFilter {
+    fn default() -> Self {
+        Self::ByPage(GetMyOrdersPage::default())
+    }
+}
+
+/// A page over the caller's orders, newest first. `length` is capped at
+/// [`MAX_ORDERS_PER_RESPONSE`].
+///
+/// Pages via a cursor: pass the previous page's last [`UserOrder::id`] as
+/// `after` to get the next page; `None` starts from the newest order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyOrdersPage {
+    /// Resume strictly after this order id (a prior page's last `id`).
+    /// `None` starts from the newest order.
+    pub after: Option<OrderId>,
+    /// Maximum number of orders to return.
+    pub length: u32,
+}
+
+impl Default for GetMyOrdersPage {
+    fn default() -> Self {
+        Self {
+            after: None,
+            length: MAX_ORDERS_PER_RESPONSE,
+        }
+    }
+}
+
+/// One entry in a `get_my_orders` response: an order the caller placed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct UserOrder {
+    /// The order's unique identifier.
+    pub id: OrderId,
+    /// The trading pair the order was placed on.
+    pub pair: TradingPair,
+    /// The full order record. `get_my_orders` only returns the caller's own
+    /// orders, so `order.owner` is always the caller — reused as-is for shape
+    /// parity with other order-returning endpoints.
+    pub order: OrderRecord,
 }
 
 /// A token identified by its ledger canister ID.
@@ -246,7 +352,7 @@ pub struct Token {
     pub metadata: TokenMetadata,
 }
 
-/// Request to deposit tokens into the DEX.
+/// Request to deposit tokens into the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct DepositRequest {
     /// The token to deposit.
@@ -260,7 +366,7 @@ pub struct DepositRequest {
 pub enum DepositError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the DEX.
+    /// The token is not part of any trading pair on the OISY TRADE.
     UnsupportedToken {
         /// The unsupported token.
         token_id: TokenId,
@@ -339,7 +445,7 @@ pub struct UserTokenBalance {
 /// Per-entry error reported in [`get_balances`] responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesError {
-    /// The filter referenced a token that the DEX does not support.
+    /// The filter referenced a token that the OISY TRADE does not support.
     TokenNotSupported(FilterToken),
 }
 
@@ -356,7 +462,7 @@ pub enum GetBalancesRequestError {
     },
 }
 
-/// Request to add a new trading pair to the DEX.
+/// Request to add a new trading pair to the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct AddTradingPairRequest {
     /// The base token of the pair (e.g. ckSOL).
@@ -364,16 +470,21 @@ pub struct AddTradingPairRequest {
     /// The quote token of the pair (e.g. ckBTC).
     pub quote: Token,
     /// Minimum price increment. Must be greater than zero.
-    pub tick_size: u64,
+    pub tick_size: Nat,
     /// Minimum order quantity. Must be greater than zero.
-    pub lot_size: u64,
+    pub lot_size: Nat,
     /// Maker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
     pub maker_fee_bps: u16,
     /// Taker fee rate in basis points (1 bps = 0.01 %). Must be in `0..=10_000`.
     pub taker_fee_bps: u16,
+    /// Minimum order notional in quote token smallest units. Must be greater than zero.
+    pub min_notional: Nat,
+    /// Maximum order notional in quote token smallest units, if any.
+    /// When set, must be greater than or equal to `min_notional`.
+    pub max_notional: Option<Nat>,
 }
 
-/// Request to withdraw tokens from the DEX.
+/// Request to withdraw tokens from the OISY TRADE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct WithdrawRequest {
     /// The token to withdraw.
@@ -396,7 +507,7 @@ pub struct WithdrawResponse {
 pub enum WithdrawError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the DEX.
+    /// The token is not part of any trading pair on the OISY TRADE.
     UnsupportedToken {
         /// The unsupported token.
         token_id: TokenId,
@@ -477,10 +588,19 @@ pub enum AddTradingPairError {
     /// `tick_size` or `lot_size`.
     IndivisibleTickLotForBaseDecimals {
         /// The submitted tick size.
-        tick_size: u64,
+        tick_size: Nat,
         /// The submitted lot size.
-        lot_size: u64,
+        lot_size: Nat,
         /// The base token's decimals (the divisor exponent).
         base_decimals: u8,
+    },
+    /// The notional bounds are invalid: `min_notional` is zero, a bound is too
+    /// large to fit the 256-bit quantity representation, or `max_notional` is
+    /// set and smaller than `min_notional`.
+    InvalidNotional {
+        /// The submitted minimum notional.
+        min_notional: Nat,
+        /// The submitted maximum notional, if any.
+        max_notional: Option<Nat>,
     },
 }

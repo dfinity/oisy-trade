@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-# Reproducible build of the DEX canister WASM.
+# Reproducible build of the OISY TRADE canister WASM.
 #
 # Invoke via `just docker-build`, or directly:
 #   docker buildx build --platform linux/amd64 \
 #       --target export --output type=local,dest=./wasms .
 #
-# The output is `wasms/dex_canister.wasm.gz`, byte-identical regardless of
+# The output is `wasms/oisy_trade_canister.wasm.gz`, byte-identical regardless of
 # host platform (Apple Silicon runs the linux/amd64 image via emulation).
 #
 # Post-build `ic-wasm` shrinks the binary, then embeds the Candid interface
@@ -59,16 +59,16 @@ COPY . .
 # Build the canister, shrink it, embed Candid metadata, and gzip. Each
 # ic-wasm step writes back to the same file; this matches the conventional
 # pattern used across the dfinity canister ecosystem.
-RUN cargo build --locked --target wasm32-unknown-unknown --release --package dex_canister \
+RUN cargo build --locked --target wasm32-unknown-unknown --release --package oisy_trade_canister \
  && mkdir -p /out \
- && cp target/wasm32-unknown-unknown/release/dex_canister.wasm /out/dex_canister.wasm \
- && ic-wasm /out/dex_canister.wasm -o /out/dex_canister.wasm shrink \
- && ic-wasm /out/dex_canister.wasm -o /out/dex_canister.wasm metadata candid:service -f canister/dex.did -v public \
- && ic-wasm /out/dex_canister.wasm -o /out/dex_canister.wasm metadata candid:args -d '(DexArg)' -v public \
- && gzip -fckn9 /out/dex_canister.wasm > /out/dex_canister.wasm.gz \
- && rm /out/dex_canister.wasm
+ && cp target/wasm32-unknown-unknown/release/oisy_trade_canister.wasm /out/oisy_trade_canister.wasm \
+ && ic-wasm /out/oisy_trade_canister.wasm -o /out/oisy_trade_canister.wasm shrink \
+ && ic-wasm /out/oisy_trade_canister.wasm -o /out/oisy_trade_canister.wasm metadata candid:service -f canister/oisy_trade.did -v public \
+ && ic-wasm /out/oisy_trade_canister.wasm -o /out/oisy_trade_canister.wasm metadata candid:args -d '(OisyTradeArg)' -v public \
+ && gzip -fckn9 /out/oisy_trade_canister.wasm > /out/oisy_trade_canister.wasm.gz \
+ && rm /out/oisy_trade_canister.wasm
 
 # Export-only stage. With `--target export --output type=local,dest=./wasms`,
 # buildx drops just the gzipped WASM into the host's wasms/ directory.
 FROM scratch AS export
-COPY --from=builder /out/dex_canister.wasm.gz /
+COPY --from=builder /out/oisy_trade_canister.wasm.gz /

@@ -1,2 +1,2 @@
-# Crate `dex_client`
+# Crate `oisy_trade_client`
 

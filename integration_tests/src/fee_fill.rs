@@ -1,7 +1,7 @@
 use crate::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use crate::{LOT_SIZE, PRICE_SCALE, Setup};
 use candid::Principal;
-use dex_types::{AddTradingPairRequest, LimitOrderRequest, Side, Token};
+use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Side, Token};
 
 /// Outputs of one fee-charging fill, used by tests covering both the
 /// `get_fee_balances` Candid query and the `/metrics` `fee_balance` gauge.
@@ -42,7 +42,7 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
     let base = request.base.clone();
     let quote = request.quote.clone();
     setup
-        .dex_client_with_caller(setup.controller())
+        .oisy_trade_client_with_caller(setup.controller())
         .add_trading_pair(request)
         .await
         .unwrap();
@@ -70,21 +70,21 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         .execute()
         .await;
     setup
-        .dex_client_with_caller(seller)
+        .oisy_trade_client_with_caller(seller)
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Sell,
-            price,
+            price: candid::Nat::from(price),
             quantity: qty.into(),
         })
         .await
         .unwrap();
     setup
-        .dex_client_with_caller(buyer)
+        .oisy_trade_client_with_caller(buyer)
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
             side: Side::Buy,
-            price,
+            price: candid::Nat::from(price),
             quantity: qty.into(),
         })
         .await

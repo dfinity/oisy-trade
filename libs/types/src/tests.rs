@@ -1,8 +1,8 @@
 use crate::{
-    AddLimitOrderError, Balance, CanceledOrderInfo, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair,
-    TradingPairInfo,
+    AddLimitOrderError, Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage,
+    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
+    OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata,
+    TradingPair, TradingPairInfo, TradingStatus,
 };
 use candid::{Nat, Principal};
 
@@ -18,7 +18,7 @@ fn should_serialize_limit_order_request() {
     let request = LimitOrderRequest {
         pair: test_trading_pair(),
         side: Side::Buy,
-        price: 100,
+        price: Nat::from(100u64),
         quantity: Nat::from(1_000_000u64),
     };
     let encoded = candid::encode_one(&request).unwrap();
@@ -29,13 +29,10 @@ fn should_serialize_limit_order_request() {
 #[test]
 fn should_serialize_order_status() {
     for status in [
-        OrderStatus::NotFound,
         OrderStatus::Pending,
         OrderStatus::Open,
         OrderStatus::Filled,
-        OrderStatus::Canceled(CanceledOrderInfo {
-            remaining_quantity: Nat::from(0u64),
-        }),
+        OrderStatus::Canceled,
     ] {
         let encoded = candid::encode_one(&status).unwrap();
         let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
@@ -64,8 +61,11 @@ fn should_serialize_trading_pair_info() {
                 decimals: 8,
             },
         },
-        tick_size: 10,
-        lot_size: 1_000_000,
+        status: TradingStatus::Trading,
+        tick_size: Nat::from(10u64),
+        lot_size: Nat::from(1_000_000u64),
+        min_notional: Nat::from(5_000_000u64),
+        max_notional: Some(Nat::from(9_000_000_000_000u64)),
     };
     let encoded = candid::encode_one(&info).unwrap();
     let decoded: TradingPairInfo = candid::decode_one(&encoded).unwrap();
@@ -136,11 +136,11 @@ fn should_serialize_order_book_ticker() {
         },
         OrderBookTicker {
             bid: Some(PriceLevel {
-                price: 100,
+                price: Nat::from(100u64),
                 quantity: Nat::from(500_000u64),
             }),
             ask: Some(PriceLevel {
-                price: 110,
+                price: Nat::from(110u64),
                 quantity: Nat::from(300_000u64),
             }),
         },
@@ -156,16 +156,16 @@ fn should_serialize_order_book_depth() {
     let depth = OrderBookDepth {
         bids: vec![
             PriceLevel {
-                price: 100,
+                price: Nat::from(100u64),
                 quantity: Nat::from(1_000u64),
             },
             PriceLevel {
-                price: 99,
+                price: Nat::from(99u64),
                 quantity: Nat::from(2_000u64),
             },
         ],
         asks: vec![PriceLevel {
-            price: 101,
+            price: Nat::from(101u64),
             quantity: Nat::from(500u64),
         }],
     };
@@ -216,16 +216,41 @@ fn should_serialize_get_order_book_depth_error() {
 }
 
 #[test]
+fn should_serialize_get_my_orders_args() {
+    for args in [
+        GetMyOrdersArgs {
+            filter: GetMyOrdersFilter::ById("order-1".to_string()),
+        },
+        GetMyOrdersArgs {
+            filter: GetMyOrdersFilter::ByPage(GetMyOrdersPage {
+                after: None,
+                length: 50,
+            }),
+        },
+        GetMyOrdersArgs {
+            filter: GetMyOrdersFilter::ByPage(GetMyOrdersPage {
+                after: Some("order-2".to_string()),
+                length: 100,
+            }),
+        },
+    ] {
+        let encoded = candid::encode_one(&args).unwrap();
+        let decoded: GetMyOrdersArgs = candid::decode_one(&encoded).unwrap();
+        assert_eq!(args, decoded);
+    }
+}
+
+#[test]
 fn should_serialize_add_limit_order_error() {
     for error in [
         AddLimitOrderError::UnknownTradingPair,
         AddLimitOrderError::InvalidPrice {
-            price: 7,
-            tick_size: 10,
+            price: Nat::from(7u64),
+            tick_size: Nat::from(10u64),
         },
         AddLimitOrderError::InvalidQuantity {
             quantity: Nat::from(500_000u64),
-            lot_size: 1_000_000,
+            lot_size: Nat::from(1_000_000u64),
         },
     ] {
         let encoded = candid::encode_one(&error).unwrap();

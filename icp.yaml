@@ -1,21 +1,21 @@
 canisters:
-  - name: dex
+  - name: oisy_trade
     recipe:
       type: "@dfinity/rust@v3.0.0"
       sha256: 620151f0c07efc1e8a986f73b85406b78bea09a92fc899f299a431431a6a6819
       configuration:
-        package: dex_canister
-        candid: canister/dex.did
+        package: oisy_trade_canister
+        candid: canister/oisy_trade.did
         shrink: true
         compress: true
 
 environments:
   - name: staging
     network: ic
-    canisters: [dex]
+    canisters: [oisy_trade]
     init_args:
-      dex: "( variant { Init = record { mode = variant { GeneralAvailability } } } )"
+      oisy_trade: "( variant { Init = record { mode = variant { GeneralAvailability } } } )"
 
   - name: prod
     network: ic
-    canisters: [dex]
+    canisters: [oisy_trade]

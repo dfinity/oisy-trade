@@ -1,8 +1,8 @@
 use super::*;
 use crate::balance::Balance;
 use crate::order::{
-    CanceledOrderInfo, FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price,
-    Quantity, Side, TokenId, TradingPair,
+    FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
+    TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
@@ -11,12 +11,12 @@ use crate::state::event::{
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
-    LOT_SIZE, PRICE_SCALE, TICK_SIZE, balances, base_metadata, order_history, quote_metadata,
-    state, user_registry,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata,
+    order_history, quote_metadata, state, user_registry,
 };
 use candid::Principal;
-use dex_types_internal::Mode;
 use ic_stable_structures::VectorMemory;
+use oisy_trade_types_internal::Mode;
 
 const BASE: [u8; 1] = [0x01];
 const QUOTE: [u8; 1] = [0x02];
@@ -108,6 +108,8 @@ impl Scenario {
             quote_metadata(),
             TICK_SIZE,
             LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
             FeeRates::default(),
         );
         self.events.push(add_trading_pair_event(base(), quote()));
@@ -209,15 +211,15 @@ impl Scenario {
         self.state
             .validate_cancel_limit_order(&user, &order_id)
             .expect("test setup: order must be cancelable");
+        let cancel_ts = self.timestamp();
         self.state
-            .record_cancel_limit_order(order_id, StableMemoryOptions::Write);
+            .record_cancel_limit_order(order_id, cancel_ts, StableMemoryOptions::Write);
         let settling_event = self
             .state
             .take_next_pending_settling_event()
             .expect("BUG: record_cancel_limit_order did not push a settling event");
         self.state
             .record_settling_event(&settling_event, StableMemoryOptions::Write);
-        let cancel_ts = self.timestamp();
         let settling_ts = self.timestamp();
         self.events.push(Event {
             timestamp: cancel_ts,
@@ -234,9 +236,13 @@ impl Scenario {
     /// caller-supplied `MatchingEvent` + `SettlingEvent` as the expected
     /// replay payload.
     fn with_matching_round(mut self, matching: MatchingEvent, settling: SettlingEvent) -> Self {
-        let runtime = crate::test_fixtures::mocks::mock_runtime_for(Principal::anonymous());
-        crate::EXECUTOR.run_once(&mut self.state, &runtime);
+        // The executor's `MatchingEvent` is timestamped with the runtime's
+        // `time()`; pin the runtime to `matching_ts` so the primary path stamps
+        // `last_updated_at` with the same value the replayed event carries.
         let matching_ts = self.timestamp();
+        let runtime =
+            crate::test_fixtures::mocks::mock_runtime_at(Principal::anonymous(), matching_ts);
+        crate::EXECUTOR.run_once(&mut self.state, &runtime);
         let settling_ts = self.timestamp();
         self.events.push(Event {
             timestamp: matching_ts,
@@ -277,6 +283,33 @@ impl Scenario {
             .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
             .status;
         assert_eq!(status, expected, "unexpected status for {order_id:?}");
+        self
+    }
+
+    fn assert_filled_quantity(self, order_id: OrderId, expected: impl Into<Quantity>) -> Self {
+        let filled = self
+            .state
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
+            .filled_quantity;
+        assert_eq!(
+            filled,
+            expected.into(),
+            "unexpected filled_quantity for {order_id:?}"
+        );
+        self
+    }
+
+    /// Applies a `SetGlobalHalt` mutation on the primary path and records the
+    /// matching `SetGlobalHalt` event as the expected replay payload.
+    fn with_set_global_halt(mut self, halted: bool) -> Self {
+        self.state.permissions_mut().set_trading_halted(halted);
+        let timestamp = self.timestamp();
+        self.events.push(Event {
+            timestamp,
+            payload: EventType::SetGlobalHalt(halted),
+        });
         self
     }
 
@@ -361,8 +394,8 @@ fn should_replay_withdraw() {
 
 #[test]
 fn should_replay_add_limit_order() {
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let (scenario, _) = Scenario::new()
         .with_trading_pair()
         .with_deposit(
@@ -383,8 +416,8 @@ fn should_replay_add_limit_order() {
 fn should_replay_matching() {
     let buyer = user_1();
     let seller = user_2();
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
 
     let (scenario, buy_id) = Scenario::new()
@@ -454,9 +487,9 @@ fn should_replay_matching() {
 fn should_replay_matching_with_price_improvement() {
     let buyer = user_1();
     let seller = user_2();
-    let maker_price = 100u64;
-    let taker_price = 110u64;
-    let quantity = 1_000_000u64;
+    let maker_price = 100u128;
+    let taker_price = 110u128;
+    let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
 
     // Sell rests first; crossing buy enters at the higher `taker_price`.
@@ -533,8 +566,8 @@ fn should_replay_matching_with_price_improvement() {
 
 #[test]
 fn should_replay_cancel_pending_order() {
-    let price = 100u64;
-    let quantity = 1_000_000u64;
+    let price = 100u128;
+    let quantity = 1_000_000u128;
     let reserved = price * quantity;
 
     let (scenario, buy_id) = Scenario::new()
@@ -552,12 +585,10 @@ fn should_replay_cancel_pending_order() {
     scenario
         .with_cancel(user_1(), buy_id)
         .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
-        .assert_order_status(
-            buy_id,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Quantity::from(quantity),
-            }),
-        )
+        .assert_order_status(buy_id, OrderStatus::Canceled)
+        // Never matched: remaining (quantity − filled_quantity) is the full
+        // placed quantity, so filled_quantity is zero.
+        .assert_filled_quantity(buy_id, 0u64)
         .assert_replay_matches();
 }
 
@@ -565,8 +596,8 @@ fn should_replay_cancel_pending_order() {
 fn should_replay_cancel_partially_filled_order() {
     let buyer = user_1();
     let seller = user_2();
-    let price = 100u64;
-    let quantity = 1_000_000u64; // one lot
+    let price = 100u128;
+    let quantity = 1_000_000u128; // one lot
     let book_id = OrderBookId::ZERO;
 
     // Seller rests 1 lot; buyer takes 3 lots — 1 lot fills, 2 lots rest as
@@ -629,13 +660,30 @@ fn should_replay_cancel_partially_filled_order() {
         .assert_balance(seller, TokenId::new(base()), 0u64, 0u64)
         .assert_balance(seller, TokenId::new(quote()), price * quantity, 0u64)
         .assert_order_status(sell_id, OrderStatus::Filled)
-        .assert_order_status(
-            buy_id,
-            OrderStatus::Canceled(CanceledOrderInfo {
-                remaining_quantity: Quantity::from(2 * quantity),
-            }),
-        )
+        .assert_order_status(buy_id, OrderStatus::Canceled)
+        // The canceled buy keeps the 1 lot it filled before cancel;
+        // remaining (2 lots) is derived as quantity − filled_quantity.
+        .assert_filled_quantity(buy_id, quantity)
         .assert_replay_matches();
+}
+
+#[test]
+fn should_apply_set_global_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_global_halt(true);
+    assert!(scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_resume_after_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_global_halt(true)
+        .with_set_global_halt(false);
+    assert!(!scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
 }
 
 #[test]
