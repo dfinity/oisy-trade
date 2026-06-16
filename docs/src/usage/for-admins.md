@@ -57,7 +57,7 @@ icp identity principal --identity "$IDENTITY" --identity-password-file "$PIN_FIL
 icp canister status oisy_trade --environment staging --identity "$IDENTITY" --identity-password-file "$PIN_FILE"
 ```
 
-## 1. Upgrade the canister
+## Upgrade the canister
 
 Upgrades preserve stable memory: balances, open orders, listed pairs, and the event log all survive. The canister's `post_upgrade` takes an `opt OisyTradeArg`; passing `(null)` keeps the current configuration. To change the access mode (`GeneralAvailability` ↔ `RestrictedTo`), pass a structured `Upgrade` arg instead.
 
@@ -87,7 +87,7 @@ icp canister install oisy_trade --mode upgrade --args '(null)' \
     --environment staging -y
 ```
 
-## 2. Add a trading pair
+## Add a trading pair
 
 `add_trading_pair` is an update call restricted to controllers. The request carries both ledger IDs plus the token metadata (`symbol`, `decimals`).
 
@@ -102,7 +102,7 @@ export QUOTE_LEDGER=apia6-jaaaa-aaaar-qabma-cai  # ckSepoliaETH
 
 ### Fetch ledger metadata
 
-The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise the OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
+The `symbol` and `decimals` you submit **must** match what each ledger reports via `icrc1_symbol` / `icrc1_decimals` — otherwise OISY TRADE rejects the call (if the token is already registered under different metadata) or, more insidiously, registers the pair with metadata that misrepresents the asset.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc1_symbol '()' --query --network ic --identity anonymous
@@ -134,7 +134,7 @@ curl -sSf "https://api.binance.com/api/v3/exchangeInfo?symbol=SOLETH" \
   | jq '{tickSize: (.symbols[0].filters[] | select(.filterType=="PRICE_FILTER") | .tickSize), stepSize: (.symbols[0].filters[] | select(.filterType=="LOT_SIZE") | .stepSize)}'
 ```
 
-The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to the OISY TRADE's integer base units using the ledger decimals you exported above:
+The `filters` array contains a `PRICE_FILTER` (`tickSize`) and a `LOT_SIZE` (`stepSize`). Those values are human-readable decimal token counts — convert to OISY TRADE's integer base units using the ledger decimals you exported above:
 
 - `tick_size = tickSize_binance × 10^(quote_decimals − base_decimals)`
 - `lot_size  = stepSize_binance × 10^base_decimals`
@@ -180,7 +180,7 @@ icp canister call oisy_trade get_trading_pairs '()' --environment staging --quer
 
 The new pair should appear in the output.
 
-## 3. Halt and resume trading
+## Halt and resume trading
 
 The canister exposes a controller-gated **global trading halt**: a soft circuit
 breaker that pauses new orders and the matching engine across every pair while
@@ -320,8 +320,3 @@ rm -f "$PIN_FILE"
 ```
 
 If you used option **A** (pointed at an existing file), leave it alone.
-
-## What's next
-
-- Every `add_trading_pair` is recorded in the append-only event log — inspect with `get_events` (see `canister/oisy_trade.did`).
-- See [`examples/getting_started.md`](getting_started.md) for how traders interact with a listed pair (deposit → order → withdraw).

@@ -4,7 +4,7 @@ title:
 tags: []
 ---
 
-# <title>
+# `<title>`
 
 ## Motivation
 
@@ -38,7 +38,7 @@ line anchors.*
 
 *Pre-existing architectural constraints that shape the design.*
 
-### <module / area>
+### `<module / area>`
 
 *Concrete types, signatures, events, enforcement points.*
 

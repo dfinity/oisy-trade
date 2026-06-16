@@ -1,6 +1,6 @@
 # For AI agents
 
-If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into OISY TRADE calls, [`examples/getting_started.md`](getting_started.md) is your command template. A few things it doesn't spell out but you must respect:
+If you're an AI agent translating a user's intent ("sell 0.01 SOL at X", "what pairs are listed?") into OISY TRADE calls, the [For Users](./for-users.md) walkthrough is your command template. A few things it doesn't spell out but you must respect:
 
 ## Before you start
 
@@ -28,7 +28,7 @@ The Candid `//` doc comments are **binding** — they encode the rules types alo
 
 ## Amount discipline
 
-Users speak human ("0.01 SOL"); the OISY TRADE speaks base units (`10^decimals`). Always:
+Users speak human ("0.01 SOL"); OISY TRADE speaks base units (`10^decimals`). Always:
 
 - Convert with integer math — **never floats**.
 - Query `icrc1_fee` before quoting any amount — fees vary wildly between ledgers (e.g. ckDevnetSOL `50`, ckSepoliaETH `10_000_000_000`).

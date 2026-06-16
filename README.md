@@ -7,6 +7,8 @@
 
 > OISY TRADE is an order-book DEX on the [Internet Computer](https://internetcomputer.org/).
 
+📖 **[Full documentation →](https://dfinity.github.io/oisy-trade/)**
+
 ## Table of Contents
 
 - [Key Features](#key-features)
@@ -29,7 +31,7 @@
 - **Synchronous matching engine**: token transfers only happen at the deposit/withdrawal edges; the matching engine operates entirely on internal balances, with no async complexity.
 - **Event-sourced state**: every state change is recorded in an append-only log in stable memory and replayed on upgrade, providing full auditability and simpler upgrades.
 
-See the [design document](docs/design.md) for the full architecture.
+See the [design document](https://dfinity.github.io/oisy-trade/development/design.html) for the full architecture.
 
 <a id="deployment"></a>
 ## 🚀 Deployment
@@ -42,20 +44,20 @@ See the [design document](docs/design.md) for the full architecture.
 <a id="usage"></a>
 ## 📘 Usage
 
-Walk through the main OISY TRADE flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve the OISY TRADE as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
+Walk through the main OISY TRADE flows against the staging canister using only the [`icp` CLI](https://cli.internetcomputer.org/): discover trading pairs, approve OISY TRADE as an ICRC-2 spender, deposit, place a limit order, check its status, and withdraw.
 
-See [`examples/getting_started.md`](examples/getting_started.md).
+See the [Getting Started walkthrough](https://dfinity.github.io/oisy-trade/usage/for-users.html).
 
 
 ### 🤖Agents
 
-Talk to your agent to interact with the OISY TRADE 😎.
+Talk to your agent to interact with OISY TRADE 😎.
 
 > Buy 0.01 SOL at a limit price of 0.037 ETH per SOL
 
-![Agent placing an order](examples/agent_place_order.png?raw=true "Agent placing an order")
+![Agent placing an order](docs/src/usage/agent_place_order.png?raw=true "Agent placing an order")
 
-See [`examples/agents.md`](examples/agents.md).
+See the [Agents guide](https://dfinity.github.io/oisy-trade/usage/for-agents.html).
 
 <a id="development"></a>
 ## 🛠️ Development
