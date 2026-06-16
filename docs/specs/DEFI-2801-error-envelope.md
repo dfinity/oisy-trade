@@ -37,7 +37,7 @@ touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to `Ord
 ## Requirements
 
 - **R1**: Every user-facing error is a **disposition-tagged variant** whose arms are drawn from
-  `RequestError` / `TemporaryError` / `InternalError`; each arm carries `opt variant { <leaves> }`.
+  `RequestError` / `TemporaryError` / `InternalError`; each arm carries `opt variant { … }`.
   An error declares only the arms it can actually produce. Applies to `add_limit_order`,
   `cancel_limit_order`, `deposit`, `withdraw`, `get_order_status`, `get_order_book_ticker`,
   `get_order_book_depth`, and both the per-token and request-level errors of `get_balances` /
