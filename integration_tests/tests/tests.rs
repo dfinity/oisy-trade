@@ -2225,7 +2225,7 @@ mod global_halt {
 
         // Halt right after placement — before any round runs the placement
         // kickoffs — so the cross stays unmatched under the halt.
-        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        assert_eq!(controller_client.halt_trading(None).await, Ok(()));
 
         // The halt is reflected on the pair's trading status.
         assert_eq!(
@@ -2339,7 +2339,7 @@ mod global_halt {
 
         // Resume and tick WITHOUT advancing time and WITHOUT placing a new
         // order: the resume kickoff alone re-arms matching and drives the fill.
-        assert_eq!(controller_client.resume_trading().await, Ok(()));
+        assert_eq!(controller_client.resume_trading(None).await, Ok(()));
 
         // The resume is reflected on the pair's trading status.
         assert_eq!(
@@ -2432,7 +2432,7 @@ mod global_halt {
         );
 
         // Halt trading.
-        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        assert_eq!(controller_client.halt_trading(None).await, Ok(()));
 
         // New orders are rejected.
         assert_eq!(
@@ -2464,11 +2464,11 @@ mod global_halt {
         let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
 
         assert_eq!(
-            user_client.halt_trading().await,
+            user_client.halt_trading(None).await,
             Err(UnauthorizedError::NotController)
         );
         assert_eq!(
-            user_client.resume_trading().await,
+            user_client.resume_trading(None).await,
             Err(UnauthorizedError::NotController)
         );
 
@@ -2496,7 +2496,7 @@ mod global_halt {
             .execute()
             .await;
 
-        assert_eq!(controller_client.halt_trading().await, Ok(()));
+        assert_eq!(controller_client.halt_trading(None).await, Ok(()));
         setup.upgrade(None).await;
 
         let order = LimitOrderRequest {
@@ -2511,7 +2511,7 @@ mod global_halt {
             "halt must survive the upgrade"
         );
 
-        assert_eq!(controller_client.resume_trading().await, Ok(()));
+        assert_eq!(controller_client.resume_trading(None).await, Ok(()));
         client
             .add_limit_order(order)
             .await
@@ -2523,16 +2523,17 @@ mod global_halt {
 
 mod pair_halt {
     use assert_matches::assert_matches;
-    use candid::{Nat, Principal};
+    use candid::{Encode, Nat, Principal};
     use oisy_trade_int_tests::Setup;
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_types::{
-        AddLimitOrderError, LimitOrderRequest, OrderStatus, PairStatus, SetPairStatusError, Side,
-        TradingPair,
+        AddLimitOrderError, LimitOrderRequest, OrderStatus, Side, TradingPair, TradingStatus,
+        UnauthorizedError,
     };
+    use pocket_ic::{RejectCode, RejectResponse};
 
     /// With two pairs, halting pair A: orders on A are rejected with
-    /// `PairHalted`, orders on B still succeed and match, and a resting order
+    /// `TradingHalted`, orders on B still succeed and match, and a resting order
     /// on A can still be canceled.
     #[tokio::test]
     async fn should_block_orders_on_halted_pair_only() {
@@ -2583,10 +2584,20 @@ mod pair_halt {
 
         // Halt pair A.
         assert_eq!(
-            controller_client
-                .set_pair_status(pair_a, PairStatus::Halted)
-                .await,
+            controller_client.halt_trading(Some(vec![pair_a])).await,
             Ok(())
+        );
+
+        // Only pair A reports as halted; pair B keeps trading.
+        assert_eq!(
+            setup.pair_status(pair_a).await,
+            TradingStatus::Halted,
+            "halted pair must report Halted"
+        );
+        assert_eq!(
+            setup.pair_status(pair_b).await,
+            TradingStatus::Trading,
+            "unaffected pair must keep reporting Trading"
         );
 
         // New orders on pair A are rejected.
@@ -2599,7 +2610,7 @@ mod pair_halt {
                     quantity: Nat::from(quantity),
                 })
                 .await,
-            Err(AddLimitOrderError::PairHalted)
+            Err(AddLimitOrderError::TradingHalted)
         );
 
         // Orders on pair B still succeed.
@@ -2686,9 +2697,7 @@ mod pair_halt {
 
         // Halt pair A first.
         assert_eq!(
-            controller_client
-                .set_pair_status(pair_a, PairStatus::Halted)
-                .await,
+            controller_client.halt_trading(Some(vec![pair_a])).await,
             Ok(())
         );
 
@@ -2715,9 +2724,7 @@ mod pair_halt {
         // Pair A cross: orders are rejected while halted, so resume A just long
         // enough to place both, then halt again before ticking.
         assert_eq!(
-            controller_client
-                .set_pair_status(pair_a, PairStatus::Active)
-                .await,
+            controller_client.resume_trading(Some(vec![pair_a])).await,
             Ok(())
         );
         let buy_a = buyer_client
@@ -2739,9 +2746,7 @@ mod pair_halt {
             .await
             .unwrap();
         assert_eq!(
-            controller_client
-                .set_pair_status(pair_a, PairStatus::Halted)
-                .await,
+            controller_client.halt_trading(Some(vec![pair_a])).await,
             Ok(())
         );
 
@@ -2792,9 +2797,7 @@ mod pair_halt {
 
         // Unhalt pair A and let the timer fire: its cross now fills.
         assert_eq!(
-            controller_client
-                .set_pair_status(pair_a, PairStatus::Active)
-                .await,
+            controller_client.resume_trading(Some(vec![pair_a])).await,
             Ok(())
         );
         setup
@@ -2821,31 +2824,39 @@ mod pair_halt {
         setup.drop().await;
     }
 
-    /// `set_pair_status` rejects non-controller callers with `NotController`
-    /// and returns `UnknownTradingPair` for an unregistered pair.
+    /// A per-pair `halt_trading` rejects non-controller callers with
+    /// `NotController` and traps for an unregistered pair.
     #[tokio::test]
-    async fn should_reject_non_controller_and_unknown_pair() {
+    async fn should_reject_non_controller_and_trap_on_unknown_pair() {
         let setup = Setup::new().await.with_trading_pair().await;
         let pair = setup.trading_pair();
         let user_client = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0x01]));
-        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
 
         // Non-controller is rejected before the pair is even resolved.
         assert_eq!(
-            user_client.set_pair_status(pair, PairStatus::Halted).await,
-            Err(SetPairStatusError::NotController)
+            user_client.halt_trading(Some(vec![pair])).await,
+            Err(UnauthorizedError::NotController)
         );
 
-        // A controller targeting an unregistered pair gets UnknownTradingPair.
+        // A controller targeting an unregistered pair traps before recording
+        // anything.
         let unknown = TradingPair {
             base: Principal::from_slice(&[0xAA]),
             quote: Principal::from_slice(&[0xBB]),
         };
-        assert_eq!(
-            controller_client
-                .set_pair_status(unknown, PairStatus::Halted)
-                .await,
-            Err(SetPairStatusError::UnknownTradingPair)
+        let result = setup
+            .env()
+            .update_call(
+                setup.oisy_trade_id(),
+                setup.controller(),
+                "halt_trading",
+                Encode!(&Some(vec![unknown])).unwrap(),
+            )
+            .await;
+        assert_matches!(
+            result,
+            Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
+            if reject_message.contains("unknown trading pair")
         );
 
         setup.drop().await;
@@ -2873,9 +2884,7 @@ mod pair_halt {
             .await;
 
         assert_eq!(
-            controller_client
-                .set_pair_status(pair, PairStatus::Halted)
-                .await,
+            controller_client.halt_trading(Some(vec![pair])).await,
             Ok(())
         );
         setup.upgrade(None).await;
@@ -2888,20 +2897,70 @@ mod pair_halt {
         };
         assert_eq!(
             client.add_limit_order(order.clone()).await,
-            Err(AddLimitOrderError::PairHalted),
+            Err(AddLimitOrderError::TradingHalted),
             "pair halt must survive the upgrade"
         );
 
         assert_eq!(
-            controller_client
-                .set_pair_status(pair, PairStatus::Active)
-                .await,
+            controller_client.resume_trading(Some(vec![pair])).await,
             Ok(())
         );
         client
             .add_limit_order(order)
             .await
             .expect("orders accepted after the pair is resumed");
+
+        setup.drop().await;
+    }
+
+    /// A global `resume_trading(None)` clears every per-pair halt in one call:
+    /// a pair halted individually accepts orders again after a global resume.
+    #[tokio::test]
+    async fn should_clear_pair_halts_on_global_resume() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let pair = setup.trading_pair();
+        let user = setup.user();
+        let client = setup.oisy_trade_client();
+        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
+
+        let price = 1000u64;
+        let quantity = 1_000_000u64;
+        let order_cost = price * quantity;
+        setup
+            .deposit_flow(user, setup.quote_token_id())
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
+            .execute()
+            .await;
+
+        // Halt the pair individually, then clear all halts globally.
+        assert_eq!(
+            controller_client.halt_trading(Some(vec![pair])).await,
+            Ok(())
+        );
+        assert_eq!(
+            setup.pair_status(pair).await,
+            TradingStatus::Halted,
+            "pair must report Halted after the per-pair halt"
+        );
+        assert_eq!(controller_client.resume_trading(None).await, Ok(()));
+
+        // The per-pair halt is gone: the pair trades again.
+        assert_eq!(
+            setup.pair_status(pair).await,
+            TradingStatus::Trading,
+            "global resume must clear the per-pair halt"
+        );
+        client
+            .add_limit_order(LimitOrderRequest {
+                pair,
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: Nat::from(quantity),
+            })
+            .await
+            .expect("orders accepted after the global resume clears the pair halt");
 
         setup.drop().await;
     }

@@ -56,10 +56,8 @@ type AddLimitOrderError = variant {
     // The order's notional (price × quantity / 10^base_decimals, in quote
     // smallest units) is below `min` or above `max`.
     InvalidNotional : record { notional : nat; min : nat; max : opt nat };
-    // Trading is globally halted; no new orders are accepted.
+    // Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted;
-    // The trading pair is halted; no new orders are accepted on it.
-    PairHalted;
 };
 
 /// Error returned when canceling a limit order fails.
@@ -418,24 +416,6 @@ type AddTradingPairError = variant {
 
 type AddTradingPairResult = variant { Ok : null; Err : AddTradingPairError };
 
-// Status of a trading pair.
-type PairStatus = variant {
-    // The pair accepts new orders and is matched by the engine.
-    Active;
-    // The pair rejects new orders and is skipped by the matching engine.
-    Halted;
-};
-
-// Error returned by the set_pair_status endpoint.
-type SetPairStatusError = variant {
-    // The caller is not a controller of the canister.
-    NotController;
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
-};
-
-type SetPairStatusResult = variant { Ok : null; Err : SetPairStatusError };
-
 // Error returned by controller-gated endpoints when the caller is not
 // authorized to perform the requested action.
 type UnauthorizedError = variant {
@@ -526,9 +506,11 @@ type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
 };
 
-// Event payload recording a per-pair halt status change.
-type SetPairStatusEvent = record {
-    book_id : nat64;
+// Event payload recording a halt status change. `book_ids` is null for a
+// global change and a list of order book ids for a per-pair change. `halted`
+// is the new status applied to the targeted scope.
+type SetHaltEvent = record {
+    book_ids : opt vec nat64;
     halted : bool;
 };
 
@@ -580,8 +562,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
-    SetGlobalHalt : bool;
-    SetPairStatus : SetPairStatusEvent;
+    SetHalt : SetHaltEvent;
 };
 
 // A canister event with a timestamp.
@@ -688,21 +669,18 @@ service : (OisyTradeArg) -> {
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
-    // Globally halt trading: reject all new orders and stop the matching
-    // engine. Cancels and withdrawals remain open. Only callable by a
-    // controller. Idempotent — halting an already-halted DEX succeeds.
-    halt_trading : () -> (UnauthorizedResult);
+    // Halt trading: a halted pair rejects new orders and is skipped by the
+    // matching engine, while cancels and withdrawals remain open. `null` halts
+    // the whole DEX; a list of pairs halts only those pairs. Only callable by a
+    // controller. Idempotent — halting already-halted scope succeeds. Traps if
+    // any listed pair is not registered.
+    halt_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
-    // Resume trading after a global halt: re-enable new orders and matching.
-    // Only callable by a controller. Idempotent — resuming an already-active
-    // DEX succeeds.
-    resume_trading : () -> (UnauthorizedResult);
-
-    // Set the halt status of a single trading pair: a halted pair rejects new
-    // orders and is skipped by the matching engine, while other pairs are
-    // unaffected. Cancels remain open. Only callable by a controller.
-    // Idempotent — setting a pair to its current status is a no-op success.
-    set_pair_status : (TradingPair, PairStatus) -> (SetPairStatusResult);
+    // Resume trading. `null` clears the global halt and every per-pair halt; a
+    // list of pairs resumes only those pairs. Only callable by a controller.
+    // Idempotent — resuming an already-active scope succeeds. Traps if any
+    // listed pair is not registered.
+    resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

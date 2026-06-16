@@ -301,31 +301,29 @@ impl Scenario {
         self
     }
 
-    /// Applies a `SetGlobalHalt` mutation on the primary path and records the
-    /// matching `SetGlobalHalt` event as the expected replay payload.
-    fn with_set_global_halt(mut self, halted: bool) -> Self {
-        self.state.permissions_mut().set_trading_halted(halted);
+    /// Applies a `SetHalt` mutation on the primary path and records the matching
+    /// `SetHalt` event as the expected replay payload. `book_ids` of `None`
+    /// targets the global flag (and, when resuming, clears every per-pair halt);
+    /// `Some` targets only the listed books.
+    fn with_set_halt(mut self, book_ids: Option<Vec<OrderBookId>>, halted: bool) -> Self {
+        let permissions = self.state.permissions_mut();
+        match &book_ids {
+            None => {
+                permissions.set_trading_halted(halted);
+                if !halted {
+                    permissions.clear_halted_pairs();
+                }
+            }
+            Some(book_ids) => {
+                for book_id in book_ids {
+                    permissions.set_pair_halted(*book_id, halted);
+                }
+            }
+        }
         let timestamp = self.timestamp();
         self.events.push(Event {
             timestamp,
-            payload: EventType::SetGlobalHalt(halted),
-        });
-        self
-    }
-
-    /// Applies a `SetPairStatus` mutation on the primary path and records the
-    /// matching `SetPairStatus` event as the expected replay payload.
-    fn with_set_pair_status(mut self, book_id: OrderBookId, halted: bool) -> Self {
-        self.state
-            .permissions_mut()
-            .set_pair_halted(book_id, halted);
-        let timestamp = self.timestamp();
-        self.events.push(Event {
-            timestamp,
-            payload: EventType::SetPairStatus(crate::state::event::SetPairStatusEvent {
-                book_id,
-                halted,
-            }),
+            payload: EventType::SetHalt(crate::state::event::SetHaltEvent { book_ids, halted }),
         });
         self
     }
@@ -685,29 +683,29 @@ fn should_replay_cancel_partially_filled_order() {
 }
 
 #[test]
-fn should_apply_set_global_halt() {
+fn should_apply_global_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_global_halt(true);
+        .with_set_halt(None, true);
     assert!(scenario.state.permissions().trading_halted());
     scenario.assert_replay_matches();
 }
 
 #[test]
-fn should_apply_resume_after_halt() {
+fn should_apply_global_resume_after_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_global_halt(true)
-        .with_set_global_halt(false);
+        .with_set_halt(None, true)
+        .with_set_halt(None, false);
     assert!(!scenario.state.permissions().trading_halted());
     scenario.assert_replay_matches();
 }
 
 #[test]
-fn should_apply_set_pair_status() {
+fn should_apply_pair_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_pair_status(OrderBookId::ZERO, true);
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true);
     assert!(
         scenario
             .state
@@ -718,11 +716,28 @@ fn should_apply_set_pair_status() {
 }
 
 #[test]
-fn should_apply_unhalt_after_pair_halt() {
+fn should_apply_pair_resume_after_pair_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_pair_status(OrderBookId::ZERO, true)
-        .with_set_pair_status(OrderBookId::ZERO, false);
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true)
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), false);
+    assert!(
+        !scenario
+            .state
+            .permissions()
+            .is_pair_halted(&OrderBookId::ZERO)
+    );
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_clear_every_pair_halt_on_global_resume() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true)
+        .with_set_halt(None, true)
+        .with_set_halt(None, false);
+    assert!(!scenario.state.permissions().trading_halted());
     assert!(
         !scenario
             .state

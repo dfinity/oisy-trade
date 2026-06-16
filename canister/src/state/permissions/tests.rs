@@ -83,16 +83,30 @@ fn should_reject_trading_on_halted_pair_only() {
     assert!(!permissions.is_pair_halted(&other));
     assert!(matches!(
         permissions.permit_trading(caller, halted),
-        Err(UnauthorizedError::PairHalted)
+        Err(UnauthorizedError::TradingHalted)
     ));
     assert!(permissions.permit_trading(caller, other).is_ok());
     // The per-pair halt gates matching on the halted book only; every other
     // book keeps matching.
     assert!(matches!(
         permissions.permit_matching(halted),
-        Err(UnauthorizedError::PairHalted)
+        Err(UnauthorizedError::TradingHalted)
     ));
     assert!(permissions.permit_matching(other).is_ok());
+}
+
+#[test]
+fn should_clear_every_halted_pair() {
+    let mut permissions = Permissions::default();
+    let a = OrderBookId::new(0);
+    let b = OrderBookId::new(1);
+    permissions.set_pair_halted(a, true);
+    permissions.set_pair_halted(b, true);
+
+    permissions.clear_halted_pairs();
+
+    assert!(!permissions.is_pair_halted(&a));
+    assert!(!permissions.is_pair_halted(&b));
 }
 
 #[test]

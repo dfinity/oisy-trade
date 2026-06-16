@@ -4,9 +4,8 @@ use oisy_trade_types::{
     GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
     MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    PairStatus, PriceLevel, SetPairStatusError, Token, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -195,9 +194,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 let quote_meta = s
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
-                // Halted when the global switch is on; a per-pair switch will
-                // be OR-ed in here.
-                let halted = global_halt;
+                let halted = global_halt || s.permissions().is_pair_halted(book_id);
                 TradingPairInfo {
                     base: oisy_trade_types::Token {
                         id: oisy_trade_types::TokenId::from(pair.base),
@@ -538,56 +535,50 @@ pub fn add_trading_pair(
     })
 }
 
-pub fn halt_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
-    set_global_halt(true, runtime)
-}
-
-pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
-    set_global_halt(false, runtime)
-}
-
-pub fn set_pair_status(
-    pair: TradingPair,
-    status: PairStatus,
+pub fn halt_trading(
+    pairs: Option<Vec<TradingPair>>,
     runtime: &impl Runtime,
-) -> Result<(), SetPairStatusError> {
-    if !runtime.is_controller(&runtime.msg_caller()) {
-        return Err(SetPairStatusError::NotController);
-    }
-    let internal_pair = order::TradingPair::from(pair);
-    let halted = matches!(status, PairStatus::Halted);
-    state::with_state_mut(|s| {
-        let book_id = *s
-            .trading_pairs()
-            .get_book_id(&internal_pair)
-            .ok_or(SetPairStatusError::UnknownTradingPair)?;
-        let permit = s
-            .permissions()
-            .permit_admin()
-            .expect("BUG: admin is never gated in this build");
-        let event = state::event::SetPairStatusEvent { book_id, halted };
-        state::audit::process_event(
-            s,
-            state::event::EventType::SetPairStatus(event),
-            permit.into(),
-            runtime,
-        );
-        Ok(())
-    })
+) -> Result<(), UnauthorizedError> {
+    set_halt(pairs, true, runtime)
 }
 
-fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+pub fn resume_trading(
+    pairs: Option<Vec<TradingPair>>,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    set_halt(pairs, false, runtime)
+}
+
+fn set_halt(
+    pairs: Option<Vec<TradingPair>>,
+    halted: bool,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
     if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(UnauthorizedError::NotController);
     }
     state::with_state_mut(|s| {
+        let book_ids = pairs.map(|pairs| {
+            pairs
+                .into_iter()
+                .map(|pair| {
+                    let internal_pair = order::TradingPair::from(pair);
+                    *s.trading_pairs()
+                        .get_book_id(&internal_pair)
+                        .unwrap_or_else(|| {
+                            ic_cdk::trap(format!("unknown trading pair: {internal_pair:?}"))
+                        })
+                })
+                .collect()
+        });
         let permit = s
             .permissions()
             .permit_admin()
             .expect("BUG: admin is never gated in this build");
+        let event = state::event::SetHaltEvent { book_ids, halted };
         state::audit::process_event(
             s,
-            state::event::EventType::SetGlobalHalt(halted),
+            state::event::EventType::SetHalt(event),
             permit.into(),
             runtime,
         );

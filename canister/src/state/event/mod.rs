@@ -42,9 +42,7 @@ pub enum EventType {
     #[n(8)]
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
     #[n(9)]
-    SetGlobalHalt(#[n(0)] bool),
-    #[n(10)]
-    SetPairStatus(#[n(0)] SetPairStatusEvent),
+    SetHalt(#[n(0)] SetHaltEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -177,9 +175,9 @@ pub struct CancelLimitOrderEvent {
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
-pub struct SetPairStatusEvent {
+pub struct SetHaltEvent {
     #[n(0)]
-    pub book_id: OrderBookId,
+    pub book_ids: Option<Vec<OrderBookId>>,
     #[n(1)]
     pub halted: bool,
 }

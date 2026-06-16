@@ -14,7 +14,6 @@ pub struct Permissions {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UnauthorizedError {
     TradingHalted,
-    PairHalted,
     NotController,
 }
 
@@ -120,6 +119,10 @@ impl Permissions {
         self.halted_pairs.contains(book)
     }
 
+    pub fn clear_halted_pairs(&mut self) {
+        self.halted_pairs.clear();
+    }
+
     pub fn halted_pairs(&self) -> impl Iterator<Item = &OrderBookId> {
         self.halted_pairs.iter()
     }
@@ -129,21 +132,15 @@ impl Permissions {
         _caller: Principal,
         book: OrderBookId,
     ) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted {
+        if self.trading_halted || self.is_pair_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
-        }
-        if self.is_pair_halted(&book) {
-            return Err(UnauthorizedError::PairHalted);
         }
         Ok(SyncPermit(()))
     }
 
     pub fn permit_matching(&self, book: OrderBookId) -> Result<SyncPermit, UnauthorizedError> {
-        if self.trading_halted {
+        if self.trading_halted || self.is_pair_halted(&book) {
             return Err(UnauthorizedError::TradingHalted);
-        }
-        if self.is_pair_halted(&book) {
-            return Err(UnauthorizedError::PairHalted);
         }
         Ok(SyncPermit(()))
     }

@@ -83,10 +83,8 @@ pub enum AddLimitOrderError {
         /// The configured maximum notional, if any.
         max: Option<Nat>,
     },
-    /// Trading is globally halted; no new orders are accepted.
+    /// Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted,
-    /// The trading pair is halted; no new orders are accepted on it.
-    PairHalted,
 }
 
 /// Error returned when canceling a limit order fails.
@@ -552,24 +550,6 @@ pub enum LedgerTransferError {
     TemporarilyUnavailable,
     /// Internal error.
     InternalError(String),
-}
-
-/// Status of a trading pair at the candid boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum PairStatus {
-    /// The pair accepts new orders and is matched by the engine.
-    Active,
-    /// The pair rejects new orders and is skipped by the matching engine.
-    Halted,
-}
-
-/// Error returned by the `set_pair_status` endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum SetPairStatusError {
-    /// The caller is not a controller of the canister.
-    NotController,
-    /// The requested trading pair is not registered.
-    UnknownTradingPair,
 }
 
 /// Error returned by the `add_trading_pair` endpoint.
