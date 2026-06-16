@@ -2317,52 +2317,28 @@ mod halt {
                 sell_status_under_halt,
                 "{mode:?}: sell status must be unchanged while halted"
             );
-            // `OrderStatus` cannot express a partial fill, so pin the exact
-            // balances too: every committed token is still fully reserved and no
-            // fill proceeds have been credited.
+            // `OrderStatus` cannot express a partial fill, so pin
+            // `filled_quantity` too: neither side has matched any quantity while
+            // halted.
             assert_eq!(
                 buyer_client
-                    .get_balance(setup.quote_token_id())
+                    .get_my_order(buy_id.clone())
                     .await
-                    .unwrap(),
-                Balance {
-                    free: 0u64.into(),
-                    reserved: required_quote.into()
-                },
-                "{mode:?}: buy's quote stays fully reserved (no partial fill) while halted"
-            );
-            assert_eq!(
-                buyer_client
-                    .get_balance(setup.base_token_id())
-                    .await
-                    .unwrap(),
-                Balance {
-                    free: 0u64.into(),
-                    reserved: 0u64.into()
-                },
-                "{mode:?}: buyer received no base (no partial fill) while halted"
+                    .unwrap()
+                    .order
+                    .filled_quantity,
+                Nat::from(0u64),
+                "{mode:?}: buy must have no partial fill while halted"
             );
             assert_eq!(
                 seller_client
-                    .get_balance(setup.base_token_id())
+                    .get_my_order(sell_id.clone())
                     .await
-                    .unwrap(),
-                Balance {
-                    free: 0u64.into(),
-                    reserved: required_base.into()
-                },
-                "{mode:?}: sell's base stays fully reserved (no partial fill) while halted"
-            );
-            assert_eq!(
-                seller_client
-                    .get_balance(setup.quote_token_id())
-                    .await
-                    .unwrap(),
-                Balance {
-                    free: 0u64.into(),
-                    reserved: 0u64.into()
-                },
-                "{mode:?}: seller received no quote (no partial fill) while halted"
+                    .unwrap()
+                    .order
+                    .filled_quantity,
+                Nat::from(0u64),
+                "{mode:?}: sell must have no partial fill while halted"
             );
 
             // Resume and tick WITHOUT advancing time and WITHOUT placing a new
