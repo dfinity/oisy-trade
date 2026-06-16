@@ -288,6 +288,8 @@ mod add_trading_pair {
         init_state_with_order_book();
         let mut runtime = mock_runtime_for(Principal::anonymous());
         runtime.expect_is_controller().return_const(true);
+        // Shared quote template; `base` is a placeholder that every pair below
+        // overrides via `..ckusdt_quote.clone()`.
         let ckusdt_quote = oisy_trade_types::AddTradingPairRequest {
             base: SupportedTokens::CKUSDT.token(),
             quote: SupportedTokens::CKUSDT.token(),
@@ -298,6 +300,8 @@ mod add_trading_pair {
             min_notional: Nat::from(5_000_000_u64),
             max_notional: Some(Nat::from(9_000_000_000_000_u64)),
         };
+        // Deliberately all ckUSDT-quoted (quote_decimals = 6) — this mirrors the
+        // real launch basket rather than maximizing quote-decimal variety.
         let pairs = [
             // ICP/ckUSDT
             oisy_trade_types::AddTradingPairRequest {

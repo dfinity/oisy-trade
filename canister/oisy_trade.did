@@ -32,8 +32,8 @@ type OrderId = text;
 
 // Side of an order.
 type Side = variant {
-    // Buy order (bid). On submission reserves `price × quantity` of the
-    // *quote* token from the caller's free balance.
+    // Buy order (bid). On submission reserves `price × quantity / 10^base_decimals`
+    // of the *quote* token from the caller's free balance.
     Buy;
     // Sell order (ask). On submission reserves `quantity` of the *base*
     // token from the caller's free balance.

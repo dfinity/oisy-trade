@@ -142,7 +142,7 @@ Constraints:
 
 Mapping back to the formula above (`tick_size = price_increment × 10^quote_decimals`):
 
-| Asset price      | Typical price increment | Sample tick at 1 bp |
+| Asset price      | Typical price increment | Resulting tick (bp) |
 |------------------|-------------------------|---------------------|
 | ~$1 (stablecoin) | $0.00001 – $0.0001      | 0.1 bp – 1 bp       |
 | ~$10 (mid-cap)   | $0.001                  | 1 bp                |
