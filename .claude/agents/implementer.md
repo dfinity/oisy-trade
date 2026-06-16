@@ -14,7 +14,7 @@ You implement code against a specification.
 
 - After the first working implementation + tests, open a DRAFT PR:
 
-      gh pr create --draft --title "<conventional-commits title>" --body "<summary + link to spec>"
+      gh pr create --draft --title "<conventional-commits title>" --body "<description per the rules below>"
 
 - The PR title MUST follow Conventional Commits
   (https://www.conventionalcommits.org/en/v1.0.0/#summary): `type(scope): description`,
