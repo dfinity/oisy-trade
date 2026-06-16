@@ -42,7 +42,7 @@ touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to `Ord
   `cancel_limit_order`, `deposit`, `withdraw`, `get_order_status`, `get_order_book_ticker`,
   `get_order_book_depth`, and both the per-token and request-level errors of `get_balances` /
   `get_fee_balances`. Admin endpoints are out of scope.
-- **R2**: The disposition arm is the contract (documented in `dex.did`):
+- **R2**: The disposition arm is the contract (documented in `oisy_trade.did`):
   `RequestError` ⇒ caller-side, do not auto-retry unchanged (fix input / satisfy a precondition /
   stop); `TemporaryError` ⇒ retry after backoff; `InternalError` ⇒ DEX-side fault, surface, do not
   retry.
@@ -57,7 +57,7 @@ touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to `Ord
 - **R7**: `get_order_status` never traps. A malformed `order_id` returns
   `Err(GetOrderStatusError::RequestError(InvalidOrderId))`; a well-formed but unknown id returns
   `Ok(OrderStatus::NotFound)`; a well-formed known id returns `Ok(<status>)`.
-- **R8**: The hand-written `canister/dex.did` matches the generated interface
+- **R8**: The hand-written `canister/oisy_trade.did` matches the generated interface
   (`check_candid_interface_compatibility` passes) and documents the R2 disposition contract.
 
 ## Non-goals
@@ -119,8 +119,8 @@ touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to `Ord
   `TemporaryError` into a reconcile-style disposition (reintroducing a fourth arm).
 - `dex_types::OrderId = String`, parsed to `canister::order::OrderId` via `FromStr`
   (`OrderIdParseError`). Parse points: `dex_canister::cancel_limit_order`, `dex_canister::get_order_status`.
-- `check_candid_interface_compatibility` (`canister/src/main.rs`) pins `dex.did` to the generated
-  interface via `service_equal`; every interface change updates `dex.did` by hand.
+- `check_candid_interface_compatibility` (`canister/src/main.rs`) pins `oisy_trade.did` to the generated
+  interface via `service_equal`; every interface change updates `oisy_trade.did` by hand.
 - Candid's forgiving `opt` decode rule provides the inner-leaf forward-compatibility; only clients
   generated from the updated `.did` benefit (the `opt` must ship now — it can't be retrofitted).
 
@@ -165,7 +165,7 @@ leaf.
 |---|---|---|---|
 | **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError` |
 | **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`* |
-| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance` | — | — |
+| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted` | — |
 | **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | — | — |
 | **GetOrderStatusError** | `InvalidOrderId` | — | — |
 | **GetOrderBookTickerError** | `UnknownTradingPair` | — | — |
@@ -173,9 +173,13 @@ leaf.
 | **GetBalancesError** | `TokenNotSupported` | — | — |
 | **GetBalancesRequestError** | `FilterTooLarge` | — | — |
 
-\* withdraw's ledger-reported `InsufficientFunds` (D5). The synchronous errors (add/cancel/queries)
-have only `RequestError` — a single-arm variant, which keeps the disposition vocabulary uniform across
-the API.
+\* withdraw's ledger-reported `InsufficientFunds` (D5). `cancel_limit_order` and the queries have only
+`RequestError` (single-arm); `AddLimitOrderError` also has a `TemporaryError` arm carrying
+`TradingHalted` — a global trading halt (DEFI-2849) is intentional transient unavailability, so "retry
+when trading resumes" (like a ledger `TemporarilyUnavailable`/HTTP 503), not a `RequestError` (the
+request is valid) or `InternalError` (no fault). `InvalidNotional` (DEFI-2850) is caller-side input →
+`RequestError`. Both leaves merged from main; `TradingHalted`'s placement is a judgment call worth a
+second look.
 
 ### Canister logic (`canister/src/lib.rs`)
 
@@ -183,7 +187,7 @@ the API.
 - `get_order_status`: return `Result<OrderStatus, GetOrderStatusError>`; parse failure ⇒
   `Err(RequestError(InvalidOrderId))`; well-formed unknown id ⇒ `Ok(OrderStatus::NotFound)`. Remove the `panic!`.
 
-### Candid (`canister/dex.did`)
+### Candid (`canister/oisy_trade.did`)
 
 - Top-of-file comment documenting the R2 disposition contract.
 - Each error renders as `variant { RequestError : opt variant {…}; TemporaryError : opt variant {…};
@@ -211,7 +215,7 @@ Integration (`dex_int_tests`):
 - New: cancel + `get_order_status` malformed-id cases over the canister boundary, asserting no trap and
   the expected arm/leaf. (**R6**, **R7**)
 
-Interface: `check_candid_interface_compatibility` passes against the updated `dex.did`. (**R8**)
+Interface: `check_candid_interface_compatibility` passes against the updated `oisy_trade.did`. (**R8**)
 
 Commands: `cargo test --workspace`, `cargo fmt --all -- --check`, `just lint`.
 
@@ -222,14 +226,14 @@ Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each 
 1. **PR1 — Disposition-tagged errors for the four update-endpoint errors.**
    `RequestError/TemporaryError/InternalError` shape + leaf enums for `AddLimitOrderError`,
    `CancelLimitOrderError`, `DepositError`, `WithdrawError`; map internal→public at the boundary;
-   `dex.did` (disposition arms + contract doc block); unit + integration tests.
+   `oisy_trade.did` (disposition arms + contract doc block); unit + integration tests.
    *Accepts*: R1 (these four), R2, R3, R4, R8.
 2. **PR2 — Extend to query errors.**
    Same shape for `GetOrderBookTickerError`, `GetOrderBookDepthError`, `GetBalancesError`,
-   `GetBalancesRequestError`; `dex.did`; tests. *Accepts*: R1 (remainder), R3 (remainder), R8.
+   `GetBalancesRequestError`; `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R3 (remainder), R8.
 3. **PR3 — Stop conflating / trapping on malformed order IDs.**
    Add the `InvalidOrderId` leaf (map cancel parse failure to it); add `GetOrderStatusError` and make
-   `get_order_status` return a non-panicking result; `dex.did`; unit + integration tests.
+   `get_order_status` return a non-panicking result; `oisy_trade.did`; unit + integration tests.
    *Accepts*: R6, R7, R8.
 
 ## Discussed Alternatives
