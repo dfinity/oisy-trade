@@ -121,27 +121,27 @@ impl Permissions {
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_deposit(&self, _caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
-        Ok(PreAsyncPermit(()))
+    pub fn permit_deposit(&self, _caller: Principal) -> PreAsyncPermit {
+        PreAsyncPermit(())
     }
 
-    pub fn permit_withdraw(&self, _caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
-        Ok(PreAsyncPermit(()))
+    pub fn permit_withdraw(&self, _caller: Principal) -> PreAsyncPermit {
+        PreAsyncPermit(())
     }
 
-    pub fn permit_cancel(&self) -> Result<SyncPermit, UnauthorizedError> {
-        Ok(SyncPermit(()))
+    pub fn permit_cancel(&self) -> SyncPermit {
+        SyncPermit(())
     }
 
-    pub fn permit_settling(&self) -> Result<SyncPermit, UnauthorizedError> {
-        Ok(SyncPermit(()))
+    pub fn permit_settling(&self) -> SyncPermit {
+        SyncPermit(())
     }
 
-    pub fn permit_add_trading_pair(&self) -> Result<SyncPermit, UnauthorizedError> {
-        Ok(SyncPermit(()))
+    pub fn permit_add_trading_pair(&self) -> SyncPermit {
+        SyncPermit(())
     }
 
-    pub fn permit_admin(&self) -> Result<SyncPermit, UnauthorizedError> {
-        Ok(SyncPermit(()))
+    pub fn permit_admin(&self) -> SyncPermit {
+        SyncPermit(())
     }
 }

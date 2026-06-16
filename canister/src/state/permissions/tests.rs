@@ -25,12 +25,12 @@ proptest! {
             Err(UnauthorizedError::TradingHalted)
         ));
 
-        prop_assert!(permissions.permit_deposit(caller).is_ok());
-        prop_assert!(permissions.permit_withdraw(caller).is_ok());
-        prop_assert!(permissions.permit_cancel().is_ok());
-        prop_assert!(permissions.permit_settling().is_ok());
-        prop_assert!(permissions.permit_add_trading_pair().is_ok());
-        prop_assert!(permissions.permit_admin().is_ok());
+        let _ = permissions.permit_deposit(caller);
+        let _ = permissions.permit_withdraw(caller);
+        let _ = permissions.permit_cancel();
+        let _ = permissions.permit_settling();
+        let _ = permissions.permit_add_trading_pair();
+        let _ = permissions.permit_admin();
 
         if global {
             prop_assert!(permissions.is_halted(&other));
@@ -57,12 +57,12 @@ fn should_permit_every_event_on_empty_permissions() {
 
     assert!(permissions.permit_trading(caller, BOOK).is_ok());
     assert!(permissions.permit_matching(BOOK).is_ok());
-    assert!(permissions.permit_deposit(caller).is_ok());
-    assert!(permissions.permit_withdraw(caller).is_ok());
-    assert!(permissions.permit_cancel().is_ok());
-    assert!(permissions.permit_settling().is_ok());
-    assert!(permissions.permit_add_trading_pair().is_ok());
-    assert!(permissions.permit_admin().is_ok());
+    let _ = permissions.permit_deposit(caller);
+    let _ = permissions.permit_withdraw(caller);
+    let _ = permissions.permit_cancel();
+    let _ = permissions.permit_settling();
+    let _ = permissions.permit_add_trading_pair();
+    let _ = permissions.permit_admin();
 }
 
 #[test]
