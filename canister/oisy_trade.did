@@ -673,13 +673,15 @@ service : (OisyTradeArg) -> {
     // matching engine, while cancels and withdrawals remain open. `null` halts
     // the whole DEX; a list of pairs halts only those pairs. Only callable by a
     // controller. Idempotent — halting already-halted scope succeeds. Traps if
-    // any listed pair is not registered.
+    // any listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
     halt_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
     // Resume trading. `null` clears the global halt and every per-pair halt; a
     // list of pairs resumes only those pairs. Only callable by a controller.
     // Idempotent — resuming an already-active scope succeeds. Traps if any
-    // listed pair is not registered.
+    // listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
     resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
