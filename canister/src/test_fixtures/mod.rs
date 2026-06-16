@@ -888,18 +888,20 @@ pub mod arbitrary {
     }
 
     /// A `Permissions` that halts trading on [`OrderBookId::ZERO`], either
-    /// globally or for that pair only.
+    /// globally or for that pair only, paired with a distinct `other` book and
+    /// the `global` flag so callers can assert per-pair isolation.
     pub fn arb_book_halted_permissions()
-    -> impl Strategy<Value = crate::state::permissions::Permissions> {
-        let global = Just(()).prop_map(|()| {
+    -> impl Strategy<Value = (crate::state::permissions::Permissions, OrderBookId, bool)> {
+        let other = (1..=u64::MAX).prop_map(OrderBookId::new);
+        let global = other.clone().prop_map(|other| {
             let mut permissions = crate::state::permissions::Permissions::default();
             permissions.halt_trading_globally();
-            permissions
+            (permissions, other, true)
         });
-        let pair = Just(()).prop_map(|()| {
+        let pair = other.prop_map(|other| {
             let mut permissions = crate::state::permissions::Permissions::default();
             permissions.halt_trading(OrderBookId::ZERO);
-            permissions
+            (permissions, other, false)
         });
         prop_oneof![global, pair]
     }

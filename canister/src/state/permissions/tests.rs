@@ -9,8 +9,10 @@ const BOOK: OrderBookId = OrderBookId::ZERO;
 proptest! {
     /// Whether trading is halted globally or just for the book, the gated
     /// permits on that book are rejected while every ungated permit stays OK.
+    /// Under a per-pair halt, a distinct book stays un-gated; under a global
+    /// halt every book is gated.
     #[test]
-    fn should_gate_book_when_halted(permissions in arb_book_halted_permissions()) {
+    fn should_gate_book_when_halted((permissions, other, global) in arb_book_halted_permissions()) {
         let caller = Principal::from_slice(&[1]);
 
         prop_assert!(permissions.is_halted(&BOOK));
@@ -29,6 +31,22 @@ proptest! {
         prop_assert!(permissions.permit_settling().is_ok());
         prop_assert!(permissions.permit_add_trading_pair().is_ok());
         prop_assert!(permissions.permit_admin().is_ok());
+
+        if global {
+            prop_assert!(permissions.is_halted(&other));
+            prop_assert!(matches!(
+                permissions.permit_trading(caller, other),
+                Err(UnauthorizedError::TradingHalted)
+            ));
+            prop_assert!(matches!(
+                permissions.permit_matching(other),
+                Err(UnauthorizedError::TradingHalted)
+            ));
+        } else {
+            prop_assert!(!permissions.is_halted(&other));
+            prop_assert!(permissions.permit_trading(caller, other).is_ok());
+            prop_assert!(permissions.permit_matching(other).is_ok());
+        }
     }
 }
 
@@ -67,19 +85,6 @@ fn should_reconcile_clean_on_empty_permissions() {
         pre.reconcile(&permissions).verdict,
         Reconciliation::Clean
     ));
-}
-
-#[test]
-fn should_gate_halted_pair_only() {
-    let mut permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-    let other = OrderBookId::new(1);
-    permissions.halt_trading(BOOK);
-
-    assert!(permissions.is_halted(&BOOK));
-    assert!(!permissions.is_halted(&other));
-    assert!(permissions.permit_trading(caller, other).is_ok());
-    assert!(permissions.permit_matching(other).is_ok());
 }
 
 #[test]
