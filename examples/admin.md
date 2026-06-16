@@ -281,7 +281,8 @@ The endpoints are controller-gated; non-controller callers are rejected with
 `NotController`. They **trap** if any listed pair is not a registered trading
 pair (all pairs are validated up front, before anything is recorded), and are
 idempotent: re-halting an already-halted pair is a no-op success that still emits
-an event for the audit trail.
+an event for the audit trail. A single call may list at most 100 pairs; passing
+more **traps**.
 
 ### When to use it
 

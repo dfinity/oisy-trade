@@ -311,6 +311,9 @@ in `canister/src/main.rs`; and a declaration in `canister/oisy_trade.did`.
   `TradingStatus::Halted`.
 - `Some(pairs)` is validated up front: any unregistered pair **traps** (`ic_cdk::trap`)
   before anything is recorded — no new error variant.
+- `Some(pairs)` carrying more than `MAX_HALT_BOOKS` (100) entries **traps**
+  (`ic_cdk::trap`) before anything is recorded, bounding the size of the `SetHalt` audit
+  event. `None` (global) is unaffected.
 
 Idempotent calls are no-op successes that still emit the event (R8). `oisy_trade.did`
 updates the two endpoints' signatures, the unified `SetHaltEvent`, and the

@@ -94,9 +94,9 @@ impl From<&EventType> for WorstCaseEvent {
 /// `bench_process_pending_orders_1000` benchmark workload.
 pub const MAX_ORDERS_PER_MATCHING_ROUND: usize = 1_000;
 
-/// Upper bound on books carried by a single `SetHalt` event, used to size the
-/// worst-case `SetHalt` fixture and the `arb_set_halt_event` generator.
-pub const MAX_HALT_BOOKS: usize = 100;
+/// Enforced upper bound on books carried by a single `SetHalt` event, used to
+/// size the worst-case `SetHalt` fixture and the `arb_set_halt_event` generator.
+pub use crate::MAX_HALT_BOOKS;
 
 impl WorstCaseEvent {
     /// Event that maximizes serialized byte size in stable memory.

@@ -534,6 +534,10 @@ pub fn add_trading_pair(
     })
 }
 
+/// Maximum number of trading pairs a single `halt_trading` / `resume_trading`
+/// call may carry, bounding the size of the `SetHalt` audit event it records.
+pub const MAX_HALT_BOOKS: usize = 100;
+
 pub fn halt_trading(
     pairs: Option<Vec<TradingPair>>,
     runtime: &impl Runtime,
@@ -558,6 +562,12 @@ fn set_halt(
     }
     state::with_state_mut(|s| {
         let book_ids = pairs.map(|pairs| {
+            if pairs.len() > MAX_HALT_BOOKS {
+                ic_cdk::trap(format!(
+                    "too many trading pairs: {} (max {MAX_HALT_BOOKS})",
+                    pairs.len()
+                ));
+            }
             pairs
                 .into_iter()
                 .map(|pair| {

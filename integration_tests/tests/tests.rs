@@ -2851,6 +2851,34 @@ mod halt {
         setup.drop().await;
     }
 
+    /// A per-pair `halt_trading` traps when given more than `MAX_HALT_BOOKS`
+    /// (100) pairs, recording nothing. Bounds the `SetHalt` event size.
+    #[tokio::test]
+    async fn should_trap_on_too_many_pairs() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let pairs = vec![setup.trading_pair(); 101];
+
+        for endpoint in ["halt_trading", "resume_trading"] {
+            let result = setup
+                .env()
+                .update_call(
+                    setup.oisy_trade_id(),
+                    setup.controller(),
+                    endpoint,
+                    Encode!(&Some(pairs.clone())).unwrap(),
+                )
+                .await;
+            assert_matches!(
+                result,
+                Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
+                if reject_message.contains("too many trading pairs"),
+                "endpoint {endpoint} must trap on more than 100 pairs"
+            );
+        }
+
+        setup.drop().await;
+    }
+
     /// A global `resume_trading(None)` clears every per-pair halt in one call:
     /// a pair halted individually accepts orders again after a global resume.
     /// Unique to the per-pair mode.
