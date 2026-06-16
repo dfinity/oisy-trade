@@ -887,6 +887,23 @@ pub mod arbitrary {
             })
     }
 
+    /// A `Permissions` that halts trading on [`OrderBookId::ZERO`], either
+    /// globally or for that pair only.
+    pub fn arb_book_halted_permissions()
+    -> impl Strategy<Value = crate::state::permissions::Permissions> {
+        let global = Just(()).prop_map(|()| {
+            let mut permissions = crate::state::permissions::Permissions::default();
+            permissions.halt_trading_globally();
+            permissions
+        });
+        let pair = Just(()).prop_map(|()| {
+            let mut permissions = crate::state::permissions::Permissions::default();
+            permissions.halt_trading(OrderBookId::ZERO);
+            permissions
+        });
+        prop_oneof![global, pair]
+    }
+
     pub fn arb_set_halt_event() -> impl Strategy<Value = SetHaltEvent> {
         let book_ids = option::of(vec(
             any::<u64>().prop_map(order::OrderBookId::new),

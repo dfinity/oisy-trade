@@ -1,25 +1,10 @@
 use super::{Permissions, Reconciliation, UnauthorizedError};
 use crate::order::OrderBookId;
+use crate::test_fixtures::arbitrary::arb_book_halted_permissions;
 use candid::Principal;
 use proptest::prelude::*;
 
 const BOOK: OrderBookId = OrderBookId::ZERO;
-
-/// A `Permissions` that halts trading on [`BOOK`], either globally or for that
-/// pair only.
-fn arb_book_halted_permissions() -> impl Strategy<Value = Permissions> {
-    let global = Just(()).prop_map(|()| {
-        let mut permissions = Permissions::default();
-        permissions.halt_trading_globally();
-        permissions
-    });
-    let pair = Just(()).prop_map(|()| {
-        let mut permissions = Permissions::default();
-        permissions.halt_trading(BOOK);
-        permissions
-    });
-    prop_oneof![global, pair]
-}
 
 proptest! {
     /// Whether trading is halted globally or just for the book, the gated
