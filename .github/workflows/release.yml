@@ -23,5 +23,9 @@ jobs:
         uses: release-plz/action@bbd1afc9813d25602e002b29e96e0aacebab1160 # v0.5.105
         with:
           command: release-pr
+          # Pin the release-plz binary: >= 0.3.142 creates the PR branch via the
+          # GitHub API (authenticated with the token) instead of `git push`,
+          # which otherwise fails with "could not read Username".
+          version: 0.3.142
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
