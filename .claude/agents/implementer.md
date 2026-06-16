@@ -20,7 +20,10 @@ You implement code against a specification.
   (https://www.conventionalcommits.org/en/v1.0.0/#summary): `type(scope): description`,
   with `!` after type/scope for breaking changes. Type is one of
   feat|fix|chore|build|ci|docs|style|refactor|perf|test.
-- Give a bullet list summary of how specification requirements are covered.
+- Keep the description CONCISE and focused on the PR's PURPOSE — the problem it
+  solves and the behaviour it changes — not implementation details: do not name
+  structs/fields/functions or walk the diff. Summarize what the spec/task asked for
+  and link to the spec. Do NOT include a "Test plan" section.
 - Only when the stack has more than one PR, end the PR description with a PR stack
   overview under a section titled exactly "📚 PR stack": all PRs in the stack listed in
   merge order (bottom to top), with a "you are here" marker on the current one. Keep it
