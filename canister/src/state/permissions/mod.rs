@@ -30,11 +30,13 @@ pub struct SyncPermit(());
 
 /// Proof that an asynchronous admission check ran and passed *pre-await*.
 ///
-/// A `PreAsyncPermit` carries the obligation to be reconciled *post-await*
-/// before the event can be recorded: it is `#[must_use]`, neither `Clone` nor
-/// `Copy`, and the only way to turn it into a recordable [`Permit`] is
-/// [`PreAsyncPermit::reconcile`], which consumes it. The only way to obtain one
-/// is to ask [`Permissions`] via `permit_deposit` / `permit_withdraw`.
+/// A `PreAsyncPermit` carries a compile-time obligation to be reconciled
+/// *post-await* before the event can be recorded: it is `#[must_use]`, neither
+/// `Clone` nor `Copy`, and the only way to turn it into a recordable [`Permit`]
+/// is [`PreAsyncPermit::reconcile`], which consumes it. The only way to obtain
+/// one is to ask [`Permissions`] via `permit_deposit` / `permit_withdraw`.
+/// This is purely a reconcile-before-record gate; it does not re-check
+/// permissions post-await.
 #[must_use]
 pub struct PreAsyncPermit(());
 
@@ -62,8 +64,10 @@ impl From<PostAsyncPermit> for Permit {
 }
 
 impl PreAsyncPermit {
-    /// Re-checks the caller's permission after the `await`. Observational only:
-    /// the ledger effect already committed, so it never denies.
+    /// Discharges the must-use `PreAsyncPermit` obligation, yielding the
+    /// recordable [`PostAsyncPermit`]. This is a compile-time
+    /// reconcile-before-record gate only: it does not re-check permissions and
+    /// never denies.
     pub fn reconcile(self) -> PostAsyncPermit {
         PostAsyncPermit(())
     }

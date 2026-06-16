@@ -40,9 +40,10 @@ canister controller.
   change) still load, decoding to "no controls active".
 - **R6 — Idempotent and auditable.** Halting an already-halted target is a no-op success
   that still emits an event for the audit trail.
-- **R7 — The async re-check cannot be skipped (compile-time).** A `deposit`/`withdraw`
-  cannot be recorded without consuming its pre-await admission through the post-await
-  reconcile step; omitting it fails to compile.
+- **R7 — Reconcile-before-record cannot be skipped (compile-time).** A `deposit`/`withdraw`
+  cannot be recorded without first turning its `PreAsyncPermit` into a `PostAsyncPermit`
+  via the post-await `reconcile` step; omitting it fails to compile. This is a
+  compile-time gate only — `reconcile` does not re-check permissions post-await.
 
 ## Non-goals
 
