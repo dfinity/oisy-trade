@@ -2756,24 +2756,24 @@ mod halt {
         }
 
         // Pair A's cross has not filled; pair B's has.
-        assert_ne!(
+        assert_matches!(
             buyer_client
                 .get_my_order(buy_a.clone())
                 .await
                 .unwrap()
                 .order
                 .status,
-            OrderStatus::Filled,
+            OrderStatus::Pending | OrderStatus::Open,
             "halted pair's buy must not fill"
         );
-        assert_ne!(
+        assert_matches!(
             seller_client
                 .get_my_order(sell_a.clone())
                 .await
                 .unwrap()
                 .order
                 .status,
-            OrderStatus::Filled,
+            OrderStatus::Pending | OrderStatus::Open,
             "halted pair's sell must not fill"
         );
         assert_eq!(
