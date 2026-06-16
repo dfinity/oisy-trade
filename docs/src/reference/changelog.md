@@ -1,3 +1,3 @@
 # Changelog
 
-{{#include ../../../canister/CHANGELOG.md}}
+{{#include ../../../canister/CHANGELOG.md:3:}}

@@ -51,11 +51,11 @@ _maybe-build:
 
 # Build the documentation book
 book:
-    mdbook build docs
+    mise exec -- mdbook build docs
 
 # Serve the documentation book locally and open it in the browser
 book-serve:
-    mdbook serve docs --open
+    mise exec -- mdbook serve docs --open
 
 # Run canbench benchmarks
 bench:
