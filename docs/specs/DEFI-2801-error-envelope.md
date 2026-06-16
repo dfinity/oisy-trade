@@ -34,7 +34,7 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 
 ## Requirements
 
-- **R1**: Every user-facing error is a record `{ kind; message : opt text }`, where `kind` is a
+- **R1**: Every user-facing error is a `record { kind : variant { … }; message : opt text }`, where `kind` is a
   disposition variant whose arms are drawn from `RequestError` / `TemporaryError` / `InternalError`,
   each carrying `opt variant { … }` of its specific leaves. An error declares only the arms it can
   produce. Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
@@ -170,8 +170,8 @@ with the parse `Display` text in `message`.
 | Error | `RequestError` | `TemporaryError` | `InternalError` |
 |---|---|---|---|
 | **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError` |
-| **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`* |
-| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`** | — |
+| **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`<sup>1</sup> |
+| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`<sup>2</sup> | — |
 | **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | — | — |
 | **GetMyOrdersError** (new public) | `InvalidOrderId` | — | — |
 | **GetOrderBookTickerError** | `UnknownTradingPair` | — | — |
@@ -179,7 +179,7 @@ with the parse `Display` text in `message`.
 | **GetBalancesError** | `TokenNotSupported` | — | — |
 | **GetBalancesRequestError** | `FilterTooLarge` | — | — |
 
-\* withdraw's ledger-reported `InsufficientFunds` (D5). ** `TradingHalted` (DEFI-2849) — a global halt
+<sup>1</sup> withdraw's ledger-reported `InsufficientFunds` (D5). <sup>2</sup> `TradingHalted` (DEFI-2849) — a global halt
 is intentional transient unavailability ("retry when trading resumes", like a ledger
 `TemporarilyUnavailable`); `InvalidNotional` (DEFI-2850) is caller-side input → `RequestError`.
 `TradingHalted`'s placement is a judgment call worth a second look.
