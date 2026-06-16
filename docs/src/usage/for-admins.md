@@ -227,7 +227,7 @@ OISY TRADE's chosen parameters for the initial listings, with the equivalent fig
 on the major venues for the same pair (or the closest substitute). The OISY TRADE
 rows show **decimal = `nat`** in each cell: the decimal is the human-readable amount,
 the `nat` is the integer in the unit convention from
-[`canister/oisy_trade.did`](../canister/oisy_trade.did) — quote-token smallest units
+[`canister/oisy_trade.did`](https://github.com/dfinity/oisy-trade/blob/main/canister/oisy_trade.did) — quote-token smallest units
 per one whole base token for tick, base-token smallest units for lot, and quote-token
 smallest units for min notional. CEX rows are human-readable only.
 Snapshot as of 2026-06-16; CEX parameters drift, so re-check via the APIs above
