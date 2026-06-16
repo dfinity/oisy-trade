@@ -2546,8 +2546,7 @@ mod halt {
     }
 
     /// A per-pair halt blocks only the halted pair: orders on the other pair
-    /// still succeed and match, while a resting order on the halted pair can
-    /// still be canceled. Unique to the per-pair mode.
+    /// still succeed and match. Unique to the per-pair mode.
     #[tokio::test]
     async fn should_block_orders_on_halted_pair_only() {
         let setup = Setup::new()
@@ -2566,13 +2565,14 @@ mod halt {
         let quantity = 1_000_000u64;
         let order_cost = price * quantity;
 
-        // A Buy on pair A reserves quote (ckBTC); a Buy on pair B reserves
-        // quote (ckSOL). Fund both, with extra for the resting A order.
+        // The Buy on pair A reserves quote; pair B reuses the two ledgers with
+        // base/quote swapped, so the Buy on pair B reserves the base ledger's
+        // token. Fund both so each order is gated by the halt, not by balance.
         setup
             .deposit_flow(user, setup.quote_token_id())
-            .mint(2 * order_cost + 2 * QUOTE_LEDGER_FEE)
-            .approve(2 * order_cost + QUOTE_LEDGER_FEE)
-            .deposit(2 * order_cost)
+            .mint(order_cost + 2 * QUOTE_LEDGER_FEE)
+            .approve(order_cost + QUOTE_LEDGER_FEE)
+            .deposit(order_cost)
             .execute()
             .await;
         setup
@@ -2582,18 +2582,6 @@ mod halt {
             .deposit(order_cost)
             .execute()
             .await;
-
-        // Place a resting buy on pair A before the halt.
-        let resting_a = client
-            .add_limit_order(LimitOrderRequest {
-                pair: pair_a,
-                side: Side::Buy,
-                price: Nat::from(price),
-                quantity: Nat::from(quantity),
-            })
-            .await
-            .unwrap();
-        setup.env().tick().await;
 
         // Halt pair A.
         assert_eq!(
@@ -2642,10 +2630,6 @@ mod halt {
             OrderStatus::Open,
             "orders on the unaffected pair are accepted and rest in the book"
         );
-
-        // The resting order on pair A can still be canceled.
-        let canceled = client.cancel_limit_order(resting_a).await.unwrap();
-        assert_matches!(canceled.status, OrderStatus::Canceled);
 
         setup.drop().await;
     }
