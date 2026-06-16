@@ -36,16 +36,20 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 
 - **R1**: Every user-facing error is a `record { kind : variant { … }; message : opt text }`, where `kind` is a
   disposition variant whose arms are drawn from `RequestError` / `TemporaryError` / `InternalError`,
-  each carrying `opt variant { … }` of its specific leaves. An error declares only the arms it can
-  produce. Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
+  each carrying `opt variant { … }` of its specific leaves. Every error declares **all three** arms;
+  an arm it cannot currently produce carries an empty `opt variant {}`, reserving the slot so that
+  leaves can be added to any arm later without breaking clients (and an arm is never *added*).
+  Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
   `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and request-level errors of
   `get_balances` / `get_fee_balances`. Admin endpoints are out of scope.
 - **R2**: The `kind` arm is the contract (documented in `oisy_trade.did`):
   `RequestError` ⇒ caller-side, do not auto-retry unchanged; `TemporaryError` ⇒ retry after backoff;
   `InternalError` ⇒ DEX-side fault, surface, do not retry.
-- **R3**: `message` is **advisory** human-readable text for logs/UI/debugging. Clients **must not**
-  parse it; programmatic handling is on `kind` and the inner leaf only. It is the natural home for
-  detail that has no typed payload (e.g. the `OrderIdParseError` text behind a bare `InvalidOrderId`).
+- **R3**: `message` is **advisory** human-readable text. Its purpose is the forward-compat case: when a
+  client hits an error it cannot decode — a future leaf that decodes to `null`, or a reserved/empty arm
+  — `message` still gives operators/UI something actionable and signals that the client should be
+  updated. The canister populates it for every error; clients **must not** parse it — programmatic
+  handling is on `kind` and the inner leaf only.
 - **R4**: Each leaf error is assigned to exactly one arm per [Disposition membership](#disposition-membership).
 - **R5**: Each arm's payload is `opt variant`. A client built against an older interface decodes an
   unknown future *leaf* as `null`, while still reading the **arm** (`kind`) and `message`. (Verified by
@@ -56,7 +60,7 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   distinct from `RequestError(OrderNotFound)`.
 - **R8**: `get_my_orders` never traps. Its signature changes from `-> (vec UserOrder)` to a result
   `-> (variant { Ok : vec UserOrder; Err : GetMyOrdersError })`. A malformed `order_id` returns
-  `Err(RequestError(InvalidOrderId))` (with the parse text in `message`); a well-formed but unknown id
+  `Err(RequestError(InvalidOrderId))`; a well-formed but unknown id
   returns `Ok([])`; otherwise `Ok(<orders>)`. (This is a breaking signature change to a query.)
 - **R9**: The hand-written `canister/oisy_trade.did` matches the generated interface
   (`check_candid_interface_compatibility` passes) and documents the R2 disposition contract and the R3
@@ -80,8 +84,10 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 - **Accepted residual limitations**:
   - A client hitting a *future leaf* sees inner `null` and loses the typed reason, but keeps the
     disposition arm and the `message` — the intended trade.
-  - The outer arm set is frozen: adding a *new disposition* later is a breaking change. Accepted,
-    because the three arms exhaustively partition what a caller can do.
+  - All three arms are declared on every error from the start (R1), so an arm is never *added*; only a
+    hypothetical *fourth* disposition would be breaking. Accepted, because the three arms exhaustively
+    partition what a caller can do. (Adding *leaves* to any arm — including a currently-empty one — is
+    forward-compatible via the inner `opt`.)
 
 ## Design Decisions
 
@@ -90,10 +96,9 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   text. This separates *what grows* (specific reasons → inner `opt`) from *what's stable* (the small set
   of caller actions → bare outer arm), and the record gives field-level headroom (a future
   `retry_after` etc. is a non-breaking field add).
-- **D2 — `message` carries the human detail; the typed leaf stays minimal.** Resolves the
-  bare-vs-payload question for `InvalidOrderId`: the leaf is **bare** (its internal `OrderIdParseError`
-  is not a Candid type and carries no dynamic data) and the parse text rides in `message`. Clients still
-  branch only on `kind`/leaf (R3).
+- **D2 — `InvalidOrderId` is bare; the leaf name carries the meaning.** Its internal `OrderIdParseError`
+  is not a Candid type and carries no dynamic data, so there is nothing to put on the wire — the leaf
+  name is self-describing. (`message` is not a payload substitute; see R3 for its purpose.)
 - **D3 — No `Indeterminate`/reconcile arm; `CallFailed` ⇒ `TemporaryError`.** Both ledger calls use
   `call_unbounded_wait` (guaranteed response) and ICRC `icrc1_transfer` / `icrc2_transfer_from` commit
   atomically with their reply, so a reject implies the transfer did **not** commit — no side effect on
@@ -162,22 +167,25 @@ the only behavioral change; internal flat enums are untouched (Non-goals).
 
 The order-id fix adds a **public** `GetMyOrdersError` (the existing `GetMyOrdersError` in
 `canister/src/lib.rs` stays internal): `kind : RequestError(Option<GetMyOrdersRequestError>)` with a
-bare `InvalidOrderId` leaf, plus `message`. The internal `InvalidOrderId(OrderIdParseError)` maps to it
-with the parse `Display` text in `message`.
+bare `InvalidOrderId` leaf, plus `message`. The internal `InvalidOrderId(OrderIdParseError)` maps to the
+bare public `InvalidOrderId` leaf.
 
 ### Disposition membership
+
+All errors declare all three arms (R1); a cell marked `(none)` is a declared-but-empty
+`opt variant {}`, reserved so leaves can be added there later without breaking clients.
 
 | Error | `RequestError` | `TemporaryError` | `InternalError` |
 |---|---|---|---|
 | **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError` |
 | **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`<sup>1</sup> |
-| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`<sup>2</sup> | — |
-| **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | — | — |
-| **GetMyOrdersError** (new public) | `InvalidOrderId` | — | — |
-| **GetOrderBookTickerError** | `UnknownTradingPair` | — | — |
-| **GetOrderBookDepthError** | `UnknownTradingPair`, `LimitTooLarge` | — | — |
-| **GetBalancesError** | `TokenNotSupported` | — | — |
-| **GetBalancesRequestError** | `FilterTooLarge` | — | — |
+| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`<sup>2</sup> | (none) |
+| **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | (none) | (none) |
+| **GetMyOrdersError** (new public) | `InvalidOrderId` | (none) | (none) |
+| **GetOrderBookTickerError** | `UnknownTradingPair` | (none) | (none) |
+| **GetOrderBookDepthError** | `UnknownTradingPair`, `LimitTooLarge` | (none) | (none) |
+| **GetBalancesError** | `TokenNotSupported` | (none) | (none) |
+| **GetBalancesRequestError** | `FilterTooLarge` | (none) | (none) |
 
 <sup>1</sup> withdraw's ledger-reported `InsufficientFunds` (D5). <sup>2</sup> `TradingHalted` (DEFI-2849) — a global halt
 is intentional transient unavailability ("retry when trading resumes", like a ledger
@@ -186,8 +194,7 @@ is intentional transient unavailability ("retry when trading resumes", like a le
 
 ### Canister logic (`canister/src/lib.rs`, `main.rs`)
 
-- `cancel_limit_order`: map `OrderId` parse failure to `RequestError(InvalidOrderId)` (was `OrderNotFound`),
-  parse text in `message`.
+- `cancel_limit_order`: map `OrderId` parse failure to a bare `RequestError(InvalidOrderId)` (was `OrderNotFound`).
 - `get_my_orders`: return `Result<Vec<UserOrder>, GetMyOrdersError>` (public); the `main.rs` entry point
   returns `Err(RequestError(InvalidOrderId))` instead of `panic!`; well-formed unknown id ⇒ `Ok(vec![])`.
 
@@ -257,4 +264,4 @@ Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each 
    aids logs/UI and flags "update your client," at the cost of a record wrapper (which also buys
    field-level forward-compat). Clients still match only on `kind`/leaf (R3).
 8. **Carry `OrderIdParseError` in `InvalidOrderId`.** Rejected: it's an internal, non-Candid unit struct
-   with no dynamic data; the bare leaf + parse text in `message` conveys the same thing on the wire.
+   with no dynamic data; the bare leaf name is self-describing, so nothing is lost on the wire.
