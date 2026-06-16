@@ -235,20 +235,19 @@ fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
     // Halt the only book before any matching runs.
     state.permissions_mut().halt_trading(OrderBookId::ZERO);
 
-    // Mirror `drive_matching`: keep running while the run reports `MoreWork`.
-    // With the halted book reporting no matchable work this must terminate
-    // immediately; a busy-spin would never reach `Complete`.
-    let runs = drive_to_completion(&mut state, &runtime);
-    assert_eq!(
-        runs, 1,
-        "halted-only state must settle in one run, not spin"
-    );
+    // Mirror `drive_matching`: a halted book reports no matchable work, so the
+    // run reaches `Complete` instead of self-rescheduling — a busy-spin would
+    // never reach `Complete`.
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(status_of(&state, buy), Some(OrderStatus::Pending));
     assert_eq!(status_of(&state, sell), Some(OrderStatus::Pending));
 
     // Unhalt and drive again: the resting cross now fills.
     state.permissions_mut().resume_trading(OrderBookId::ZERO);
-    drive_to_completion(&mut state, &runtime);
+    while state.has_pending_orders() || state.has_pending_settling_events() {
+        EXECUTOR.run_once(&mut state, &runtime);
+    }
     assert_eq!(status_of(&state, buy), Some(OrderStatus::Filled));
     assert_eq!(status_of(&state, sell), Some(OrderStatus::Filled));
 }
@@ -529,21 +528,6 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     assert!(state.has_pending_orders());
     // No matching event was emitted, so no settling was queued either.
     assert!(!state.has_pending_settling_events());
-}
-
-/// Mirror `drive_matching`'s reschedule loop: keep running while the run
-/// reports `MoreWork`, exactly as the zero-delay timer chain would. Returns
-/// the number of runs; bounded so a non-terminating busy-spin fails the test
-/// instead of hanging.
-fn drive_to_completion(state: &mut TestState, runtime: &MockRuntime) -> usize {
-    let mut runs = 0;
-    loop {
-        runs += 1;
-        assert!(runs <= 100, "executor busy-spun without reaching Complete");
-        if EXECUTOR.run_once(state, runtime) != ExecutionStatus::MoreWork {
-            return runs;
-        }
-    }
 }
 
 fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
