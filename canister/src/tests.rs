@@ -1,11 +1,12 @@
 mod add_trading_pair {
+    use crate::test_fixtures::tokens::SupportedTokens;
     use crate::test_fixtures::{
         ckbtc_token_id, icp_ckbtc_trading_pair, icp_token_id, init_state_with_order_book,
         mocks::{MockRuntime, mock_runtime_for},
         trading_pair_request,
     };
     use crate::{add_trading_pair, state};
-    use candid::Principal;
+    use candid::{Nat, Principal};
     use oisy_trade_types::{AddTradingPairError, TokenId, TokenMetadata};
 
     #[test]
@@ -287,37 +288,61 @@ mod add_trading_pair {
         init_state_with_order_book();
         let mut runtime = mock_runtime_for(Principal::anonymous());
         runtime.expect_is_controller().return_const(true);
-        // (pair, base_decimals, quote_decimals, tick_size, lot_size)
+        // Shared quote template; `base` is a placeholder that every pair below
+        // overrides via `..ckusdt_quote.clone()`.
+        let ckusdt_quote = oisy_trade_types::AddTradingPairRequest {
+            base: SupportedTokens::CKUSDT.token(),
+            quote: SupportedTokens::CKUSDT.token(),
+            tick_size: Nat::default(),
+            lot_size: Nat::default(),
+            maker_fee_bps: 0,
+            taker_fee_bps: 20,
+            min_notional: Nat::from(5_000_000_u64),
+            max_notional: Some(Nat::from(9_000_000_000_000_u64)),
+        };
+        // Deliberately all ckUSDT-quoted (quote_decimals = 6) — this mirrors the
+        // real launch basket rather than maximizing quote-decimal variety.
         let pairs = [
-            ("ckBTC/ckUSDT", 8u8, 6u8, 10_000u64, 10_000u64),
-            ("ckETH/ckUSDT", 18, 6, 10_000, 100_000_000_000_000),
-            ("ckUSDC/ckUSDT", 6, 6, 100, 10_000),
-            ("ICP/ckUSDT", 8, 6, 1_000, 1_000_000),
-            ("VCHF/ckUSDT", 8, 6, 100, 1_000_000),
-            ("ICP/ckBTC", 8, 8, 10, 10_000_000),
-            ("ICP/VCHF", 8, 8, 100_000, 1_000_000),
+            // ICP/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::ICP.token(),
+                tick_size: Nat::from(1_000_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckBTC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKBTC.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(10_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // VCHF/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::VCHF.token(),
+                tick_size: Nat::from(100_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckUSDC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKUSDC.token(),
+                tick_size: Nat::from(10_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckETH/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKETH.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(100_000_000_000_000_u64),
+                ..ckusdt_quote.clone()
+            },
         ];
-        for (i, &(pair, base_decimals, quote_decimals, tick_size, lot_size)) in
-            pairs.iter().enumerate()
-        {
-            let base = TokenId {
-                ledger_id: Principal::from_slice(&[0x20, i as u8]),
-            };
-            let quote = TokenId {
-                ledger_id: Principal::from_slice(&[0x21, i as u8]),
-            };
-            let result = add_trading_pair(
-                pair_request(
-                    base,
-                    base_decimals,
-                    quote,
-                    quote_decimals,
-                    tick_size,
-                    lot_size,
-                ),
-                &runtime,
-            );
-            assert_eq!(result, Ok(()), "{pair} should be accepted");
+
+        for pair in pairs {
+            let result = add_trading_pair(pair.clone(), &runtime);
+            assert_eq!(result, Ok(()), "{pair:?} should be accepted");
         }
     }
 
