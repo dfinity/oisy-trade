@@ -2655,26 +2655,29 @@ mod halt {
 
         let price = 1000u64;
         let quantity = 1_000_000u64;
-        let required_quote = price * quantity;
         let required_base = quantity;
 
-        // Pair A (base ckSOL, quote ckBTC): buy reserves ckBTC, sell reserves
-        // ckSOL. Pair B is the swapped pair (base ckBTC, quote ckSOL): buy
-        // reserves ckSOL, sell reserves ckBTC. So the buyer needs a quote-worth
-        // of *each* token, and the seller needs a base-worth of *each* token.
-        // `quote_token_id()` is ckBTC; `base_token_id()` is ckSOL.
+        // Pair A (base ckSOL/9 dec, quote ckBTC): buy reserves ckBTC, sell
+        // reserves ckSOL. Pair B is the swapped pair (base ckBTC/8 dec, quote
+        // ckSOL): buy reserves ckSOL, sell reserves ckBTC. A buy reserves
+        // `price * quantity / 10^base_decimals` of the quote token, so the
+        // buyer needs a quote-worth of *each* token, and the seller needs a
+        // base-worth of *each* token. `quote_token_id()` is ckBTC;
+        // `base_token_id()` is ckSOL.
+        let required_quote_a = price * quantity / 10u64.pow(9);
+        let required_quote_b = price * quantity / 10u64.pow(8);
         setup
             .deposit_flow(buyer, setup.quote_token_id())
-            .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
-            .approve(required_quote + QUOTE_LEDGER_FEE)
-            .deposit(required_quote)
+            .mint(required_quote_a + 2 * QUOTE_LEDGER_FEE)
+            .approve(required_quote_a + QUOTE_LEDGER_FEE)
+            .deposit(required_quote_a)
             .execute()
             .await;
         setup
             .deposit_flow(buyer, setup.base_token_id())
-            .mint(required_quote + 2 * BASE_LEDGER_FEE)
-            .approve(required_quote + BASE_LEDGER_FEE)
-            .deposit(required_quote)
+            .mint(required_quote_b + 2 * BASE_LEDGER_FEE)
+            .approve(required_quote_b + BASE_LEDGER_FEE)
+            .deposit(required_quote_b)
             .execute()
             .await;
         setup
