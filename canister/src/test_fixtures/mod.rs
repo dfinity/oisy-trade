@@ -870,6 +870,23 @@ pub mod arbitrary {
         )
     }
 
+    pub fn arb_permissions() -> impl Strategy<Value = crate::state::permissions::Permissions> {
+        (
+            any::<bool>(),
+            btree_set(any::<u64>().prop_map(OrderBookId::new), 0..=MAX_HALT_BOOKS),
+        )
+            .prop_map(|(globally_halted, halted_pairs)| {
+                let mut permissions = crate::state::permissions::Permissions::default();
+                if globally_halted {
+                    permissions.halt_trading_globally();
+                }
+                for book in halted_pairs {
+                    permissions.halt_trading(book);
+                }
+                permissions
+            })
+    }
+
     pub fn arb_set_halt_event() -> impl Strategy<Value = SetHaltEvent> {
         let book_ids = option::of(vec(
             any::<u64>().prop_map(order::OrderBookId::new),

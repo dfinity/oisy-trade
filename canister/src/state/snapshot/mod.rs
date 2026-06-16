@@ -161,10 +161,7 @@ impl StateSnapshot {
             permissions: if *permissions == Permissions::default() {
                 None
             } else {
-                Some(PermissionsSnapshot {
-                    trading_halted: permissions.trading_halted(),
-                    halted_pairs: permissions.halted_pairs().copied().collect(),
-                })
+                Some(PermissionsSnapshot::from(permissions))
             },
         }
     }
@@ -254,6 +251,15 @@ impl StateSnapshot {
             pending_settling_events,
             in_flight_user_ops: Default::default(),
             permissions,
+        }
+    }
+}
+
+impl From<&Permissions> for PermissionsSnapshot {
+    fn from(permissions: &Permissions) -> Self {
+        PermissionsSnapshot {
+            trading_halted: permissions.trading_halted(),
+            halted_pairs: permissions.halted_pairs().copied().collect(),
         }
     }
 }
