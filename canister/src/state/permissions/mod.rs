@@ -36,39 +36,13 @@ pub struct SyncPermit(());
 /// [`PreAsyncPermit::reconcile`], which consumes it. The only way to obtain one
 /// is to ask [`Permissions`] via `permit_deposit` / `permit_withdraw`.
 #[must_use]
-pub struct PreAsyncPermit {
-    // TODO(DEFI-2849): `reconcile` reads these to re-check the freeze once the
-    // freeze check lands (PR 4); unused while reconcile is always `Clean`.
-    #[allow(dead_code)]
-    caller: Principal,
-    #[allow(dead_code)]
-    kind: AsyncKind,
-}
+pub struct PreAsyncPermit(());
 
 /// Proof that an asynchronous action was reconciled post-await.
 ///
 /// Produced *only* by [`PreAsyncPermit::reconcile`]; the recorder consumes it to
-/// persist a deposit/withdraw. Carries the reconciliation verdict so the policy
-/// for a mid-await permission change lives in one place (the recorder).
-pub struct PostAsyncPermit {
-    // TODO(DEFI-2849): the recorder reads this verdict to emit the `Raced`
-    // observability log once the freeze check lands (PR 4); always `Clean` here.
-    #[allow(dead_code)]
-    verdict: Reconciliation,
-}
-
-pub enum AsyncKind {
-    Deposit,
-    Withdraw,
-}
-
-/// Whether the permission state changed across the `await`. `Raced` means the
-/// caller was frozen mid-await; the external effect already committed, so it is
-/// flagged, never reverted.
-pub enum Reconciliation {
-    Clean,
-    Raced,
-}
+/// persist a deposit/withdraw.
+pub struct PostAsyncPermit(());
 
 pub enum Permit {
     Sync(SyncPermit),
@@ -89,12 +63,9 @@ impl From<PostAsyncPermit> for Permit {
 
 impl PreAsyncPermit {
     /// Re-checks the caller's permission after the `await`. Observational only:
-    /// the ledger effect already committed, so it never denies — it can only
-    /// flag a mid-await permission change as [`Reconciliation::Raced`].
-    pub fn reconcile(self, _permissions: &Permissions) -> PostAsyncPermit {
-        PostAsyncPermit {
-            verdict: Reconciliation::Clean,
-        }
+    /// the ledger effect already committed, so it never denies.
+    pub fn reconcile(self) -> PostAsyncPermit {
+        PostAsyncPermit(())
     }
 }
 
@@ -146,18 +117,12 @@ impl Permissions {
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_deposit(&self, caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
-        Ok(PreAsyncPermit {
-            caller,
-            kind: AsyncKind::Deposit,
-        })
+    pub fn permit_deposit(&self, _caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
+        Ok(PreAsyncPermit(()))
     }
 
-    pub fn permit_withdraw(&self, caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
-        Ok(PreAsyncPermit {
-            caller,
-            kind: AsyncKind::Withdraw,
-        })
+    pub fn permit_withdraw(&self, _caller: Principal) -> Result<PreAsyncPermit, UnauthorizedError> {
+        Ok(PreAsyncPermit(()))
     }
 
     pub fn permit_cancel(&self) -> Result<SyncPermit, UnauthorizedError> {

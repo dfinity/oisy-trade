@@ -1,4 +1,4 @@
-use super::{Permissions, Reconciliation, UnauthorizedError};
+use super::{Permissions, UnauthorizedError};
 use crate::order::OrderBookId;
 use crate::test_fixtures::arbitrary::arb_book_halted_permissions;
 use candid::Principal;
@@ -63,28 +63,6 @@ fn should_permit_every_event_on_empty_permissions() {
     assert!(permissions.permit_settling().is_ok());
     assert!(permissions.permit_add_trading_pair().is_ok());
     assert!(permissions.permit_admin().is_ok());
-}
-
-#[test]
-fn should_reconcile_clean_on_empty_permissions() {
-    let permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-
-    let pre = permissions
-        .permit_deposit(caller)
-        .expect("deposit is never gated in this build");
-    assert!(matches!(
-        pre.reconcile(&permissions).verdict,
-        Reconciliation::Clean
-    ));
-
-    let pre = permissions
-        .permit_withdraw(caller)
-        .expect("withdraw is never gated in this build");
-    assert!(matches!(
-        pre.reconcile(&permissions).verdict,
-        Reconciliation::Clean
-    ));
 }
 
 #[test]

@@ -254,7 +254,7 @@ pub async fn deposit(
         token: order::TokenId::from(token_id),
         amount,
     };
-    let post = state::with_state(|s| pre.reconcile(s.permissions()));
+    let post = pre.reconcile();
     state::with_state_mut(|s| {
         state::audit::process_event(
             s,
@@ -326,7 +326,7 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            let post = state::with_state(|s| pre.reconcile(s.permissions()));
+            let post = pre.reconcile();
             state::audit::record_event(
                 state::event::EventType::Withdraw(event),
                 post.into(),
