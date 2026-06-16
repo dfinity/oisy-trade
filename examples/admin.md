@@ -217,6 +217,49 @@ export MAKER_FEE_BPS=10
 export TAKER_FEE_BPS=10
 ```
 
+### Launch basket
+
+OISY TRADE's chosen parameters for the initial listings, with the equivalent figures
+on the major venues for the same pair (or the closest substitute). The OISY TRADE
+rows show **decimal = `nat`** in each cell: the decimal is the human-readable amount,
+the `nat` is the integer in the unit convention from
+[`canister/oisy_trade.did`](../canister/oisy_trade.did) — quote-token smallest units
+per one whole base token for tick, base-token smallest units for lot, and quote-token
+smallest units for min notional. CEX rows are human-readable only.
+Snapshot as of 2026-06-16; CEX parameters drift, so re-check via the APIs above
+before copying.
+
+| Pair              | Source             | Tick (price increment) | Lot (qty increment)                  | Min notional       |
+|-------------------|--------------------|------------------------|--------------------------------------|--------------------|
+| **ICP/ckUSDT**    | OISY TRADE         | `0.001` USDT = `1_000` | `0.01` ICP = `1_000_000`             | `$5` = `5_000_000` |
+|                   | Binance `ICPUSDT`  | `0.001`                | `0.01`                               | `$5`               |
+|                   | Coinbase `ICP-USD` | `0.001`                | `0.0001`                             | `$1`               |
+|                   | Kraken `ICPUSD`    | `0.001`                | `0.00000001`                         | `$0.50`            |
+| **ckBTC/ckUSDT**  | OISY TRADE         | `0.01` USDT = `10_000` | `0.0001` BTC = `10_000`              | `$5` = `5_000_000` |
+|                   | Binance `BTCUSDT`  | `0.01`                 | `0.00001`                            | `$5`               |
+|                   | Coinbase `BTC-USD` | `0.01`                 | `0.00000001`                         | `$1`               |
+|                   | Kraken `XBTUSD`    | `0.1`                  | `0.00000001`                         | `$0.50`            |
+| **VCHF/ckUSDT**   | OISY TRADE         | `0.0001` USDT = `100`  | `0.01` VCHF = `1_000_000`            | `$5` = `5_000_000` |
+|                   | Binance / Coinbase | not listed             | —                                    | —                  |
+|                   | Kraken `USDTCHF` ‡ | `0.00001` (inverted)   | `0.00000001`                         | `$0.50`            |
+| **ckUSDC/ckUSDT** | OISY TRADE         | `0.00001` USDT = `10`  | `1` USDC = `1_000_000`               | `$5` = `5_000_000` |
+|                   | Binance `USDCUSDT` | `0.00001`              | `1`                                  | `$5`               |
+|                   | Coinbase           | not listed             | —                                    | —                  |
+|                   | Kraken `USDCUSDT`  | `0.0001`               | `0.00000001`                         | `$0.50`            |
+| **ckETH/ckUSDT**  | OISY TRADE         | `0.01` USDT = `10_000` | `0.0001` ETH = `100_000_000_000_000` | `$5` = `5_000_000` |
+|                   | Binance `ETHUSDT`  | `0.01`                 | `0.0001`                             | `$5`               |
+|                   | Coinbase `ETH-USD` | `0.01`                 | `0.00000001`                         | `$1`               |
+|                   | Kraken `ETHUSD`    | `0.01`                 | `0.00000001`                         | `$0.50`            |
+
+‡ Kraken's `USDTCHF` quotes USDT *in CHF* — the inverse direction of VCHF/ckUSDT.
+At near-parity prices the precision implications transfer, so the tick is a
+loose proxy for VCHF/USDT precision; treat as directional, not exact.
+
+VCHF is a synthetic Swiss-franc stablecoin. There's no direct CHF/USDT pair on
+Binance, Coinbase, or Kraken; `USDTCHF` is the closest market for the same
+underlying. The parameters were picked using the same sizing rules as the other
+launch pairs (≈1 bp tick, sub-dollar lot).
+
 ### Call `add_trading_pair`
 
 ```bash

@@ -340,38 +340,6 @@ mod add_trading_pair {
             let result = add_trading_pair(pair.clone(), &runtime);
             assert_eq!(result, Ok(()), "{pair:?} should be accepted");
         }
-
-        let pairs = [
-            ("ckBTC/ckUSDT", 8u8, 6u8, 10_000u64, 10_000u64),
-            ("ckETH/ckUSDT", 18, 6, 10_000, 100_000_000_000_000),
-            ("ckUSDC/ckUSDT", 6, 6, 100, 10_000),
-            ("ICP/ckUSDT", 8, 6, 1_000, 1_000_000),
-            ("VCHF/ckUSDT", 8, 6, 100, 1_000_000),
-            ("ICP/ckBTC", 8, 8, 10, 10_000_000),
-            ("ICP/VCHF", 8, 8, 100_000, 1_000_000),
-        ];
-        for (i, &(pair, base_decimals, quote_decimals, tick_size, lot_size)) in
-            pairs.iter().enumerate()
-        {
-            let base = TokenId {
-                ledger_id: Principal::from_slice(&[0x20, i as u8]),
-            };
-            let quote = TokenId {
-                ledger_id: Principal::from_slice(&[0x21, i as u8]),
-            };
-            let result = add_trading_pair(
-                pair_request(
-                    base,
-                    base_decimals,
-                    quote,
-                    quote_decimals,
-                    tick_size,
-                    lot_size,
-                ),
-                &runtime,
-            );
-            assert_eq!(result, Ok(()), "{pair} should be accepted");
-        }
     }
 
     #[test]

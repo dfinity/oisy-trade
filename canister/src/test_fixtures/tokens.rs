@@ -25,7 +25,7 @@ impl SupportedTokens {
         }
     }
 
-    pub fn symbol(&self) -> &'static str {
+    pub const fn symbol(&self) -> &'static str {
         match self {
             SupportedTokens::ICP => "ICP",
             SupportedTokens::CKBTC => "ckBTC",
@@ -36,7 +36,7 @@ impl SupportedTokens {
         }
     }
 
-    pub fn decimals(&self) -> u8 {
+    pub const fn decimals(&self) -> u8 {
         match self {
             SupportedTokens::ICP => 8,
             SupportedTokens::CKBTC => 8,
@@ -59,5 +59,10 @@ impl SupportedTokens {
             id: self.token_id(),
             metadata: self.token_metadata(),
         }
+    }
+
+    /// One whole token in the smallest denomination.
+    pub const fn one(&self) -> u64 {
+        10_u64.checked_pow(self.decimals() as u32).unwrap()
     }
 }
