@@ -138,12 +138,12 @@ Constraints:
 
 Mapping back to the formula above (`tick_size = price_increment × 10^quote_decimals`):
 
-| Asset price | Typical price increment | Sample tick at 1 bp |
-|---|---|---|
-| ~$1 (stablecoin) | $0.00001 – $0.0001 | 0.1 bp – 1 bp |
-| ~$10 (mid-cap) | $0.001 | 1 bp |
-| ~$1,000 | $0.1 | 1 bp |
-| ~$100,000 (BTC) | $0.01 – $1 | 0.0001 bp – 0.01 bp |
+| Asset price      | Typical price increment | Sample tick at 1 bp |
+|------------------|-------------------------|---------------------|
+| ~$1 (stablecoin) | $0.00001 – $0.0001      | 0.1 bp – 1 bp       |
+| ~$10 (mid-cap)   | $0.001                  | 1 bp                |
+| ~$1,000          | $0.1                    | 1 bp                |
+| ~$100,000 (BTC)  | $0.01 – $1              | 0.0001 bp – 0.01 bp |
 
 **Lot size — aim for the minimum order (1 lot × current price) to be roughly $0.10–$1 in notional.**
 
@@ -213,8 +213,8 @@ Major centralized exchanges sit at roughly **10 bps maker / 10 bps taker** at th
 - Maker rebates (negative fees) are not supported — the field is unsigned.
 
 ```bash
-export MAKER_FEE_BPS=10
-export TAKER_FEE_BPS=10
+export MAKER_FEE_BPS=0
+export TAKER_FEE_BPS=20
 ```
 
 ### Launch basket
