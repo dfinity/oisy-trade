@@ -207,13 +207,16 @@ These endpoints are not gated by the halt, so they are not rejected with
 `TradingHalted`. Other canister-wide access controls (e.g. the `Mode`
 restriction) still apply and can independently reject a caller.
 
-The halt is a single persisted flag. It is recorded as a `SetGlobalHalt` event
-in the audit log, so it is reproduced exactly on replay, and it is included in
-the upgrade snapshot, so it survives canister upgrades.
+The global halt is a single persisted flag. Each change is recorded as a
+`SetHalt` event in the audit log (with no pair filter, i.e. `book_ids = null`),
+so it is reproduced exactly on replay, and the flag is included in the upgrade
+snapshot, so it survives canister upgrades.
 
-Both endpoints are idempotent: halting an already-halted canister (or resuming
-an already-active one) is a no-op success that still emits an event for the
-audit trail. Non-controller callers are rejected with `NotController`.
+Both endpoints take an optional pair filter (see section 4); passing `null`
+targets the global halt. They are idempotent: halting an already-halted canister
+(or resuming an already-active one) is a no-op success that still emits an event
+for the audit trail. A global resume (`resume_trading(null)`) additionally clears
+every per-pair halt. Non-controller callers are rejected with `NotController`.
 
 ### When to use it
 
@@ -226,7 +229,7 @@ halt is in effect.
 ### Halt
 
 ```bash
-icp canister call oisy_trade halt_trading '()' \
+icp canister call oisy_trade halt_trading '(null)' \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```
@@ -234,7 +237,7 @@ icp canister call oisy_trade halt_trading '()' \
 ### Resume
 
 ```bash
-icp canister call oisy_trade resume_trading '()' \
+icp canister call oisy_trade resume_trading '(null)' \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```
@@ -246,9 +249,13 @@ every other pair keeps trading normally.
 
 ### Mechanism
 
+A per-pair halt reuses the same `halt_trading` / `resume_trading` endpoints as
+the global halt, but with a list of trading pairs instead of `null`.
+
 While a pair is halted:
 
-- `add_limit_order` on the halted pair is rejected with `PairHalted`.
+- `add_limit_order` on the halted pair is rejected with `TradingHalted` (the same
+  error as a global halt).
 - The matching engine skips the halted pair: its resting orders are left
   untouched and no crossing fills occur on it, while other pairs continue to
   match.
@@ -259,15 +266,22 @@ What stays open for the halted pair:
 - `withdraw` and `deposit` — balances are never tied to a single pair and stay
   movable.
 
-Halted pairs are tracked as a set of order-book identifiers. Each status change
-is recorded as a `SetPairStatus` event in the audit log, so it is reproduced
-exactly on replay, and the set is included in the upgrade snapshot, so it
-survives canister upgrades.
+Halted pairs are tracked as a set of order-book identifiers. Each change is
+recorded as a `SetHalt` event in the audit log (with the targeted pairs in
+`book_ids`), so it is reproduced exactly on replay, and the set is included in
+the upgrade snapshot, so it survives canister upgrades.
 
-`set_pair_status` is controller-gated; non-controller callers are rejected with
-`NotController`. It returns `UnknownTradingPair` for a pair that is not
-registered, and is idempotent: setting a pair to its current status is a no-op
-success that still emits an event for the audit trail.
+A pair is considered halted when the global flag is on **or** the pair is in the
+set, and `get_trading_pairs` reports it as `Halted` in either case. Passing a
+list of pairs to `halt_trading` adds them to the set; passing the same list to
+`resume_trading` removes them; `resume_trading(null)` clears the entire set at
+once (along with the global flag).
+
+The endpoints are controller-gated; non-controller callers are rejected with
+`NotController`. They **trap** if any listed pair is not a registered trading
+pair (all pairs are validated up front, before anything is recorded), and are
+idempotent: re-halting an already-halted pair is a no-op success that still emits
+an event for the audit trail.
 
 ### When to use it
 
@@ -281,8 +295,8 @@ exit.
 ### Halt a pair
 
 ```bash
-icp canister call oisy_trade set_pair_status \
-    "(record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" }, variant { Halted })" \
+icp canister call oisy_trade halt_trading \
+    "(opt vec { record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" } })" \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```
@@ -290,8 +304,8 @@ icp canister call oisy_trade set_pair_status \
 ### Resume a pair
 
 ```bash
-icp canister call oisy_trade set_pair_status \
-    "(record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" }, variant { Active })" \
+icp canister call oisy_trade resume_trading \
+    "(opt vec { record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" } })" \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```

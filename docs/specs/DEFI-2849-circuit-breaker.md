@@ -33,8 +33,9 @@ deliberately applies. All three are invoked only by the canister controller.
   withdrawal of available balance still succeed; `resume_trading` re-enables orders and
   matching.
 - **R3 — Per-pair halt is isolated.** If pair A is halted, then orders on A are rejected
-  with `PairHalted` and A's resting orders do not fill; orders on every other pair
-  succeed and match; a cancel on A still succeeds.
+  with `TradingHalted` and A's resting orders do not fill; orders on every other pair
+  succeed and match; a cancel on A still succeeds. A per-pair halt is requested by passing
+  a pair list to `halt_trading` / `resume_trading`; targeting an unregistered pair traps.
 - **R4 — Freeze blocks the frozen principal.** If account U is frozen, then U's
   `add_limit_order`, `deposit`, and `withdraw` fail with `AccountFrozen`; U's
   `cancel_limit_order` and read endpoints still succeed.
@@ -166,7 +167,7 @@ pub enum Reconciliation { Clean, Raced }                  // Raced = permission 
 pub enum Permit { Sync(SyncPermit), Async(PostAsyncPermit) }
 // From<SyncPermit> / From<PostAsyncPermit> for Permit, so call sites read `permit.into()`.
 
-pub enum UnauthorizedError { TradingHalted, PairHalted, AccountFrozen, NotController }
+pub enum UnauthorizedError { TradingHalted, AccountFrozen, NotController }
 ```
 
 `PreAsyncPermit::reconcile(self, &Permissions) -> PostAsyncPermit` consumes the pre-permit
@@ -176,11 +177,12 @@ only** — the ledger effect already committed, so it never denies.
 One `permit_*` per `EventType`, so the policy for each event is exhaustive, named, and
 greppable:
 
-- Gated: `permit_trading(caller, book)` (frozen → global halt → pair halt),
-  `permit_matching(book)` (global halt → that book's pair halt — **per-book**, so the
-  matching loop gates each book through this one method rather than a separate
-  `is_pair_halted` filter), `permit_deposit(caller)` / `permit_withdraw(caller)`
-  (frozen; return `PreAsyncPermit`).
+- Gated: `permit_trading(caller, book)` (frozen → global-or-pair halt → `TradingHalted`),
+  `permit_matching(book)` (global halt or that book's pair halt → `TradingHalted` —
+  **per-book**, so the matching loop gates each book through this one method rather than a
+  separate `is_pair_halted` filter), `permit_deposit(caller)` / `permit_withdraw(caller)`
+  (frozen; return `PreAsyncPermit`). A globally- or per-pair-halted pair both surface the
+  single `TradingHalted` — there is no distinct `PairHalted`.
 - Always-`Ok` — ungated *in the permission layer*, but not all truly unguarded:
   `permit_cancel` and `permit_settling` are genuinely ungated; `permit_admin` is the
   permit for the halt/freeze/upgrade events and is controller/lifecycle-gated *at the
@@ -215,15 +217,17 @@ specific payload. That residual is accepted — see Non-goals.
 reuse:
 
 ```rust
-#[n(9)]  SetGlobalHalt(#[n(0)] bool),
-#[n(10)] SetPairStatus(#[n(0)] SetPairStatusEvent),       // { book_id, halted }
-#[n(11)] SetAccountFrozen(#[n(0)] SetAccountFrozenEvent), // { account, frozen }
+#[n(9)]  SetHalt(#[n(0)] SetHaltEvent),                   // { book_ids: Option<Vec<OrderBookId>>, halted }
+#[n(10)] SetAccountFrozen(#[n(0)] SetAccountFrozenEvent), // { account, frozen }
 ```
 
-`SetPairStatusEvent` and `SetAccountFrozenEvent` follow the existing event-struct derive
-pattern (`#[cbor(n(0), with = "icrc_cbor::principal")]` for the `Principal`). Three
-`apply_state_transition` arms mutate `state.permissions` (persistence-independent — no
-stable-memory writes).
+`SetHaltEvent` carries the optional book-id list (the resolved pair filter) and the new
+halted flag. Replay reproduces the endpoint semantics exactly: `book_ids = None` sets the
+global flag, and on resume (`halted = false`) additionally clears the whole per-pair set;
+`book_ids = Some(ids)` adds/removes those books from the set. `SetAccountFrozenEvent`
+follows the existing event-struct derive pattern (`#[cbor(n(0), with =
+"icrc_cbor::principal")]` for the `Principal`). The `apply_state_transition` arms mutate
+`state.permissions` (persistence-independent — no stable-memory writes).
 
 ### Snapshot
 
@@ -240,16 +244,17 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
 
 ### Enforcement points
 
-- **`add_limit_order`** — after `assert_caller_is_allowed`, resolve `pair -> book_id`
-  (existing `UnknownTradingPair` path wins for unknown pairs), then
-  `permit_trading(caller, book)?`. Map `UnauthorizedError::{TradingHalted, PairHalted,
-  AccountFrozen}` onto new variants of internal + public `AddLimitOrderError`. The
-  `SyncPermit` flows into the existing `process_event(AddLimitOrder, …)`.
+- **`add_limit_order`** — after `assert_caller_is_allowed`, validate the order (unknown
+  pair → `UnknownTradingPair`; tick/lot/notional → their errors), then the halt gate
+  `permit_trading(caller, book)?`. Map `UnauthorizedError::{TradingHalted, AccountFrozen}`
+  onto the internal + public `AddLimitOrderError` (a halted pair, global or per-pair,
+  surfaces `TradingHalted`). The `SyncPermit` flows into the existing
+  `process_event(AddLimitOrder, …)`.
 - **Matching** (`canister/src/execute/mod.rs`) — `run_once` **always drains in-flight
   settling first** (`drain_settling` before any matching), then matches only the books
   for which `permit_matching(book)` is `Ok`. A book is gated by that one call: it returns
-  `Err(TradingHalted)` under global halt (every book) and `Err(PairHalted)` for a halted
-  book — so there is no separate `is_pair_halted` loop filter. Draining-first is required:
+  `Err(TradingHalted)` under global halt (every book) and for a per-pair-halted book — so
+  there is no separate `is_pair_halted` loop filter. Draining-first is required:
   a halt can land while `pending_settling_events` are queued (a prior chunk hit the
   instruction budget), and those events apply the balance effects of already-matched
   fills — skipping them would strand a counterparty's proceeds for the halt's duration,
@@ -257,8 +262,8 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
   (`has_matchable_pending_orders`) counts only books with pending orders **and**
   `permit_matching(book).is_ok()`, so under global or per-pair halt `run_once` reschedules
   **only** for leftover settling (`MoreWork` iff `has_pending_settling_events()`, else
-  `Complete`) and never busy-spins on halted books' pending orders. `resume_trading` and
-  `set_pair_status` (on the Active transition) re-arm matching from the endpoint.
+  `Complete`) and never busy-spins on halted books' pending orders. `resume_trading`
+  (global or per-pair) re-arms matching from the endpoint.
   ⚠️ **Freeze must NOT touch matching:** do **not** filter a frozen account's resting
   orders out of the book or the matching loop — counterparty fills against them must
   succeed, with proceeds landing in the frozen (non-withdrawable) balance (R5).
@@ -283,27 +288,34 @@ encodes `None` when all-default (per the `fee_pool` idiom); `into_state` does
 
 ### Admin endpoints
 
-Five controller-gated endpoints. Each: a business fn in `canister/src/lib.rs` guarded by
+Four controller-gated endpoints. Each: a business fn in `canister/src/lib.rs` guarded by
 `if !runtime.is_controller(&runtime.msg_caller()) { return Err(...NotController) }`, which
 builds the event and records it with `permit_admin()`; a thin `#[ic_cdk::update]` wrapper
 in `canister/src/main.rs`; and a declaration in `canister/oisy_trade.did`.
 
 | Endpoint | Arg | Event |
 |---|---|---|
-| `halt_trading` | `()` | `SetGlobalHalt(true)` |
-| `resume_trading` | `()` | `SetGlobalHalt(false)` |
-| `set_pair_status` | `(TradingPair, PairStatus)` | `SetPairStatus { book_id, halted }` |
+| `halt_trading` | `(Option<Vec<TradingPair>>)` | `SetHalt { book_ids, halted: true }` |
+| `resume_trading` | `(Option<Vec<TradingPair>>)` | `SetHalt { book_ids, halted: false }` |
 | `freeze_account` | `(Principal)` | `SetAccountFrozen { account, frozen: true }` |
 | `unfreeze_account` | `(Principal)` | `SetAccountFrozen { account, frozen: false }` |
 
-`set_pair_status` resolves `pair -> book_id` and returns `UnknownTradingPair` for an
-unknown pair via a dedicated `SetPairStatusError { NotController, UnknownTradingPair }`
-(keeps the global `UnauthorizedError` about authorization). Public `PairStatus { Active,
-Halted }` is exposed only at the candid boundary (internally two states suffice).
-Idempotent calls are no-op successes that still emit the event (R8). Public types mirror
-`AddTradingPairError`; `oisy_trade.did` gains the endpoints, `PairStatus`, the error types, and
-the new `AddLimitOrderError`/`DepositError`/`WithdrawError` variants. The repo's candid
-equality check must pass.
+`halt_trading` / `resume_trading` take an optional pair filter and keep returning
+`Result<(), UnauthorizedError>` (`UnauthorizedError { NotController }` only):
+
+- `halt_trading(None)` sets the global flag; `halt_trading(Some(pairs))` adds those pairs
+  to the halted set.
+- `resume_trading(None)` clears the global flag **and** empties the entire per-pair set in
+  one call; `resume_trading(Some(pairs))` removes those pairs from the set.
+- A pair is halted iff `global_flag || pair ∈ set`; this also drives `get_trading_pairs`'
+  `TradingStatus::Halted`.
+- `Some(pairs)` is validated up front: any unregistered pair **traps** (`ic_cdk::trap`)
+  before anything is recorded — no new error variant.
+
+Idempotent calls are no-op successes that still emit the event (R8). `oisy_trade.did`
+updates the two endpoints' signatures, the unified `SetHaltEvent`, and the
+`AddLimitOrderError`/`DepositError`/`WithdrawError` variants. The repo's candid equality
+check must pass.
 
 ### Test plan
 
@@ -312,10 +324,13 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 1. **Global halt** (R1, R2): under halt, `add_limit_order` → `TradingHalted`; a resting
    order placed pre-halt still cancels; a withdrawal of available balance succeeds;
    `resume_trading` re-enables orders.
-2. **Per-pair halt** (R3): with two pairs, halt A → orders on A → `PairHalted`, orders on
-   B succeed and match, a cancel on A succeeds.
+2. **Per-pair halt** (R3): with two pairs, `halt_trading(Some([A]))` → orders on A →
+   `TradingHalted`, orders on B succeed and match, a cancel on A succeeds, and
+   `get_trading_pairs` reports A `Halted` / B `Trading`. A controller targeting an
+   unregistered pair traps; `resume_trading(None)` clears the per-pair halt too.
 3. **Per-pair halt stops matching** (R3): resting crossable orders on a halted pair don't
-   fill after the timer ticks; unhalting lets them fill; the other pair is never affected.
+   fill after the timer ticks; `resume_trading(Some([A]))` lets them fill; the other pair
+   is never affected.
 4. **Freeze blocks** (R4): freeze U → U's `add_limit_order`, `withdraw`, and `deposit`
    (ICRC-2 pull) all fail with `AccountFrozen`; U's `cancel_limit_order` and reads succeed.
 5. **Freeze keeps liquidity** (R5): U has a resting order; freeze U; another user's order
@@ -370,17 +385,19 @@ halt; compliance or compromised principal → freeze).
   snapshot round-trips empty + old-format decodes to default; every recorder call site
   supplies a permit; deposit/withdraw record via `Permit::Async` (the post-await re-check
   is structurally present even though it can't yet deny).
-- **PR 2 — Global trading halt.** `trading_halted`; `SetGlobalHalt` + arm + snapshot;
-  `permit_trading`/`permit_matching(book)` gate the global halt; `run_once` drains
-  settling then matches only `permit_matching(book).is_ok()` books;
-  `halt_trading`/`resume_trading` + candid; `AddLimitOrderError::TradingHalted`.
+- **PR 2 — Global trading halt.** `trading_halted`; the unified `SetHalt` event + arm +
+  snapshot; `permit_trading`/`permit_matching(book)` gate the global halt; `run_once`
+  drains settling then matches only `permit_matching(book).is_ok()` books;
+  `halt_trading(None)`/`resume_trading(None)` + candid; `AddLimitOrderError::TradingHalted`.
   *Acceptance:* R1, R2 (incl. settling still drains under halt), R6 (these two endpoints),
   R7 for the halt flag.
-- **PR 3 — Per-pair halt.** `halted_pairs`; `SetPairStatus` + arm + snapshot;
-  `permit_matching(book)` and `permit_trading` extended with the per-book pair check (no
-  separate matching-loop filter); `set_pair_status` + `PairStatus` + `SetPairStatusError`;
-  `AddLimitOrderError::PairHalted`.
-  *Acceptance:* R3, R6 (`set_pair_status`, incl. `UnknownTradingPair`), R7 for per-pair
+- **PR 3 — Per-pair halt.** `halted_pairs`; extend the unified `SetHalt` event with the
+  optional `book_ids` filter + arm + snapshot; `permit_matching(book)` and `permit_trading`
+  extended with the per-book pair check (no separate matching-loop filter); the existing
+  `halt_trading`/`resume_trading` endpoints gain the `Option<Vec<TradingPair>>` filter
+  (per-pair halt reuses `TradingHalted`; an unregistered pair traps; `resume_trading(None)`
+  also clears the whole per-pair set).
+  *Acceptance:* R3, R6 (the halt endpoints, incl. trap-on-unknown-pair), R7 for per-pair
   state, and the executor does not busy-spin on a halted-but-non-empty book.
 - **PR 4 — Per-account freeze (the async machinery's enforcement).**
   `frozen_accounts`; `SetAccountFrozen` + arm + snapshot; add the frozen check to
