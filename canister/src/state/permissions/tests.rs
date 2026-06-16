@@ -1,15 +1,59 @@
 use super::{Permissions, Reconciliation, UnauthorizedError};
 use crate::order::OrderBookId;
 use candid::Principal;
+use proptest::prelude::*;
+
+const BOOK: OrderBookId = OrderBookId::ZERO;
+
+/// A `Permissions` that halts trading on [`BOOK`], either globally or for that
+/// pair only.
+fn arb_book_halted_permissions() -> impl Strategy<Value = Permissions> {
+    let global = Just(()).prop_map(|()| {
+        let mut permissions = Permissions::default();
+        permissions.halt_trading_globally();
+        permissions
+    });
+    let pair = Just(()).prop_map(|()| {
+        let mut permissions = Permissions::default();
+        permissions.halt_trading(BOOK);
+        permissions
+    });
+    prop_oneof![global, pair]
+}
+
+proptest! {
+    /// Whether trading is halted globally or just for the book, the gated
+    /// permits on that book are rejected while every ungated permit stays OK.
+    #[test]
+    fn should_gate_book_when_halted(permissions in arb_book_halted_permissions()) {
+        let caller = Principal::from_slice(&[1]);
+
+        prop_assert!(permissions.is_halted(&BOOK));
+        prop_assert!(matches!(
+            permissions.permit_trading(caller, BOOK),
+            Err(UnauthorizedError::TradingHalted)
+        ));
+        prop_assert!(matches!(
+            permissions.permit_matching(BOOK),
+            Err(UnauthorizedError::TradingHalted)
+        ));
+
+        prop_assert!(permissions.permit_deposit(caller).is_ok());
+        prop_assert!(permissions.permit_withdraw(caller).is_ok());
+        prop_assert!(permissions.permit_cancel().is_ok());
+        prop_assert!(permissions.permit_settling().is_ok());
+        prop_assert!(permissions.permit_add_trading_pair().is_ok());
+        prop_assert!(permissions.permit_admin().is_ok());
+    }
+}
 
 #[test]
 fn should_permit_every_event_on_empty_permissions() {
     let permissions = Permissions::default();
     let caller = Principal::from_slice(&[1]);
-    let book = OrderBookId::ZERO;
 
-    assert!(permissions.permit_trading(caller, book).is_ok());
-    assert!(permissions.permit_matching(book).is_ok());
+    assert!(permissions.permit_trading(caller, BOOK).is_ok());
+    assert!(permissions.permit_matching(BOOK).is_ok());
     assert!(permissions.permit_deposit(caller).is_ok());
     assert!(permissions.permit_withdraw(caller).is_ok());
     assert!(permissions.permit_cancel().is_ok());
@@ -41,110 +85,41 @@ fn should_reconcile_clean_on_empty_permissions() {
 }
 
 #[test]
-fn should_reject_trading_and_matching_when_globally_halted() {
-    let mut permissions = Permissions::default();
-    permissions.set_trading_halted(true);
-    let caller = Principal::from_slice(&[1]);
-    let book = OrderBookId::ZERO;
-
-    assert!(matches!(
-        permissions.permit_trading(caller, book),
-        Err(UnauthorizedError::TradingHalted)
-    ));
-    assert!(matches!(
-        permissions.permit_matching(book),
-        Err(UnauthorizedError::TradingHalted)
-    ));
-}
-
-#[test]
-fn should_keep_ungated_permits_ok_when_globally_halted() {
-    let mut permissions = Permissions::default();
-    permissions.set_trading_halted(true);
-    let caller = Principal::from_slice(&[1]);
-
-    assert!(permissions.permit_deposit(caller).is_ok());
-    assert!(permissions.permit_withdraw(caller).is_ok());
-    assert!(permissions.permit_cancel().is_ok());
-    assert!(permissions.permit_settling().is_ok());
-    assert!(permissions.permit_add_trading_pair().is_ok());
-    assert!(permissions.permit_admin().is_ok());
-}
-
-#[test]
-fn should_reject_trading_on_halted_pair_only() {
+fn should_gate_halted_pair_only() {
     let mut permissions = Permissions::default();
     let caller = Principal::from_slice(&[1]);
-    let halted = OrderBookId::new(0);
     let other = OrderBookId::new(1);
-    permissions.set_pair_halted(halted, true);
+    permissions.halt_trading(BOOK);
 
-    assert!(permissions.is_pair_halted(&halted));
-    assert!(!permissions.is_pair_halted(&other));
-    assert!(matches!(
-        permissions.permit_trading(caller, halted),
-        Err(UnauthorizedError::TradingHalted)
-    ));
+    assert!(permissions.is_halted(&BOOK));
+    assert!(!permissions.is_halted(&other));
     assert!(permissions.permit_trading(caller, other).is_ok());
-    // The per-pair halt gates matching on the halted book only; every other
-    // book keeps matching.
-    assert!(matches!(
-        permissions.permit_matching(halted),
-        Err(UnauthorizedError::TradingHalted)
-    ));
     assert!(permissions.permit_matching(other).is_ok());
 }
 
 #[test]
-fn should_clear_every_halted_pair() {
+fn should_re_enable_trading_after_resuming_pair() {
+    let mut permissions = Permissions::default();
+    let caller = Principal::from_slice(&[1]);
+
+    permissions.halt_trading(BOOK);
+    permissions.resume_trading(BOOK);
+
+    assert!(!permissions.is_halted(&BOOK));
+    assert!(permissions.permit_trading(caller, BOOK).is_ok());
+}
+
+#[test]
+fn should_clear_every_halted_pair_on_global_resume() {
     let mut permissions = Permissions::default();
     let a = OrderBookId::new(0);
     let b = OrderBookId::new(1);
-    permissions.set_pair_halted(a, true);
-    permissions.set_pair_halted(b, true);
+    permissions.halt_trading_globally();
+    permissions.halt_trading(a);
+    permissions.halt_trading(b);
 
-    permissions.clear_halted_pairs();
+    permissions.resume_trading_globally();
 
-    assert!(!permissions.is_pair_halted(&a));
-    assert!(!permissions.is_pair_halted(&b));
-}
-
-#[test]
-fn should_re_enable_trading_after_unhalting_pair() {
-    let mut permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-    let book = OrderBookId::new(0);
-
-    permissions.set_pair_halted(book, true);
-    permissions.set_pair_halted(book, false);
-
-    assert!(!permissions.is_pair_halted(&book));
-    assert!(permissions.permit_trading(caller, book).is_ok());
-}
-
-#[test]
-fn should_keep_ungated_permits_ok_when_pair_halted() {
-    let mut permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-    permissions.set_pair_halted(OrderBookId::new(0), true);
-
-    assert!(permissions.permit_deposit(caller).is_ok());
-    assert!(permissions.permit_withdraw(caller).is_ok());
-    assert!(permissions.permit_cancel().is_ok());
-    assert!(permissions.permit_settling().is_ok());
-    assert!(permissions.permit_add_trading_pair().is_ok());
-    assert!(permissions.permit_admin().is_ok());
-}
-
-#[test]
-fn should_re_enable_trading_after_resuming() {
-    let mut permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-    let book = OrderBookId::ZERO;
-
-    permissions.set_trading_halted(true);
-    permissions.set_trading_halted(false);
-
-    assert!(permissions.permit_trading(caller, book).is_ok());
-    assert!(permissions.permit_matching(book).is_ok());
+    assert!(!permissions.is_halted(&a));
+    assert!(!permissions.is_halted(&b));
 }
