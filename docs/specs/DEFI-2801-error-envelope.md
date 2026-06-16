@@ -9,133 +9,138 @@ tags: [errors, candid, api]
 ## Motivation
 
 Today every fallible endpoint returns a bare, flat error variant (`DepositError`, `WithdrawError`,
-`AddLimitOrderError`, `CancelLimitOrderError`, …). A caller that wants to decide *whether to
-retry* must enumerate every variant and hard-code the mapping itself; the DEX gives it no
-machine-readable signal. Some failures are the caller's to fix (`UnsupportedToken`, `InvalidPrice`,
-`InsufficientFunds`), some are transient and worth retrying (`OperationInProgress`, a ledger that is
-`TemporarilyUnavailable`), and some are the DEX's own fault (`LedgerInternalError`, an
-accounting/ledger inconsistency).
+`AddLimitOrderError`, …). A caller that wants to decide *whether to retry* must enumerate every
+variant and hard-code the mapping itself; the DEX gives it no machine-readable signal. Some failures
+are the caller's to fix (`UnsupportedToken`, `InvalidPrice`, `InsufficientFunds`), some are transient
+(`OperationInProgress`, a ledger that is `TemporarilyUnavailable`, a global `TradingHalted`), and some
+are the DEX's own fault (`LedgerInternalError`, an accounting/ledger inconsistency).
 
 The consumers here are **multiple independent clients, written in different languages, that are not
 upgraded in lockstep with the DEX**. That rules out a Rust-only helper and makes Candid
-forward-compatibility a hard requirement: a client built against today's interface must keep working
-— without traps and without silently mishandling — after the DEX adds a new error case tomorrow.
+forward-compatibility a hard requirement: a client built against today's interface must keep working —
+without traps and without silently mishandling — after the DEX adds a new error case tomorrow.
 
-The fix is to tag every error with the **disposition** — what the caller should do — as the
-outer variant, and carry the specific reason as an inner `opt variant`:
+Each error becomes a small record: a **disposition** (what the caller should do) carried as a variant,
+plus an advisory free-text **`message`**:
 
 - **`RequestError`** — caller-side; the request will not succeed as-is. Correct the input, satisfy a
-  precondition (fund / approve / authorize), or stop. Do **not** auto-retry unchanged.
+  precondition (fund / approve), or stop. Do **not** auto-retry unchanged.
 - **`TemporaryError`** — transient; retry the same call after a backoff.
 - **`InternalError`** — DEX-side fault; surface to operators. Do **not** retry.
 
-Two adjacent input-handling bugs are folded in because they live in the same surface and the PRs
-touch the same files: `cancel_limit_order` maps a *malformed* `order_id` to `OrderNotFound`
-(conflating bad input with a missing order), and `get_order_status` **traps** on a malformed
-`order_id` (user input can panic the canister).
+Two adjacent input-handling bugs are folded in because they live in the same surface: `cancel_limit_order`
+maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a missing order), and
+`get_my_orders` **traps** on a malformed `order_id` (user input can panic the canister).
 
 ## Requirements
 
-- **R1**: Every user-facing error is a **disposition-tagged variant** whose arms are drawn from
-  `RequestError` / `TemporaryError` / `InternalError`; each arm carries `opt variant { … }`.
-  An error declares only the arms it can actually produce. Applies to `add_limit_order`,
-  `cancel_limit_order`, `deposit`, `withdraw`, `get_order_status`, `get_order_book_ticker`,
-  `get_order_book_depth`, and both the per-token and request-level errors of `get_balances` /
-  `get_fee_balances`. Admin endpoints are out of scope.
-- **R2**: The disposition arm is the contract (documented in `oisy_trade.did`):
-  `RequestError` ⇒ caller-side, do not auto-retry unchanged (fix input / satisfy a precondition /
-  stop); `TemporaryError` ⇒ retry after backoff; `InternalError` ⇒ DEX-side fault, surface, do not
-  retry.
-- **R3**: Each leaf error is assigned to exactly one arm per [Disposition membership](#disposition-membership).
-- **R4**: Each arm's payload is `opt variant`. A client generated against an older interface decodes
-  an unknown future *leaf* as `null` while still reading the **arm** (disposition). (Verified by a
-  decode test that feeds a superset-leaf value into the shipped type — inner `null`, arm intact.)
-- **R5**: `CallFailed` is a `TemporaryError`, not an indeterminate/reconcile case — see D3. This holds
-  only while the ledger calls are guaranteed-response (`call_unbounded_wait`); see Constraints.
-- **R6**: `cancel_limit_order` with a malformed `order_id` returns `RequestError(InvalidOrderId)`,
+- **R1**: Every user-facing error is a record `{ kind; message : opt text }`, where `kind` is a
+  disposition variant whose arms are drawn from `RequestError` / `TemporaryError` / `InternalError`,
+  each carrying `opt variant { … }` of its specific leaves. An error declares only the arms it can
+  produce. Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
+  `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and request-level errors of
+  `get_balances` / `get_fee_balances`. Admin endpoints are out of scope.
+- **R2**: The `kind` arm is the contract (documented in `oisy_trade.did`):
+  `RequestError` ⇒ caller-side, do not auto-retry unchanged; `TemporaryError` ⇒ retry after backoff;
+  `InternalError` ⇒ DEX-side fault, surface, do not retry.
+- **R3**: `message` is **advisory** human-readable text for logs/UI/debugging. Clients **must not**
+  parse it; programmatic handling is on `kind` and the inner leaf only. It is the natural home for
+  detail that has no typed payload (e.g. the `OrderIdParseError` text behind a bare `InvalidOrderId`).
+- **R4**: Each leaf error is assigned to exactly one arm per [Disposition membership](#disposition-membership).
+- **R5**: Each arm's payload is `opt variant`. A client built against an older interface decodes an
+  unknown future *leaf* as `null`, while still reading the **arm** (`kind`) and `message`. (Verified by
+  a decode test feeding a superset-leaf value into the shipped type — inner `null`, arm + message intact.)
+- **R6**: `CallFailed` is a `TemporaryError`, not indeterminate — see D3. Holds only while the ledger
+  calls are guaranteed-response (`call_unbounded_wait`); see Constraints.
+- **R7**: `cancel_limit_order` with a malformed `order_id` returns `RequestError(InvalidOrderId)`,
   distinct from `RequestError(OrderNotFound)`.
-- **R7**: `get_order_status` never traps. A malformed `order_id` returns
-  `Err(GetOrderStatusError::RequestError(InvalidOrderId))`; a well-formed but unknown id returns
-  `Ok(OrderStatus::NotFound)`; a well-formed known id returns `Ok(<status>)`.
-- **R8**: The hand-written `canister/oisy_trade.did` matches the generated interface
-  (`check_candid_interface_compatibility` passes) and documents the R2 disposition contract.
+- **R8**: `get_my_orders` never traps. Its signature changes from `-> (vec UserOrder)` to a result
+  `-> (variant { Ok : vec UserOrder; Err : GetMyOrdersError })`. A malformed `order_id` returns
+  `Err(RequestError(InvalidOrderId))` (with the parse text in `message`); a well-formed but unknown id
+  returns `Ok([])`; otherwise `Ok(<orders>)`. (This is a breaking signature change to a query.)
+- **R9**: The hand-written `canister/oisy_trade.did` matches the generated interface
+  (`check_candid_interface_compatibility` passes) and documents the R2 disposition contract and the R3
+  `message` rule.
 
 ## Non-goals
 
 - **No fourth disposition arm.** No `Indeterminate`/`Reconcile` (see D3) and no split of `RequestError`
-  into "fix the request" vs "satisfy a precondition" vs "stop" — those finer distinctions are carried
-  by the inner leaf (`InsufficientFunds` is self-evidently fund-and-retry) and don't change the coarse
-  client action. The three arms are treated as the complete, frozen partition of caller actions.
-- **No free-text `message` field.** The typed leaves are self-describing. If a human-readable message
-  is ever needed it goes on the individual leaf records (e.g. `CallFailed { …, reason }` already does),
-  not as a top-level field.
+  into finer "fix the request / satisfy a precondition / stop" — those distinctions are carried by the
+  inner leaf and don't change the coarse client action. The three arms are the complete, frozen
+  partition of caller actions.
+- **`message` is not a wire contract.** It exists for humans/operators; the spec forbids clients from
+  matching on it (R3). It is not localized and its exact text may change.
 - **Admin endpoints are out of scope** (e.g. `add_trading_pair`): controller-only, not part of the
   multi-language client surface this targets.
-- **No changes to internal/state-layer error types** (`canister/src/state`, `order`, `ledger`
-  internal enums) beyond mapping them to the disposition-tagged public types at the boundary.
+- **No changes to internal/state-layer error types** (`canister/src/state`, `order`, `lib`,
+  `ledger` — incl. the internal `GetMyOrdersError` / `OrderIdParseError`) beyond mapping them to the
+  disposition-tagged public types at the boundary.
 - **No change to which errors are logged.** The `main.rs` per-error logging arms encode
-  *log-worthiness*, which is deliberately not the disposition (`OperationInProgress` is a
-  `TemporaryError` yet logged as a user action). Left untouched.
+  *log-worthiness*, deliberately not the disposition. Left untouched.
 - **Accepted residual limitations**:
-  - A client hitting a *future leaf* sees inner `null` and loses the specific reason, but keeps the
-    disposition arm — the intended trade.
-  - The outer arm set is frozen: adding a *new disposition* later is a breaking change (old clients
-    trap on the unknown arm). Accepted, because the three arms exhaustively partition what a caller can
-    do (fix your side / wait / it's the DEX's fault).
+  - A client hitting a *future leaf* sees inner `null` and loses the typed reason, but keeps the
+    disposition arm and the `message` — the intended trade.
+  - The outer arm set is frozen: adding a *new disposition* later is a breaking change. Accepted,
+    because the three arms exhaustively partition what a caller can do.
 
 ## Design Decisions
 
-- **D1 — Disposition is the outer variant tag; the specific reason is an inner `opt variant`.**
-  `type DepositError = variant { RequestError : opt variant {…}; TemporaryError : opt variant {…};
-  InternalError : opt variant {…} }`. The tag is typed and self-documenting (no numeric-code → meaning
-  doc dependency), and it separates *what grows* (specific reasons → inner `opt`, forward-compatible)
-  from *what's stable* (the small set of caller actions → bare outer arm).
-- **D2 — Three arms, not more.** The disposition axis is "what does the client do," and that space is
-  small and bounded: act on your side, wait, or escalate to the DEX. Finer distinctions
-  (precondition-vs-malformed, terminal-vs-correctable) live in the inner leaf, which clients inspect
-  only when they want the specific reason.
+- **D1 — `record { kind : variant {…}; message : opt text }`.** The disposition is a typed, self-
+  documenting variant (`kind`); the specific reason is an inner `opt variant`; `message` is advisory
+  text. This separates *what grows* (specific reasons → inner `opt`) from *what's stable* (the small set
+  of caller actions → bare outer arm), and the record gives field-level headroom (a future
+  `retry_after` etc. is a non-breaking field add).
+- **D2 — `message` carries the human detail; the typed leaf stays minimal.** Resolves the
+  bare-vs-payload question for `InvalidOrderId`: the leaf is **bare** (its internal `OrderIdParseError`
+  is not a Candid type and carries no dynamic data) and the parse text rides in `message`. Clients still
+  branch only on `kind`/leaf (R3).
 - **D3 — No `Indeterminate`/reconcile arm; `CallFailed` ⇒ `TemporaryError`.** Both ledger calls use
   `call_unbounded_wait` (guaranteed response) and ICRC `icrc1_transfer` / `icrc2_transfer_from` commit
-  atomically with their reply. So a reject implies the transfer did **not** commit — no side effect on
-  either side — making the whole operation safe to retry. There is nothing to reconcile.
+  atomically with their reply, so a reject implies the transfer did **not** commit — no side effect on
+  either side — making the operation safe to retry. Nothing to reconcile.
 - **D4 — Naming `RequestError / TemporaryError / InternalError`.** Symmetric `-Error` triple,
-  attribution-clear (your *request* / *transient* / the DEX's *internals*), and IC-native — no
-  `Server` (not IC terminology) and no `Caller`/`Callee` jargon. `Internal` is standard Rust/IC
-  vocabulary and fits the contents literally (`LedgerInternalError`).
-- **D5 — The `InsufficientFunds` asymmetry.** Deposit `InsufficientFunds` (the caller's external
-  wallet is short) ⇒ `RequestError`. Withdraw's ledger-reported `InsufficientFunds` (DEX accounting
-  says it has the funds, the ledger disagrees) ⇒ `InternalError` — a genuine invariant violation.
-- **D6 — Malformed `order_id` ⇒ a dedicated `InvalidOrderId` leaf** under `RequestError` (not
-  `OrderNotFound`, not a trap), on both `cancel_limit_order` and `get_order_status`.
+  attribution-clear (your *request* / *transient* / the DEX's *internals*), IC-native — no `Server` and
+  no `Caller`/`Callee` jargon.
+- **D5 — The `InsufficientFunds` asymmetry.** Deposit `InsufficientFunds` (caller's external wallet) ⇒
+  `RequestError`; withdraw's ledger-reported `InsufficientFunds` (DEX accounting says it has the funds,
+  the ledger disagrees) ⇒ `InternalError` — a genuine invariant violation.
+- **D6 — Malformed `order_id` ⇒ a bare `InvalidOrderId` leaf under `RequestError`**, on
+  `cancel_limit_order` and `get_my_orders` (`get_order_status` was removed in #133). `get_my_orders`
+  becomes non-trapping by returning a result (R8).
 
 ## Implementation
 
 ### Constraints
 
-- Both ledger calls are guaranteed-response: `icrc2_transfer_from` (`ledger/mod.rs`, deposit) and
-  `icrc1_transfer` (`ledger/mod.rs`, withdraw) use `call_unbounded_wait`. **D3/R5 depend on this.**
-  `ledger/mod.rs` carries `TODO(DEFI-2745): Consider switching to bounded_wait` — if that lands,
-  best-effort timeouts become genuinely indeterminate and `CallFailed` must move out of
-  `TemporaryError` into a reconcile-style disposition (reintroducing a fourth arm).
-- `dex_types::OrderId = String`, parsed to `canister::order::OrderId` via `FromStr`
-  (`OrderIdParseError`). Parse points: `dex_canister::cancel_limit_order`, `dex_canister::get_order_status`.
+- Both ledger calls are guaranteed-response: `icrc2_transfer_from` and `icrc1_transfer` use
+  `call_unbounded_wait` (`canister/src/ledger/mod.rs`). **D3/R6 depend on this.** `ledger/mod.rs` carries
+  `TODO(DEFI-2745): Consider switching to bounded_wait` — if that lands, best-effort timeouts become
+  genuinely indeterminate and `CallFailed` must move out of `TemporaryError` into a reconcile-style
+  disposition (reintroducing a fourth arm).
+- `dex_types::OrderId = String`, parsed to `canister::order::OrderId` via `FromStr` (`OrderIdParseError`,
+  an internal non-Candid unit struct). Parse points: `cancel_limit_order`, `get_my_orders`.
+- `get_my_orders` currently returns `-> (vec UserOrder)` and the entry point (`canister/src/main.rs`)
+  `panic!`s on the internal `GetMyOrdersError::InvalidOrderId(OrderIdParseError)`. R8 turns that into a
+  returned, disposition-tagged public error.
 - `check_candid_interface_compatibility` (`canister/src/main.rs`) pins `oisy_trade.did` to the generated
   interface via `service_equal`; every interface change updates `oisy_trade.did` by hand.
-- Candid's forgiving `opt` decode rule provides the inner-leaf forward-compatibility; only clients
-  generated from the updated `.did` benefit (the `opt` must ship now — it can't be retrofitted).
+- Candid's forgiving `opt` decode rule provides inner-leaf forward-compatibility; only clients generated
+  from the updated `.did` benefit.
 
 ### `dex_types` (`libs/types/src/lib.rs`)
 
-Each public error becomes a disposition enum whose arms wrap `Option<…>` of a per-arm leaf enum
-(`Option` ⇒ Candid `opt`). Pattern (DepositError shown; the rest follow):
+Pattern (DepositError shown; the rest follow):
 
 ```rust
-pub enum DepositError {
+pub struct DepositError {
+    pub kind: DepositErrorKind,
+    pub message: Option<String>,   // advisory; clients must not parse (R3)
+}
+pub enum DepositErrorKind {
     RequestError(Option<DepositRequestError>),
     TemporaryError(Option<DepositTemporaryError>),
     InternalError(Option<DepositInternalError>),
 }
-
 pub enum DepositRequestError {
     AmountExceedsMaximum,
     UnsupportedToken { token_id: TokenId },
@@ -150,14 +155,15 @@ pub enum DepositTemporaryError {
 pub enum DepositInternalError { LedgerError { reason: String } }
 ```
 
-Provide `From<leaf>`/constructors so call sites read cleanly (e.g. `DepositRequestError::UnsupportedToken{..}.into()`).
-The existing internal→public conversions (`canister/src/state`, `ledger`) and the direct
-construction sites in `canister/src/lib.rs` now target these disposition-tagged types — placing each
-leaf into its arm is the only behavioral change; internal flat enums are untouched (Non-goals).
+Provide constructors so call sites read cleanly and set `message` (e.g. from an internal error's
+`Display`). The internal→public conversions (`canister/src/state`, `lib`, `ledger`) and direct
+construction sites now target these types — placing each leaf into its arm and supplying `message` is
+the only behavioral change; internal flat enums are untouched (Non-goals).
 
-Order-id fixes add leaves: `CancelLimitOrderError::RequestError(InvalidOrderId)` and a new
-`GetOrderStatusError { RequestError(Option<GetOrderStatusRequestError>) }` with an `InvalidOrderId`
-leaf.
+The order-id fix adds a **public** `GetMyOrdersError` (the existing `GetMyOrdersError` in
+`canister/src/lib.rs` stays internal): `kind : RequestError(Option<GetMyOrdersRequestError>)` with a
+bare `InvalidOrderId` leaf, plus `message`. The internal `InvalidOrderId(OrderIdParseError)` maps to it
+with the parse `Display` text in `message`.
 
 ### Disposition membership
 
@@ -165,57 +171,51 @@ leaf.
 |---|---|---|---|
 | **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError` |
 | **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`* |
-| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted` | — |
+| **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`** | — |
 | **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | — | — |
-| **GetOrderStatusError** | `InvalidOrderId` | — | — |
+| **GetMyOrdersError** (new public) | `InvalidOrderId` | — | — |
 | **GetOrderBookTickerError** | `UnknownTradingPair` | — | — |
 | **GetOrderBookDepthError** | `UnknownTradingPair`, `LimitTooLarge` | — | — |
 | **GetBalancesError** | `TokenNotSupported` | — | — |
 | **GetBalancesRequestError** | `FilterTooLarge` | — | — |
 
-\* withdraw's ledger-reported `InsufficientFunds` (D5). `cancel_limit_order` and the queries have only
-`RequestError` (single-arm); `AddLimitOrderError` also has a `TemporaryError` arm carrying
-`TradingHalted` — a global trading halt (DEFI-2849) is intentional transient unavailability, so "retry
-when trading resumes" (like a ledger `TemporarilyUnavailable`/HTTP 503), not a `RequestError` (the
-request is valid) or `InternalError` (no fault). `InvalidNotional` (DEFI-2850) is caller-side input →
-`RequestError`. Both leaves merged from main; `TradingHalted`'s placement is a judgment call worth a
-second look.
+\* withdraw's ledger-reported `InsufficientFunds` (D5). ** `TradingHalted` (DEFI-2849) — a global halt
+is intentional transient unavailability ("retry when trading resumes", like a ledger
+`TemporarilyUnavailable`); `InvalidNotional` (DEFI-2850) is caller-side input → `RequestError`.
+`TradingHalted`'s placement is a judgment call worth a second look.
 
-### Canister logic (`canister/src/lib.rs`)
+### Canister logic (`canister/src/lib.rs`, `main.rs`)
 
-- `cancel_limit_order`: map `OrderId` parse failure to `RequestError(InvalidOrderId)` (was `OrderNotFound`).
-- `get_order_status`: return `Result<OrderStatus, GetOrderStatusError>`; parse failure ⇒
-  `Err(RequestError(InvalidOrderId))`; well-formed unknown id ⇒ `Ok(OrderStatus::NotFound)`. Remove the `panic!`.
+- `cancel_limit_order`: map `OrderId` parse failure to `RequestError(InvalidOrderId)` (was `OrderNotFound`),
+  parse text in `message`.
+- `get_my_orders`: return `Result<Vec<UserOrder>, GetMyOrdersError>` (public); the `main.rs` entry point
+  returns `Err(RequestError(InvalidOrderId))` instead of `panic!`; well-formed unknown id ⇒ `Ok(vec![])`.
 
 ### Candid (`canister/oisy_trade.did`)
 
-- Top-of-file comment documenting the R2 disposition contract.
-- Each error renders as `variant { RequestError : opt variant {…}; TemporaryError : opt variant {…};
-  InternalError : opt variant {…} }`, declaring only the arms it produces.
-- New `InvalidOrderId` leaf on `CancelLimitOrderError`; new `GetOrderStatusError`; new
-  `get_order_status` signature returning a result.
+- Top-of-file comment documenting the R2 disposition contract and the R3 `message` rule.
+- Each error renders as `record { kind : variant { RequestError : opt variant {…}; … }; message : opt text }`,
+  declaring only the arms it produces.
+- `get_my_orders` signature becomes a result; new `GetMyOrdersError`; new bare `InvalidOrderId` leaf on
+  `CancelLimitOrderError`.
 
 ### Test plan
 
 Unit (`libs/types/src/tests.rs`):
-- For every leaf, assert the internal→public conversion places it under the arm in the membership
-  table — parameterized, no copy/paste. (**R2**, **R3**)
+- For every leaf, assert the internal→public conversion places it under the membership-table arm and
+  sets a non-empty `message` — parameterized. (**R2**, **R3**, **R4**)
 - Forward-compat decode test: encode an error whose inner arm has an *extra* leaf, decode into the
-  shipped (smaller) type; assert the inner decodes to `None` while the outer arm decodes intact.
-  (**R4**)
+  shipped type; assert inner `null` while `kind` and `message` decode intact. (**R5**)
 
-Unit (`canister/src/.../tests.rs`, sibling files):
-- `cancel_limit_order` with a malformed id ⇒ `RequestError(InvalidOrderId)`, not `OrderNotFound`. (**R6**)
-- `get_order_status` with a malformed id ⇒ `Err(RequestError(InvalidOrderId))` and does not panic;
-  well-formed unknown ⇒ `Ok(NotFound)`; well-formed known ⇒ `Ok(<status>)`. (**R7**)
+Unit (`canister/src/.../tests.rs`):
+- `cancel_limit_order` malformed id ⇒ `RequestError(InvalidOrderId)`, not `OrderNotFound`. (**R7**)
+- `get_my_orders` malformed id ⇒ `Err(RequestError(InvalidOrderId))`, no panic; unknown id ⇒ `Ok([])`. (**R8**)
 
-Integration (`dex_int_tests`):
-- Update existing deposit/withdraw/add/cancel error assertions to the disposition-tagged shape; assert
-  the arm and the inner leaf for at least one case per endpoint. (**R1**)
-- New: cancel + `get_order_status` malformed-id cases over the canister boundary, asserting no trap and
-  the expected arm/leaf. (**R6**, **R7**)
+Integration (`dex_int_tests`): update existing assertions to the `{ kind; message }` shape, asserting the
+arm + inner leaf for at least one case per endpoint; new cancel + `get_my_orders` malformed-id cases over
+the boundary, asserting no trap. (**R1**, **R7**, **R8**)
 
-Interface: `check_candid_interface_compatibility` passes against the updated `oisy_trade.did`. (**R8**)
+Interface: `check_candid_interface_compatibility` passes against the updated `oisy_trade.did`. (**R9**)
 
 Commands: `cargo test --workspace`, `cargo fmt --all -- --check`, `just lint`.
 
@@ -223,42 +223,38 @@ Commands: `cargo test --workspace`, `cargo fmt --all -- --check`, `just lint`.
 
 Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each depend only on PR1.
 
-1. **PR1 — Disposition-tagged errors for the four update-endpoint errors.**
-   `RequestError/TemporaryError/InternalError` shape + leaf enums for `AddLimitOrderError`,
-   `CancelLimitOrderError`, `DepositError`, `WithdrawError`; map internal→public at the boundary;
-   `oisy_trade.did` (disposition arms + contract doc block); unit + integration tests.
-   *Accepts*: R1 (these four), R2, R3, R4, R8.
-2. **PR2 — Extend to query errors.**
-   Same shape for `GetOrderBookTickerError`, `GetOrderBookDepthError`, `GetBalancesError`,
-   `GetBalancesRequestError`; `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R3 (remainder), R8.
-3. **PR3 — Stop conflating / trapping on malformed order IDs.**
-   Add the `InvalidOrderId` leaf (map cancel parse failure to it); add `GetOrderStatusError` and make
-   `get_order_status` return a non-panicking result; `oisy_trade.did`; unit + integration tests.
-   *Accepts*: R6, R7, R8.
+1. **PR1 — Disposition-tagged `{ kind; message }` errors for the four update-endpoint errors.**
+   Shape + leaf enums for `AddLimitOrderError`, `CancelLimitOrderError`, `DepositError`, `WithdrawError`;
+   map internal→public at the boundary (incl. `message`); `oisy_trade.did` + contract doc block; tests.
+   *Accepts*: R1 (these four), R2, R3, R4, R5, R9.
+2. **PR2 — Extend to query errors.** Same shape for `GetOrderBookTickerError`, `GetOrderBookDepthError`,
+   `GetBalancesError`, `GetBalancesRequestError`; `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R4
+   (remainder), R9.
+3. **PR3 — Stop conflating / trapping on malformed order IDs.** Bare `InvalidOrderId` on
+   `CancelLimitOrderError`; new public `GetMyOrdersError`; `get_my_orders` returns a result (no `panic!`);
+   `oisy_trade.did`; tests. *Accepts*: R7, R8, R9.
 
 ## Discussed Alternatives
 
-1. **Keep bare flat enums, document retryability** (Binance/Coinbase norm). Rejected: no
-   machine-readable signal; every multi-language client re-derives the map; doesn't satisfy the
-   ticket's "an API that allows the caller to differentiate."
-2. **Rust `is_retryable()`/`category()` helper, no wire change.** Rejected: serves only Rust callers;
-   our consumers are multi-language and uncoordinated with DEX versions.
+1. **Keep bare flat enums, document retryability** (Binance/Coinbase norm). Rejected: no machine-readable
+   signal; every multi-language client re-derives the map.
+2. **Rust `is_retryable()`/`category()` helper, no wire change.** Rejected: serves only Rust callers; ours
+   are multi-language and uncoordinated.
 3. **Numeric `record { code : nat16; detail : opt E }` envelope** (HTTP-status-class codes). Seriously
-   considered. Rejected in favor of typed disposition tags: clearer for multi-language clients (no
-   code-range → meaning doc dependency), avoids the awkward "409 is a 4xx but retryable" tension, and
-   the typed tag *is* the contract. Its one edge — adding a disposition is non-breaking (a new code) —
-   was given up knowingly, since the three dispositions are treated as an exhaustive, frozen partition.
-4. **Closed flat `variant { Transient; Permanent }` category, or a `record { category; error }`
-   wrapper.** Rejected: a closed category in a return position can't gain cases compatibly, and the
-   detail loses forward-compatibility; the inner `opt variant` solves the latter.
-5. **A fourth `Indeterminate`/`Reconcile` arm for `CallFailed`.** Rejected once we confirmed both
-   ledger calls are guaranteed-response (`call_unbounded_wait`): a reject implies no side effect, so
-   there is nothing to reconcile and `CallFailed` is a safe-to-retry `TemporaryError` (D3). Revisit if
-   DEFI-2745 switches to bounded-wait.
-6. **Finer caller-side arms** (`Fix`/`Resolve`/`Stop`, or `BadRequest`/`UnprocessableRequest`). Rejected:
-   they split on "what's wrong," not "what to do" — the caller action for all of them is the same
-   ("don't auto-retry; act on your side"), so the distinction belongs in the inner leaf.
-7. **Verb arms** (`Fix`/`Retry`/`Report` or `Resolve`/`Retry`/`Report`). Considered; the team preferred
-   the symmetric, attribution-clear noun triple `RequestError/TemporaryError/InternalError`.
-8. **Flat `record { code; message : text }`.** Rejected: discards the typed, structured leaf payloads
-   on-chain callers consume.
+   considered; rejected for typed disposition tags — clearer for multi-language clients (no code-range →
+   meaning doc dependency), avoids the "409 is a 4xx but retryable" tension. Note the chosen shape is
+   `record { kind : variant {…}; message }`, i.e. a *typed* disposition, not a numeric code.
+4. **Closed flat `variant { Transient; Permanent }` category, or a closed `{ category; error }` wrapper.**
+   Rejected: can't gain cases compatibly and the detail loses forward-compatibility; the inner `opt
+   variant` solves the latter.
+5. **A fourth `Indeterminate`/`Reconcile` arm for `CallFailed`.** Rejected once both ledger calls were
+   confirmed guaranteed-response (D3). Revisit if DEFI-2745 switches to bounded-wait.
+6. **Finer caller-side arms / verb arms** (`Fix`/`Resolve`/`Stop`, `BadRequest`/`UnprocessableRequest`).
+   Rejected: they split on "what's wrong," not "what to do"; the action is the same and the distinction
+   belongs in the inner leaf.
+7. **Omit the `message` field** (the spec's original stance). Reversed on review: when an old client hits
+   a future leaf, `detail` is `null` and `kind` alone is thin for diagnostics — an advisory `message`
+   aids logs/UI and flags "update your client," at the cost of a record wrapper (which also buys
+   field-level forward-compat). Clients still match only on `kind`/leaf (R3).
+8. **Carry `OrderIdParseError` in `InvalidOrderId`.** Rejected: it's an internal, non-Candid unit struct
+   with no dynamic data; the bare leaf + parse text in `message` conveys the same thing on the wire.
