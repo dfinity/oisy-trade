@@ -306,30 +306,15 @@ impl Scenario {
     /// targets the global flag (and, when resuming, clears every per-pair halt);
     /// `Some` targets only the listed books.
     fn with_set_halt(mut self, book_ids: Option<Vec<OrderBookId>>, halted: bool) -> Self {
-        let permissions = self.state.permissions_mut();
-        match &book_ids {
-            None => {
-                if halted {
-                    permissions.halt_trading_globally();
-                } else {
-                    permissions.resume_trading_globally();
-                }
-            }
-            Some(book_ids) => {
-                for book_id in book_ids {
-                    if halted {
-                        permissions.halt_trading(*book_id);
-                    } else {
-                        permissions.resume_trading(*book_id);
-                    }
-                }
-            }
-        }
         let timestamp = self.timestamp();
-        self.events.push(Event {
+        let payload = EventType::SetHalt(crate::state::event::SetHaltEvent { book_ids, halted });
+        apply_state_transition(
+            &mut self.state,
+            &payload,
             timestamp,
-            payload: EventType::SetHalt(crate::state::event::SetHaltEvent { book_ids, halted }),
-        });
+            StableMemoryOptions::Write,
+        );
+        self.events.push(Event { timestamp, payload });
         self
     }
 
