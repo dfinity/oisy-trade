@@ -160,11 +160,12 @@ greppable:
   separate `is_pair_halted` filter), `permit_deposit(caller)` / `permit_withdraw(caller)`
   (return `PreAsyncPermit`). A globally- or per-pair-halted pair both surface the single
   `TradingHalted` — there is no distinct `PairHalted`.
-- Always-`Ok` — ungated *in the permission layer*, but not all truly unguarded:
+- Infallible — ungated *in the permission layer*, but not all truly unguarded:
   `permit_cancel` and `permit_settling` are genuinely ungated; `permit_admin` is the
   permit for the halt/upgrade events and is controller/lifecycle-gated *at the endpoint*;
-  `permit_add_trading_pair` is controller-gated at the endpoint. The always-`Ok` return
-  documents "not gated here" at a named, greppable site — it does not mean "unguarded".
+  `permit_add_trading_pair` is controller-gated at the endpoint. These permits return
+  their permit value directly — documenting "not gated here" at a named, greppable site
+  (it does not mean "unguarded").
   **`permit_settling` is intentionally book-less and never gated** — settling must always
   drain (even under halt) so already-matched fills don't strand (R2); a per-book settling
   gate would reintroduce that stranding.
@@ -252,7 +253,7 @@ Absent field decodes to default (R5).
 - **`cancel_limit_order`** — **no change**; cancels stay open under every control.
   Covered by tests, not code.
 - **Other recorders** (`add_trading_pair`, matching/settling, `Upgrade`) pass the
-  matching always-`Ok` permit (`permit_add_trading_pair` / `permit_settling` /
+  matching infallible permit (`permit_add_trading_pair` / `permit_settling` /
   `permit_admin`). The low-level `Init` append in `lifecycle.rs` is unchanged.
 
 ### Admin endpoints
@@ -305,8 +306,8 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 
 Unit:
 
-- `state/permissions/tests.rs`: each `permit_*` returns the right `Ok`/`UnauthorizedError`;
-  always-`Ok` permits never fail.
+- `state/permissions/tests.rs`: `permit_trading`/`permit_matching` return the right
+  `Ok`/`UnauthorizedError`; the infallible permits return their permit unconditionally.
 - `state/audit/tests.rs`: each new `EventType` arm applies the expected mutation (R5 replay).
 - `state/snapshot/tests.rs`: `from_state -> into_state` round-trips both controls; an
   old-format snapshot (field absent) decodes to defaults (R5 upgrade).
@@ -338,7 +339,7 @@ halt).
 - **PR 1 — Permission scaffolding (behavior-neutral).** Empty `Permissions` + `State`
   field, snapshotted (backward-compatible); the full permit vocabulary —
   `UnauthorizedError`, `SyncPermit`, the async types (`PreAsyncPermit`/`PostAsyncPermit`/
-  `reconcile`), and `Permit { Sync, Async }`; one always-`Ok` `permit_*`
+  `reconcile`), and `Permit { Sync, Async }`; one infallible `permit_*`
   per `EventType`, with `permit_matching(book)` taking the book and
   `permit_deposit`/`permit_withdraw` returning `PreAsyncPermit` (reconciled to
   `Permit::Async` at the deposit/withdraw recorder sites); thread the `Permit` parameter
@@ -370,7 +371,7 @@ halt).
   so a re-check at the event's log position would deny an op that legitimately committed).
   Admission must live above the shared apply path.
 - **A single recording function with an `Unguarded`/`System` authority variant.**
-  Superseded by `permit_*`-per-event: the always-`Ok` permits document "intentionally
+  Superseded by `permit_*`-per-event: the infallible permits document "intentionally
   ungated" at a named site and remove the need for a freely-constructible catch-all.
 - **A dedicated `process_async` consuming `PostAsyncPermit`.** Superseded: putting the
   `Permit` parameter on the existing `process_event`/`record_event` subsumes it and keeps
