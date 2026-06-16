@@ -57,7 +57,7 @@ branches, or PR state beyond posting your review.
 - Flag code duplication; point to easy refactorings that reduce it. Substantial
   duplication — a copy-pasted module, test block, or setup repeated across cases,
   not a one-line repeat; as a rule of thumb, roughly 10+ near-identical lines or the
-  same block repeated at 3+ sites — is at least 🟠 Medium and gates the verdict;
+  same block repeated at 2+ sites — is at least 🟠 Medium and gates the verdict;
   name the parameterization, helper, or proptest that removes it.
 - For new types, every derived trait (`Hash`, `Ord`, `PartialOrd`, `Default`, …)
   must be used somewhere. Unused derives are dead capability and can mislead future
