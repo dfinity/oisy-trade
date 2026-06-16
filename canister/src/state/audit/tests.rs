@@ -301,15 +301,20 @@ impl Scenario {
         self
     }
 
-    /// Applies a `SetGlobalHalt` mutation on the primary path and records the
-    /// matching `SetGlobalHalt` event as the expected replay payload.
-    fn with_set_global_halt(mut self, halted: bool) -> Self {
-        self.state.permissions_mut().set_trading_halted(halted);
+    /// Applies a `SetHalt` mutation on the primary path and records the matching
+    /// `SetHalt` event as the expected replay payload. `book_ids` of `None`
+    /// targets the global flag (and, when resuming, clears every per-pair halt);
+    /// `Some` targets only the listed books.
+    fn with_set_halt(mut self, book_ids: Option<Vec<OrderBookId>>, halted: bool) -> Self {
         let timestamp = self.timestamp();
-        self.events.push(Event {
+        let payload = EventType::SetHalt(crate::state::event::SetHaltEvent { book_ids, halted });
+        apply_state_transition(
+            &mut self.state,
+            &payload,
             timestamp,
-            payload: EventType::SetGlobalHalt(halted),
-        });
+            StableMemoryOptions::Write,
+        );
+        self.events.push(Event { timestamp, payload });
         self
     }
 
@@ -668,21 +673,52 @@ fn should_replay_cancel_partially_filled_order() {
 }
 
 #[test]
-fn should_apply_set_global_halt() {
+fn should_apply_global_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_global_halt(true);
+        .with_set_halt(None, true);
     assert!(scenario.state.permissions().trading_halted());
     scenario.assert_replay_matches();
 }
 
 #[test]
-fn should_apply_resume_after_halt() {
+fn should_apply_global_resume_after_halt() {
     let scenario = Scenario::new()
         .with_trading_pair()
-        .with_set_global_halt(true)
-        .with_set_global_halt(false);
+        .with_set_halt(None, true)
+        .with_set_halt(None, false);
     assert!(!scenario.state.permissions().trading_halted());
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_pair_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true);
+    assert!(scenario.state.permissions().is_halted(&OrderBookId::ZERO));
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_apply_pair_resume_after_pair_halt() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true)
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), false);
+    assert!(!scenario.state.permissions().is_halted(&OrderBookId::ZERO));
+    scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_clear_every_pair_halt_on_global_resume() {
+    let scenario = Scenario::new()
+        .with_trading_pair()
+        .with_set_halt(Some(vec![OrderBookId::ZERO]), true)
+        .with_set_halt(None, true)
+        .with_set_halt(None, false);
+    assert!(!scenario.state.permissions().trading_halted());
+    assert!(!scenario.state.permissions().is_halted(&OrderBookId::ZERO));
     scenario.assert_replay_matches();
 }
 

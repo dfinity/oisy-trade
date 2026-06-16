@@ -5,6 +5,7 @@ Administrative operations that require the caller to be a **controller** of the 
 1. Upgrade the canister to a new WASM
 2. Add a new trading pair
 3. Halt and resume trading
+4. Halt and resume a single trading pair
 
 Calls will fail when run from a non-controller identity.
 
@@ -206,13 +207,16 @@ These endpoints are not gated by the halt, so they are not rejected with
 `TradingHalted`. Other canister-wide access controls (e.g. the `Mode`
 restriction) still apply and can independently reject a caller.
 
-The halt is a single persisted flag. It is recorded as a `SetGlobalHalt` event
-in the audit log, so it is reproduced exactly on replay, and it is included in
-the upgrade snapshot, so it survives canister upgrades.
+The global halt is a single persisted flag. Each change is recorded as a
+`SetHalt` event in the audit log (with no pair filter, i.e. `book_ids = null`),
+so it is reproduced exactly on replay, and the flag is included in the upgrade
+snapshot, so it survives canister upgrades.
 
-Both endpoints are idempotent: halting an already-halted canister (or resuming
-an already-active one) is a no-op success that still emits an event for the
-audit trail. Non-controller callers are rejected with `NotController`.
+Both endpoints take an optional pair filter (see section 4); passing `null`
+targets the global halt. They are idempotent: halting an already-halted canister
+(or resuming an already-active one) is a no-op success that still emits an event
+for the audit trail. A global resume (`resume_trading(null)`) additionally clears
+every per-pair halt. Non-controller callers are rejected with `NotController`.
 
 ### When to use it
 
@@ -225,7 +229,7 @@ halt is in effect.
 ### Halt
 
 ```bash
-icp canister call oisy_trade halt_trading '()' \
+icp canister call oisy_trade halt_trading '(null)' \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```
@@ -233,7 +237,76 @@ icp canister call oisy_trade halt_trading '()' \
 ### Resume
 
 ```bash
-icp canister call oisy_trade resume_trading '()' \
+icp canister call oisy_trade resume_trading '(null)' \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
+
+## 4. Halt and resume a single trading pair
+
+A per-pair halt stops new orders and matching on a single trading pair while
+every other pair keeps trading normally.
+
+### Mechanism
+
+A per-pair halt reuses the same `halt_trading` / `resume_trading` endpoints as
+the global halt, but with a list of trading pairs instead of `null`.
+
+While a pair is halted:
+
+- `add_limit_order` on the halted pair is rejected with `TradingHalted` (the same
+  error as a global halt).
+- The matching engine skips the halted pair: its resting orders are left
+  untouched and no crossing fills occur on it, while other pairs continue to
+  match.
+
+What stays open for the halted pair:
+
+- `cancel_limit_order` — users can always cancel resting orders on the pair.
+- `withdraw` and `deposit` — balances are never tied to a single pair and stay
+  movable.
+
+Halted pairs are tracked as a set of order-book identifiers. Each change is
+recorded as a `SetHalt` event in the audit log (with the targeted pairs in
+`book_ids`), so it is reproduced exactly on replay, and the set is included in
+the upgrade snapshot, so it survives canister upgrades.
+
+A pair is considered halted when the global flag is on **or** the pair is in the
+set, and `get_trading_pairs` reports it as `Halted` in either case. Passing a
+list of pairs to `halt_trading` adds them to the set; passing the same list to
+`resume_trading` removes them; `resume_trading(null)` clears the entire set at
+once (along with the global flag).
+
+The endpoints are controller-gated; non-controller callers are rejected with
+`NotController`. They **trap** if any listed pair is not a registered trading
+pair (all pairs are validated up front, before anything is recorded), and are
+idempotent: re-halting an already-halted pair is a no-op success that still emits
+an event for the audit trail. A single call may list at most 100 pairs; passing
+more **traps**.
+
+### When to use it
+
+Use a per-pair halt when a problem is confined to one market rather than the
+whole exchange — for example, a **compromised or suspect ledger** backing one
+pair's token. Halt just that pair so trading on every other pair continues
+uninterrupted, investigate, and resume the pair once it is safe. Because cancels
+and withdrawals stay open, users holding orders on the halted pair can still
+exit.
+
+### Halt a pair
+
+```bash
+icp canister call oisy_trade halt_trading \
+    "(opt vec { record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" } })" \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
+
+### Resume a pair
+
+```bash
+icp canister call oisy_trade resume_trading \
+    "(opt vec { record { base = principal \"$BASE_LEDGER\"; quote = principal \"$QUOTE_LEDGER\" } })" \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging
 ```

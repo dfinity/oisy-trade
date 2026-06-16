@@ -3,7 +3,7 @@ use crate::balance::TokenBalance;
 use crate::order::OrderHistory;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    WithdrawEvent,
+    SetHaltEvent, WithdrawEvent,
 };
 use crate::state::permissions::Permit;
 use crate::storage;
@@ -143,8 +143,26 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         EventType::Settling(event) => {
             state.record_settling_event(event, persistence);
         }
-        EventType::SetGlobalHalt(halted) => {
-            state.permissions_mut().set_trading_halted(*halted);
+        EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
+            let permissions = state.permissions_mut();
+            match book_ids {
+                None => {
+                    if *halted {
+                        permissions.halt_trading_globally();
+                    } else {
+                        permissions.resume_trading_globally();
+                    }
+                }
+                Some(book_ids) => {
+                    for book_id in book_ids {
+                        if *halted {
+                            permissions.halt_trading(*book_id);
+                        } else {
+                            permissions.resume_trading(*book_id);
+                        }
+                    }
+                }
+            }
         }
     }
 }

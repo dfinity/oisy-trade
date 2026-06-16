@@ -167,13 +167,13 @@ fn add_trading_pair(request: AddTradingPairRequest) -> Result<(), AddTradingPair
 }
 
 #[ic_cdk::update]
-fn halt_trading() -> Result<(), UnauthorizedError> {
-    oisy_trade_canister::halt_trading(&oisy_trade_canister::IC_RUNTIME)
+fn halt_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError> {
+    oisy_trade_canister::halt_trading(pairs, &oisy_trade_canister::IC_RUNTIME)
 }
 
 #[ic_cdk::update]
-fn resume_trading() -> Result<(), UnauthorizedError> {
-    oisy_trade_canister::resume_trading(&oisy_trade_canister::IC_RUNTIME)?;
+fn resume_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError> {
+    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)?;
     // Re-arm matching immediately so orders that piled up while halted match now,
     // without waiting for the periodic timer. Mirrors the add_limit_order kickoff.
     ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
@@ -323,7 +323,12 @@ fn get_events(
                         .map(map_balance_operation)
                         .collect(),
                 }),
-                EventType::SetGlobalHalt(halted) => event::EventType::SetGlobalHalt(halted),
+                EventType::SetHalt(e) => event::EventType::SetHalt(event::SetHaltEvent {
+                    book_ids: e
+                        .book_ids
+                        .map(|ids| ids.into_iter().map(|id| id.get()).collect()),
+                    halted: e.halted,
+                }),
             },
         }
     }

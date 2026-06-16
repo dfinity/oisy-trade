@@ -56,7 +56,7 @@ type AddLimitOrderError = variant {
     // The order's notional (price × quantity / 10^base_decimals, in quote
     // smallest units) is below `min` or above `max`.
     InvalidNotional : record { notional : nat; min : nat; max : opt nat };
-    // Trading is globally halted; no new orders are accepted.
+    // Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted;
 };
 
@@ -506,6 +506,14 @@ type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
 };
 
+// Event payload recording a halt status change. `book_ids` is null for a
+// global change and a list of order book ids for a per-pair change. `halted`
+// is the new status applied to the targeted scope.
+type SetHaltEvent = record {
+    book_ids : opt vec nat64;
+    halted : bool;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -554,7 +562,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
-    SetGlobalHalt : bool;
+    SetHalt : SetHaltEvent;
 };
 
 // A canister event with a timestamp.
@@ -661,15 +669,20 @@ service : (OisyTradeArg) -> {
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
-    // Globally halt trading: reject all new orders and stop the matching
-    // engine. Cancels and withdrawals remain open. Only callable by a
-    // controller. Idempotent — halting an already-halted DEX succeeds.
-    halt_trading : () -> (UnauthorizedResult);
+    // Halt trading: a halted pair rejects new orders and is skipped by the
+    // matching engine, while cancels and withdrawals remain open. `null` halts
+    // the whole DEX; a list of pairs halts only those pairs. Only callable by a
+    // controller. Idempotent — halting already-halted scope succeeds. Traps if
+    // any listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
+    halt_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
-    // Resume trading after a global halt: re-enable new orders and matching.
-    // Only callable by a controller. Idempotent — resuming an already-active
-    // DEX succeeds.
-    resume_trading : () -> (UnauthorizedResult);
+    // Resume trading. `null` clears the global halt and every per-pair halt; a
+    // list of pairs resumes only those pairs. Only callable by a controller.
+    // Idempotent — resuming an already-active scope succeeds. Traps if any
+    // listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
+    resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

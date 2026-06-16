@@ -83,7 +83,7 @@ pub enum AddLimitOrderError {
         /// The configured maximum notional, if any.
         max: Option<Nat>,
     },
-    /// Trading is globally halted; no new orders are accepted.
+    /// Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted,
 }
 
