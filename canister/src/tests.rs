@@ -1879,6 +1879,7 @@ mod get_trading_pairs {
                         decimals: 8,
                     },
                 },
+                status: oisy_trade_types::TradingStatus::Trading,
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.into(),
                 min_notional: MIN_NOTIONAL.into(),

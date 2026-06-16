@@ -83,6 +83,8 @@ pub enum AddLimitOrderError {
         /// The configured maximum notional, if any.
         max: Option<Nat>,
     },
+    /// Trading is globally halted; no new orders are accepted.
+    TradingHalted,
 }
 
 /// Error returned when canceling a limit order fails.
@@ -98,6 +100,23 @@ pub enum CancelLimitOrderError {
     OrderAlreadyCanceled,
 }
 
+/// Error returned by controller-gated endpoints when the caller is not
+/// authorized to perform the requested action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum UnauthorizedError {
+    /// The caller is not a controller of the canister.
+    NotController,
+}
+
+/// Whether trading on a pair is currently active or halted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum TradingStatus {
+    /// Trading on the pair is active.
+    Trading,
+    /// Trading on the pair is halted.
+    Halted,
+}
+
 /// Information about a listed trading pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct TradingPairInfo {
@@ -105,6 +124,8 @@ pub struct TradingPairInfo {
     pub base: Token,
     /// The quote token.
     pub quote: Token,
+    /// Whether trading on this pair is currently active or halted.
+    pub status: TradingStatus,
     /// Minimum price increment.
     pub tick_size: Nat,
     /// Minimum order quantity.

@@ -4,6 +4,7 @@ Administrative operations that require the caller to be a **controller** of the 
 
 1. Upgrade the canister to a new WASM
 2. Add a new trading pair
+3. Halt and resume trading
 
 Calls will fail when run from a non-controller identity.
 
@@ -294,6 +295,65 @@ icp canister call oisy_trade get_trading_pairs '()' --environment staging --quer
 ```
 
 The new pair should appear in the output.
+
+## 3. Halt and resume trading
+
+The canister exposes a controller-gated **global trading halt**: a soft circuit
+breaker that pauses new orders and the matching engine across every pair while
+always preserving state and letting users exit their positions.
+
+### Mechanism
+
+While the halt is in effect:
+
+- `add_limit_order` is rejected with `TradingHalted` once the request passes
+  pair resolution and validation — an unknown pair still returns
+  `UnknownTradingPair`, and an order failing the tick/lot or notional checks
+  still returns the corresponding validation error, since those run before the
+  halt gate.
+- The matching engine makes no progress: resting orders are left untouched and
+  no crossing fills occur while the halt is in effect.
+
+What the halt itself does not block:
+
+- `cancel_limit_order` — canceling resting orders.
+- `withdraw` and `deposit` — moving available balance.
+
+These endpoints are not gated by the halt, so they are not rejected with
+`TradingHalted`. Other canister-wide access controls (e.g. the `Mode`
+restriction) still apply and can independently reject a caller.
+
+The halt is a single persisted flag. It is recorded as a `SetGlobalHalt` event
+in the audit log, so it is reproduced exactly on replay, and it is included in
+the upgrade snapshot, so it survives canister upgrades.
+
+Both endpoints are idempotent: halting an already-halted canister (or resuming
+an already-active one) is a no-op success that still emits an event for the
+audit trail. Non-controller callers are rejected with `NotController`.
+
+### When to use it
+
+Use a global halt when a problem affects the whole exchange and trading must
+stop everywhere until it is resolved — for example, a **suspected
+matching-engine bug**. Halt trading, investigate and fix, then resume. Because
+cancels and withdrawals stay open, users can exit their positions while the
+halt is in effect.
+
+### Halt
+
+```bash
+icp canister call oisy_trade halt_trading '()' \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
+
+### Resume
+
+```bash
+icp canister call oisy_trade resume_trading '()' \
+    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
+    --environment staging
+```
 
 ## Clean up
 
