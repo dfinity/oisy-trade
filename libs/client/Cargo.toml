@@ -1,6 +1,6 @@
 [package]
 name = "oisy_trade_client"
-version = "0.1.0"
+version = "0.0.0"
 description = "Client to interact with the OISY TRADE canister"
 authors.workspace = true
 edition.workspace = true

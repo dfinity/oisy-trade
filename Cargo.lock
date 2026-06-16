@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_canister"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "askama",
  "assert_matches",
@@ -1840,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_client"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "candid",
@@ -1851,7 +1851,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_int_tests"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "assert_matches",
  "async-trait",
@@ -1873,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_types"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "candid",
  "serde",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_types_internal"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "candid",
  "canlog",
