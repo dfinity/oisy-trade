@@ -87,7 +87,7 @@ icp canister install oisy_trade --mode upgrade --args '(null)' \
 
 ## 2. Add a trading pair
 
-`add_trading_pair` is an update call restricted to controllers. The request multiple parameters that are explained below.
+`add_trading_pair` is an update call restricted to controllers. The request takes multiple parameters that are explained below.
 
 ### Ledger parameters
 
@@ -118,7 +118,7 @@ export QUOTE_DECIMALS=18
 
 ### Tick and lot sizes
 
-- `tick_size` — the minimum price increment (in quote-token base units per base-token base unit). All order prices must be a positive multiple.
+- `tick_size` — the minimum price increment (in quote-token base units per whole base token). All order prices must be a positive multiple.
 - `lot_size` — the minimum quantity (in base-token base units). All order quantities must be a positive multiple.
 
 
