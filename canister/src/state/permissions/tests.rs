@@ -1,4 +1,4 @@
-use super::{Permissions, Reconciliation, UnauthorizedError};
+use super::{Permissions, UnauthorizedError};
 use crate::order::OrderBookId;
 use crate::test_fixtures::arbitrary::arb_book_halted_permissions;
 use candid::Principal;
@@ -25,12 +25,12 @@ proptest! {
             Err(UnauthorizedError::TradingHalted)
         ));
 
-        prop_assert!(permissions.permit_deposit(caller).is_ok());
-        prop_assert!(permissions.permit_withdraw(caller).is_ok());
-        prop_assert!(permissions.permit_cancel().is_ok());
-        prop_assert!(permissions.permit_settling().is_ok());
-        prop_assert!(permissions.permit_add_trading_pair().is_ok());
-        prop_assert!(permissions.permit_admin().is_ok());
+        let _ = permissions.permit_deposit(caller);
+        let _ = permissions.permit_withdraw(caller);
+        let _ = permissions.permit_cancel();
+        let _ = permissions.permit_settling();
+        let _ = permissions.permit_add_trading_pair();
+        let _ = permissions.permit_admin();
 
         if global {
             prop_assert!(permissions.is_halted(&other));
@@ -57,34 +57,12 @@ fn should_permit_every_event_on_empty_permissions() {
 
     assert!(permissions.permit_trading(caller, BOOK).is_ok());
     assert!(permissions.permit_matching(BOOK).is_ok());
-    assert!(permissions.permit_deposit(caller).is_ok());
-    assert!(permissions.permit_withdraw(caller).is_ok());
-    assert!(permissions.permit_cancel().is_ok());
-    assert!(permissions.permit_settling().is_ok());
-    assert!(permissions.permit_add_trading_pair().is_ok());
-    assert!(permissions.permit_admin().is_ok());
-}
-
-#[test]
-fn should_reconcile_clean_on_empty_permissions() {
-    let permissions = Permissions::default();
-    let caller = Principal::from_slice(&[1]);
-
-    let pre = permissions
-        .permit_deposit(caller)
-        .expect("deposit is never gated in this build");
-    assert!(matches!(
-        pre.reconcile(&permissions).verdict,
-        Reconciliation::Clean
-    ));
-
-    let pre = permissions
-        .permit_withdraw(caller)
-        .expect("withdraw is never gated in this build");
-    assert!(matches!(
-        pre.reconcile(&permissions).verdict,
-        Reconciliation::Clean
-    ));
+    let _ = permissions.permit_deposit(caller);
+    let _ = permissions.permit_withdraw(caller);
+    let _ = permissions.permit_cancel();
+    let _ = permissions.permit_settling();
+    let _ = permissions.permit_add_trading_pair();
+    let _ = permissions.permit_admin();
 }
 
 #[test]

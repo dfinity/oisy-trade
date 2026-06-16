@@ -245,8 +245,7 @@ pub async fn deposit(
         return Err(DepositError::AmountExceedsMaximum);
     }
 
-    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
-        .expect("BUG: deposit is never gated in this build");
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller));
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -254,7 +253,7 @@ pub async fn deposit(
         token: order::TokenId::from(token_id),
         amount,
     };
-    let post = state::with_state(|s| pre.reconcile(s.permissions()));
+    let post = pre.reconcile();
     state::with_state_mut(|s| {
         state::audit::process_event(
             s,
@@ -299,8 +298,7 @@ pub async fn withdraw(
         }
     })?;
 
-    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
-        .expect("BUG: withdraw is never gated in this build");
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller));
 
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
@@ -326,7 +324,7 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            let post = state::with_state(|s| pre.reconcile(s.permissions()));
+            let post = pre.reconcile();
             state::audit::record_event(
                 state::event::EventType::Withdraw(event),
                 post.into(),
@@ -520,10 +518,7 @@ pub fn add_trading_pair(
             min_notional,
             max_notional,
         };
-        let permit = s
-            .permissions()
-            .permit_add_trading_pair()
-            .expect("BUG: add_trading_pair is never gated in this build");
+        let permit = s.permissions().permit_add_trading_pair();
         state::audit::process_event(
             s,
             state::event::EventType::AddTradingPair(event),
@@ -580,10 +575,7 @@ fn set_halt(
                 })
                 .collect()
         });
-        let permit = s
-            .permissions()
-            .permit_admin()
-            .expect("BUG: admin is never gated in this build");
+        let permit = s.permissions().permit_admin();
         let event = state::event::SetHaltEvent { book_ids, halted };
         state::audit::process_event(
             s,
