@@ -1845,13 +1845,17 @@ mod get_my_orders {
 
 mod get_trading_pairs {
     use crate::get_trading_pairs;
+    use crate::order::{BasisPoint, FeeRates};
     use crate::state::init_state;
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_token_id, icp_token_id,
-        init_state_with_order_book,
+        init_state_with_order_book_and_fees,
     };
     use oisy_trade_types::TradingPairInfo;
+
+    const MAKER_FEE_BPS: u16 = 7;
+    const TAKER_FEE_BPS: u16 = 23;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -1862,7 +1866,10 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state_with_order_book();
+        init_state_with_order_book_and_fees(FeeRates {
+            maker: BasisPoint::new(MAKER_FEE_BPS).unwrap(),
+            taker: BasisPoint::new(TAKER_FEE_BPS).unwrap(),
+        });
 
         let pairs = get_trading_pairs();
 
@@ -1886,8 +1893,8 @@ mod get_trading_pairs {
                 status: oisy_trade_types::TradingStatus::Trading,
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.into(),
-                maker_fee_bps: 0,
-                taker_fee_bps: 0,
+                maker_fee_bps: MAKER_FEE_BPS,
+                taker_fee_bps: TAKER_FEE_BPS,
                 min_notional: MIN_NOTIONAL.into(),
                 max_notional: Some(MAX_NOTIONAL.into()),
             }]
