@@ -1,6 +1,6 @@
 use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
 use crate::order::{
-    FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
+    BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
 };
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
@@ -14,6 +14,8 @@ use ic_stable_structures::VectorMemory;
 use scraper::{Html, Selector};
 
 const TEST_CANISTER: Principal = Principal::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+const MAKER_FEE_BPS: u16 = 7;
+const TAKER_FEE_BPS: u16 = 23;
 
 #[test]
 fn should_render_metadata() {
@@ -104,8 +106,14 @@ fn should_render_per_pair_metadata() {
     let best_ask = 110 * PRICE_SCALE;
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
-    assert!(dl_text.contains("Maker fee"), "maker fee row in: {dl_text}");
-    assert!(dl_text.contains("Taker fee"), "taker fee row in: {dl_text}");
+    assert!(
+        dl_text.contains(&format!("Maker fee{MAKER_FEE_BPS} bps")),
+        "maker fee {MAKER_FEE_BPS} bps in: {dl_text}"
+    );
+    assert!(
+        dl_text.contains(&format!("Taker fee{TAKER_FEE_BPS} bps")),
+        "taker fee {TAKER_FEE_BPS} bps in: {dl_text}"
+    );
     assert!(
         dl_text.contains(&best_bid.to_string()),
         "best bid {best_bid} in: {dl_text}"
@@ -202,7 +210,10 @@ fn record_pair(state: &mut State<VectorMemory, VectorMemory>) {
         LOT_SIZE,
         MIN_NOTIONAL,
         Some(MAX_NOTIONAL),
-        FeeRates::default(),
+        FeeRates {
+            maker: BasisPoint::new(MAKER_FEE_BPS).unwrap(),
+            taker: BasisPoint::new(TAKER_FEE_BPS).unwrap(),
+        },
     );
 }
 
