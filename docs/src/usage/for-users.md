@@ -267,7 +267,7 @@ After the matched trade in §5 the seller now holds quote and the buyer now hold
 
 ### Seller withdraws quote
 
-Withdraws the seller's full `5_000_000_000_000_000` quote-base-units balance; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `4_990_000_000_000_000` on-ledger.
+Withdraws the seller's full `5_000_000_000_000_000` quote-base-units balance; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `4_999_990_000_000_000` on-ledger.
 
 ```bash
 icp canister call oisy_trade withdraw --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
