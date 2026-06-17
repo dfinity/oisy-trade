@@ -195,12 +195,13 @@ export LOT_SIZE=1_000_000
 
 Convert dollar amounts using `quote_decimals`:
 
-- `min_notional ≈ $1` in quote-token base units — i.e. `1 × 10^quote_decimals` for a USD-pegged quote token (e.g. `1_000_000` for a 6-dp stablecoin). Reuses Binance's `NOTIONAL.minNotional` of $5 if you want a more conservative floor; below ~$0.50 the order becomes uneconomic to settle.
-- `max_notional` — a fat-finger guardrail. Binance defaults to `$9,000,000` (`9_000_000 × 10^quote_decimals`). Pass `null` if you don't want a ceiling; pass a value if your pair has enough volatility risk that single large orders could move the book sharply.
+- `min_notional` — for a USD-pegged quote, `≈ $1` is `1 × 10^quote_decimals` (e.g. `1_000_000` for a 6-dp stablecoin); below ~$0.50 the order becomes uneconomic to settle. For a non-USD quote, take the value from that pair's Binance `NOTIONAL.minNotional`, denominated in the quote asset (for `SOLETH`, `0.001 ETH`).
+- `max_notional` — a fat-finger guardrail. Binance's `NOTIONAL.maxNotional` is `9_000_000` quote units (`9_000_000 × 10^quote_decimals` — i.e. $9M for a USD-pegged quote, or `9_000_000 ETH` for the `SOLETH` example below). Pass `null` if you don't want a ceiling; pass a value if your pair has enough volatility risk that single large orders could move the book sharply.
 
 ```bash
-export MIN_NOTIONAL=1_000_000                         # ≈ $1 — replace per pair
-export MAX_NOTIONAL='opt (9_000_000_000_000 : nat)'   # or 'null' for no ceiling
+# Binance SOLETH NOTIONAL filter: minNotional 0.001 ETH, maxNotional 9_000_000 ETH (× 10^18):
+export MIN_NOTIONAL=1_000_000_000_000_000                             # 0.001 ETH × 10^18
+export MAX_NOTIONAL='opt (9_000_000_000_000_000_000_000_000 : nat)'   # 9_000_000 ETH × 10^18 — or 'null' for no ceiling
 ```
 
 ### Fees
