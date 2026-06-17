@@ -231,7 +231,23 @@ EOF
 
 Both orders should reach `Filled` once the matching engine has ticked. The engine typically processes within a few seconds — if you see `Pending`, wait a moment and re-run the query.
 
-Re-check balances to confirm the trade settled. The seller's newly received quote `free` should be the notional `price × quantity / 10^base_decimals = 5_000_000_000_000_000`, and the buyer's newly received base `free` should be `quantity = 100_000_000`. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read 0.
+Re-check balances to confirm the trade settled. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read `0` — fees are charged on the asset each side *receives*, so the spent side nets to zero either way.
+
+What each side receives in its `free` balance depends on the pair's maker/taker fees:
+
+- **Zero-fee pair** (`maker_fee_bps = taker_fee_bps = 0`): the seller's quote `free` is the full notional `price × quantity / 10^base_decimals = 5_000_000_000_000_000`, and the buyer's base `free` is the full `quantity = 100_000_000`. These are the amounts withdrawn in the **Withdraw** section below.
+- **With fees**: each side pays a fee in the asset it receives, at the **maker** rate if its order was resting or the **taker** rate if it crossed. Here the seller's sell rested (maker) and the buyer's buy crossed (taker); fees round up, in the protocol's favor:
+  - seller's quote `free` = `notional − ⌈maker_bps × notional / 10_000⌉`
+  - buyer's base `free` = `quantity − ⌈taker_bps × quantity / 10_000⌉`
+
+  For example, on a pair with `maker_fee_bps = taker_fee_bps = 10` (0.1%):
+
+  | Side | Gross | Fee | Net `free` |
+  |------|-------|-----|------------|
+  | Seller (quote) | `5_000_000_000_000_000` | `5_000_000_000_000` | `4_995_000_000_000_000` |
+  | Buyer (base)   | `100_000_000`           | `100_000`           | `99_900_000`             |
+
+A pair's fee rates aren't returned by `get_trading_pairs`; read them from the pair's `AddTradingPair` event via `get_events`. Fees the canister has collected are queryable with `get_fee_balances`.
 
 ```bash
 # Seller's quote (credited by the fill)
