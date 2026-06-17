@@ -106,13 +106,26 @@ fn should_render_per_pair_metadata() {
     let best_ask = 110 * PRICE_SCALE;
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
-    assert!(
-        dl_text.contains(&format!("Maker fee{MAKER_FEE_BPS} bps")),
-        "maker fee {MAKER_FEE_BPS} bps in: {dl_text}"
+    // Pair each <dt> label with its <dd> value so the assertion checks the
+    // value wiring (and maker/taker are not swapped) without depending on
+    // whitespace between the tags.
+    let dts = column(&dom, "section.pair dl dt");
+    let dds = column(&dom, "section.pair dl dd");
+    let value_for = |label: &str| {
+        dts.iter()
+            .zip(&dds)
+            .find(|(dt, _)| dt.trim() == label)
+            .map(|(_, dd)| dd.trim().to_string())
+    };
+    let expected_maker = format!("{MAKER_FEE_BPS} bps");
+    let expected_taker = format!("{TAKER_FEE_BPS} bps");
+    assert_eq!(
+        value_for("Maker fee").as_deref(),
+        Some(expected_maker.as_str())
     );
-    assert!(
-        dl_text.contains(&format!("Taker fee{TAKER_FEE_BPS} bps")),
-        "taker fee {TAKER_FEE_BPS} bps in: {dl_text}"
+    assert_eq!(
+        value_for("Taker fee").as_deref(),
+        Some(expected_taker.as_str())
     );
     assert!(
         dl_text.contains(&best_bid.to_string()),
