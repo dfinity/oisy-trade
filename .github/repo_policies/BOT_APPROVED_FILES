@@ -1,0 +1,9 @@
+# List of approved files that can be changed by a bot via an automated PR
+# This is to increase security and prevent accidentally updating files that shouldn't be changed by a bot
+
+# These files may be modified by the release-plz bot
+Cargo.lock
+canister/Cargo.toml
+canister/CHANGELOG.md
+libs/types/Cargo.toml
+libs/types/CHANGELOG.md

@@ -2,11 +2,11 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use oisy_trade_client::{OisyTradeClient, Runtime};
-use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LEDGER_FEE};
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
+    LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side, Token, TokenId, TokenMetadata,
     TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
 };
 use oisy_trade_types_internal::log::Priority;
@@ -679,6 +679,8 @@ async fn should_return_empty_trading_pairs() {
             status: TradingStatus::Trading,
             tick_size: Nat::from(TICK_SIZE),
             lot_size: Nat::from(LOT_SIZE),
+            maker_fee_bps: 0,
+            taker_fee_bps: 0,
             min_notional: Nat::from(1u64),
             max_notional: None,
         }]
@@ -1300,6 +1302,199 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     setup.drop().await;
 }
 
+/// End-to-end walkthrough from `docs/src/usage/for-users.md` on the documented
+/// SOLETH pair (ckDevnetSOL / ckSepoliaETH, with their decimals and ledger
+/// fees): list pairs, both sides approve+deposit, a resting sell and a crossing
+/// buy fill, the taker fee is charged on the base the buyer receives, then each
+/// side withdraws what it received and lands on the ledger net of the ledger fee.
+#[tokio::test]
+async fn should_complete_for_users_walkthrough() {
+    // Binance SOLETH parameters from the docs: ckDevnetSOL has 9 decimals,
+    // ckSepoliaETH has 18; tick = 0.00001 ETH/SOL × 10^18, lot = 0.001 SOL × 10^9.
+    const TICK_SIZE_SOLETH: u64 = 10_000_000_000_000;
+    const LOT_SIZE_SOLETH: u64 = 1_000_000;
+    const MAKER_FEE_BPS: u16 = 0;
+    const TAKER_FEE_BPS: u16 = 20;
+
+    let base_config = LedgerConfig::ckdevnetsol();
+    let quote_config = LedgerConfig::cksepoliaeth();
+    let base_ledger_fee = base_config.transfer_fee;
+    let quote_ledger_fee = quote_config.transfer_fee;
+
+    let setup = Setup::builder()
+        .with_ledgers(base_config, quote_config)
+        .build()
+        .await;
+    setup
+        .oisy_trade_client_with_caller(setup.controller())
+        .add_trading_pair(AddTradingPairRequest {
+            tick_size: Nat::from(TICK_SIZE_SOLETH),
+            lot_size: Nat::from(LOT_SIZE_SOLETH),
+            maker_fee_bps: MAKER_FEE_BPS,
+            taker_fee_bps: TAKER_FEE_BPS,
+            ..setup.add_trading_pair_request()
+        })
+        .await
+        .unwrap();
+
+    let seller = Principal::from_slice(&[0x01]);
+    let buyer = Principal::from_slice(&[0x02]);
+    let seller_client = setup.oisy_trade_client_with_caller(seller);
+    let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+
+    // 1) List trading pairs — the pair is listed with its tick/lot sizes and
+    // maker/taker fee rates.
+    let pairs = setup.oisy_trade_client().get_trading_pairs().await;
+    let pair_info = pairs
+        .iter()
+        .find(|info| {
+            info.base.id.ledger_id == setup.base_ledger_id()
+                && info.quote.id.ledger_id == setup.quote_ledger_id()
+        })
+        .expect("the registered pair must be listed");
+    assert_eq!(pair_info.tick_size, Nat::from(TICK_SIZE_SOLETH));
+    assert_eq!(pair_info.lot_size, Nat::from(LOT_SIZE_SOLETH));
+    assert_eq!(pair_info.maker_fee_bps, MAKER_FEE_BPS);
+    assert_eq!(pair_info.taker_fee_bps, TAKER_FEE_BPS);
+
+    // Trade 0.1 SOL @ 0.05 ETH/SOL. Price is quote base units per whole base
+    // token (0.05 × 10^18); the base has 9 decimals, so the fill settles
+    // price × quantity / 10^9 quote base units.
+    let quantity = 100_000_000u64; // 0.1 SOL = 100 lots
+    let price = 50_000_000_000_000_000u64; // 0.05 ETH/SOL × 10^18
+    let quote_notional = 5_000_000_000_000_000u64; // = price × quantity / 10^9 (0.005 ETH)
+    // Taker (buyer) pays the taker fee on the base it receives; the maker
+    // (seller) pays nothing here, so it keeps the full notional.
+    let taker_fee = (quantity * u64::from(TAKER_FEE_BPS)).div_ceil(10_000);
+    let buyer_base_received = quantity - taker_fee;
+
+    // 2) Approve + deposit — seller funds base to sell, buyer funds quote to buy.
+    setup
+        .deposit_flow(seller, setup.base_token_id())
+        .mint(quantity + 2 * base_ledger_fee)
+        .approve(quantity + base_ledger_fee)
+        .deposit(quantity)
+        .execute()
+        .await;
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(quote_notional + 2 * quote_ledger_fee)
+        .approve(quote_notional + quote_ledger_fee)
+        .deposit(quote_notional)
+        .execute()
+        .await;
+
+    // 3) Place a limit order — the sell rests (maker), the matching buy crosses
+    // it (taker).
+    let sell_order_id = seller_client
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        })
+        .await
+        .unwrap();
+    let buy_order_id = buyer_client
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        })
+        .await
+        .unwrap();
+    setup.env().tick().await;
+
+    // 4) Check order status — both fully filled, balances settled. The seller
+    // receives the full notional (maker fee 0); the buyer receives the base
+    // net of the taker fee.
+    assert_eq!(
+        seller_client
+            .get_my_order(sell_order_id)
+            .await
+            .map(|o| o.order.status),
+        Some(OrderStatus::Filled)
+    );
+    assert_eq!(
+        buyer_client
+            .get_my_order(buy_order_id)
+            .await
+            .map(|o| o.order.status),
+        Some(OrderStatus::Filled)
+    );
+    assert_eq!(
+        seller_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        seller_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(quote_notional)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(buyer_base_received)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+
+    // 5) Withdraw — each side withdraws what it received and lands on the
+    // ledger net of the ledger fee.
+    seller_client
+        .withdraw(WithdrawRequest {
+            token_id: setup.quote_token_id(),
+            amount: Nat::from(quote_notional),
+        })
+        .await
+        .expect("seller quote withdrawal should succeed");
+    buyer_client
+        .withdraw(WithdrawRequest {
+            token_id: setup.base_token_id(),
+            amount: Nat::from(buyer_base_received),
+        })
+        .await
+        .expect("buyer base withdrawal should succeed");
+
+    assert_eq!(
+        seller_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        setup.quote_token_ledger().icrc1_balance_of(seller).await,
+        Nat::from(quote_notional - quote_ledger_fee)
+    );
+    assert_eq!(
+        setup.base_token_ledger().icrc1_balance_of(buyer).await,
+        Nat::from(buyer_base_received - base_ledger_fee)
+    );
+
+    setup.drop().await;
+}
+
 #[tokio::test]
 async fn should_fail_withdraw_on_negative_cases() {
     let setup = Setup::new().await.with_trading_pair().await;
@@ -1738,14 +1933,16 @@ mod chunked_matching {
     /// upgrade across.
     #[tokio::test]
     async fn should_drain_pending_orders_across_upgrade() {
-        let setup = Setup::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
-            instruction_budget: 1, // intentionally too small to make progress
-        })
-        .await
-        .with_trading_pair()
-        .await;
+        let setup = Setup::builder()
+            .with_init_arg(InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+                instruction_budget: 1, // intentionally too small to make progress
+            })
+            .build()
+            .await
+            .with_trading_pair()
+            .await;
 
         let user = Principal::from_slice(&[0x43]);
         place_n_buy_orders(&setup, user).await;
@@ -1783,14 +1980,16 @@ mod chunked_matching {
     }
 
     async fn install_with_chunked_buy_workload() -> (Setup, Principal) {
-        let setup = Setup::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
-            instruction_budget: 1_000_000_000,
-        })
-        .await
-        .with_trading_pair()
-        .await;
+        let setup = Setup::builder()
+            .with_init_arg(InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+                instruction_budget: 1_000_000_000,
+            })
+            .build()
+            .await
+            .with_trading_pair()
+            .await;
 
         let user = Principal::from_slice(&[0x42]);
         place_n_buy_orders(&setup, user).await;
