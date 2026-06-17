@@ -59,10 +59,10 @@ export LOT_SIZE=1_000_000             # 0.001   × 10^9  = 10^6
 
 # This walkthrough trades 1 SOL at 0.05 ETH/SOL:
 export PRICE=50_000_000_000_000_000   # 0.05 ETH/SOL = 5000 × tick_size
-export QUANTITY=1_000_000_000         # 1 SOL = 1000 × lot_size
+export QUANTITY=100_000_000           # 0.1 SOL = 100 × lot_size
 ```
 
-The pair's notional bounds (admin-set, from Binance SOLETH's `NOTIONAL` filter) are `min_notional = 0.001 ETH = 1_000_000_000_000_000` and `max_notional = 9_000_000 ETH = 9_000_000_000_000_000_000_000_000` quote base units. Our order's notional is `PRICE × QUANTITY / 10^9 = 50_000_000_000_000_000` (0.05 ETH), comfortably between them.
+The pair's notional bounds (admin-set, from Binance SOLETH's `NOTIONAL` filter) are `min_notional = 0.001 ETH = 1_000_000_000_000_000` and `max_notional = 9_000_000 ETH = 9_000_000_000_000_000_000_000_000` quote base units. Our order's notional is `PRICE × QUANTITY / 10^9 = 5_000_000_000_000_000` (0.005 ETH), comfortably between them.
 
 ## Approve and deposit
 
@@ -94,14 +94,14 @@ Then approve and deposit — run each subsection as the appropriate identity. `i
 
 ### Seller — approve + deposit *base*
 
-Deposits `QUANTITY` base-token base units (= `1000 × LOT_SIZE` = 1 SOL; a base unit is the token's smallest indivisible unit, not to be confused with the *base* token in the trading pair), enough for one sell at `quantity = $QUANTITY`. Approval is `QUANTITY + ckDevnetSOL_fee = 1_000_000_000 + 50`.
+Deposits `QUANTITY` base-token base units (= `100 × LOT_SIZE` = 0.1 SOL; a base unit is the token's smallest indivisible unit, not to be confused with the *base* token in the trading pair), enough for one sell at `quantity = $QUANTITY`. Approval is `QUANTITY + ckDevnetSOL_fee = 100_000_000 + 50`.
 
 ```bash
 icp canister call "$BASE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         spender = record { owner = principal "$OISY_TRADE"; subaccount = null };
-        amount  = 1_000_000_050 : nat
+        amount  = 100_000_050 : nat
     }
 )
 EOF
@@ -110,7 +110,7 @@ icp canister call oisy_trade deposit --args-file /dev/stdin --environment stagin
 (
     record {
         token_id = record { ledger_id = principal "$BASE_LEDGER" };
-        amount   = 1_000_000_000 : nat
+        amount   = 100_000_000 : nat
     }
 )
 EOF
@@ -118,14 +118,14 @@ EOF
 
 ### Buyer — approve + deposit *quote*
 
-Deposits the order's notional `price × quantity / 10^base_decimals = PRICE × QUANTITY / 10^9 = 50_000_000_000_000_000` quote-base-units (= 0.05 ETH), enough for one buy at `price = $PRICE`, `quantity = $QUANTITY`. Approval is `notional + ckSepoliaETH_fee = 50_000_000_000_000_000 + 10_000_000_000`. The buyer's ckSepoliaETH on-ledger balance must be at least `notional + 2 × fee = 50_000_020_000_000_000` (≈ 0.05 ETH) to cover both the `icrc2_approve` fee and the `icrc2_transfer_from` fee on top of the deposit itself.
+Deposits the order's notional `price × quantity / 10^base_decimals = PRICE × QUANTITY / 10^9 = 5_000_000_000_000_000` quote-base-units (= 0.005 ETH), enough for one buy at `price = $PRICE`, `quantity = $QUANTITY`. Approval is `notional + ckSepoliaETH_fee = 5_000_000_000_000_000 + 10_000_000_000`. The buyer's ckSepoliaETH on-ledger balance must be at least `notional + 2 × fee = 5_000_020_000_000_000` (≈ 0.005 ETH) to cover both the `icrc2_approve` fee and the `icrc2_transfer_from` fee on top of the deposit itself.
 
 ```bash
 icp canister call "$QUOTE_LEDGER" icrc2_approve --args-file /dev/stdin --network ic --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         spender = record { owner = principal "$OISY_TRADE"; subaccount = null };
-        amount  = 50_000_010_000_000_000 : nat
+        amount  = 5_000_010_000_000_000 : nat
     }
 )
 EOF
@@ -134,7 +134,7 @@ icp canister call oisy_trade deposit --args-file /dev/stdin --environment stagin
 (
     record {
         token_id = record { ledger_id = principal "$QUOTE_LEDGER" };
-        amount   = 50_000_000_000_000_000 : nat
+        amount   = 5_000_000_000_000_000 : nat
     }
 )
 EOF
@@ -231,7 +231,7 @@ EOF
 
 Both orders should reach `Filled` once the matching engine has ticked. The engine typically processes within a few seconds — if you see `Pending`, wait a moment and re-run the query.
 
-Re-check balances to confirm the trade settled. The seller's newly received quote `free` should be the notional `price × quantity / 10^base_decimals = 50_000_000_000_000_000`, and the buyer's newly received base `free` should be `quantity = 1_000_000_000`. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read 0.
+Re-check balances to confirm the trade settled. The seller's newly received quote `free` should be the notional `price × quantity / 10^base_decimals = 5_000_000_000_000_000`, and the buyer's newly received base `free` should be `quantity = 100_000_000`. The pre-trade balances from §4 (seller's base, buyer's quote) should now both read 0.
 
 ```bash
 # Seller's quote (credited by the fill)
@@ -253,14 +253,14 @@ After the matched trade in §5 the seller now holds quote and the buyer now hold
 
 ### Seller withdraws quote
 
-Withdraws the seller's full `50_000_000_000_000_000` quote-base-units balance; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `49_999_990_000_000_000` on-ledger.
+Withdraws the seller's full `5_000_000_000_000_000` quote-base-units balance; after the ckSepoliaETH fee (`10_000_000_000`), the seller receives `4_990_000_000_000_000` on-ledger.
 
 ```bash
 icp canister call oisy_trade withdraw --args-file /dev/stdin --environment staging --identity "$SELLER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$QUOTE_LEDGER" };
-        amount   = 50_000_000_000_000_000 : nat
+        amount   = 5_000_000_000_000_000 : nat
     }
 )
 EOF
@@ -268,14 +268,14 @@ EOF
 
 ### Buyer withdraws base
 
-Withdraws the buyer's full `1_000_000_000` base-base-units balance; after the ckDevnetSOL fee (`50`), the buyer receives `999_999_950` on-ledger.
+Withdraws the buyer's full `100_000_000` base-base-units balance; after the ckDevnetSOL fee (`50`), the buyer receives `99_999_950` on-ledger.
 
 ```bash
 icp canister call oisy_trade withdraw --args-file /dev/stdin --environment staging --identity "$BUYER_IDENTITY" <<EOF
 (
     record {
         token_id = record { ledger_id = principal "$BASE_LEDGER" };
-        amount   = 1_000_000_000 : nat
+        amount   = 100_000_000 : nat
     }
 )
 EOF
