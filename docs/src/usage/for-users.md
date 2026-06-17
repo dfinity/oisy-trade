@@ -57,7 +57,7 @@ export OISY_TRADE=proc5-daaaa-aaaar-qb5va-cai    # staging OISY TRADE canister
 export TICK_SIZE=10_000_000_000_000   # 0.00001 × 10^18 = 10^13
 export LOT_SIZE=1_000_000             # 0.001   × 10^9  = 10^6
 
-# This walkthrough trades 1 SOL at 0.05 ETH/SOL:
+# This walkthrough trades 0.1 SOL at 0.05 ETH/SOL:
 export PRICE=50_000_000_000_000_000   # 0.05 ETH/SOL = 5000 × tick_size
 export QUANTITY=100_000_000           # 0.1 SOL = 100 × lot_size
 ```
