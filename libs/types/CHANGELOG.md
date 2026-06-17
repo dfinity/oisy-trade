@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deposit and withdrawal types ([#17](https://github.com/dfinity/oisy-trade/pull/17), [#45](https://github.com/dfinity/oisy-trade/pull/45))
 - Balance types: per-user free/reserved balances and the `get_balances` query ([#27](https://github.com/dfinity/oisy-trade/pull/27), [#99](https://github.com/dfinity/oisy-trade/pull/99))
 - Trading pair types: `add_trading_pair`, `get_trading_pairs`, and token metadata ([#22](https://github.com/dfinity/oisy-trade/pull/22), [#21](https://github.com/dfinity/oisy-trade/pull/21), [#32](https://github.com/dfinity/oisy-trade/pull/32))
-- Per-pair maker/taker fee types ([#107](https://github.com/dfinity/oisy-trade/pull/107))
+- Per-pair maker/taker fee types, also returned by `get_trading_pairs` ([#107](https://github.com/dfinity/oisy-trade/pull/107), [#153](https://github.com/dfinity/oisy-trade/pull/153))
 - Order history and query types: lifecycle status, submission timestamps, and a `get_my_orders` query ([#41](https://github.com/dfinity/oisy-trade/pull/41), [#110](https://github.com/dfinity/oisy-trade/pull/110), [#115](https://github.com/dfinity/oisy-trade/pull/115))
 - Order-book ticker and depth query types ([#74](https://github.com/dfinity/oisy-trade/pull/74))
 - Trading-halt types: global and per-pair halt ([#126](https://github.com/dfinity/oisy-trade/pull/126), [#127](https://github.com/dfinity/oisy-trade/pull/127))
