@@ -411,7 +411,7 @@ icp canister call oisy_trade resume_trading '(null)' \
     --environment staging
 ```
 
-## 5. Halt and resume a single trading pair
+## Halt and resume a single trading pair
 
 A per-pair halt stops new orders and matching on a single trading pair while
 every other pair keeps trading normally.
