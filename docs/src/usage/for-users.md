@@ -240,8 +240,8 @@ Each side pays a trading fee in the asset it receives, at the **maker** rate if 
 
 This walkthrough assumes the pair is configured with `maker_fee_bps = 0` and `taker_fee_bps = 20` (0.2%):
 
-| Side | Gross | Fee | Net `free` |
-|------|-------|-----|------------|
+| Side                        | Gross                   | Fee       | Net `free`              |
+|-----------------------------|-------------------------|-----------|-------------------------|
 | Seller (quote, maker 0 bps) | `5_000_000_000_000_000` | `0`       | `5_000_000_000_000_000` |
 | Buyer (base, taker 20 bps)  | `100_000_000`           | `200_000` | `99_800_000`            |
 
