@@ -3,10 +3,9 @@
 Administrative operations that require the caller to be a **controller** of the OISY TRADE canister:
 
 1. Upgrade the canister to a new WASM
-2. Reinstall the canister (wipes stable memory)
-3. Add a new trading pair
-4. Halt and resume trading
-5. Halt and resume a single trading pair
+2. Add a new trading pair
+3. Halt and resume trading
+4. Halt and resume a single trading pair
 
 Calls will fail when run from a non-controller identity.
 
@@ -17,7 +16,7 @@ Run every command below from the same shell — steps share `export`ed variables
 - [`icp` CLI](https://cli.internetcomputer.org/) installed and on `PATH`
 - Run these commands from the **project root** so `--environment staging` resolves the `oisy_trade` canister name (defined in `icp.yaml`)
 - An identity that is a controller of the OISY TRADE canister. The repo convention is the `hsm` identity — adjust `IDENTITY` below if you use a different one.
-- Optional: `curl` and `jq` — only needed for the Binance sizing sanity check in §3.
+- Optional: `curl` and `jq` — only needed for the Binance sizing sanity check in §2.
 
 ## Setup
 
@@ -83,58 +82,10 @@ just deploy "$IDENTITY" "$PIN_FILE"
 **B. Full command** — gives you control over the upgrade arg:
 
 ```bash
-icp deploy oisy_trade --mode upgrade --args '(null)' \
+icp canister install oisy_trade --mode upgrade --args '(null)' \
     --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
     --environment staging -y
 ```
-
-## Reinstall the canister
-
-Reinstall **wipes stable memory**: balances, open orders, listed trading pairs,
-and the event log are all lost. The canister principal, controllers, and cycles
-balance are preserved. Use this only when a clean slate is the actual goal —
-typically on staging during early development, or to recover from a broken
-post-upgrade. Never reinstall a canister holding user funds you cannot afford
-to lose.
-
-Because the canister boots through `canister_init` rather than `post_upgrade`,
-reinstall takes an `OisyTradeArg::Init` variant — not the `(null)` upgrade arg
-used above. The shape of `InitArg` is defined in
-[`canister/oisy_trade.did`](https://github.com/dfinity/oisy-trade/blob/main/canister/oisy_trade.did);
-the staging defaults live in [`icp.yaml`](https://github.com/dfinity/oisy-trade/blob/main/icp.yaml)
-under `environments.staging.init_args`.
-
-### Build the WASM
-
-Same as for upgrade:
-
-```bash
-just build
-```
-
-### Reinstall
-
-Use `icp deploy` so the WASM artifact is resolved via the `icp.yaml` recipe —
-`icp canister install` fails with `could not find artifact for canister
-'oisy_trade'` since it doesn't run the recipe. `--args` is omitted: `icp deploy`
-picks up `environments.staging.init_args` from `icp.yaml` automatically. Pass
-`--args` explicitly to override (e.g. to boot in `RestrictedTo` mode).
-
-```bash
-icp deploy oisy_trade --mode reinstall \
-    --identity "$IDENTITY" --identity-password-file "$PIN_FILE" \
-    --environment staging
-```
-
-`max_orders_per_chunk` and `instruction_budget` (set in `icp.yaml`) cap how
-much work the matching engine does per chunked-execution slice; the
-[`icp.yaml`](https://github.com/dfinity/oisy-trade/blob/main/icp.yaml) values
-match the conservative production defaults (`DEFAULT_MAX_ORDERS_PER_CHUNK` and
-`DEFAULT_INSTRUCTION_BUDGET` in
-[`libs/types-internal/src/lib.rs`](https://github.com/dfinity/oisy-trade/blob/main/libs/types-internal/src/lib.rs)).
-
-After a reinstall, every trading pair must be re-listed from scratch — see
-[Add a trading pair](#add-a-trading-pair) below.
 
 ## Add a trading pair
 
@@ -244,13 +195,12 @@ export LOT_SIZE=1_000_000
 
 Convert dollar amounts using `quote_decimals`:
 
-- `min_notional` — for a USD-pegged quote, `≈ $1` is `1 × 10^quote_decimals` (e.g. `1_000_000` for a 6-dp stablecoin); below ~$0.50 the order becomes uneconomic to settle. For a non-USD quote, take the value from that pair's Binance `NOTIONAL.minNotional`, denominated in the quote asset (for `SOLETH`, `0.001 ETH`).
-- `max_notional` — a fat-finger guardrail. Binance's `NOTIONAL.maxNotional` is `9_000_000` quote units (`9_000_000 × 10^quote_decimals` — i.e. $9M for a USD-pegged quote, or `9_000_000 ETH` for the `SOLETH` example below). Pass `null` if you don't want a ceiling; pass a value if your pair has enough volatility risk that single large orders could move the book sharply.
+- `min_notional ≈ $1` in quote-token base units — i.e. `1 × 10^quote_decimals` for a USD-pegged quote token (e.g. `1_000_000` for a 6-dp stablecoin). Reuses Binance's `NOTIONAL.minNotional` of $5 if you want a more conservative floor; below ~$0.50 the order becomes uneconomic to settle.
+- `max_notional` — a fat-finger guardrail. Binance defaults to `$9,000,000` (`9_000_000 × 10^quote_decimals`). Pass `null` if you don't want a ceiling; pass a value if your pair has enough volatility risk that single large orders could move the book sharply.
 
 ```bash
-# Binance SOLETH NOTIONAL filter: minNotional 0.001 ETH, maxNotional 9_000_000 ETH (× 10^18):
-export MIN_NOTIONAL=1_000_000_000_000_000                             # 0.001 ETH × 10^18
-export MAX_NOTIONAL='opt (9_000_000_000_000_000_000_000_000 : nat)'   # 9_000_000 ETH × 10^18 — or 'null' for no ceiling
+export MIN_NOTIONAL=1_000_000                         # ≈ $1 — replace per pair
+export MAX_NOTIONAL='opt (9_000_000_000_000 : nat)'   # or 'null' for no ceiling
 ```
 
 ### Fees
@@ -381,7 +331,7 @@ The global halt is a single persisted flag. Each change is recorded as a
 so it is reproduced exactly on replay, and the flag is included in the upgrade
 snapshot, so it survives canister upgrades.
 
-Both endpoints take an optional pair filter (see section 5); passing `null`
+Both endpoints take an optional pair filter (see section 4); passing `null`
 targets the global halt. They are idempotent: halting an already-halted canister
 (or resuming an already-active one) is a no-op success that still emits an event
 for the audit trail. A global resume (`resume_trading(null)`) additionally clears
@@ -411,7 +361,7 @@ icp canister call oisy_trade resume_trading '(null)' \
     --environment staging
 ```
 
-## 5. Halt and resume a single trading pair
+## 4. Halt and resume a single trading pair
 
 A per-pair halt stops new orders and matching on a single trading pair while
 every other pair keeps trading normally.

@@ -70,7 +70,7 @@ This separation means the matching engine never waits on async inter-canister ca
 
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| **Admin** (controller)     | Add pairs (fees set at pair creation), halt/resume trading, upgrade canister |
+| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees |
 | **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance |
 
 - No allowlisting: any principal can trade on any active pair.
@@ -99,7 +99,7 @@ For that division to be exact for every order and fill (no rounding, no dust), a
 
 #### Pair Management
 
-- An admin (the canister controller) can add trading pairs.
+- An admin (the canister controller) can add or remove trading pairs.
 - Each pair has configurable parameters:
   - **Tick size**: minimum price increment.
   - **Lot size**: minimum order quantity.
@@ -108,7 +108,7 @@ For that division to be exact for every order and fill (no rounding, no dust), a
     must be greater than zero.
   - **Max notional**: optional maximum order value (same units). Rejects fat-finger orders and
     caps single-order impact. When set, must be greater than or equal to the min notional.
-  - **Status**: active or halted.
+  - **Status**: active, halted, or delisted.
 - Tick, lot, min notional, and max notional are enforced independently: an order may fail any
   one of them, and none is implied by another.
 - Orders can only be placed on active pairs.
@@ -134,7 +134,7 @@ Since deposits are a separate step, the user's balance is already available when
                |    Open     |  <-- resting in the book (unfilled remainder)
                +--+----------+
                ^       |      \
-               |     filled   cancel_limit_order
+               |     filled   cancel_order
           partial      |          |
           fill         v          v
                |     +-----------+  +------------+
@@ -145,7 +145,7 @@ Since deposits are a separate step, the user's balance is already available when
 1. **Pending**: The order is submitted. The required funds are debited from the user's available balance (quote tokens for buys, base tokens for sells). The order is placed in a queue and an order ID is returned immediately. If the user has insufficient balance, the order is rejected.
 2. **Open**: The timer-driven matching engine dequeues the order and matches it against the opposite side of the book. If the order is fully filled during this initial matching, it transitions directly to `Filled` without ever resting in the book. If only partially filled, the filled portion is settled immediately (proceeds credited to the user's available balance) and the remaining quantity rests in the book at the specified price level, where it can be matched against future incoming orders.
 3. **Filled**: The order has been fully matched (either immediately or after resting in the book). Proceeds from the final fill are credited to the user's available balance.
-4. **Canceled**: The user canceled the order via `cancel_limit_order`. Reserved tokens are returned to the user's available balance.
+4. **Canceled**: The user canceled the order (or it was removed due to pair delisting). Reserved tokens are returned to the user's available balance.
 
 ### Order Book Data Structure
 
@@ -248,10 +248,11 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 
 Both fees are rounded up in the protocol's favor.
 
-#### Collection
+#### Collection and withdrawal
 
-Collected fees accumulate per token into an internal canister-owned balance, one entry per token,
-exposed read-only through the `get_fee_balances` query. No fee-withdrawal endpoint is implemented yet.
+Collected fees accumulate per token into an internal canister-owned balance, one entry per token.
+The controller can withdraw any amount from the per-token balance to a recipient principal via an admin endpoint;
+the recipient then uses the standard withdrawal flow to pull the funds out of the canister.
 
 #### Storage
 
@@ -490,14 +491,12 @@ At-a-glance viability of each placement per data structure (🟢 = viable choice
 
 ### Metrics
 
-The canister exposes Prometheus-format metrics over its `/metrics` HTTP endpoint:
+The canister exposes basic metrics via a query endpoint:
 
-- Pending and resting order counts per pair.
-- Best bid and ask per pair.
-- Number of registered trading pairs.
-- Per-token accrued fee balances.
-- Total event-log entry count.
-- Cycle balance, and stable and heap memory size.
+- Number of open orders per pair.
+- Total volume traded per pair.
+- Current best bid/ask per pair.
+- Canister cycle balance.
 
 ## Potential Additional Features
 
