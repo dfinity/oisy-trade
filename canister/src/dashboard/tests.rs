@@ -104,6 +104,8 @@ fn should_render_per_pair_metadata() {
     let best_ask = 110 * PRICE_SCALE;
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
+    assert!(dl_text.contains("Maker fee"), "maker fee row in: {dl_text}");
+    assert!(dl_text.contains("Taker fee"), "taker fee row in: {dl_text}");
     assert!(
         dl_text.contains(&best_bid.to_string()),
         "best bid {best_bid} in: {dl_text}"

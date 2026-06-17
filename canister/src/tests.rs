@@ -1886,6 +1886,8 @@ mod get_trading_pairs {
                 status: oisy_trade_types::TradingStatus::Trading,
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.into(),
+                maker_fee_bps: 0,
+                taker_fee_bps: 0,
                 min_notional: MIN_NOTIONAL.into(),
                 max_notional: Some(MAX_NOTIONAL.into()),
             }]

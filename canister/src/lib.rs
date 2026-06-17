@@ -210,6 +210,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
+                    maker_fee_bps: book.fee_rates().maker.get(),
+                    taker_fee_bps: book.fee_rates().taker.get(),
                     min_notional: book.min_notional().into(),
                     max_notional: book.max_notional().map(Into::into),
                 }
