@@ -44,35 +44,34 @@ pub struct Setup {
     quote_config: icrc_ledger::LedgerConfig,
 }
 
-impl Setup {
-    pub async fn new() -> Self {
-        Self::new_with_init_arg(default_init_arg()).await
+/// Builder for [`Setup`]. Defaults to ckSOL / ckBTC ledgers and the default
+/// init arg; override either before calling [`SetupBuilder::build`].
+pub struct SetupBuilder {
+    init_arg: InitArg,
+    base_config: icrc_ledger::LedgerConfig,
+    quote_config: icrc_ledger::LedgerConfig,
+}
+
+impl SetupBuilder {
+    pub fn with_init_arg(mut self, init_arg: InitArg) -> Self {
+        self.init_arg = init_arg;
+        self
     }
 
-    pub async fn new_with_init_arg(init_arg: InitArg) -> Self {
-        Self::new_with_init_arg_and_ledgers(
-            init_arg,
-            icrc_ledger::LedgerConfig::cksol(),
-            icrc_ledger::LedgerConfig::ckbtc(),
-        )
-        .await
-    }
-
-    /// Build a [`Setup`] whose base/quote ledgers use the given configs (symbol,
-    /// decimals, transfer fee). The submitted trading-pair metadata follows from
-    /// these, so the registered pair matches what the ledgers report.
-    pub async fn new_with_ledgers(
+    /// Use the given base/quote ledger configs (symbol, decimals, transfer fee).
+    /// The submitted trading-pair metadata follows from these, so the registered
+    /// pair matches what the ledgers report.
+    pub fn with_ledgers(
+        mut self,
         base_config: icrc_ledger::LedgerConfig,
         quote_config: icrc_ledger::LedgerConfig,
     ) -> Self {
-        Self::new_with_init_arg_and_ledgers(default_init_arg(), base_config, quote_config).await
+        self.base_config = base_config;
+        self.quote_config = quote_config;
+        self
     }
 
-    pub async fn new_with_init_arg_and_ledgers(
-        init_arg: InitArg,
-        base_config: icrc_ledger::LedgerConfig,
-        quote_config: icrc_ledger::LedgerConfig,
-    ) -> Self {
+    pub async fn build(self) -> Setup {
         const DEFAULT_CALLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
         const DEFAULT_CONTROLLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
@@ -94,7 +93,7 @@ impl Setup {
         env.install_canister(
             canister_id,
             oisy_trade_wasm(),
-            Encode!(&OisyTradeArg::Init(init_arg)).unwrap(),
+            Encode!(&OisyTradeArg::Init(self.init_arg)).unwrap(),
             Some(controller),
         )
         .await;
@@ -104,28 +103,45 @@ impl Setup {
             &env,
             controller,
             ledger_wasm.clone(),
-            icrc_ledger::ledger_init_args(controller, &base_config),
+            icrc_ledger::ledger_init_args(controller, &self.base_config),
         )
         .await;
         let quote_ledger_id = icrc_ledger::install_ledger(
             &env,
             controller,
             ledger_wasm,
-            icrc_ledger::ledger_init_args(controller, &quote_config),
+            icrc_ledger::ledger_init_args(controller, &self.quote_config),
         )
         .await;
 
         let caller = DEFAULT_CALLER_TEST_ID;
 
-        Self {
+        Setup {
             env: Some(env),
             caller,
             controller,
             oisy_trade_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
-            base_config,
-            quote_config,
+            base_config: self.base_config,
+            quote_config: self.quote_config,
+        }
+    }
+}
+
+impl Setup {
+    pub async fn new() -> Self {
+        Self::builder().build().await
+    }
+
+    /// Start a [`Setup`] with default ledgers (ckSOL / ckBTC) and init arg.
+    /// Override either with [`SetupBuilder::with_init_arg`] /
+    /// [`SetupBuilder::with_ledgers`] before calling [`SetupBuilder::build`].
+    pub fn builder() -> SetupBuilder {
+        SetupBuilder {
+            init_arg: default_init_arg(),
+            base_config: icrc_ledger::LedgerConfig::cksol(),
+            quote_config: icrc_ledger::LedgerConfig::ckbtc(),
         }
     }
 

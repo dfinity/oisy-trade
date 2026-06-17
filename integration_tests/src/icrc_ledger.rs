@@ -8,10 +8,6 @@ use serde::{Deserialize, Serialize};
 
 pub const BASE_LEDGER_FEE: u64 = 5_000u64;
 pub const QUOTE_LEDGER_FEE: u64 = 10u64;
-/// Ledger transfer fees of the tokens used in the `for-users.md` walkthrough:
-/// ckDevnetSOL (9 decimals) and ckSepoliaETH (18 decimals).
-pub const DEVNET_SOL_LEDGER_FEE: u64 = 50u64;
-pub const SEPOLIA_ETH_LEDGER_FEE: u64 = 10_000_000_000u64;
 
 /// Symbol, decimals and transfer fee of an ICRC ledger under test.
 #[derive(Clone, Debug)]
@@ -38,19 +34,19 @@ impl LedgerConfig {
         }
     }
 
-    pub fn ck_devnet_sol() -> Self {
+    pub fn ckdevnetsol() -> Self {
         Self {
             symbol: "ckDevnetSOL".to_string(),
             decimals: 9,
-            transfer_fee: DEVNET_SOL_LEDGER_FEE,
+            transfer_fee: 50,
         }
     }
 
-    pub fn ck_sepolia_eth() -> Self {
+    pub fn cksepoliaeth() -> Self {
         Self {
             symbol: "ckSepoliaETH".to_string(),
             decimals: 18,
-            transfer_fee: SEPOLIA_ETH_LEDGER_FEE,
+            transfer_fee: 10_000_000_000,
         }
     }
 }

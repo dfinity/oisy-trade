@@ -2,9 +2,7 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use oisy_trade_client::{OisyTradeClient, Runtime};
-use oisy_trade_int_tests::icrc_ledger::{
-    BASE_LEDGER_FEE, DEVNET_SOL_LEDGER_FEE, LedgerConfig, QUOTE_LEDGER_FEE, SEPOLIA_ETH_LEDGER_FEE,
-};
+use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LEDGER_FEE};
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -1318,11 +1316,15 @@ async fn should_complete_for_users_walkthrough() {
     const MAKER_FEE_BPS: u16 = 0;
     const TAKER_FEE_BPS: u16 = 20;
 
-    let setup = Setup::new_with_ledgers(
-        LedgerConfig::ck_devnet_sol(),
-        LedgerConfig::ck_sepolia_eth(),
-    )
-    .await;
+    let base_config = LedgerConfig::ckdevnetsol();
+    let quote_config = LedgerConfig::cksepoliaeth();
+    let base_ledger_fee = base_config.transfer_fee;
+    let quote_ledger_fee = quote_config.transfer_fee;
+
+    let setup = Setup::builder()
+        .with_ledgers(base_config, quote_config)
+        .build()
+        .await;
     setup
         .oisy_trade_client_with_caller(setup.controller())
         .add_trading_pair(AddTradingPairRequest {
@@ -1369,15 +1371,15 @@ async fn should_complete_for_users_walkthrough() {
     // 2) Approve + deposit — seller funds base to sell, buyer funds quote to buy.
     setup
         .deposit_flow(seller, setup.base_token_id())
-        .mint(quantity + 2 * DEVNET_SOL_LEDGER_FEE)
-        .approve(quantity + DEVNET_SOL_LEDGER_FEE)
+        .mint(quantity + 2 * base_ledger_fee)
+        .approve(quantity + base_ledger_fee)
         .deposit(quantity)
         .execute()
         .await;
     setup
         .deposit_flow(buyer, setup.quote_token_id())
-        .mint(quote_notional + 2 * SEPOLIA_ETH_LEDGER_FEE)
-        .approve(quote_notional + SEPOLIA_ETH_LEDGER_FEE)
+        .mint(quote_notional + 2 * quote_ledger_fee)
+        .approve(quote_notional + quote_ledger_fee)
         .deposit(quote_notional)
         .execute()
         .await;
@@ -1483,11 +1485,11 @@ async fn should_complete_for_users_walkthrough() {
     );
     assert_eq!(
         setup.quote_token_ledger().icrc1_balance_of(seller).await,
-        Nat::from(quote_notional - SEPOLIA_ETH_LEDGER_FEE)
+        Nat::from(quote_notional - quote_ledger_fee)
     );
     assert_eq!(
         setup.base_token_ledger().icrc1_balance_of(buyer).await,
-        Nat::from(buyer_base_received - DEVNET_SOL_LEDGER_FEE)
+        Nat::from(buyer_base_received - base_ledger_fee)
     );
 
     setup.drop().await;
@@ -1931,14 +1933,16 @@ mod chunked_matching {
     /// upgrade across.
     #[tokio::test]
     async fn should_drain_pending_orders_across_upgrade() {
-        let setup = Setup::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
-            instruction_budget: 1, // intentionally too small to make progress
-        })
-        .await
-        .with_trading_pair()
-        .await;
+        let setup = Setup::builder()
+            .with_init_arg(InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+                instruction_budget: 1, // intentionally too small to make progress
+            })
+            .build()
+            .await
+            .with_trading_pair()
+            .await;
 
         let user = Principal::from_slice(&[0x43]);
         place_n_buy_orders(&setup, user).await;
@@ -1976,14 +1980,16 @@ mod chunked_matching {
     }
 
     async fn install_with_chunked_buy_workload() -> (Setup, Principal) {
-        let setup = Setup::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
-            instruction_budget: 1_000_000_000,
-        })
-        .await
-        .with_trading_pair()
-        .await;
+        let setup = Setup::builder()
+            .with_init_arg(InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
+                instruction_budget: 1_000_000_000,
+            })
+            .build()
+            .await
+            .with_trading_pair()
+            .await;
 
         let user = Principal::from_slice(&[0x42]);
         place_n_buy_orders(&setup, user).await;
