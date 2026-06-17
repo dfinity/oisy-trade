@@ -121,6 +121,10 @@ type TradingPairInfo = record {
     // Minimum order quantity, in base-token smallest units. All order
     // quantities must be a positive multiple of this value.
     lot_size : nat;
+    // Maker fee rate, in basis points.
+    maker_fee_bps : nat16;
+    // Taker fee rate, in basis points.
+    taker_fee_bps : nat16;
     // Minimum order notional in quote-token smallest units.
     min_notional : nat;
     // Maximum order notional in quote-token smallest units, if any.

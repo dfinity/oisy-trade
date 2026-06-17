@@ -255,6 +255,10 @@ pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, f
 }
 
 pub fn init_state_with_order_book() {
+    init_state_with_order_book_and_fees(FeeRates::default());
+}
+
+pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
     let order_history = order::OrderHistory::new(
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
@@ -284,7 +288,7 @@ pub fn init_state_with_order_book() {
             LOT_SIZE,
             MIN_NOTIONAL,
             Some(MAX_NOTIONAL),
-            FeeRates::default(),
+            fee_rates,
         );
     });
 }

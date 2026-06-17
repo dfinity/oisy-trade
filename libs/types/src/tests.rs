@@ -64,6 +64,8 @@ fn should_serialize_trading_pair_info() {
         status: TradingStatus::Trading,
         tick_size: Nat::from(10u64),
         lot_size: Nat::from(1_000_000u64),
+        maker_fee_bps: 10,
+        taker_fee_bps: 23,
         min_notional: Nat::from(5_000_000u64),
         max_notional: Some(Nat::from(9_000_000_000_000u64)),
     };

@@ -130,6 +130,10 @@ pub struct TradingPairInfo {
     pub tick_size: Nat,
     /// Minimum order quantity.
     pub lot_size: Nat,
+    /// Maker fee rate, in basis points.
+    pub maker_fee_bps: u16,
+    /// Taker fee rate, in basis points.
+    pub taker_fee_bps: u16,
     /// Minimum order notional in quote token smallest units.
     pub min_notional: Nat,
     /// Maximum order notional in quote token smallest units, if any.

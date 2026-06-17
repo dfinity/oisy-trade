@@ -9,6 +9,48 @@ use serde::{Deserialize, Serialize};
 pub const BASE_LEDGER_FEE: u64 = 5_000u64;
 pub const QUOTE_LEDGER_FEE: u64 = 10u64;
 
+/// Symbol, decimals and transfer fee of an ICRC ledger under test.
+#[derive(Clone, Debug)]
+pub struct LedgerConfig {
+    pub symbol: String,
+    pub decimals: u8,
+    pub transfer_fee: u64,
+}
+
+impl LedgerConfig {
+    pub fn cksol() -> Self {
+        Self {
+            symbol: "ckSOL".to_string(),
+            decimals: 9,
+            transfer_fee: BASE_LEDGER_FEE,
+        }
+    }
+
+    pub fn ckbtc() -> Self {
+        Self {
+            symbol: "ckBTC".to_string(),
+            decimals: 8,
+            transfer_fee: QUOTE_LEDGER_FEE,
+        }
+    }
+
+    pub fn ckdevnetsol() -> Self {
+        Self {
+            symbol: "ckDevnetSOL".to_string(),
+            decimals: 9,
+            transfer_fee: 50,
+        }
+    }
+
+    pub fn cksepoliaeth() -> Self {
+        Self {
+            symbol: "ckSepoliaETH".to_string(),
+            decimals: 18,
+            transfer_fee: 10_000_000_000,
+        }
+    }
+}
+
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct ArchiveOptions {
     pub num_blocks_to_archive: u64,
@@ -127,18 +169,18 @@ fn test_archive_options(controller: Principal) -> ArchiveOptions {
     }
 }
 
-pub fn cksol_init_args(controller: Principal) -> InitArgs {
+pub fn ledger_init_args(controller: Principal, config: &LedgerConfig) -> InitArgs {
     InitArgs {
         minting_account: Account {
             owner: controller,
             subaccount: None,
         },
         fee_collector_account: None,
-        transfer_fee: Nat::from(BASE_LEDGER_FEE),
-        decimals: Some(9),
+        transfer_fee: Nat::from(config.transfer_fee),
+        decimals: Some(config.decimals),
         max_memo_length: Some(256),
-        token_symbol: "ckSOL".to_string(),
-        token_name: "ckSOL".to_string(),
+        token_symbol: config.symbol.clone(),
+        token_name: config.symbol.clone(),
         metadata: vec![],
         initial_balances: vec![],
         feature_flags: None,
@@ -260,25 +302,5 @@ impl<'a> LedgerClient<'a> {
             .await
             .expect("Failed to call icrc1_balance_of");
         Decode!(&response, Nat).expect("Failed to decode icrc1_balance_of response")
-    }
-}
-
-pub fn ckbtc_init_args(controller: Principal) -> InitArgs {
-    InitArgs {
-        minting_account: Account {
-            owner: controller,
-            subaccount: None,
-        },
-        fee_collector_account: None,
-        transfer_fee: Nat::from(QUOTE_LEDGER_FEE),
-        decimals: Some(8),
-        max_memo_length: Some(256),
-        token_symbol: "ckBTC".to_string(),
-        token_name: "ckBTC".to_string(),
-        metadata: vec![],
-        initial_balances: vec![],
-        feature_flags: None,
-        archive_options: test_archive_options(controller),
-        index_principal: None,
     }
 }
