@@ -6,7 +6,7 @@ use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, LimitOrderRequest, Side, Token, TokenId, TokenMetadata,
+    LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side, Token, TokenId, TokenMetadata,
     TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
 };
 use oisy_trade_types_internal::log::Priority;
@@ -1298,6 +1298,161 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
             });
         });
     });
+
+    setup.drop().await;
+}
+
+/// End-to-end walkthrough from `docs/src/usage/for-users.md`: list pairs,
+/// both sides approve+deposit, a sell and a crossing buy fill, balances
+/// settle, then each side withdraws what it received and lands on the ledger
+/// net of the ledger fee.
+#[tokio::test]
+async fn should_complete_for_users_walkthrough() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let seller = Principal::from_slice(&[0x01]);
+    let buyer = Principal::from_slice(&[0x02]);
+    let seller_client = setup.oisy_trade_client_with_caller(seller);
+    let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+
+    // 1) List trading pairs — the pair is listed with its tick/lot sizes.
+    let pairs = setup.oisy_trade_client().get_trading_pairs().await;
+    let pair_info = pairs
+        .iter()
+        .find(|info| {
+            info.base.id.ledger_id == setup.base_ledger_id()
+                && info.quote.id.ledger_id == setup.quote_ledger_id()
+        })
+        .expect("the registered pair must be listed");
+    assert_eq!(pair_info.tick_size, Nat::from(TICK_SIZE));
+    assert_eq!(pair_info.lot_size, Nat::from(LOT_SIZE));
+
+    // Trade 10 lots at 10_000 quote per whole base token. The base has 9
+    // decimals, so the fill settles price × quantity / 10^9 quote base units.
+    let quantity = 10 * LOT_SIZE; // 10_000_000 base base-units
+    let price = 10_000 * PRICE_SCALE;
+    let quote_notional = 10_000_000_000u64;
+
+    // 2) Approve + deposit — seller funds base to sell, buyer funds quote to buy.
+    setup
+        .deposit_flow(seller, setup.base_token_id())
+        .mint(quantity + 2 * BASE_LEDGER_FEE)
+        .approve(quantity + BASE_LEDGER_FEE)
+        .deposit(quantity)
+        .execute()
+        .await;
+    setup
+        .deposit_flow(buyer, setup.quote_token_id())
+        .mint(quote_notional + 2 * QUOTE_LEDGER_FEE)
+        .approve(quote_notional + QUOTE_LEDGER_FEE)
+        .deposit(quote_notional)
+        .execute()
+        .await;
+
+    // 3) Place a limit order — the sell rests, the matching buy crosses it.
+    let sell_order_id = seller_client
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        })
+        .await
+        .unwrap();
+    let buy_order_id = buyer_client
+        .add_limit_order(LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(price),
+            quantity: Nat::from(quantity),
+        })
+        .await
+        .unwrap();
+    setup.env().tick().await;
+
+    // 4) Check order status — both fully filled, balances settled. With zero
+    // fees the seller receives the full notional and the buyer the full base.
+    assert_eq!(
+        seller_client
+            .get_my_order(sell_order_id)
+            .await
+            .map(|o| o.order.status),
+        Some(OrderStatus::Filled)
+    );
+    assert_eq!(
+        buyer_client
+            .get_my_order(buy_order_id)
+            .await
+            .map(|o| o.order.status),
+        Some(OrderStatus::Filled)
+    );
+    assert_eq!(
+        seller_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        seller_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(quote_notional)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(quantity)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+
+    // 5) Withdraw — each side withdraws what it received and lands on the
+    // ledger net of the ledger fee.
+    seller_client
+        .withdraw(WithdrawRequest {
+            token_id: setup.quote_token_id(),
+            amount: Nat::from(quote_notional),
+        })
+        .await
+        .expect("seller quote withdrawal should succeed");
+    buyer_client
+        .withdraw(WithdrawRequest {
+            token_id: setup.base_token_id(),
+            amount: Nat::from(quantity),
+        })
+        .await
+        .expect("buyer base withdrawal should succeed");
+
+    assert_eq!(
+        seller_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        buyer_client
+            .get_balance(setup.base_token_id())
+            .await
+            .unwrap(),
+        expected_balance(0)
+    );
+    assert_eq!(
+        setup.quote_token_ledger().icrc1_balance_of(seller).await,
+        Nat::from(quote_notional - QUOTE_LEDGER_FEE)
+    );
+    assert_eq!(
+        setup.base_token_ledger().icrc1_balance_of(buyer).await,
+        Nat::from(quantity - BASE_LEDGER_FEE)
+    );
 
     setup.drop().await;
 }
