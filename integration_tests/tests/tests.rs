@@ -2,7 +2,9 @@ use assert_matches::assert_matches;
 use candid::{Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use oisy_trade_client::{OisyTradeClient, Runtime};
-use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+use oisy_trade_int_tests::icrc_ledger::{
+    BASE_LEDGER_FEE, DEVNET_SOL_LEDGER_FEE, LedgerConfig, QUOTE_LEDGER_FEE, SEPOLIA_ETH_LEDGER_FEE,
+};
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
@@ -1302,19 +1304,44 @@ async fn should_withdraw_and_receive_tokens_on_ledger() {
     setup.drop().await;
 }
 
-/// End-to-end walkthrough from `docs/src/usage/for-users.md`: list pairs,
-/// both sides approve+deposit, a sell and a crossing buy fill, balances
-/// settle, then each side withdraws what it received and lands on the ledger
-/// net of the ledger fee.
+/// End-to-end walkthrough from `docs/src/usage/for-users.md` on the documented
+/// SOLETH pair (ckDevnetSOL / ckSepoliaETH, with their decimals and ledger
+/// fees): list pairs, both sides approve+deposit, a resting sell and a crossing
+/// buy fill, the taker fee is charged on the base the buyer receives, then each
+/// side withdraws what it received and lands on the ledger net of the ledger fee.
 #[tokio::test]
 async fn should_complete_for_users_walkthrough() {
-    let setup = Setup::new().await.with_trading_pair().await;
+    // Binance SOLETH parameters from the docs: ckDevnetSOL has 9 decimals,
+    // ckSepoliaETH has 18; tick = 0.00001 ETH/SOL × 10^18, lot = 0.001 SOL × 10^9.
+    const TICK_SIZE_SOLETH: u64 = 10_000_000_000_000;
+    const LOT_SIZE_SOLETH: u64 = 1_000_000;
+    const MAKER_FEE_BPS: u16 = 0;
+    const TAKER_FEE_BPS: u16 = 20;
+
+    let setup = Setup::new_with_ledgers(
+        LedgerConfig::ck_devnet_sol(),
+        LedgerConfig::ck_sepolia_eth(),
+    )
+    .await;
+    setup
+        .oisy_trade_client_with_caller(setup.controller())
+        .add_trading_pair(AddTradingPairRequest {
+            tick_size: Nat::from(TICK_SIZE_SOLETH),
+            lot_size: Nat::from(LOT_SIZE_SOLETH),
+            maker_fee_bps: MAKER_FEE_BPS,
+            taker_fee_bps: TAKER_FEE_BPS,
+            ..setup.add_trading_pair_request()
+        })
+        .await
+        .unwrap();
+
     let seller = Principal::from_slice(&[0x01]);
     let buyer = Principal::from_slice(&[0x02]);
     let seller_client = setup.oisy_trade_client_with_caller(seller);
     let buyer_client = setup.oisy_trade_client_with_caller(buyer);
 
-    // 1) List trading pairs — the pair is listed with its tick/lot sizes.
+    // 1) List trading pairs — the pair is listed with its tick/lot sizes and
+    // maker/taker fee rates.
     let pairs = setup.oisy_trade_client().get_trading_pairs().await;
     let pair_info = pairs
         .iter()
@@ -1323,32 +1350,40 @@ async fn should_complete_for_users_walkthrough() {
                 && info.quote.id.ledger_id == setup.quote_ledger_id()
         })
         .expect("the registered pair must be listed");
-    assert_eq!(pair_info.tick_size, Nat::from(TICK_SIZE));
-    assert_eq!(pair_info.lot_size, Nat::from(LOT_SIZE));
+    assert_eq!(pair_info.tick_size, Nat::from(TICK_SIZE_SOLETH));
+    assert_eq!(pair_info.lot_size, Nat::from(LOT_SIZE_SOLETH));
+    assert_eq!(pair_info.maker_fee_bps, MAKER_FEE_BPS);
+    assert_eq!(pair_info.taker_fee_bps, TAKER_FEE_BPS);
 
-    // Trade 10 lots at 10_000 quote per whole base token. The base has 9
-    // decimals, so the fill settles price × quantity / 10^9 quote base units.
-    let quantity = 10 * LOT_SIZE; // 10_000_000 base base-units
-    let price = 10_000 * PRICE_SCALE;
-    let quote_notional = 10_000_000_000u64;
+    // Trade 0.1 SOL @ 0.05 ETH/SOL. Price is quote base units per whole base
+    // token (0.05 × 10^18); the base has 9 decimals, so the fill settles
+    // price × quantity / 10^9 quote base units.
+    let quantity = 100_000_000u64; // 0.1 SOL = 100 lots
+    let price = 50_000_000_000_000_000u64; // 0.05 ETH/SOL × 10^18
+    let quote_notional = 5_000_000_000_000_000u64; // = price × quantity / 10^9 (0.005 ETH)
+    // Taker (buyer) pays the taker fee on the base it receives; the maker
+    // (seller) pays nothing here, so it keeps the full notional.
+    let taker_fee = (quantity * u64::from(TAKER_FEE_BPS)).div_ceil(10_000);
+    let buyer_base_received = quantity - taker_fee;
 
     // 2) Approve + deposit — seller funds base to sell, buyer funds quote to buy.
     setup
         .deposit_flow(seller, setup.base_token_id())
-        .mint(quantity + 2 * BASE_LEDGER_FEE)
-        .approve(quantity + BASE_LEDGER_FEE)
+        .mint(quantity + 2 * DEVNET_SOL_LEDGER_FEE)
+        .approve(quantity + DEVNET_SOL_LEDGER_FEE)
         .deposit(quantity)
         .execute()
         .await;
     setup
         .deposit_flow(buyer, setup.quote_token_id())
-        .mint(quote_notional + 2 * QUOTE_LEDGER_FEE)
-        .approve(quote_notional + QUOTE_LEDGER_FEE)
+        .mint(quote_notional + 2 * SEPOLIA_ETH_LEDGER_FEE)
+        .approve(quote_notional + SEPOLIA_ETH_LEDGER_FEE)
         .deposit(quote_notional)
         .execute()
         .await;
 
-    // 3) Place a limit order — the sell rests, the matching buy crosses it.
+    // 3) Place a limit order — the sell rests (maker), the matching buy crosses
+    // it (taker).
     let sell_order_id = seller_client
         .add_limit_order(LimitOrderRequest {
             pair: setup.trading_pair(),
@@ -1369,8 +1404,9 @@ async fn should_complete_for_users_walkthrough() {
         .unwrap();
     setup.env().tick().await;
 
-    // 4) Check order status — both fully filled, balances settled. With zero
-    // fees the seller receives the full notional and the buyer the full base.
+    // 4) Check order status — both fully filled, balances settled. The seller
+    // receives the full notional (maker fee 0); the buyer receives the base
+    // net of the taker fee.
     assert_eq!(
         seller_client
             .get_my_order(sell_order_id)
@@ -1404,7 +1440,7 @@ async fn should_complete_for_users_walkthrough() {
             .get_balance(setup.base_token_id())
             .await
             .unwrap(),
-        expected_balance(quantity)
+        expected_balance(buyer_base_received)
     );
     assert_eq!(
         buyer_client
@@ -1426,7 +1462,7 @@ async fn should_complete_for_users_walkthrough() {
     buyer_client
         .withdraw(WithdrawRequest {
             token_id: setup.base_token_id(),
-            amount: Nat::from(quantity),
+            amount: Nat::from(buyer_base_received),
         })
         .await
         .expect("buyer base withdrawal should succeed");
@@ -1447,11 +1483,11 @@ async fn should_complete_for_users_walkthrough() {
     );
     assert_eq!(
         setup.quote_token_ledger().icrc1_balance_of(seller).await,
-        Nat::from(quote_notional - QUOTE_LEDGER_FEE)
+        Nat::from(quote_notional - SEPOLIA_ETH_LEDGER_FEE)
     );
     assert_eq!(
         setup.base_token_ledger().icrc1_balance_of(buyer).await,
-        Nat::from(quantity - BASE_LEDGER_FEE)
+        Nat::from(buyer_base_received - DEVNET_SOL_LEDGER_FEE)
     );
 
     setup.drop().await;

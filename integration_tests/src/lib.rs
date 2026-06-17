@@ -40,19 +40,39 @@ pub struct Setup {
     oisy_trade_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
+    base_config: icrc_ledger::LedgerConfig,
+    quote_config: icrc_ledger::LedgerConfig,
 }
 
 impl Setup {
     pub async fn new() -> Self {
-        Self::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-        })
-        .await
+        Self::new_with_init_arg(default_init_arg()).await
     }
 
     pub async fn new_with_init_arg(init_arg: InitArg) -> Self {
+        Self::new_with_init_arg_and_ledgers(
+            init_arg,
+            icrc_ledger::LedgerConfig::cksol(),
+            icrc_ledger::LedgerConfig::ckbtc(),
+        )
+        .await
+    }
+
+    /// Build a [`Setup`] whose base/quote ledgers use the given configs (symbol,
+    /// decimals, transfer fee). The submitted trading-pair metadata follows from
+    /// these, so the registered pair matches what the ledgers report.
+    pub async fn new_with_ledgers(
+        base_config: icrc_ledger::LedgerConfig,
+        quote_config: icrc_ledger::LedgerConfig,
+    ) -> Self {
+        Self::new_with_init_arg_and_ledgers(default_init_arg(), base_config, quote_config).await
+    }
+
+    pub async fn new_with_init_arg_and_ledgers(
+        init_arg: InitArg,
+        base_config: icrc_ledger::LedgerConfig,
+        quote_config: icrc_ledger::LedgerConfig,
+    ) -> Self {
         const DEFAULT_CALLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
         const DEFAULT_CONTROLLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
@@ -84,14 +104,14 @@ impl Setup {
             &env,
             controller,
             ledger_wasm.clone(),
-            icrc_ledger::cksol_init_args(controller),
+            icrc_ledger::ledger_init_args(controller, &base_config),
         )
         .await;
         let quote_ledger_id = icrc_ledger::install_ledger(
             &env,
             controller,
             ledger_wasm,
-            icrc_ledger::ckbtc_init_args(controller),
+            icrc_ledger::ledger_init_args(controller, &quote_config),
         )
         .await;
 
@@ -104,6 +124,8 @@ impl Setup {
             oisy_trade_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
+            base_config,
+            quote_config,
         }
     }
 
@@ -128,8 +150,8 @@ impl Setup {
                     ledger_id: trading_pair.base,
                 },
                 metadata: TokenMetadata {
-                    symbol: "ckSOL".to_string(),
-                    decimals: 9,
+                    symbol: self.base_config.symbol.clone(),
+                    decimals: self.base_config.decimals,
                 },
             },
             quote: Token {
@@ -137,8 +159,8 @@ impl Setup {
                     ledger_id: trading_pair.quote,
                 },
                 metadata: TokenMetadata {
-                    symbol: "ckBTC".to_string(),
-                    decimals: 8,
+                    symbol: self.quote_config.symbol.clone(),
+                    decimals: self.quote_config.decimals,
                 },
             },
             tick_size: Nat::from(TICK_SIZE),
@@ -437,6 +459,14 @@ impl Drop for Setup {
         if self.env.is_some() && !std::thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
+    }
+}
+
+fn default_init_arg() -> InitArg {
+    InitArg {
+        mode: Mode::GeneralAvailability,
+        max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+        instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
     }
 }
 
