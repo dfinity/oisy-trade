@@ -282,10 +282,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.validate_cancel_limit_order(user, &order_id)?;
 
-        let permit = self
-            .permissions()
-            .permit_cancel()
-            .expect("BUG: cancel is never gated in this build");
+        let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
             event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
@@ -299,10 +296,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // previous matching round and inherit its instruction debt. Pop
         // only the event this cancel just pushed.
         while let Some(event) = self.take_next_pending_settling_event() {
-            let permit = self
-                .permissions()
-                .permit_settling()
-                .expect("BUG: settling is never gated in this build");
+            let permit = self.permissions().permit_settling();
             audit::process_event(
                 self,
                 event::EventType::Settling(event),

@@ -89,10 +89,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
         }
         Some(OisyTradeArg::Upgrade(Some(upgrade_arg))) => {
             state::with_state_mut(|s| {
-                let permit = s
-                    .permissions()
-                    .permit_admin()
-                    .expect("BUG: admin events are never gated in this build");
+                let permit = s.permissions().permit_admin();
                 audit::process_event(s, EventType::Upgrade(upgrade_arg), permit.into(), runtime)
             });
         }
