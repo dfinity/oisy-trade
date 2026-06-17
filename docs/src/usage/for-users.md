@@ -245,7 +245,7 @@ This walkthrough assumes the pair is configured with `maker_fee_bps = 0` and `ta
 | Seller (quote, maker 0 bps) | `5_000_000_000_000_000` | `0`       | `5_000_000_000_000_000` |
 | Buyer (base, taker 20 bps)  | `100_000_000`           | `200_000` | `99_800_000`            |
 
-> A pair's fee rates are **not** returned by `get_trading_pairs` — a current gap. Read them from the pair's `AddTradingPair` event via `get_events`, and the fees the canister has collected via `get_fee_balances`.
+A pair's fee rates are returned by `get_trading_pairs`, and the fees the canister has collected are queryable with `get_fee_balances`.
 
 ```bash
 # Seller's quote (credited by the fill)
