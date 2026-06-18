@@ -103,16 +103,30 @@ Matching Engine). FOK reuses this unchanged. The caller observes the terminal `F
 available on the very next poll. (Why not synchronous inline matching — see Discussed
 Alternatives.)
 
-### FOK atomicity needs a non-mutating liquidity check
+### Split matching into a read-only *plan* and a mutating *execute*
 
-`OrderBook::match_order` fills greedily and **mutates the book as it goes** (it reduces resting
-quantities and pops fully-consumed makers in `fill_against_queue`). So "fill fully or do
-nothing" cannot be expressed by calling `match_order` and reacting to a `PartiallyFilled`
-result — by then the book is already mutated and partial fills already exist. FOK therefore
-needs the fill to be *gated*: first determine whether the full quantity is satisfiable at the
-order's price or better **without mutating**, then either execute (which is guaranteed to fully
-fill) or kill (touching nothing). This primitive is the matching-engine half of FOK and is
-self-contained, which is why it lands in its own PR ahead of the execution wiring.
+`OrderBook::match_order` today fills greedily and **mutates the book as it goes** (it reduces
+resting quantities and pops fully-consumed makers in `fill_against_queue`, and rests any
+remainder at the tail). So "fill fully or do nothing" cannot be expressed by calling
+`match_order` and reacting to a `PartiallyFilled` result — by then the book is already mutated
+and partial fills already exist.
+
+We therefore restructure matching into two phases. **`plan_fills`** walks the crossing prices
+read-only and records the fills it *would* make (`maker_seq`, fill price, quantity, and whether
+the maker is emptied) plus whether the order fully fills — touching no book state.
+**`apply_plan`** then replays that plan, performing the mutations. A single parameter,
+`require_full`, gates the two: when it is set and the plan does not fully fill, `execute` returns
+a *killed* outcome **before `apply_plan` runs**, so the book is provably untouched. GTC calls
+`execute(order, require_full = false)` and behaves exactly as today; FOK calls
+`execute(order, require_full = true)`.
+
+Chosen over the two narrower alternatives (a non-mutating liquidity *pre-check* that then reuses
+the unchanged `match_order`, and an *operation-log rollback* that undoes a partial match — both
+in Discussed Alternatives) because plan/execute makes the no-mutation-on-kill guarantee
+**structural** rather than test-enforced, keeps a single matching traversal with no duplicated
+crossing predicate, and **generalizes to other time-in-force values**: a future IOC is just
+`execute(order, require_full = false)` that cancels the remainder instead of resting it, reusing
+the same plan. The cost is a constant-factor second pass on the GTC hot path (see Performance).
 
 ### `Expired` is a unit variant, matching the current `Canceled`
 
@@ -165,16 +179,34 @@ beyond confirming the path is shared (R-coverage in the test plan).
 - Internal `OrderRecord` (`order/history`) gains `time_in_force` as a new trailing minicbor
   field (append-only index; never reuse) so it round-trips through history and snapshot (R9).
 
-### Atomic fill primitive — `canister/src/order/book.rs`
+### Plan/execute matching — `canister/src/order/book.rs`
 
-Add a non-mutating check that answers "can an order of this `side`/`price`/`quantity` be fully
-filled against current resting liquidity at price-or-better?" — e.g. an
-`available_liquidity_at_or_better(side, price, up_to: quantity)` walk over `asks`/`bids` that
-sums matchable resting quantity and short-circuits once it reaches `quantity`. FOK execution
-calls this first: if satisfiable, run the existing `match_order` (now guaranteed to return
-`Filled`); otherwise produce a kill outcome that mutates nothing. The `MatchResult` /
-`MatchingOutput` surface gains a way to express "killed/expired" so the caller can record the
-`Expired` status and release the reservation. (R3, R4, R5, R10.)
+Refactor `match_order` into a read-only **plan** and a mutating **apply**, joined by a single
+`execute(order, require_full)` entry point. The refactor is behavior-preserving for GTC.
+
+- **`plan_fills(side, price, quantity) -> FillPlan`** — read-only. Iterates the crossing price
+  levels best-first (`asks` ascending while `price ≤ order price`; `bids` descending while
+  `price ≥ order price` — the *same* crossing predicate as today's `match_order` break) and,
+  FIFO within each level, records one `PlannedFill { maker_seq, maker_price, fill_qty,
+  maker_emptied }` per maker it would touch, accumulating until the order is satisfied. Returns
+  `FillPlan { fills, fully_filled }`. No mutation.
+- **`apply_plan(side, &FillPlan, &mut Order, &mut fills_out, &mut filled_orders)`** — mutating.
+  Replays the plan: for each `PlannedFill`, reduce the maker (held at the front of its level —
+  re-acquire the level cursor only when `maker_price` changes, so cost stays `O(L log p + f)`,
+  not `O(f log p)`), reduce the taker, push the `Fill`, and on `maker_emptied` pop the maker,
+  drop its `resting_orders` index entry, insert into `filled_orders`, and remove the level if its
+  queue empties. A `debug_assert_eq!(front.id(), planned.maker_seq)` guards plan/apply
+  divergence.
+- **`execute(order, require_full) -> Execution`** — `let plan = plan_fills(..)`; if
+  `require_full && !plan.fully_filled` return `Execution::Killed { seq }` *before* any mutation
+  (R4, R5); else `apply_plan(..)` and, per the existing tail, return `Filled` when the remainder
+  is zero or rest it (`insert_order`) and return `Resting`. `match_order` becomes
+  `execute(order, false)` (GTC unchanged, R2); FOK is `execute(order, true)`.
+
+`MatchingOutput` gains `expired_orders: BTreeSet<OrderSeq>` alongside `fills` / `resting_orders`
+/ `filled_orders`. `process_pending_orders` runs the per-order loop — `pop_front`, `execute` with
+`require_full` derived from the order's `time_in_force`, and on `Killed` insert into
+`expired_orders` (the order, already popped, leaves no book trace) (R3, R4, R5, R10).
 
 ### Fee logic — `canister/src/state` (`compute_balance_operations`)
 
@@ -197,13 +229,26 @@ of every fill the FOK produced. GTC assignment is unchanged (R7).
 ### Execution wiring — `canister/src/execute`, `canister/src/state` (`record_matching_event`)
 
 `add_limit_order` is unchanged: it validates, reserves balance, and enqueues the FOK as
-`Pending`, returning an `OrderId` (R11). In the executor / `record_matching_event`, when a
-dequeued order is a FOK, use the gated atomic match: if its full quantity is satisfiable at
-price-or-better, run the match (guaranteed `Filled`); otherwise transition `Pending → Expired`,
-mutating no book state and releasing the reservation taken at placement. A FOK never transitions
-to `Open`. This is the only site that distinguishes FOK from GTC in the matching path; GTC keeps
-its `Pending → Open` / `Filled` transitions. The reservation-release on kill reuses the same
-unreserve/refund computation the cancel path already performs (R4, R5).
+`Pending`, returning an `OrderId` (R11). The plan/execute branch lives entirely in the order book
+(above); `record_matching_event` consumes the resulting `MatchingOutput`, mapping each
+`expired_orders` entry to `status = Expired` and releasing the reservation taken at placement. A
+FOK never transitions to `Open`; GTC keeps its `Pending → Open` / `Filled` transitions. The
+reservation-release on kill reuses the same unreserve/refund computation the cancel path already
+performs over the order's full quantity (it never entered the book, so there is no `RemovedOrder`
+to read) (R4, R5).
+
+### Performance
+
+The plan/execute refactor costs GTC a **constant-factor second pass**: today's single fused
+matching pass becomes a read-only `plan_fills` walk plus an `apply_plan` replay, plus one
+transient `O(f)` `FillPlan` allocation (`f` = fills). Asymptotics are unchanged at
+`O(L log p + f)` **provided** `apply_plan` holds the level cursor across a level's fills rather
+than re-looking-up by price per fill. The non-crossing/rest case is negligibly affected
+(`plan_fills` stops at the first non-crossing level). The overhead is expected to be small
+relative to the settlement that follows in `record_matching_event` (per-fill fee math and
+balance operations, plus stable-memory writes), but it falls on the hot path — confirm with the
+`canbench` suite (the `bench_scopes!` instrumentation already in `lib.rs`) before relying on the
+estimate.
 
 ### Docs — `docs/src/development/design.md`
 
@@ -217,10 +262,18 @@ model.)
 
 Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 
-- `order/book.rs` tests: the liquidity check reports "fully fillable" exactly when summed
-  resting quantity at price-or-better ≥ `quantity`, and the gated match leaves the book
-  untouched when not fillable (R4, R5); a fillable FOK produces `Filled` with the expected fills
-  (R3). A deep-book worst case stays within expected instruction bounds (R10).
+- `order/book.rs` tests:
+  - **GTC regression / plan==apply:** a property test over arbitrary books + orders asserts
+    `execute(order, false)` produces the identical fills, resting state, and final book as the
+    pre-refactor `match_order` — i.e. the refactor is behavior-preserving (R2). The
+    `debug_assert` in `apply_plan` (plan agrees with the book at replay) holds throughout.
+  - **Kill is mutation-free:** when `plan_fills(..).fully_filled` is `false`,
+    `execute(order, true)` returns `Killed` and the book is byte-identical to its pre-call state
+    — compared via the `OrderBookSnapshot` round-trip (no `PartialEq` on `OrderBook` needed)
+    (R4, R5). Covers the *some-but-insufficient* liquidity case explicitly (R5).
+  - **Boundary + fill:** available liquidity exactly equal to `quantity` ⇒ `Filled` (inclusive);
+    a fillable FOK produces `Filled` with the expected fills (R3). A deep-book worst case stays
+    within expected instruction bounds (R10).
 - `state/tests.rs`: a FOK that fully fills records `Filled` / `filled_quantity == quantity` and
   releases nothing extra (R3); a FOK that can't fill records `Expired` / `filled_quantity == 0`,
   no book trace, reservation released (R4, R5); FOK fills are charged `FeeRates.taker` on both
@@ -256,17 +309,21 @@ cargo test -p oisy_trade_int_tests
 
 Split by reviewability; both PRs can proceed back-to-back.
 
-- **PR 1 (1/2) — data model + fill primitive.** `TimeInForce` enum; optional `time_in_force`
-  on `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal + public + Candid);
-  `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the non-mutating
-  liquidity check + gated atomic-fill primitive in `OrderBook`; the always-taker fee rule for
-  FOK in `compute_balance_operations`. Covers R1, R2, R6, R7, R8, R9, and the primitive behind
-  R3/R4/R5/R10. At this point a FOK request is *accepted and parsed* and the engine *can*
-  fully-fill-or-kill, but nothing yet routes FOK orders down the kill path end-to-end.
-  - *Acceptance:* R1, R2, R6, R7, R8, R9; unit coverage of the fill primitive (R3/R4/R5/R10).
-- **PR 2 (2/2) — execution wiring.** Route dequeued FOK orders through the gated atomic match in
-  the executor / `record_matching_event`, wire the `Pending → Expired` transition and
-  reservation release, update `design.md`, and add the end-to-end integration tests.
+- **PR 1 (1/2) — data model + plan/execute matching.** `TimeInForce` enum; optional
+  `time_in_force` on `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal +
+  public + Candid); `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the
+  `plan_fills` / `apply_plan` / `execute(order, require_full)` refactor of `match_order` (with
+  the GTC-regression property test proving it behavior-preserving) and `expired_orders` on
+  `MatchingOutput`; the always-taker fee rule for FOK in `compute_balance_operations`. Covers
+  R1, R2, R6, R7, R8, R9, and the matching primitive behind R3/R4/R5/R10. At this point a FOK
+  request is *accepted and parsed* and the engine *can* fully-fill-or-kill, but nothing yet
+  routes FOK orders down the kill path end-to-end.
+  - *Acceptance:* R1, R2, R6, R7, R8, R9; unit coverage of the plan/execute primitive
+    (R3/R4/R5/R10).
+- **PR 2 (2/2) — execution wiring.** Drive the per-order `require_full` branch from
+  `time_in_force` in `process_pending_orders`, map `expired_orders` to `Pending → Expired` plus
+  reservation release in `record_matching_event`, update `design.md`, and add the end-to-end
+  integration tests.
   - *Acceptance:* R3, R4, R5, R10, R11, and the design-doc AC.
 
 ## Discussed Alternatives
@@ -289,10 +346,24 @@ Split by reviewability; both PRs can proceed back-to-back.
   a hard gate because a single atomic FOK cannot be chunked. The asynchronous model (Binance's
   "upon execution") avoids all of this; the only cost is that the caller polls `get_my_orders`
   for the outcome instead of reading it from the call result.
-- **Reacting to `match_order`'s `PartiallyFilled` result instead of pre-checking liquidity.**
-  Rejected: `match_order` mutates the book and creates real fills as it runs, so by the time it
-  reports `PartiallyFilled` the partial execution has already happened and would need rolling
-  back. A non-mutating liquidity check that gates execution is simpler and has no rollback path.
+- **Non-mutating liquidity pre-check, then reuse the unchanged `match_order`.** A read-only walk
+  summing crossing liquidity gates a kill; if it passes, run today's `match_order` (guaranteed
+  `Filled`). *More surgical* — it leaves the GTC hot path at exactly one pass (zero regression)
+  and pays the second walk only on FOK; a killed FOK is a single cheap read-only walk. Rejected
+  for this ticket in favor of the broader plan/execute refactor: the pre-check's no-mutation
+  guarantee is *by avoidance* (it depends on the walk's crossing predicate staying in lockstep
+  with `match_order`'s, a divergence risk closed only by a property test), and it does not
+  generalize to IOC, which needs to *commit* a partial — exactly what plan/execute's `apply_plan`
+  provides. We accept a constant-factor GTC cost (see Performance) to get the structural
+  guarantee and the IOC-ready shape.
+- **Operation-log rollback.** Run the unchanged `match_order` while journaling each mutation onto
+  a stack, then pop-and-invert the stack if a FOK did not fully fill. Rejected: it carries the
+  largest correctness surface of the options (every mutating primitive must emit a correct,
+  correctly-ordered inverse, or a kill silently corrupts the book), and its performance profile
+  is backwards for this feature — it makes the *kill* path the most expensive (full mutate, then
+  full reverse with index/level churn) when a kill ("insufficient liquidity") is exactly the case
+  that should be cheap and side-effect-free. It also yields no benefit for a future IOC, which
+  keeps its partial and never rolls back.
 - **A dedicated `PartiallyFilled` / richer FOK-specific status set.** Out of scope and
   unnecessary: FOK only ever reaches `Filled` or `Expired`, both of which already exist (or are
   added as the single `Expired` unit variant).
