@@ -1,11 +1,12 @@
 use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, ErrorKind, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError,
+    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -72,18 +73,15 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             "[deposit]: successful deposit for request {deposit_dbg}, block_index={}",
             response.block_index
         ),
-        Err(err) => match &err.kind {
-            ErrorKind::TemporaryError(_) | ErrorKind::InternalError(_) => {
+        Err(err) => {
+            if should_log_deposit_error(err) {
                 canlog::log!(
                     Priority::Debug,
                     "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
                     err
                 )
             }
-            ErrorKind::RequestError(_) => {
-                // do not log errors due to user actions
-            }
-        },
+        }
     }
     result
 }
@@ -98,20 +96,41 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             "[withdraw]: successful withdrawal for request {withdraw_dbg}, block_index={}",
             response.block_index
         ),
-        Err(err) => match &err.kind {
-            ErrorKind::TemporaryError(_) | ErrorKind::InternalError(_) => {
+        Err(err) => {
+            if should_log_withdraw_error(err) {
                 canlog::log!(
                     Priority::Debug,
                     "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
                     err
                 )
             }
-            ErrorKind::RequestError(_) => {
-                // do not log errors due to user actions
-            }
-        },
+        }
     }
     result
+}
+
+fn should_log_deposit_error(err: &DepositError) -> bool {
+    match &err.kind {
+        ErrorKind::InternalError(_) => true,
+        ErrorKind::TemporaryError(Some(leaf)) => match leaf {
+            DepositTemporaryError::LedgerTemporarilyUnavailable
+            | DepositTemporaryError::CallFailed { .. } => true,
+            DepositTemporaryError::OperationInProgress => false,
+        },
+        ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
+    }
+}
+
+fn should_log_withdraw_error(err: &WithdrawError) -> bool {
+    match &err.kind {
+        ErrorKind::InternalError(_) => true,
+        ErrorKind::TemporaryError(Some(leaf)) => match leaf {
+            WithdrawTemporaryError::LedgerTemporarilyUnavailable
+            | WithdrawTemporaryError::CallFailed { .. } => true,
+            WithdrawTemporaryError::OperationInProgress => false,
+        },
+        ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
+    }
 }
 
 #[ic_cdk::query]
@@ -458,4 +477,148 @@ fn check_candid_interface_compatibility() {
         CandidSource::File(old_interface.as_path()),
     )
     .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_log_deposit_error, should_log_withdraw_error};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{
+        DepositError, DepositInternalError, DepositRequestError, DepositTemporaryError, ErrorKind,
+        WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    };
+
+    #[test]
+    fn should_log_exactly_the_pre_disposition_deposit_errors() {
+        let cases = [
+            (
+                DepositError::temporary(DepositTemporaryError::OperationInProgress),
+                false,
+            ),
+            (
+                DepositError::temporary(DepositTemporaryError::LedgerTemporarilyUnavailable),
+                true,
+            ),
+            (
+                DepositError::temporary(DepositTemporaryError::CallFailed {
+                    ledger: Principal::anonymous(),
+                    method: "icrc2_transfer_from".to_string(),
+                    reason: "timeout".to_string(),
+                }),
+                true,
+            ),
+            (
+                DepositError::internal(DepositInternalError::LedgerError {
+                    reason: "boom".to_string(),
+                }),
+                true,
+            ),
+            (
+                DepositError::request(DepositRequestError::AmountExceedsMaximum),
+                false,
+            ),
+            (
+                DepositError::request(DepositRequestError::UnsupportedToken {
+                    token_id: token_id(),
+                }),
+                false,
+            ),
+            (
+                DepositError::request(DepositRequestError::InsufficientFunds {
+                    balance: Nat::from(0u8),
+                }),
+                false,
+            ),
+            (
+                DepositError::request(DepositRequestError::InsufficientAllowance {
+                    allowance: Nat::from(0u8),
+                }),
+                false,
+            ),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(should_log_deposit_error(&err), expected, "{:?}", err.kind);
+        }
+        assert!(!should_log_deposit_error(&unknown_leaf_deposit_error()));
+    }
+
+    #[test]
+    fn should_log_exactly_the_pre_disposition_withdraw_errors() {
+        let cases = [
+            (
+                WithdrawError::temporary(WithdrawTemporaryError::OperationInProgress),
+                false,
+            ),
+            (
+                WithdrawError::temporary(WithdrawTemporaryError::LedgerTemporarilyUnavailable),
+                true,
+            ),
+            (
+                WithdrawError::temporary(WithdrawTemporaryError::CallFailed {
+                    ledger: Principal::anonymous(),
+                    method: "icrc1_transfer".to_string(),
+                    reason: "timeout".to_string(),
+                }),
+                true,
+            ),
+            (
+                WithdrawError::internal(WithdrawInternalError::LedgerError {
+                    reason: "boom".to_string(),
+                }),
+                true,
+            ),
+            (
+                WithdrawError::internal(WithdrawInternalError::LedgerInsufficientFunds {
+                    balance: Nat::from(0u8),
+                }),
+                true,
+            ),
+            (
+                WithdrawError::request(WithdrawRequestError::AmountExceedsMaximum),
+                false,
+            ),
+            (
+                WithdrawError::request(WithdrawRequestError::AmountTooSmall {
+                    min_amount: Nat::from(1u8),
+                }),
+                false,
+            ),
+            (
+                WithdrawError::request(WithdrawRequestError::UnsupportedToken {
+                    token_id: token_id(),
+                }),
+                false,
+            ),
+            (
+                WithdrawError::request(WithdrawRequestError::InsufficientBalance {
+                    available: Nat::from(0u8),
+                }),
+                false,
+            ),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(should_log_withdraw_error(&err), expected, "{:?}", err.kind);
+        }
+        assert!(!should_log_withdraw_error(&unknown_leaf_withdraw_error()));
+    }
+
+    fn token_id() -> oisy_trade_types::TokenId {
+        oisy_trade_types::TokenId {
+            ledger_id: Principal::anonymous(),
+        }
+    }
+
+    fn unknown_leaf_deposit_error() -> DepositError {
+        DepositError {
+            kind: ErrorKind::TemporaryError(None),
+            message: None,
+        }
+    }
+
+    fn unknown_leaf_withdraw_error() -> WithdrawError {
+        WithdrawError {
+            kind: ErrorKind::TemporaryError(None),
+            message: None,
+        }
+    }
 }
