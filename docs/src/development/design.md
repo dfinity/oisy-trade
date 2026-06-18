@@ -329,7 +329,7 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
-- **price**: the limit price as a `u64`.
+- **price**: the limit price, a `u128` (exposed as `nat` in the Candid interface).
 - **quantity**: the original submission size as a `Quantity`.
 - **filled_quantity**: the cumulative quantity filled so far as a `Quantity`.
 - **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.

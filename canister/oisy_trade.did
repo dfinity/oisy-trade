@@ -319,7 +319,7 @@ type WithdrawRequest = record {
     // token's base units. The ledger transfer fee is deducted from this
     // amount, so the caller receives `amount - ledger_fee` on the ledger;
     // `amount` must therefore be strictly greater than `ledger_fee`
-    // (otherwise the call rejects with `AmountTooSmall`).
+    // (otherwise the call returns `Err(AmountTooSmall)`).
     amount : nat;
 };
 
