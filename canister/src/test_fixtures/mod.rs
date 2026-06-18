@@ -1,4 +1,5 @@
 pub mod event;
+pub mod tokens;
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
@@ -254,6 +255,10 @@ pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, f
 }
 
 pub fn init_state_with_order_book() {
+    init_state_with_order_book_and_fees(FeeRates::default());
+}
+
+pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
     let order_history = order::OrderHistory::new(
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
@@ -283,7 +288,7 @@ pub fn init_state_with_order_book() {
             LOT_SIZE,
             MIN_NOTIONAL,
             Some(MAX_NOTIONAL),
-            FeeRates::default(),
+            fee_rates,
         );
     });
 }
@@ -444,7 +449,7 @@ pub mod arbitrary {
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, SettlingEvent, WithdrawEvent,
+        DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
@@ -456,6 +461,7 @@ pub mod arbitrary {
     use proptest::prop_oneof;
     use std::num::{NonZeroU64, NonZeroU128};
 
+    use super::event::MAX_HALT_BOOKS;
     use super::{LOT_SIZE, TICK_SIZE};
 
     /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
@@ -869,6 +875,50 @@ pub mod arbitrary {
         )
     }
 
+    pub fn arb_permissions() -> impl Strategy<Value = crate::state::permissions::Permissions> {
+        (
+            any::<bool>(),
+            btree_set(any::<u64>().prop_map(OrderBookId::new), 0..=MAX_HALT_BOOKS),
+        )
+            .prop_map(|(globally_halted, halted_pairs)| {
+                let mut permissions = crate::state::permissions::Permissions::default();
+                if globally_halted {
+                    permissions.halt_trading_globally();
+                }
+                for book in halted_pairs {
+                    permissions.halt_trading(book);
+                }
+                permissions
+            })
+    }
+
+    /// A `Permissions` that halts trading on [`OrderBookId::ZERO`], either
+    /// globally or for that pair only, paired with a distinct `other` book and
+    /// the `global` flag so callers can assert per-pair isolation.
+    pub fn arb_book_halted_permissions()
+    -> impl Strategy<Value = (crate::state::permissions::Permissions, OrderBookId, bool)> {
+        let other = (1..=u64::MAX).prop_map(OrderBookId::new);
+        let global = other.clone().prop_map(|other| {
+            let mut permissions = crate::state::permissions::Permissions::default();
+            permissions.halt_trading_globally();
+            (permissions, other, true)
+        });
+        let pair = other.prop_map(|other| {
+            let mut permissions = crate::state::permissions::Permissions::default();
+            permissions.halt_trading(OrderBookId::ZERO);
+            (permissions, other, false)
+        });
+        prop_oneof![global, pair]
+    }
+
+    pub fn arb_set_halt_event() -> impl Strategy<Value = SetHaltEvent> {
+        let book_ids = option::of(vec(
+            any::<u64>().prop_map(order::OrderBookId::new),
+            0..=MAX_HALT_BOOKS,
+        ));
+        (book_ids, any::<bool>()).prop_map(|(book_ids, halted)| SetHaltEvent { book_ids, halted })
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_arg().prop_map(EventType::Init),
@@ -880,6 +930,7 @@ pub mod arbitrary {
             arb_cancel_limit_order_event().prop_map(EventType::CancelLimitOrder),
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
+            arb_set_halt_event().prop_map(EventType::SetHalt),
         ]
     }
 

@@ -40,19 +40,38 @@ pub struct Setup {
     oisy_trade_id: CanisterId,
     base_ledger_id: CanisterId,
     quote_ledger_id: CanisterId,
+    base_config: icrc_ledger::LedgerConfig,
+    quote_config: icrc_ledger::LedgerConfig,
 }
 
-impl Setup {
-    pub async fn new() -> Self {
-        Self::new_with_init_arg(InitArg {
-            mode: Mode::GeneralAvailability,
-            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-        })
-        .await
+/// Builder for [`Setup`]. Defaults to ckSOL / ckBTC ledgers and the default
+/// init arg; override either before calling [`SetupBuilder::build`].
+pub struct SetupBuilder {
+    init_arg: InitArg,
+    base_config: icrc_ledger::LedgerConfig,
+    quote_config: icrc_ledger::LedgerConfig,
+}
+
+impl SetupBuilder {
+    pub fn with_init_arg(mut self, init_arg: InitArg) -> Self {
+        self.init_arg = init_arg;
+        self
     }
 
-    pub async fn new_with_init_arg(init_arg: InitArg) -> Self {
+    /// Use the given base/quote ledger configs (symbol, decimals, transfer fee).
+    /// The submitted trading-pair metadata follows from these, so the registered
+    /// pair matches what the ledgers report.
+    pub fn with_ledgers(
+        mut self,
+        base_config: icrc_ledger::LedgerConfig,
+        quote_config: icrc_ledger::LedgerConfig,
+    ) -> Self {
+        self.base_config = base_config;
+        self.quote_config = quote_config;
+        self
+    }
+
+    pub async fn build(self) -> Setup {
         const DEFAULT_CALLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x01]);
         const DEFAULT_CONTROLLER_TEST_ID: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
@@ -74,7 +93,7 @@ impl Setup {
         env.install_canister(
             canister_id,
             oisy_trade_wasm(),
-            Encode!(&OisyTradeArg::Init(init_arg)).unwrap(),
+            Encode!(&OisyTradeArg::Init(self.init_arg)).unwrap(),
             Some(controller),
         )
         .await;
@@ -84,26 +103,45 @@ impl Setup {
             &env,
             controller,
             ledger_wasm.clone(),
-            icrc_ledger::cksol_init_args(controller),
+            icrc_ledger::ledger_init_args(controller, &self.base_config),
         )
         .await;
         let quote_ledger_id = icrc_ledger::install_ledger(
             &env,
             controller,
             ledger_wasm,
-            icrc_ledger::ckbtc_init_args(controller),
+            icrc_ledger::ledger_init_args(controller, &self.quote_config),
         )
         .await;
 
         let caller = DEFAULT_CALLER_TEST_ID;
 
-        Self {
+        Setup {
             env: Some(env),
             caller,
             controller,
             oisy_trade_id: canister_id,
             base_ledger_id,
             quote_ledger_id,
+            base_config: self.base_config,
+            quote_config: self.quote_config,
+        }
+    }
+}
+
+impl Setup {
+    pub async fn new() -> Self {
+        Self::builder().build().await
+    }
+
+    /// Start a [`Setup`] with default ledgers (ckSOL / ckBTC) and init arg.
+    /// Override either with [`SetupBuilder::with_init_arg`] /
+    /// [`SetupBuilder::with_ledgers`] before calling [`SetupBuilder::build`].
+    pub fn builder() -> SetupBuilder {
+        SetupBuilder {
+            init_arg: default_init_arg(),
+            base_config: icrc_ledger::LedgerConfig::cksol(),
+            quote_config: icrc_ledger::LedgerConfig::ckbtc(),
         }
     }
 
@@ -128,8 +166,8 @@ impl Setup {
                     ledger_id: trading_pair.base,
                 },
                 metadata: TokenMetadata {
-                    symbol: "ckSOL".to_string(),
-                    decimals: 9,
+                    symbol: self.base_config.symbol.clone(),
+                    decimals: self.base_config.decimals,
                 },
             },
             quote: Token {
@@ -137,8 +175,8 @@ impl Setup {
                     ledger_id: trading_pair.quote,
                 },
                 metadata: TokenMetadata {
-                    symbol: "ckBTC".to_string(),
-                    decimals: 8,
+                    symbol: self.quote_config.symbol.clone(),
+                    decimals: self.quote_config.decimals,
                 },
             },
             tick_size: Nat::from(TICK_SIZE),
@@ -169,6 +207,28 @@ impl Setup {
             })
             .expect("trading pair must be listed")
             .status
+    }
+
+    /// Register a second, distinct trading pair reusing the two ledgers with
+    /// base and quote swapped. It has its own order book, so per-pair controls
+    /// can be exercised independently of [`Self::trading_pair`].
+    pub async fn with_second_trading_pair(self) -> Self {
+        let controller_client = self.oisy_trade_client_with_caller(self.controller());
+        let request = self.add_trading_pair_request();
+        let swapped = AddTradingPairRequest {
+            base: request.quote,
+            quote: request.base,
+            ..request
+        };
+        assert_eq!(controller_client.add_trading_pair(swapped).await, Ok(()));
+        self
+    }
+
+    pub fn second_trading_pair(&self) -> TradingPair {
+        TradingPair {
+            base: self.quote_ledger_id,
+            quote: self.base_ledger_id,
+        }
     }
 
     pub fn base_token_id(&self) -> TokenId {
@@ -415,6 +475,14 @@ impl Drop for Setup {
         if self.env.is_some() && !std::thread::panicking() {
             panic!("Setup was not dropped properly. Call Setup::drop().await to clean up.");
         }
+    }
+}
+
+fn default_init_arg() -> InitArg {
+    InitArg {
+        mode: Mode::GeneralAvailability,
+        max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+        instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
     }
 }
 

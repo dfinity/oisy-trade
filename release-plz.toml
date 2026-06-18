@@ -17,8 +17,8 @@ git_tag_enable = true
 # creates the git release as draft
 git_release_draft = true
 
-# the release PR is created ready-to-review (not a draft) so it can be merged directly
-pr_draft = false
+# the release PR is opened as a draft; review it, mark it ready, then merge
+pr_draft = true
 
 # labels for the release PR
 pr_labels = ["release"]

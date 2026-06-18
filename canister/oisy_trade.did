@@ -1,4 +1,29 @@
 // OISY TRADE canister: an order book DEX on the Internet Computer.
+//
+// Unit conventions
+// ----------------
+// Token amounts are integers in the token's smallest denomination ("base
+// units"); the conversion factor for a token with `decimals = d` is `10^d`.
+// E.g. 1.5 ckUSDT (6 dp) = `1_500_000`; 0.01 ICP (8 dp) = `1_000_000`.
+//
+// Prices are denominated in **quote-token smallest units per one WHOLE
+// base token** (not per base smallest unit). This makes the notional of
+// an order equal to `price × quantity / 10^base_decimals` in quote
+// smallest units — see `LimitOrderRequest`.
+//
+// Running example — ICP/ckUSDT (base_decimals = 8, quote_decimals = 6).
+// Listing parameters that mirror Binance's 0.001 USDT × 0.01 ICP grid:
+//
+//   tick_size = 0.001 × 10^6 = 1_000            (price increment)
+//   lot_size  = 0.01  × 10^8 = 1_000_000        (quantity increment)
+//
+// A limit buy of 0.5 ICP at 10.50 USDT translates to:
+//
+//   price    = 10.50 × 10^6 = 10_500_000        (10_500 ticks)
+//   quantity = 0.5   × 10^8 = 50_000_000        (50 lots)
+//   notional = price × quantity / 10^8
+//            = 10_500_000 × 50_000_000 / 10^8
+//            = 5_250_000                        (= 5.25 USDT reserved)
 
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
@@ -7,8 +32,8 @@ type OrderId = text;
 
 // Side of an order.
 type Side = variant {
-    // Buy order (bid). On submission reserves `price × quantity` of the
-    // *quote* token from the caller's free balance.
+    // Buy order (bid). On submission reserves `price × quantity / 10^base_decimals`
+    // of the *quote* token from the caller's free balance.
     Buy;
     // Sell order (ask). On submission reserves `quantity` of the *base*
     // token from the caller's free balance.
@@ -29,11 +54,12 @@ type LimitOrderRequest = record {
     pair : TradingPair;
     // Whether this is a buy or sell order.
     side : Side;
-    // Limit price in quote token smallest units per one whole base token.
-    // Must be a positive multiple of the pair's `tick_size`.
+    // Limit price in quote-token smallest units per one whole base token
+    // (see top-of-file unit conventions). Must be a positive multiple of
+    // the pair's `tick_size`.
     price : nat;
-    // Order quantity in base token units.
-    // Must be a positive multiple of the pair's `lot_size`.
+    // Order quantity in base-token smallest units. Must be a positive
+    // multiple of the pair's `lot_size`.
     quantity : nat;
 };
 
@@ -56,7 +82,7 @@ type AddLimitOrderError = variant {
     // The order's notional (price × quantity / 10^base_decimals, in quote
     // smallest units) is below `min` or above `max`.
     InvalidNotional : record { notional : nat; min : nat; max : opt nat };
-    // Trading is globally halted; no new orders are accepted.
+    // Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted;
 };
 
@@ -88,21 +114,30 @@ type TradingPairInfo = record {
     quote : Token;
     // Whether trading on this pair is currently active or halted.
     status : TradingStatus;
-    // Minimum price increment. All order prices must be a positive multiple of this value.
+    // Minimum price increment, in the same units as `price` (quote-token
+    // smallest units per one whole base token). All order prices must be a
+    // positive multiple of this value.
     tick_size : nat;
-    // Minimum order quantity. All order quantities must be a positive multiple of this value.
+    // Minimum order quantity, in base-token smallest units. All order
+    // quantities must be a positive multiple of this value.
     lot_size : nat;
-    // Minimum order notional in quote token smallest units.
+    // Maker fee rate, in basis points.
+    maker_fee_bps : nat16;
+    // Taker fee rate, in basis points.
+    taker_fee_bps : nat16;
+    // Minimum order notional in quote-token smallest units.
     min_notional : nat;
-    // Maximum order notional in quote token smallest units, if any.
+    // Maximum order notional in quote-token smallest units, if any.
     max_notional : opt nat;
 };
 
 // A single price level in an order book, aggregated across all resting orders at that price.
 type PriceLevel = record {
-    // Price in quote token smallest units per one whole base token.
+    // Price in quote-token smallest units per one whole base token
+    // (see top-of-file unit conventions).
     price : nat;
-    // Total quantity in base token units across all resting orders at this price.
+    // Total quantity, in base-token smallest units, across all resting
+    // orders at this price.
     quantity : nat;
 };
 
@@ -169,11 +204,12 @@ type OrderRecord = record {
     owner : principal;
     /// Whether the order is a buy or a sell.
     side : Side;
-    /// Limit price in quote token smallest units per one whole base token, as originally placed.
+    /// Limit price as originally placed, in quote-token smallest units
+    /// per one whole base token (see top-of-file unit conventions).
     price : nat;
-    /// Quantity originally placed, in base token units.
+    /// Quantity originally placed, in base-token smallest units.
     quantity : nat;
-    /// Cumulative quantity filled so far, in base token units.
+    /// Cumulative quantity filled so far, in base-token smallest units.
     /// Remaining is `quantity − filled_quantity`.
     filled_quantity : nat;
     /// Current lifecycle state.
@@ -371,9 +407,14 @@ type AddTradingPairRequest = record {
     base : Token;
     // The quote token of the pair.
     quote : Token;
-    // Minimum price increment. Must be greater than zero.
+    // Minimum price increment, in quote-token smallest units per one whole
+    // base token (same scale as `price`; see top-of-file unit conventions).
+    // Must be greater than zero. Additionally, `tick_size × lot_size` must
+    // be a multiple of `10^base_decimals` so every fill settles to an exact
+    // integer quote amount.
     tick_size : nat;
-    // Minimum order quantity. Must be greater than zero.
+    // Minimum order quantity, in base-token smallest units (same scale as
+    // `quantity`). Must be greater than zero.
     lot_size : nat;
     // Maker fee rate in basis points (1 bps = 0.01 %). Must be in 0..=10_000.
     maker_fee_bps : nat16;
@@ -506,6 +547,14 @@ type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
 };
 
+// Event payload recording a halt status change. `book_ids` is null for a
+// global change and a list of order book ids for a per-pair change. `halted`
+// is the new status applied to the targeted scope.
+type SetHaltEvent = record {
+    book_ids : opt vec nat64;
+    halted : bool;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -554,7 +603,7 @@ type EventType = variant {
     Settling : SettlingEvent;
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
-    SetGlobalHalt : bool;
+    SetHalt : SetHaltEvent;
 };
 
 // A canister event with a timestamp.
@@ -661,15 +710,20 @@ service : (OisyTradeArg) -> {
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
-    // Globally halt trading: reject all new orders and stop the matching
-    // engine. Cancels and withdrawals remain open. Only callable by a
-    // controller. Idempotent — halting an already-halted DEX succeeds.
-    halt_trading : () -> (UnauthorizedResult);
+    // Halt trading: a halted pair rejects new orders and is skipped by the
+    // matching engine, while cancels and withdrawals remain open. `null` halts
+    // the whole DEX; a list of pairs halts only those pairs. Only callable by a
+    // controller. Idempotent — halting already-halted scope succeeds. Traps if
+    // any listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
+    halt_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
-    // Resume trading after a global halt: re-enable new orders and matching.
-    // Only callable by a controller. Idempotent — resuming an already-active
-    // DEX succeeds.
-    resume_trading : () -> (UnauthorizedResult);
+    // Resume trading. `null` clears the global halt and every per-pair halt; a
+    // list of pairs resumes only those pairs. Only callable by a controller.
+    // Idempotent — resuming an already-active scope succeeds. Traps if any
+    // listed pair is not registered, or if the list contains more than 100
+    // trading pairs.
+    resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.

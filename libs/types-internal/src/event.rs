@@ -20,7 +20,7 @@ pub enum EventType {
     Settling(SettlingEvent),
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
-    SetGlobalHalt(bool),
+    SetHalt(SetHaltEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -65,6 +65,12 @@ pub struct AddLimitOrderEvent {
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct CancelLimitOrderEvent {
     pub order_id: OrderId,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct SetHaltEvent {
+    pub book_ids: Option<Vec<u64>>,
+    pub halted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

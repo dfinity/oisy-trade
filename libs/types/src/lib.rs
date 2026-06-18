@@ -83,7 +83,7 @@ pub enum AddLimitOrderError {
         /// The configured maximum notional, if any.
         max: Option<Nat>,
     },
-    /// Trading is globally halted; no new orders are accepted.
+    /// Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted,
 }
 
@@ -130,6 +130,10 @@ pub struct TradingPairInfo {
     pub tick_size: Nat,
     /// Minimum order quantity.
     pub lot_size: Nat,
+    /// Maker fee rate, in basis points.
+    pub maker_fee_bps: u16,
+    /// Taker fee rate, in basis points.
+    pub taker_fee_bps: u16,
     /// Minimum order notional in quote token smallest units.
     pub min_notional: Nat,
     /// Maximum order notional in quote token smallest units, if any.

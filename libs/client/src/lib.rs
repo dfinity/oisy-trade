@@ -227,18 +227,26 @@ impl<R: Runtime> OisyTradeClient<R> {
             .unwrap()
     }
 
-    /// Globally halt trading on the DEX canister. Only callable by a controller.
-    pub async fn halt_trading(&self) -> Result<(), UnauthorizedError> {
+    /// Halt trading. `None` halts the whole DEX; `Some(pairs)` halts only those
+    /// pairs. Only callable by a controller.
+    pub async fn halt_trading(
+        &self,
+        pairs: Option<Vec<TradingPair>>,
+    ) -> Result<(), UnauthorizedError> {
         self.runtime
-            .call(self.oisy_trade_canister, "halt_trading", (), 0)
+            .call(self.oisy_trade_canister, "halt_trading", (pairs,), 0)
             .await
             .unwrap()
     }
 
-    /// Resume trading after a global halt. Only callable by a controller.
-    pub async fn resume_trading(&self) -> Result<(), UnauthorizedError> {
+    /// Resume trading. `None` clears the global halt and all per-pair halts;
+    /// `Some(pairs)` resumes only those pairs. Only callable by a controller.
+    pub async fn resume_trading(
+        &self,
+        pairs: Option<Vec<TradingPair>>,
+    ) -> Result<(), UnauthorizedError> {
         self.runtime
-            .call(self.oisy_trade_canister, "resume_trading", (), 0)
+            .call(self.oisy_trade_canister, "resume_trading", (pairs,), 0)
             .await
             .unwrap()
     }

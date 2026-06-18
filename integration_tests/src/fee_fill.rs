@@ -91,10 +91,21 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
         .unwrap();
     setup.env().tick().await;
 
+    let pair = setup.trading_pair();
+    let pair_info = setup
+        .oisy_trade_client_with_caller(Principal::anonymous())
+        .get_trading_pairs()
+        .await
+        .into_iter()
+        .find(|info| info.base.id.ledger_id == pair.base && info.quote.id.ledger_id == pair.quote)
+        .expect("trading pair must be listed");
+    let maker_fee_bps = u64::from(pair_info.maker_fee_bps);
+    let taker_fee_bps = u64::from(pair_info.taker_fee_bps);
+
     // Buyer crossed → base (CKSOL) fee at the taker rate, quote (CKBTC) at
     // the maker rate (`mul_ceil`, matching production).
-    let base_fee_raw = (qty * 23).div_ceil(10_000);
-    let quote_fee_raw = (notional * 10).div_ceil(10_000);
+    let base_fee_raw = (qty * taker_fee_bps).div_ceil(10_000);
+    let quote_fee_raw = (notional * maker_fee_bps).div_ceil(10_000);
 
     let outcome = FeeFillOutcome {
         base,

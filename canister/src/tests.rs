@@ -1,11 +1,12 @@
 mod add_trading_pair {
+    use crate::test_fixtures::tokens::SupportedTokens;
     use crate::test_fixtures::{
         ckbtc_token_id, icp_ckbtc_trading_pair, icp_token_id, init_state_with_order_book,
         mocks::{MockRuntime, mock_runtime_for},
         trading_pair_request,
     };
     use crate::{add_trading_pair, state};
-    use candid::Principal;
+    use candid::{Nat, Principal};
     use oisy_trade_types::{AddTradingPairError, TokenId, TokenMetadata};
 
     #[test]
@@ -287,37 +288,61 @@ mod add_trading_pair {
         init_state_with_order_book();
         let mut runtime = mock_runtime_for(Principal::anonymous());
         runtime.expect_is_controller().return_const(true);
-        // (pair, base_decimals, quote_decimals, tick_size, lot_size)
+        // Shared quote template; `base` is a placeholder that every pair below
+        // overrides via `..ckusdt_quote.clone()`.
+        let ckusdt_quote = oisy_trade_types::AddTradingPairRequest {
+            base: SupportedTokens::CKUSDT.token(),
+            quote: SupportedTokens::CKUSDT.token(),
+            tick_size: Nat::default(),
+            lot_size: Nat::default(),
+            maker_fee_bps: 0,
+            taker_fee_bps: 20,
+            min_notional: Nat::from(5_000_000_u64),
+            max_notional: Some(Nat::from(9_000_000_000_000_u64)),
+        };
+        // Deliberately all ckUSDT-quoted (quote_decimals = 6) — this mirrors the
+        // real launch basket rather than maximizing quote-decimal variety.
         let pairs = [
-            ("ckBTC/ckUSDT", 8u8, 6u8, 10_000u64, 10_000u64),
-            ("ckETH/ckUSDT", 18, 6, 10_000, 100_000_000_000_000),
-            ("ckUSDC/ckUSDT", 6, 6, 100, 10_000),
-            ("ICP/ckUSDT", 8, 6, 1_000, 1_000_000),
-            ("VCHF/ckUSDT", 8, 6, 100, 1_000_000),
-            ("ICP/ckBTC", 8, 8, 10, 10_000_000),
-            ("ICP/VCHF", 8, 8, 100_000, 1_000_000),
+            // ICP/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::ICP.token(),
+                tick_size: Nat::from(1_000_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckBTC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKBTC.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(10_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // VCHF/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::VCHF.token(),
+                tick_size: Nat::from(100_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckUSDC/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKUSDC.token(),
+                tick_size: Nat::from(10_u32),
+                lot_size: Nat::from(1_000_000_u32),
+                ..ckusdt_quote.clone()
+            },
+            // ckETH/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKETH.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(100_000_000_000_000_u64),
+                ..ckusdt_quote.clone()
+            },
         ];
-        for (i, &(pair, base_decimals, quote_decimals, tick_size, lot_size)) in
-            pairs.iter().enumerate()
-        {
-            let base = TokenId {
-                ledger_id: Principal::from_slice(&[0x20, i as u8]),
-            };
-            let quote = TokenId {
-                ledger_id: Principal::from_slice(&[0x21, i as u8]),
-            };
-            let result = add_trading_pair(
-                pair_request(
-                    base,
-                    base_decimals,
-                    quote,
-                    quote_decimals,
-                    tick_size,
-                    lot_size,
-                ),
-                &runtime,
-            );
-            assert_eq!(result, Ok(()), "{pair} should be accepted");
+
+        for pair in pairs {
+            let result = add_trading_pair(pair.clone(), &runtime);
+            assert_eq!(result, Ok(()), "{pair:?} should be accepted");
         }
     }
 
@@ -1820,13 +1845,17 @@ mod get_my_orders {
 
 mod get_trading_pairs {
     use crate::get_trading_pairs;
+    use crate::order::{BasisPoint, FeeRates};
     use crate::state::init_state;
     use crate::test_fixtures;
     use crate::test_fixtures::{
         LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_token_id, icp_token_id,
-        init_state_with_order_book,
+        init_state_with_order_book_and_fees,
     };
     use oisy_trade_types::TradingPairInfo;
+
+    const MAKER_FEE_BPS: u16 = 7;
+    const TAKER_FEE_BPS: u16 = 23;
 
     #[test]
     fn should_return_empty_when_no_trading_pairs() {
@@ -1837,7 +1866,10 @@ mod get_trading_pairs {
 
     #[test]
     fn should_return_listed_trading_pairs() {
-        init_state_with_order_book();
+        init_state_with_order_book_and_fees(FeeRates {
+            maker: BasisPoint::new(MAKER_FEE_BPS).unwrap(),
+            taker: BasisPoint::new(TAKER_FEE_BPS).unwrap(),
+        });
 
         let pairs = get_trading_pairs();
 
@@ -1861,6 +1893,8 @@ mod get_trading_pairs {
                 status: oisy_trade_types::TradingStatus::Trading,
                 tick_size: candid::Nat::from(TICK_SIZE.get()),
                 lot_size: LOT_SIZE.into(),
+                maker_fee_bps: MAKER_FEE_BPS,
+                taker_fee_bps: TAKER_FEE_BPS,
                 min_notional: MIN_NOTIONAL.into(),
                 max_notional: Some(MAX_NOTIONAL.into()),
             }]
@@ -1959,5 +1993,36 @@ mod process_pending_orders {
         let status = crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
         assert_eq!(status, ExecutionStatus::AlreadyRunning);
+    }
+}
+
+mod set_halt {
+    use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
+    use crate::test_fixtures::{ckbtc_token_id, icp_token_id, init_state_with_order_book};
+    use crate::{MAX_HALT_BOOKS, halt_trading, resume_trading};
+    use candid::Principal;
+    use oisy_trade_types::TradingPair;
+
+    #[test]
+    fn should_accept_max_halt_books_pairs() {
+        init_state_with_order_book();
+        let runtime = controller_runtime();
+        let pairs = vec![registered_pair(); MAX_HALT_BOOKS];
+
+        assert_eq!(halt_trading(Some(pairs.clone()), &runtime), Ok(()));
+        assert_eq!(resume_trading(Some(pairs), &runtime), Ok(()));
+    }
+
+    fn registered_pair() -> TradingPair {
+        TradingPair {
+            base: *icp_token_id().as_principal(),
+            quote: *ckbtc_token_id().as_principal(),
+        }
+    }
+
+    fn controller_runtime() -> MockRuntime {
+        let mut mock = mock_runtime_for(Principal::anonymous());
+        mock.expect_is_controller().return_const(true);
+        mock
     }
 }

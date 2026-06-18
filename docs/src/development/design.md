@@ -2,15 +2,6 @@
 
 High-level design for OISY TRADE, an order-book DEX running entirely onchain as an Internet Computer canister.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Trading](#trading)
-- [Balances](#balances)
-- [Architecture](#architecture)
-- [Monitoring](#monitoring)
-- [Potential Additional Features](#potential-additional-features)
-
 ## Overview
 
 The OISY TRADE canister implements a central limit order book (CLOB) that matches buy and sell orders for ICRC-2 token pairs. All order management, matching, and settlement happen onchain within a **single** canister.
@@ -79,7 +70,7 @@ This separation means the matching engine never waits on async inter-canister ca
 
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| **Admin** (controller)     | Add/remove pairs, set fees, halt trading, upgrade canister, withdraw collected fees |
+| **Admin** (controller)     | Add pairs (fees set at pair creation), halt/resume trading, upgrade canister |
 | **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance |
 
 - No allowlisting: any principal can trade on any active pair.
@@ -108,7 +99,7 @@ For that division to be exact for every order and fill (no rounding, no dust), a
 
 #### Pair Management
 
-- An admin (the canister controller) can add or remove trading pairs.
+- An admin (the canister controller) can add trading pairs.
 - Each pair has configurable parameters:
   - **Tick size**: minimum price increment.
   - **Lot size**: minimum order quantity.
@@ -117,7 +108,7 @@ For that division to be exact for every order and fill (no rounding, no dust), a
     must be greater than zero.
   - **Max notional**: optional maximum order value (same units). Rejects fat-finger orders and
     caps single-order impact. When set, must be greater than or equal to the min notional.
-  - **Status**: active, halted, or delisted.
+  - **Status**: active or halted.
 - Tick, lot, min notional, and max notional are enforced independently: an order may fail any
   one of them, and none is implied by another.
 - Orders can only be placed on active pairs.
@@ -143,7 +134,7 @@ Since deposits are a separate step, the user's balance is already available when
                |    Open     |  <-- resting in the book (unfilled remainder)
                +--+----------+
                ^       |      \
-               |     filled   cancel_order
+               |     filled   cancel_limit_order
           partial      |          |
           fill         v          v
                |     +-----------+  +------------+
@@ -154,7 +145,7 @@ Since deposits are a separate step, the user's balance is already available when
 1. **Pending**: The order is submitted. The required funds are debited from the user's available balance (quote tokens for buys, base tokens for sells). The order is placed in a queue and an order ID is returned immediately. If the user has insufficient balance, the order is rejected.
 2. **Open**: The timer-driven matching engine dequeues the order and matches it against the opposite side of the book. If the order is fully filled during this initial matching, it transitions directly to `Filled` without ever resting in the book. If only partially filled, the filled portion is settled immediately (proceeds credited to the user's available balance) and the remaining quantity rests in the book at the specified price level, where it can be matched against future incoming orders.
 3. **Filled**: The order has been fully matched (either immediately or after resting in the book). Proceeds from the final fill are credited to the user's available balance.
-4. **Canceled**: The user canceled the order (or it was removed due to pair delisting). Reserved tokens are returned to the user's available balance.
+4. **Canceled**: The user canceled the order via `cancel_limit_order`. Reserved tokens are returned to the user's available balance.
 
 ### Order Book Data Structure
 
@@ -257,11 +248,10 @@ Both tokens are assumed to have 8 decimals, so amounts are shown in base units (
 
 Both fees are rounded up in the protocol's favor.
 
-#### Collection and withdrawal
+#### Collection
 
-Collected fees accumulate per token into an internal canister-owned balance, one entry per token.
-The controller can withdraw any amount from the per-token balance to a recipient principal via an admin endpoint;
-the recipient then uses the standard withdrawal flow to pull the funds out of the canister.
+Collected fees accumulate per token into an internal canister-owned balance, one entry per token,
+exposed read-only through the `get_fee_balances` query. No fee-withdrawal endpoint is implemented yet.
 
 #### Storage
 
@@ -335,7 +325,7 @@ Fits within the 4 GiB heap limit even at 10 tokens/user. The CBOR snapshot at 5 
 
 ## Order History
 
-Every order submitted to the OISY TRADE is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
+Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; keys are insert-only (one record per submission) while each record's `status` is updated in place as the order transitions. Each `OrderRecord` captures:
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
@@ -414,8 +404,8 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 **Query calls** (read-only):
 
 - **`get_my_orders(opt GetMyOrdersArgs)`**: returns the caller's orders, each with its current status. The argument is optional; when absent it defaults to the first page (newest first, `length = MAX_ORDERS_PER_RESPONSE`). When present, `GetMyOrdersArgs.filter` selects the mode: `ById` performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
-- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with the OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
-- **`list_supported_tokens()`**: returns the full list of tokens registered with the OISY TRADE. Time: O(n) over the registered tokens.
+- **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
+- **`list_supported_tokens()`**: returns the full list of tokens registered with OISY TRADE. Time: O(n) over the registered tokens.
 
 ### Expected Load
 
@@ -426,7 +416,7 @@ Based on Binance ICP/USDT data (the most active ICP pair), two numbers drive the
 
 Peak load is the binding constraint. The timer-driven matching engine naturally absorbs bursts by queuing orders and processing them in batches — the exact mechanism to sustain peak load will be addressed in DEFI-2724.
 
-See [`docs/trading_data/README.md`](trading_data/README.md) for the full analysis.
+See the [Trading Data Analysis](./trading-data.md) for the full analysis.
 
 ### Upgrade Strategy
 
@@ -500,12 +490,14 @@ At-a-glance viability of each placement per data structure (🟢 = viable choice
 
 ### Metrics
 
-The canister exposes basic metrics via a query endpoint:
+The canister exposes Prometheus-format metrics over its `/metrics` HTTP endpoint:
 
-- Number of open orders per pair.
-- Total volume traded per pair.
-- Current best bid/ask per pair.
-- Canister cycle balance.
+- Pending and resting order counts per pair.
+- Best bid and ask per pair.
+- Number of registered trading pairs.
+- Per-token accrued fee balances.
+- Total event-log entry count.
+- Cycle balance, and stable and heap memory size.
 
 ## Potential Additional Features
 

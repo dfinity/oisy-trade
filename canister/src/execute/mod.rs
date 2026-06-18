@@ -125,10 +125,7 @@ impl Executor {
             let Some(event) = state.take_next_pending_settling_event() else {
                 break;
             };
-            let permit = state
-                .permissions()
-                .permit_settling()
-                .expect("BUG: settling is never gated in this build");
+            let permit = state.permissions().permit_settling();
             audit::process_event(state, EventType::Settling(event), permit.into(), runtime);
         }
     }

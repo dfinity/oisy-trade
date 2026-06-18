@@ -181,7 +181,6 @@ fn to_price_level((price, quantity): (order::Price, order::Quantity)) -> PriceLe
 
 pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
     state::with_state(|s| {
-        let global_halt = s.permissions().trading_halted();
         s.trading_pairs()
             .iter()
             .map(|(pair, book_id)| {
@@ -194,9 +193,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                 let quote_meta = s
                     .token_metadata(&pair.quote)
                     .expect("BUG: trading pair registered but quote token metadata missing");
-                // Halted when the global switch is on; a per-pair switch will
-                // be OR-ed in here.
-                let halted = global_halt;
+                let halted = s.permissions().is_halted(book_id);
                 TradingPairInfo {
                     base: oisy_trade_types::Token {
                         id: oisy_trade_types::TokenId::from(pair.base),
@@ -213,6 +210,8 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
                     },
                     tick_size: candid::Nat::from(book.tick_size()),
                     lot_size: candid::Nat::from(book.lot_size()),
+                    maker_fee_bps: book.fee_rates().maker.get(),
+                    taker_fee_bps: book.fee_rates().taker.get(),
                     min_notional: book.min_notional().into(),
                     max_notional: book.max_notional().map(Into::into),
                 }
@@ -248,8 +247,7 @@ pub async fn deposit(
         return Err(DepositError::AmountExceedsMaximum);
     }
 
-    let pre = state::with_state(|s| s.permissions().permit_deposit(caller))
-        .expect("BUG: deposit is never gated in this build");
+    let pre = state::with_state(|s| s.permissions().permit_deposit(caller));
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -257,7 +255,7 @@ pub async fn deposit(
         token: order::TokenId::from(token_id),
         amount,
     };
-    let post = state::with_state(|s| pre.reconcile(s.permissions()));
+    let post = pre.reconcile();
     state::with_state_mut(|s| {
         state::audit::process_event(
             s,
@@ -302,8 +300,7 @@ pub async fn withdraw(
         }
     })?;
 
-    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller))
-        .expect("BUG: withdraw is never gated in this build");
+    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller));
 
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
@@ -329,7 +326,7 @@ pub async fn withdraw(
                 token: order::TokenId::from(token_id),
                 amount,
             };
-            let post = state::with_state(|s| pre.reconcile(s.permissions()));
+            let post = pre.reconcile();
             state::audit::record_event(
                 state::event::EventType::Withdraw(event),
                 post.into(),
@@ -523,10 +520,7 @@ pub fn add_trading_pair(
             min_notional,
             max_notional,
         };
-        let permit = s
-            .permissions()
-            .permit_add_trading_pair()
-            .expect("BUG: add_trading_pair is never gated in this build");
+        let permit = s.permissions().permit_add_trading_pair();
         state::audit::process_event(
             s,
             state::event::EventType::AddTradingPair(event),
@@ -537,26 +531,57 @@ pub fn add_trading_pair(
     })
 }
 
-pub fn halt_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
-    set_global_halt(true, runtime)
+/// Maximum number of trading pairs a single `halt_trading` / `resume_trading`
+/// call may carry, bounding the size of the `SetHalt` audit event it records.
+pub const MAX_HALT_BOOKS: usize = 100;
+
+pub fn halt_trading(
+    pairs: Option<Vec<TradingPair>>,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    set_halt(pairs, true, runtime)
 }
 
-pub fn resume_trading(runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
-    set_global_halt(false, runtime)
+pub fn resume_trading(
+    pairs: Option<Vec<TradingPair>>,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
+    set_halt(pairs, false, runtime)
 }
 
-fn set_global_halt(halted: bool, runtime: &impl Runtime) -> Result<(), UnauthorizedError> {
+fn set_halt(
+    pairs: Option<Vec<TradingPair>>,
+    halted: bool,
+    runtime: &impl Runtime,
+) -> Result<(), UnauthorizedError> {
     if !runtime.is_controller(&runtime.msg_caller()) {
         return Err(UnauthorizedError::NotController);
     }
     state::with_state_mut(|s| {
-        let permit = s
-            .permissions()
-            .permit_admin()
-            .expect("BUG: admin is never gated in this build");
+        let book_ids = pairs.map(|pairs| {
+            if pairs.len() > MAX_HALT_BOOKS {
+                ic_cdk::trap(format!(
+                    "too many trading pairs: {} (max {MAX_HALT_BOOKS})",
+                    pairs.len()
+                ));
+            }
+            pairs
+                .into_iter()
+                .map(|pair| {
+                    let internal_pair = order::TradingPair::from(pair);
+                    *s.trading_pairs()
+                        .get_book_id(&internal_pair)
+                        .unwrap_or_else(|| {
+                            ic_cdk::trap(format!("unknown trading pair: {internal_pair:?}"))
+                        })
+                })
+                .collect()
+        });
+        let permit = s.permissions().permit_admin();
+        let event = state::event::SetHaltEvent { book_ids, halted };
         state::audit::process_event(
             s,
-            state::event::EventType::SetGlobalHalt(halted),
+            state::event::EventType::SetHalt(event),
             permit.into(),
             runtime,
         );

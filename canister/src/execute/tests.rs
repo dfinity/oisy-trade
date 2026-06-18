@@ -113,7 +113,7 @@ fn should_be_a_no_op_when_globally_halted() {
     let buy_id = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
     let sell_id = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
 
-    state.permissions_mut().set_trading_halted(true);
+    state.permissions_mut().halt_trading_globally();
 
     let status = EXECUTOR.run_once(&mut state, &runtime);
 
@@ -124,7 +124,7 @@ fn should_be_a_no_op_when_globally_halted() {
     assert!(state.has_pending_orders());
 
     // Resuming lets the same orders fill.
-    state.permissions_mut().set_trading_halted(false);
+    state.permissions_mut().resume_trading_globally();
     let status = EXECUTOR.run_once(&mut state, &runtime);
     assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Filled));
@@ -161,7 +161,7 @@ fn should_drain_leftover_settling_events_under_global_halt() {
     assert!(state.has_pending_settling_events());
     assert!(!state.has_pending_orders());
 
-    state.permissions_mut().set_trading_halted(true);
+    state.permissions_mut().halt_trading_globally();
 
     set_unlimited_policy(&mut state);
     let status = EXECUTOR.run_once(&mut state, &runtime());
@@ -170,6 +170,86 @@ fn should_drain_leftover_settling_events_under_global_halt() {
     assert_eq!(status, ExecutionStatus::Complete);
     assert!(!state.has_pending_settling_events());
     assert_eq!(state.get_balance(&BUYER, &pair.base).free(), &lot.into());
+}
+
+/// A per-pair halt must skip only the halted book: its crossable orders stay
+/// pending while every other book keeps matching. Because the halted book's
+/// pending orders are not matchable, the executor reports `Complete` rather
+/// than busy-spinning on them; unhalting lets the book fill.
+#[test]
+fn should_skip_halted_book_while_matching_others() {
+    let mut state = setup_two_books();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair_a = icp_ckbtc_trading_pair();
+    let pair_b = pair_b();
+    let lot = u64::from(LOT_SIZE);
+
+    // A crossable pair on each book.
+    let buy_a = test_fixtures::place_order(&mut state, BUYER, &pair_a, Side::Buy, 100, lot);
+    let sell_a = test_fixtures::place_order(&mut state, SELLER, &pair_a, Side::Sell, 100, lot);
+    let buy_b = test_fixtures::place_order(&mut state, BUYER, &pair_b, Side::Buy, 100, lot);
+    let sell_b = test_fixtures::place_order(&mut state, SELLER, &pair_b, Side::Sell, 100, lot);
+
+    // Halt book A only.
+    state.permissions_mut().halt_trading(OrderBookId::ZERO);
+
+    // The halted book keeps its pending orders, but they are not matchable,
+    // so once book B drains the run reports `Complete` — no matching happens
+    // on the halted book and the matching timer can stop instead of spinning.
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+
+    // Book A's orders are left untouched; book B's cross fills.
+    assert_eq!(status_of(&state, buy_a), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell_a), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, buy_b), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_b), Some(OrderStatus::Filled));
+
+    // Unhalting lets book A's cross fill.
+    state.permissions_mut().resume_trading(OrderBookId::ZERO);
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(status_of(&state, buy_a), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell_a), Some(OrderStatus::Filled));
+}
+
+/// Drives the actual `drive_matching` reschedule decision (loop while
+/// `run_once` reports `MoreWork`) rather than a single direct call. While a
+/// pair is halted and only its book holds pending orders, the loop must
+/// terminate at `Complete` with no forward progress — otherwise the
+/// zero-delay self-reschedule chain busy-spins for the whole halt. After
+/// unhalting, a fresh drive must fill the previously-halted book's resting
+/// cross.
+#[test]
+fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
+    let mut state = setup_one_book();
+    set_chunk_policy(&mut state, 1);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+
+    let buy = test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100, lot);
+    let sell = test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 100, lot);
+
+    // Halt the only book before any matching runs.
+    state.permissions_mut().halt_trading(OrderBookId::ZERO);
+
+    // Mirror `drive_matching`: a halted book reports no matchable work, so the
+    // run reaches `Complete` instead of self-rescheduling — a busy-spin would
+    // never reach `Complete`.
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert_eq!(status_of(&state, buy), Some(OrderStatus::Pending));
+    assert_eq!(status_of(&state, sell), Some(OrderStatus::Pending));
+
+    // Unhalt and drive again: the resting cross now fills.
+    state.permissions_mut().resume_trading(OrderBookId::ZERO);
+    while state.has_pending_orders() || state.has_pending_settling_events() {
+        EXECUTOR.run_once(&mut state, &runtime);
+    }
+    assert_eq!(status_of(&state, buy), Some(OrderStatus::Filled));
+    assert_eq!(status_of(&state, sell), Some(OrderStatus::Filled));
 }
 
 /// Driving the same workload through a single unlimited [`Executor`] run and

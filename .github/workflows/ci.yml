@@ -23,7 +23,7 @@ jobs:
       TITLE: ${{ github.event.pull_request.title }}
     steps:
       - run: |
-          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?\!?\: ]]; then
+          if [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?\!?\: ]]; then
               echo pass
           else
               echo "PR title does not match conventions"

@@ -1,6 +1,6 @@
 use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
 use crate::order::{
-    FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
+    BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
 };
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
@@ -14,6 +14,8 @@ use ic_stable_structures::VectorMemory;
 use scraper::{Html, Selector};
 
 const TEST_CANISTER: Principal = Principal::from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+const MAKER_FEE_BPS: u16 = 7;
+const TAKER_FEE_BPS: u16 = 23;
 
 #[test]
 fn should_render_metadata() {
@@ -104,6 +106,27 @@ fn should_render_per_pair_metadata() {
     let best_ask = 110 * PRICE_SCALE;
     assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
     assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
+    // Pair each <dt> label with its <dd> value so the assertion checks the
+    // value wiring (and maker/taker are not swapped) without depending on
+    // whitespace between the tags.
+    let dts = column(&dom, "section.pair dl dt");
+    let dds = column(&dom, "section.pair dl dd");
+    let value_for = |label: &str| {
+        dts.iter()
+            .zip(&dds)
+            .find(|(dt, _)| dt.trim() == label)
+            .map(|(_, dd)| dd.trim().to_string())
+    };
+    let expected_maker = format!("{MAKER_FEE_BPS} bps");
+    let expected_taker = format!("{TAKER_FEE_BPS} bps");
+    assert_eq!(
+        value_for("Maker fee").as_deref(),
+        Some(expected_maker.as_str())
+    );
+    assert_eq!(
+        value_for("Taker fee").as_deref(),
+        Some(expected_taker.as_str())
+    );
     assert!(
         dl_text.contains(&best_bid.to_string()),
         "best bid {best_bid} in: {dl_text}"
@@ -200,7 +223,10 @@ fn record_pair(state: &mut State<VectorMemory, VectorMemory>) {
         LOT_SIZE,
         MIN_NOTIONAL,
         Some(MAX_NOTIONAL),
-        FeeRates::default(),
+        FeeRates {
+            maker: BasisPoint::new(MAKER_FEE_BPS).unwrap(),
+            taker: BasisPoint::new(TAKER_FEE_BPS).unwrap(),
+        },
     );
 }
 
