@@ -38,7 +38,7 @@ Users speak human ("0.01 SOL"); OISY TRADE speaks base units (`10^decimals`). Al
 
 **"What pairs can I trade?"** → `get_trading_pairs`; summarize in human terms ("ckDevnetSOL vs ckSepoliaETH, min order 0.001 SOL, price tick 0.00001 ETH/SOL").
 
-**"Sell 0.01 SOL for ckSepoliaETH at market."** → (1) confirm the pair is listed; (2) convert 0.01 SOL to `10_000_000` base units; (3) verify `quantity` is a multiple of `lot_size`; (4) pick a price (ask if unclear — there's no `get_orderbook`); (5) check the seller's on-OISY-TRADE free base ≥ `quantity`; (6) place the order as the seller identity; (7) poll `get_my_orders` (with the `ById` filter for that order id) for `Filled`.
+**"Sell 0.01 SOL for ckSepoliaETH at market."** → (1) confirm the pair is listed; (2) convert 0.01 SOL to `10_000_000` base units; (3) verify `quantity` is a multiple of `lot_size`; (4) pick a limit price — consult `get_order_book_ticker` (best bid/ask) or `get_order_book_depth` (aggregated levels); OISY TRADE is limit-only, so translate "at market" into a marketable limit price (ask if unclear); (5) check the seller's on-OISY-TRADE free base ≥ `quantity`; (6) place the order as the seller identity; (7) poll `get_my_orders` (with the `ById` filter for that order id) for `Filled`.
 
 **On any error** → translate the variant name into plain language plus a concrete next step (e.g. `InsufficientAllowance { allowance }` → "your allowance is X but you need X + fee — let me re-approve").
 
