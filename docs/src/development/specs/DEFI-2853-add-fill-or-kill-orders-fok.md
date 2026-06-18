@@ -18,9 +18,9 @@ what the Oisy integration needs.
 `time_in_force` value on the existing limit order:
 
 - **GTC** (current default): rests until filled or canceled; partial fills allowed.
-- **FOK** (new): the entire quantity must fill immediately against resting liquidity at the
-  order's price or better, otherwise the whole order is killed with **zero** execution. No
-  resting, no partial fill.
+- **FOK** (new): when the matching engine executes the order, the entire quantity must fill
+  against resting liquidity at the order's price or better, otherwise the whole order is killed
+  with **zero** execution. No resting, no partial fill.
 
 FOK is the matching-engine half of the swap story; the value to the client is a terminal
 "filled or killed" outcome rather than a resting order it has to manage.
@@ -48,9 +48,11 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
   the maker rate, the incoming (crossing) side pays the taker rate, exactly as today.
 - **R8 — `Expired` is distinct from `Canceled`.** `OrderStatus` gains a new **unit** variant
   `Expired`, surfaced in the public Candid type. `Canceled` keeps its current meaning —
-  user-initiated termination (`cancel_limit_order`, admin sweep) — and `Expired` is reserved
-  for system-initiated FOK kills. A client can distinguish "I changed my mind" (`Canceled`)
-  from "the engine couldn't honor my FOK" (`Expired`).
+  user-initiated termination (`cancel_limit_order`, admin sweep) — and `Expired` is reserved for
+  system-initiated, time-in-force-driven terminations. This ticket produces exactly one such
+  case (a FOK that cannot fully fill); a future IOC would terminate as `Expired` too. A client
+  can distinguish "I changed my mind" (`Canceled`) from "the engine couldn't honor my
+  time-in-force" (`Expired`).
 - **R9 — TIF is durable and observable.** An order's `time_in_force` is recorded on its order
   record, surfaced on `OrderRecord` in the query API, and round-trips through the state
   snapshot and event-log replay. The matching engine can always determine an order's TIF when
@@ -68,9 +70,10 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
 ## Non-goals
 
 - **IOC (Immediate-Or-Cancel).** Conceptually the sibling of FOK (same `TimeInForce` enum, same
-  always-taker fee, same `Expired` terminal state) but it *does* allow partial fill of the
-  immediately-available quantity. Deferred to a follow-up; it should reuse whatever
-  atomic/synchronous-matching infrastructure FOK introduces.
+  always-taker fee, same `Expired` terminal state — see R8) but it *does* allow partial fill of
+  the available quantity. Deferred to a follow-up; it reuses the plan/execute matching this
+  ticket introduces — `execute(order, require_full = false)` that cancels the remainder instead
+  of resting it.
 - **`LIMIT_MAKER` / post-only.** The opposite end of the TIF spectrum (reject if it would
   cross). Separate scope.
 - **Self-Trade Prevention and `EXPIRED_IN_MATCH`.** STP is not in scope, so there is no distinct
@@ -195,8 +198,10 @@ Refactor `match_order` into a read-only **plan** and a mutating **apply**, joine
   re-acquire the level cursor only when `maker_price` changes, so cost stays `O(L log p + f)`,
   not `O(f log p)`), reduce the taker, push the `Fill`, and on `maker_emptied` pop the maker,
   drop its `resting_orders` index entry, insert into `filled_orders`, and remove the level if its
-  queue empties. A `debug_assert_eq!(front.id(), planned.maker_seq)` guards plan/apply
-  divergence.
+  queue empties. An **always-on** check (`expect("BUG: …")` / `assert_eq!`, matching the
+  codebase convention — *not* `debug_assert!`, which the release canister compiles out, per the
+  DEFI-2852 invariant convention) asserts the maker at the level front matches
+  `planned.maker_seq`, trapping on any plan/apply divergence rather than corrupting the book.
 - **`execute(order, require_full) -> Execution`** — `let plan = plan_fills(..)`; if
   `require_full && !plan.fully_filled` return `Execution::Killed { seq }` *before* any mutation
   (R4, R5); else `apply_plan(..)` and, per the existing tail, return `Filled` when the remainder
@@ -265,8 +270,8 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 - `order/book.rs` tests:
   - **GTC regression / plan==apply:** a property test over arbitrary books + orders asserts
     `execute(order, false)` produces the identical fills, resting state, and final book as the
-    pre-refactor `match_order` — i.e. the refactor is behavior-preserving (R2). The
-    `debug_assert` in `apply_plan` (plan agrees with the book at replay) holds throughout.
+    pre-refactor `match_order` — i.e. the refactor is behavior-preserving (R2). The always-on
+    plan/apply-divergence check in `apply_plan` holds throughout.
   - **Kill is mutation-free:** when `plan_fills(..).fully_filled` is `false`,
     `execute(order, true)` returns `Killed` and the book is byte-identical to its pre-call state
     — compared via the `OrderBookSnapshot` round-trip (no `PartialEq` on `OrderBook` needed)
@@ -307,22 +312,28 @@ cargo test -p oisy_trade_int_tests
 
 ### Delivery / PR sequence
 
-Split by reviewability; both PRs can proceed back-to-back.
+A stack of three PRs, each independently compilable/testable, that isolate the
+behavior-preserving refactor from the FOK feature itself.
 
-- **PR 1 (1/2) — data model + plan/execute matching.** `TimeInForce` enum; optional
-  `time_in_force` on `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal +
-  public + Candid); `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the
-  `plan_fills` / `apply_plan` / `execute(order, require_full)` refactor of `match_order` (with
-  the GTC-regression property test proving it behavior-preserving) and `expired_orders` on
-  `MatchingOutput`; the always-taker fee rule for FOK in `compute_balance_operations`. Covers
-  R1, R2, R6, R7, R8, R9, and the matching primitive behind R3/R4/R5/R10. At this point a FOK
-  request is *accepted and parsed* and the engine *can* fully-fill-or-kill, but nothing yet
-  routes FOK orders down the kill path end-to-end.
-  - *Acceptance:* R1, R2, R6, R7, R8, R9; unit coverage of the plan/execute primitive
-    (R3/R4/R5/R10).
-- **PR 2 (2/2) — execution wiring.** Drive the per-order `require_full` branch from
-  `time_in_force` in `process_pending_orders`, map `expired_orders` to `Pending → Expired` plus
-  reservation release in `record_matching_event`, update `design.md`, and add the end-to-end
+- **PR 1 (1/3) — plan/execute refactor (pure implementation detail).** Introduce `plan_fills`
+  and `apply_plan`, rewrite `match_order` as plan-then-apply, and add the always-on
+  plan/apply-divergence check. **No new public types, no behavior change, no new requirement** —
+  this is purely how matching is structured internally. The acceptance signal is that **every
+  existing order-book/matching test passes unmodified**; the only test addition is an optional
+  new property test asserting plan-then-apply equals the prior `match_order` output. The
+  `require_full` gate, `Killed` outcome, and `expired_orders` are *not* introduced here (they
+  have no caller yet and would be dead code) — they arrive with the FOK wiring in PR 3.
+  - *Acceptance:* existing matching tests green without edits (behavior preserved, R2).
+- **PR 2 (2/3) — FOK data model + fee rule.** `TimeInForce` enum; optional `time_in_force` on
+  `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal + public + Candid);
+  `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the always-taker fee
+  rule (`fee_rate_for_fill`), unit-tested directly. Types are defined and surfaced but FOK is
+  not yet routed through matching.
+  - *Acceptance:* R1, R2, R6, R7, R8, R9.
+- **PR 3 (3/3) — FOK matching gate + execution wiring.** Add the `require_full` gate to
+  `execute` (the `Killed` outcome) and `expired_orders` to `MatchingOutput`; drive `require_full`
+  from `time_in_force` in `process_pending_orders`; map `expired_orders` to `Pending → Expired`
+  plus reservation release in `record_matching_event`; update `design.md`; add unit + end-to-end
   integration tests.
   - *Acceptance:* R3, R4, R5, R10, R11, and the design-doc AC.
 
