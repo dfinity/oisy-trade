@@ -117,7 +117,7 @@ jobs:
             envsubst '$OISY_TRADE_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
             < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
 
-      - name: 'Publish GitHub release'
+      - name: 'Create draft GitHub release'
         if: steps.meta.outputs.has_canister == 'true'
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
