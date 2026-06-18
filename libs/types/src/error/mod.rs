@@ -10,11 +10,12 @@ use std::fmt;
 
 /// A disposition-tagged, forward-compatible user-facing error.
 ///
-/// Every fallible endpoint returns one of these: a [`kind`](Self::kind)
+/// The update-endpoint error types use this shape: a [`kind`](Self::kind)
 /// carrying the disposition (what the caller should do) plus an advisory,
 /// human-readable [`message`](Self::message). The disposition is the contract;
 /// clients branch on `kind` and the inner leaf, and **must not** parse
-/// `message`.
+/// `message`. The remaining error types are still flat variants, tracked for
+/// conversion to this shape (see their `// TODO(DEFI-2801)` markers).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct Error<Request, Temporary, Internal> {
     /// The disposition and, when available, the specific reason.
