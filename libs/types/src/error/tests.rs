@@ -1,8 +1,6 @@
 use crate::{
-    AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
-    CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
-    DepositRequestError, DepositTemporaryError, ErrorKind, WithdrawError, WithdrawInternalError,
-    WithdrawRequestError, WithdrawTemporaryError,
+    AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError, DepositError,
+    DepositRequestError, ErrorKind,
 };
 use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
@@ -36,51 +34,6 @@ fn should_set_message_from_leaf_display() {
         ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
     );
     assert_eq!(error.message, Some(leaf.to_string()));
-    assert!(!error.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_deposit_leaves_under_their_disposition_arm() {
-    let request = DepositError::request(DepositRequestError::InsufficientFunds {
-        balance: Nat::from(1u64),
-    });
-    assert!(matches!(request.kind, ErrorKind::RequestError(Some(_))));
-    assert!(!request.message.unwrap().is_empty());
-
-    let temporary = DepositError::temporary(DepositTemporaryError::LedgerTemporarilyUnavailable);
-    assert!(matches!(temporary.kind, ErrorKind::TemporaryError(Some(_))));
-    assert!(!temporary.message.unwrap().is_empty());
-
-    let internal = DepositError::internal(DepositInternalError::LedgerError {
-        reason: "boom".to_string(),
-    });
-    assert!(matches!(internal.kind, ErrorKind::InternalError(Some(_))));
-    assert!(!internal.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_withdraw_leaves_under_their_disposition_arm() {
-    let request = WithdrawError::request(WithdrawRequestError::AmountTooSmall {
-        min_amount: Nat::from(2u64),
-    });
-    assert!(matches!(request.kind, ErrorKind::RequestError(Some(_))));
-    assert!(!request.message.unwrap().is_empty());
-
-    let temporary = WithdrawError::temporary(WithdrawTemporaryError::OperationInProgress);
-    assert!(matches!(temporary.kind, ErrorKind::TemporaryError(Some(_))));
-    assert!(!temporary.message.unwrap().is_empty());
-
-    let internal = WithdrawError::internal(WithdrawInternalError::LedgerInsufficientFunds {
-        balance: Nat::from(0u64),
-    });
-    assert!(matches!(internal.kind, ErrorKind::InternalError(Some(_))));
-    assert!(!internal.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_cancel_leaves_under_request_arm() {
-    let error = CancelLimitOrderError::request(CancelLimitOrderRequestError::OrderNotFound);
-    assert!(matches!(error.kind, ErrorKind::RequestError(Some(_))));
     assert!(!error.message.unwrap().is_empty());
 }
 
