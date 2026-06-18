@@ -245,6 +245,16 @@ pub enum DepositInternalError {
         /// A human-readable description of the ledger error.
         reason: String,
     },
+    /// The ledger's response could not be Candid-decoded.
+    #[error("failed to decode the response from {ledger}.{method}: {reason}")]
+    CandidDecodeFailed {
+        /// The ledger canister that was called.
+        ledger: Principal,
+        /// The name of the method that was called.
+        method: String,
+        /// The reason the response could not be decoded.
+        reason: String,
+    },
 }
 
 /// Error returned by the withdraw endpoint.
@@ -315,5 +325,15 @@ pub enum WithdrawInternalError {
     LedgerInsufficientFunds {
         /// The balance the ledger reported for the OISY TRADE.
         balance: Nat,
+    },
+    /// The ledger's response could not be Candid-decoded.
+    #[error("failed to decode the response from {ledger}.{method}: {reason}")]
+    CandidDecodeFailed {
+        /// The ledger canister that was called.
+        ledger: Principal,
+        /// The name of the method that was called.
+        method: String,
+        /// The reason the response could not be decoded.
+        reason: String,
     },
 }

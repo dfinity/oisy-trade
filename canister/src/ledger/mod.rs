@@ -68,7 +68,7 @@ pub async fn deposit(
 
     let (result,): (Result<candid::Nat, TransferFromError>,) =
         response.candid_tuple().map_err(|e| {
-            DepositError::temporary(DepositTemporaryError::CallFailed {
+            DepositError::internal(DepositInternalError::CandidDecodeFailed {
                 ledger: token.ledger_id,
                 method: "icrc2_transfer_from".to_string(),
                 reason: e.to_string(),
@@ -189,8 +189,8 @@ async fn icrc1_transfer(
 
     let (result,): (Result<candid::Nat, icrc_ledger_types::icrc1::transfer::TransferError>,) =
         response.candid_tuple().map_err(|e| {
-            Icrc1TransferError::Other(WithdrawError::temporary(
-                WithdrawTemporaryError::CallFailed {
+            Icrc1TransferError::Other(WithdrawError::internal(
+                WithdrawInternalError::CandidDecodeFailed {
                     ledger: token.ledger_id,
                     method: "icrc1_transfer".to_string(),
                     reason: e.to_string(),
