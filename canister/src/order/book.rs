@@ -161,48 +161,78 @@ impl OrderBook {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::plan_fills");
         let mut fills = Vec::new();
-        let mut remaining = quantity;
-
-        let levels: Box<dyn Iterator<Item = (Price, &VecDeque<RestingOrder>)>> = match side {
-            Side::Buy => Box::new(
-                self.asks
-                    .iter()
-                    .take_while(|(ask_price, _)| **ask_price <= price)
-                    .map(|(ask_price, queue)| (*ask_price, queue)),
-            ),
-            Side::Sell => Box::new(
-                self.bids
-                    .iter()
-                    .take_while(|(Reverse(bid_price), _)| *bid_price >= price)
-                    .map(|(Reverse(bid_price), queue)| (*bid_price, queue)),
-            ),
+        let remaining = match side {
+            Side::Buy => self.plan_against_asks(price, quantity, &mut fills),
+            Side::Sell => self.plan_against_bids(price, quantity, &mut fills),
         };
-
-        'outer: for (maker_price, queue) in levels {
-            for resting in queue {
-                if remaining.is_zero() {
-                    break 'outer;
-                }
-                let fill_qty = *std::cmp::min(&remaining, resting.remaining_quantity());
-                remaining = remaining
-                    .checked_sub(fill_qty)
-                    .expect("BUG: fill_qty exceeds remaining");
-                let maker_emptied = fill_qty == *resting.remaining_quantity();
-                fills.push(PlannedFill {
-                    maker_seq: resting.id(),
-                    maker_price,
-                    fill_qty,
-                    maker_emptied,
-                });
-            }
-            if remaining.is_zero() {
-                break;
-            }
-        }
 
         FillPlan {
             fills,
             fully_filled: remaining.is_zero(),
+        }
+    }
+
+    /// Walk the ask side (ascending) for a buy taker, recording fills while the
+    /// ask price crosses (`ask_price <= price`). Returns the unfilled remainder.
+    /// Allocation-free until the first crossing maker is found.
+    fn plan_against_asks(
+        &self,
+        price: Price,
+        quantity: Quantity,
+        fills: &mut Vec<PlannedFill>,
+    ) -> Quantity {
+        let mut remaining = quantity;
+        for (&ask_price, queue) in &self.asks {
+            if ask_price > price || remaining.is_zero() {
+                break;
+            }
+            Self::plan_level(ask_price, queue, &mut remaining, fills);
+        }
+        remaining
+    }
+
+    /// Walk the bid side (descending) for a sell taker, recording fills while the
+    /// bid price crosses (`bid_price >= price`). Returns the unfilled remainder.
+    /// Allocation-free until the first crossing maker is found.
+    fn plan_against_bids(
+        &self,
+        price: Price,
+        quantity: Quantity,
+        fills: &mut Vec<PlannedFill>,
+    ) -> Quantity {
+        let mut remaining = quantity;
+        for (&Reverse(bid_price), queue) in &self.bids {
+            if bid_price < price || remaining.is_zero() {
+                break;
+            }
+            Self::plan_level(bid_price, queue, &mut remaining, fills);
+        }
+        remaining
+    }
+
+    /// Record FIFO fills against a single crossing price level, decrementing
+    /// `remaining` as it goes.
+    fn plan_level(
+        maker_price: Price,
+        queue: &VecDeque<RestingOrder>,
+        remaining: &mut Quantity,
+        fills: &mut Vec<PlannedFill>,
+    ) {
+        for resting in queue {
+            if remaining.is_zero() {
+                break;
+            }
+            let fill_qty = *std::cmp::min(&*remaining, resting.remaining_quantity());
+            *remaining = remaining
+                .checked_sub(fill_qty)
+                .expect("BUG: fill_qty exceeds remaining");
+            let maker_emptied = fill_qty == *resting.remaining_quantity();
+            fills.push(PlannedFill {
+                maker_seq: resting.id(),
+                maker_price,
+                fill_qty,
+                maker_emptied,
+            });
         }
     }
 
