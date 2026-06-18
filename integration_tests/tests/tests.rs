@@ -654,8 +654,8 @@ mod cancel_limit_order {
                 .kind,
             ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
         );
-        // Malformed id is also rejected cleanly (PR1 keeps mapping it to
-        // OrderNotFound; PR3 introduces a distinct InvalidOrderId leaf).
+        // Malformed id is also rejected cleanly; it is currently mapped to
+        // OrderNotFound (a distinct InvalidOrderId leaf may be introduced later).
         assert_eq!(
             client
                 .cancel_limit_order("not-a-valid-id".to_string())
