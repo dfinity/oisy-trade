@@ -77,6 +77,10 @@ where
 pub use never::Never;
 
 mod never {
+    // The `CandidType` derive on the uninhabited `Never` expands to a match
+    // over its (empty) variant set, which the compiler flags as unreachable.
+    // The allow cannot be narrowed to the item: it must cover the derive's
+    // generated impl, and this module contains only `Never`.
     #![allow(unreachable_code)]
 
     use super::{CandidType, Deserialize, Serialize, fmt};
