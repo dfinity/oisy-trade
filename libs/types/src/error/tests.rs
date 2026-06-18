@@ -4,11 +4,32 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 enum CurrentRequestError {
-    #[error("known reason")]
-    KnownReason,
+    #[error("request failed: {detail}")]
+    KnownReason {
+        /// A distinctive detail so the `Display` is non-trivial.
+        detail: String,
+    },
 }
 
-type CurrentError = crate::Error<CurrentRequestError, crate::Never, crate::Never>;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+enum CurrentTemporaryError {
+    #[error("temporary failure: {detail}")]
+    KnownReason {
+        /// A distinctive detail so the `Display` is non-trivial.
+        detail: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+enum CurrentInternalError {
+    #[error("internal failure: {detail}")]
+    KnownReason {
+        /// A distinctive detail so the `Display` is non-trivial.
+        detail: String,
+    },
+}
+
+type CurrentError = crate::Error<CurrentRequestError, CurrentTemporaryError, CurrentInternalError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 enum FutureRequestError {
@@ -32,17 +53,27 @@ struct FutureError {
 
 #[test]
 fn should_round_trip_each_disposition_arm() {
-    for error in [
-        CurrentError::request(CurrentRequestError::KnownReason),
-        CurrentError {
-            kind: ErrorKind::TemporaryError(None),
-            message: None,
-        },
-        CurrentError {
-            kind: ErrorKind::InternalError(None),
-            message: None,
-        },
-    ] {
+    let cases = [
+        CurrentError::request(CurrentRequestError::KnownReason {
+            detail: "bad request".to_string(),
+        }),
+        CurrentError::temporary(CurrentTemporaryError::KnownReason {
+            detail: "try again".to_string(),
+        }),
+        CurrentError::internal(CurrentInternalError::KnownReason {
+            detail: "ledger broke".to_string(),
+        }),
+    ];
+
+    let expected_messages = [
+        Some("request failed: bad request".to_string()),
+        Some("temporary failure: try again".to_string()),
+        Some("internal failure: ledger broke".to_string()),
+    ];
+
+    for (error, expected_message) in cases.into_iter().zip(expected_messages) {
+        assert_eq!(error.message, expected_message);
+
         let encoded = candid::encode_one(&error).unwrap();
         let decoded: CurrentError = candid::decode_one(&encoded).unwrap();
         assert_eq!(error, decoded);
