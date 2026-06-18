@@ -10,58 +10,36 @@ impl OrderBook {
     /// Iterates best-first (asks ascending while `ask_price <= price`; bids
     /// descending while `bid_price >= price`) and, FIFO within each level,
     /// records one [`PlannedFill`] per maker it would touch, accumulating until
-    /// the order is satisfied. Mutates no book state.
+    /// the order is satisfied. Mutates no book state. Allocation-free until the
+    /// first crossing maker is pushed.
     pub(crate) fn plan_fills(&self, side: Side, price: Price, quantity: Quantity) -> FillPlan {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::plan_fills");
         let mut fills = Vec::new();
-        let remaining = match side {
-            Side::Buy => self.plan_against_asks(price, quantity, &mut fills),
-            Side::Sell => self.plan_against_bids(price, quantity, &mut fills),
-        };
+        let mut remaining = quantity;
+        match side {
+            Side::Buy => {
+                for (&ask_price, queue) in &self.asks {
+                    if ask_price > price || remaining.is_zero() {
+                        break;
+                    }
+                    Self::plan_level(ask_price, queue, &mut remaining, &mut fills);
+                }
+            }
+            Side::Sell => {
+                for (&Reverse(bid_price), queue) in &self.bids {
+                    if bid_price < price || remaining.is_zero() {
+                        break;
+                    }
+                    Self::plan_level(bid_price, queue, &mut remaining, &mut fills);
+                }
+            }
+        }
 
         FillPlan {
             fills,
             fully_filled: remaining.is_zero(),
         }
-    }
-
-    /// Walk the ask side (ascending) for a buy taker, recording fills while the
-    /// ask price crosses (`ask_price <= price`). Returns the unfilled remainder.
-    /// Allocation-free until the first crossing maker is found.
-    fn plan_against_asks(
-        &self,
-        price: Price,
-        quantity: Quantity,
-        fills: &mut Vec<PlannedFill>,
-    ) -> Quantity {
-        let mut remaining = quantity;
-        for (&ask_price, queue) in &self.asks {
-            if ask_price > price || remaining.is_zero() {
-                break;
-            }
-            Self::plan_level(ask_price, queue, &mut remaining, fills);
-        }
-        remaining
-    }
-
-    /// Walk the bid side (descending) for a sell taker, recording fills while the
-    /// bid price crosses (`bid_price >= price`). Returns the unfilled remainder.
-    /// Allocation-free until the first crossing maker is found.
-    fn plan_against_bids(
-        &self,
-        price: Price,
-        quantity: Quantity,
-        fills: &mut Vec<PlannedFill>,
-    ) -> Quantity {
-        let mut remaining = quantity;
-        for (&Reverse(bid_price), queue) in &self.bids {
-            if bid_price < price || remaining.is_zero() {
-                break;
-            }
-            Self::plan_level(bid_price, queue, &mut remaining, fills);
-        }
-        remaining
     }
 
     /// Record FIFO fills against a single crossing price level, decrementing
