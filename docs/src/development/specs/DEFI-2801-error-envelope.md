@@ -50,7 +50,7 @@ type DepositError = record {
 };
 ```
 
-Arms an endpoint can't produce are still declared, as an empty `opt variant {}` (R1). See
+Arms an endpoint can't produce are still declared, as an always-`null` `opt variant {}` (R1). See
 [Disposition membership](#disposition-membership) for the per-endpoint leaves.
 
 Two adjacent input-handling bugs are folded in because they live in the same surface: `cancel_limit_order`
@@ -62,7 +62,7 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 - **R1**: Every user-facing error is a `record { kind : variant { … }; message : opt text }`, where `kind` is a
   disposition variant whose arms are drawn from `RequestError` / `TemporaryError` / `InternalError`,
   each carrying `opt variant { … }` of its specific leaves. Every error declares **all three** arms;
-  an arm it cannot currently produce carries an empty `opt variant {}`, reserving the slot so that
+  an arm it cannot currently produce carries an always-`null` `opt variant {}`, reserving the slot so that
   leaves can be added to any arm later without breaking clients (and an arm is never *added*).
   Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
   `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and request-level errors of
@@ -71,7 +71,7 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   `RequestError` ⇒ caller-side, do not auto-retry unchanged; `TemporaryError` ⇒ retry after backoff;
   `InternalError` ⇒ DEX-side fault, surface, do not retry.
 - **R3**: `message` is **advisory** human-readable text. Its purpose is the forward-compat case: when a
-  client hits an error it cannot decode — a future leaf that decodes to `null`, or a reserved/empty arm
+  client hits an error it cannot decode — a future leaf that decodes to `null`, or a reserved (always-`null`) arm
   — `message` still gives operators/UI something actionable and signals that the client should be
   updated. The canister populates it for every error from the underlying leaf's `Display` /
   `to_string()`; clients **must not** parse it — programmatic
@@ -194,24 +194,26 @@ pub enum DepositInternalError { LedgerError { reason: String } }
 - The `impl` block bounds `Request: Error`, `Temporary: Error`, `Internal: Error` (each leaf enum
   implements `std::error::Error`), and the constructors set `message` from the underlying leaf's
   `to_string()` — e.g. `Error::request(leaf)` ⇒ `{ kind: RequestError(Some(leaf)), message: Some(leaf.to_string()) }`.
-- Arms an endpoint can't produce are instantiated with an **empty leaf enum** (e.g.
-  `enum AddLimitOrderInternalError {}`, or a shared uninhabited type), rendering as an empty
-  `opt variant {}` (R1).
+- Arms an endpoint can't produce are instantiated with an **empty (uninhabited) leaf enum** (e.g. the
+  shared `Never` type, or `enum AddLimitOrderInternalError {}`), rendering as an always-`null`
+  `opt variant {}` (R1) — valid Candid (`opt` of the empty variant; never `Some` on the wire).
 - Candid renders each `Error<…>` instantiation structurally as
   `record { kind : variant { RequestError : opt variant {…}; TemporaryError : opt variant {…}; InternalError : opt variant {…} }; message : opt text }`.
 
 The internal→public conversions (`canister/src/state`, `lib`, `ledger`) and construction sites build
 these via the constructors; internal flat enums are untouched (Non-goals).
 
-The order-id fix adds a **public** `GetMyOrdersError = Error<GetMyOrdersRequestError, ∅, ∅>` (the
+The order-id fix adds a **public** `GetMyOrdersError = Error<GetMyOrdersRequestError, Never, Never>` (the
 internal `GetMyOrdersError` in `canister/src/lib.rs` stays internal): a single `RequestError` arm with a
 bare `InvalidOrderId` leaf and empty Temporary/Internal arms. The internal
 `InvalidOrderId(OrderIdParseError)` maps to the bare public `InvalidOrderId` leaf.
 
 ### Disposition membership
 
-All errors declare all three arms (R1); a cell marked `(none)` is a declared-but-empty
-`opt variant {}`, reserved so leaves can be added there later without breaking clients.
+All errors declare all three arms (R1); a cell marked `(none)` is an `opt variant {}` — the `opt` of an
+uninhabited variant (the `Never` leaf) — so it is **always `null`** on the wire and reserves the slot for
+future leaves without breaking clients. (`variant {}` is valid Candid; the canister's
+`check_candid_interface_compatibility` test confirms the generated interface uses it.)
 
 | Error | `RequestError` | `TemporaryError` | `InternalError` |
 |---|---|---|---|
@@ -245,7 +247,7 @@ rare and safe to retry → `TemporaryError`.
 
 - Top-of-file comment documenting the R2 disposition contract and the R3 `message` rule.
 - Each error renders as `record { kind : variant { RequestError : opt variant {…}; TemporaryError : opt variant {…}; InternalError : opt variant {…} }; message : opt text }`,
-  declaring all three arms — uninhabited ones as an empty `opt variant {}` (R1).
+  declaring all three arms — uninhabited ones as an always-`null` `opt variant {}` (R1).
 - `get_my_orders` signature becomes a result; new `GetMyOrdersError`; new bare `InvalidOrderId` leaf on
   `CancelLimitOrderError`.
 
@@ -278,8 +280,8 @@ Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each 
    map internal→public at the boundary (incl. `message`); `oisy_trade.did` + contract doc block; tests.
    *Accepts*: R1 (these four), R2, R3, R4, R5, R9.
 2. **PR2 — Extend to query errors.** Same shape for `GetOrderBookTickerError`, `GetOrderBookDepthError`,
-   `GetBalancesError`, `GetBalancesRequestError`; `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R4
-   (remainder), R9.
+   `GetBalancesError`, `GetBalancesRequestError` (the latter two cover **both** `get_balances` and
+   `get_fee_balances`); `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R4 (remainder), R9.
 3. **PR3 — Stop conflating / trapping on malformed order IDs.** Bare `InvalidOrderId` on
    `CancelLimitOrderError`; new public `GetMyOrdersError`; `get_my_orders` returns a result (no `panic!`);
    `oisy_trade.did`; tests. *Accepts*: R7, R8, R9.
