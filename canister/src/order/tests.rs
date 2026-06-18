@@ -1030,6 +1030,180 @@ mod process_pending_orders {
     }
 }
 
+/// Proves the plan/apply refactor is behavior-preserving: a read-only
+/// `plan_fills` walk leaves the book untouched, and `match_order` (plan then
+/// apply) produces exactly the fills and final book an independent greedy
+/// reference matcher does.
+mod plan_execute {
+    use crate::order::{
+        Fill, Order, OrderBookSnapshot, OrderSeq, PendingOrder, Price, PriceLevel, Quantity, Side,
+    };
+    use crate::test_fixtures::arbitrary::arb_non_matching_pending_order;
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE, order_book};
+    use proptest::collection::vec;
+    use proptest::prelude::{Just, Strategy, prop_assert_eq};
+    use proptest::{prop_oneof, proptest};
+
+    proptest! {
+        #[test]
+        fn plan_fills_is_read_only_and_apply_matches_reference(
+            resting in vec(arb_non_matching_pending_order(), 0..40),
+            taker in arb_taker(),
+        ) {
+            let mut book = order_book();
+            for (i, pending) in resting.into_iter().enumerate() {
+                book.match_order(pending.into_order(OrderSeq::new(i as u64)))
+                    .unwrap();
+            }
+            let taker = taker.into_order(OrderSeq::new(1_000_000));
+
+            let before = OrderBookSnapshot::from(&book);
+
+            // `plan_fills` must not mutate any book state.
+            let _plan = book.plan_fills(taker.side(), taker.price(), *taker.remaining_quantity());
+            prop_assert_eq!(
+                &before,
+                &OrderBookSnapshot::from(&book),
+                "plan_fills mutated the book"
+            );
+
+            let (expected_fills, expected_after) = reference_match(&before, &taker);
+
+            let result = book.match_order(taker).unwrap();
+            prop_assert_eq!(result.fills().to_vec(), expected_fills);
+
+            let after = OrderBookSnapshot::from(&book);
+            prop_assert_eq!(
+                resting_levels(&after.bids),
+                resting_levels(&expected_after.bids)
+            );
+            prop_assert_eq!(
+                resting_levels(&after.asks),
+                resting_levels(&expected_after.asks)
+            );
+        }
+    }
+
+    /// Taker that may cross the `[1, 199] * tick` book: a buy or sell priced in
+    /// `[1, 250] * tick`, sized to rest, partially fill, or fully fill against
+    /// the generated liquidity.
+    fn arb_taker() -> impl Strategy<Value = PendingOrder> {
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        let side = prop_oneof![Just(Side::Buy), Just(Side::Sell)];
+        (side, 1u64..250u64, 1u64..4000u64).prop_map(move |(side, price_ticks, qty_lots)| {
+            PendingOrder {
+                side,
+                price: Price::new(price_ticks as u128 * tick),
+                quantity: Quantity::from(qty_lots * lot),
+            }
+        })
+    }
+
+    /// Independent greedy matcher over the pre-state snapshot, mirroring the
+    /// pre-refactor `match_order`: best price first, FIFO within a level,
+    /// crossing while the maker price is at the taker price or better. Returns
+    /// the fills it would produce and the resulting book snapshot.
+    fn reference_match(
+        before: &OrderBookSnapshot,
+        taker: &Order,
+    ) -> (Vec<Fill>, OrderBookSnapshot) {
+        let mut after = before.clone();
+        let mut fills = Vec::new();
+        let mut remaining = *taker.remaining_quantity();
+
+        // `bids` is stored highest-price first, `asks` lowest-price first, so
+        // both are already in best-first order in the snapshot.
+        let book_side = match taker.side() {
+            Side::Buy => &mut after.asks,
+            Side::Sell => &mut after.bids,
+        };
+        for level in book_side.iter_mut() {
+            if remaining.is_zero() {
+                break;
+            }
+            let crosses = match taker.side() {
+                Side::Buy => level.price <= taker.price(),
+                Side::Sell => level.price >= taker.price(),
+            };
+            if !crosses {
+                break;
+            }
+            while !remaining.is_zero() {
+                let Some(maker) = level.orders.first_mut() else {
+                    break;
+                };
+                let fill_qty = *std::cmp::min(&remaining, maker.remaining_quantity());
+                remaining = remaining.checked_sub(fill_qty).unwrap();
+                maker.reduce_quantity(&fill_qty);
+                fills.push(Fill {
+                    taker_order_seq: taker.id(),
+                    taker_side: taker.side(),
+                    taker_price: taker.price(),
+                    maker_order_seq: maker.id(),
+                    maker_price: level.price,
+                    quantity: fill_qty,
+                });
+                if maker.remaining_quantity().is_zero() {
+                    level.orders.remove(0);
+                }
+            }
+        }
+        book_side.retain(|level| !level.orders.is_empty());
+
+        // A taker that does not fully fill rests its remainder in the book,
+        // at the tail of its price level (FIFO), exactly as `match_order` does.
+        if !remaining.is_zero() {
+            let mut resting_order = taker.clone();
+            let consumed = taker.remaining_quantity().checked_sub(remaining).unwrap();
+            resting_order.reduce_quantity(&consumed);
+            let resting = crate::order::RestingOrder::from(resting_order);
+            let levels = match taker.side() {
+                Side::Buy => &mut after.bids,
+                Side::Sell => &mut after.asks,
+            };
+            match levels.iter_mut().find(|level| level.price == taker.price()) {
+                Some(level) => level.orders.push(resting),
+                None => {
+                    let new_level = PriceLevel {
+                        price: taker.price(),
+                        orders: vec![resting],
+                    };
+                    insert_level_best_first(levels, new_level, taker.side());
+                }
+            }
+        }
+
+        (fills, after)
+    }
+
+    /// Insert a price level into a best-first ordered list: bids descending,
+    /// asks ascending.
+    fn insert_level_best_first(levels: &mut Vec<PriceLevel>, level: PriceLevel, side: Side) {
+        let pos = levels.iter().position(|existing| match side {
+            Side::Buy => existing.price < level.price,
+            Side::Sell => existing.price > level.price,
+        });
+        match pos {
+            Some(i) => levels.insert(i, level),
+            None => levels.push(level),
+        }
+    }
+
+    /// Flatten price levels into `(price, seq, remaining)` triples.
+    fn resting_levels(levels: &[PriceLevel]) -> Vec<(Price, OrderSeq, Quantity)> {
+        levels
+            .iter()
+            .flat_map(|level| {
+                level
+                    .orders
+                    .iter()
+                    .map(move |o| (level.price, o.id(), *o.remaining_quantity()))
+            })
+            .collect()
+    }
+}
+
 mod remove_order {
     use crate::order::{
         OrderBookSnapshot, OrderSeq, Price, PriceLevel, Quantity, RemovedOrder, Side,

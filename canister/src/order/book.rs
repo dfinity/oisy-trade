@@ -129,48 +129,9 @@ impl OrderBook {
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
+        let plan = self.plan_fills(order.side(), order.price(), *order.remaining_quantity());
         let mut fills = Vec::new();
-
-        match order.side() {
-            Side::Buy => {
-                while !order.remaining_quantity().is_zero() {
-                    let Some(entry) = self.asks.first_entry() else {
-                        break;
-                    };
-                    if *entry.key() > order.price() {
-                        break;
-                    }
-                    let maker_price = *entry.key();
-                    fill_against_queue(
-                        maker_price,
-                        entry,
-                        &mut order,
-                        &mut fills,
-                        &mut self.resting_orders,
-                        &mut self.filled_orders,
-                    );
-                }
-            }
-            Side::Sell => {
-                while !order.remaining_quantity().is_zero() {
-                    let Some(entry) = self.bids.first_entry() else {
-                        break;
-                    };
-                    let Reverse(maker_price) = *entry.key();
-                    if maker_price < order.price() {
-                        break;
-                    }
-                    fill_against_queue(
-                        maker_price,
-                        entry,
-                        &mut order,
-                        &mut fills,
-                        &mut self.resting_orders,
-                        &mut self.filled_orders,
-                    );
-                }
-            }
-        }
+        self.apply_plan(order.side(), &plan, &mut order, &mut fills);
 
         if order.remaining_quantity().is_zero() {
             self.filled_orders.insert(order.id());
@@ -185,6 +146,143 @@ impl OrderBook {
                     fills,
                     resting_order_seq,
                 })
+            }
+        }
+    }
+
+    /// Read-only walk of the crossing price levels, recording the fills an
+    /// incoming order of `side`/`price`/`quantity` *would* make.
+    ///
+    /// Iterates best-first (asks ascending while `ask_price <= price`; bids
+    /// descending while `bid_price >= price`) and, FIFO within each level,
+    /// records one [`PlannedFill`] per maker it would touch, accumulating until
+    /// the order is satisfied. Mutates no book state.
+    pub(crate) fn plan_fills(&self, side: Side, price: Price, quantity: Quantity) -> FillPlan {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::plan_fills");
+        let mut fills = Vec::new();
+        let mut remaining = quantity;
+
+        let levels: Box<dyn Iterator<Item = (Price, &VecDeque<RestingOrder>)>> = match side {
+            Side::Buy => Box::new(
+                self.asks
+                    .iter()
+                    .take_while(|(ask_price, _)| **ask_price <= price)
+                    .map(|(ask_price, queue)| (*ask_price, queue)),
+            ),
+            Side::Sell => Box::new(
+                self.bids
+                    .iter()
+                    .take_while(|(Reverse(bid_price), _)| *bid_price >= price)
+                    .map(|(Reverse(bid_price), queue)| (*bid_price, queue)),
+            ),
+        };
+
+        'outer: for (maker_price, queue) in levels {
+            for resting in queue {
+                if remaining.is_zero() {
+                    break 'outer;
+                }
+                let fill_qty = *std::cmp::min(&remaining, resting.remaining_quantity());
+                remaining = remaining
+                    .checked_sub(fill_qty)
+                    .expect("BUG: fill_qty exceeds remaining");
+                let maker_emptied = fill_qty == *resting.remaining_quantity();
+                fills.push(PlannedFill {
+                    maker_seq: resting.id(),
+                    maker_price,
+                    fill_qty,
+                    maker_emptied,
+                });
+            }
+            if remaining.is_zero() {
+                break;
+            }
+        }
+
+        FillPlan {
+            fills,
+            fully_filled: remaining.is_zero(),
+        }
+    }
+
+    /// Replay a [`FillPlan`] against the book, performing the mutations.
+    ///
+    /// For each [`PlannedFill`]: reduce the maker (the level cursor is held
+    /// across consecutive fills at the same level and only re-acquired when
+    /// `maker_price` changes), reduce the taker, push the [`Fill`], and on
+    /// `maker_emptied` pop the maker, drop its `resting_orders` index entry,
+    /// insert into `filled_orders`, and remove the level if its queue empties.
+    fn apply_plan(
+        &mut self,
+        side: Side,
+        plan: &FillPlan,
+        order: &mut Order,
+        fills: &mut Vec<Fill>,
+    ) {
+        #[cfg(feature = "canbench-rs")]
+        let _p = canbench_rs::bench_scope("book::apply_plan");
+        let mut cursor: Option<(Price, &mut VecDeque<RestingOrder>)> = None;
+
+        for planned in &plan.fills {
+            // Re-acquire the level only when the price changes; otherwise hold
+            // the cursor across consecutive fills at the same level.
+            if cursor
+                .as_ref()
+                .is_none_or(|(cursor_price, _)| *cursor_price != planned.maker_price)
+            {
+                let queue = match side {
+                    Side::Buy => self
+                        .asks
+                        .get_mut(&planned.maker_price)
+                        .expect("BUG: planned ask level missing"),
+                    Side::Sell => self
+                        .bids
+                        .get_mut(&Reverse(planned.maker_price))
+                        .expect("BUG: planned bid level missing"),
+                };
+                cursor = Some((planned.maker_price, queue));
+            }
+            let queue = &mut cursor.as_mut().expect("cursor set above").1;
+
+            let resting = queue.front_mut().expect("BUG: planned maker level empty");
+            assert_eq!(
+                resting.id(),
+                planned.maker_seq,
+                "BUG: plan/apply divergence — maker at level front does not match plan"
+            );
+
+            order.reduce_quantity(&planned.fill_qty);
+            resting.reduce_quantity(&planned.fill_qty);
+
+            fills.push(Fill {
+                taker_order_seq: order.id(),
+                taker_side: order.side(),
+                taker_price: order.price(),
+                maker_order_seq: planned.maker_seq,
+                maker_price: planned.maker_price,
+                quantity: planned.fill_qty,
+            });
+
+            if planned.maker_emptied {
+                assert!(
+                    resting.remaining_quantity().is_zero(),
+                    "BUG: plan/apply divergence — maker marked emptied but has remaining quantity"
+                );
+                let filled = queue.pop_front().expect("front exists");
+                assert!(self.resting_orders.remove(&filled.id()).is_some());
+                self.filled_orders.insert(filled.id());
+                if queue.is_empty() {
+                    cursor = None;
+                    match side {
+                        Side::Buy => {
+                            self.asks.remove(&planned.maker_price);
+                        }
+                        Side::Sell => {
+                            self.bids.remove(&Reverse(planned.maker_price));
+                        }
+                    }
+                }
             }
         }
     }
@@ -374,46 +472,6 @@ fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
     })
 }
 
-fn fill_against_queue<K: Ord>(
-    maker_price: Price,
-    mut entry: btree_map::OccupiedEntry<'_, K, VecDeque<RestingOrder>>,
-    order: &mut Order,
-    fills: &mut Vec<Fill>,
-    orders_index: &mut BTreeMap<OrderSeq, (Side, Price)>,
-    filled_orders: &mut BTreeSet<OrderSeq>,
-) {
-    #[cfg(feature = "canbench-rs")]
-    let _p = canbench_rs::bench_scope("book::fill_against_queue");
-    let resting_orders = entry.get_mut();
-    while !order.remaining_quantity().is_zero() && !resting_orders.is_empty() {
-        let Some(resting) = resting_orders.front_mut() else {
-            break;
-        };
-        let fill_qty = *std::cmp::min(order.remaining_quantity(), resting.remaining_quantity());
-
-        order.reduce_quantity(&fill_qty);
-        resting.reduce_quantity(&fill_qty);
-
-        fills.push(Fill {
-            taker_order_seq: order.id(),
-            taker_side: order.side(),
-            taker_price: order.price(),
-            maker_order_seq: resting.id(),
-            maker_price,
-            quantity: fill_qty,
-        });
-
-        if resting.remaining_quantity().is_zero() {
-            let filled = resting_orders.pop_front().expect("front exists");
-            assert!(orders_index.remove(&filled.id()).is_some());
-            filled_orders.insert(filled.id());
-        }
-    }
-    if resting_orders.is_empty() {
-        entry.remove();
-    }
-}
-
 /// An order removed from the book via [`OrderBook::remove_order`].
 ///
 /// Carries enough information for the caller to refund the reserved balance:
@@ -460,6 +518,29 @@ pub struct MatchingOutput {
     /// Orders that were fully filled and removed from the book.
     #[n(2)]
     pub filled_orders: BTreeSet<OrderSeq>,
+}
+
+/// A read-only plan of the fills an incoming order would make, produced by
+/// [`OrderBook::plan_fills`] and replayed by [`OrderBook::apply_plan`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FillPlan {
+    /// The fills, in execution order (best price first, FIFO within a level).
+    pub fills: Vec<PlannedFill>,
+    /// Whether the order's full quantity is satisfied by `fills`.
+    pub fully_filled: bool,
+}
+
+/// A single fill an incoming order would make against one resting maker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlannedFill {
+    /// Sequence of the resting (maker) order to fill against.
+    pub maker_seq: OrderSeq,
+    /// Price of the maker's level (the fill executes at this price).
+    pub maker_price: Price,
+    /// Quantity to fill against this maker.
+    pub fill_qty: Quantity,
+    /// Whether this fill empties the maker (it is removed from the book).
+    pub maker_emptied: bool,
 }
 
 /// The result of matching an incoming order against the book.
