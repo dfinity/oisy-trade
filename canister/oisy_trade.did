@@ -27,9 +27,7 @@
 //
 // Error disposition contract
 // ---------------------------
-// The four update-endpoint errors converted in this iteration —
-// `AddLimitOrderError`, `CancelLimitOrderError`, `DepositError` and
-// `WithdrawError` — follow this disposition-tagged structure:
+// User-facing errors ALWAYS follow this structure:
 //
 //   record {
 //       kind : variant {
@@ -53,11 +51,6 @@
 // without breaking clients. Each arm's payload is `opt variant`: a client built
 // against an older interface decodes an unknown future leaf as `null` while
 // still reading the arm and `message`.
-//
-// The remaining errors are still flat variants: the query errors
-// (`GetOrderBook*Error`) are converted to this shape in a later PR of this
-// stack, and the admin errors (`AddTradingPairError`, `UnauthorizedError`) are
-// out of scope.
 
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
