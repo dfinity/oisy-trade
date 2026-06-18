@@ -306,6 +306,10 @@ pub enum WithdrawTemporaryError {
         /// The reason the call failed.
         reason: String,
     },
+    /// The ledger fee changed between fetch and transfer; nothing happened on
+    /// the ledger. This is rare; retry.
+    #[error("the ledger fee changed before the transfer was applied")]
+    LedgerFeeChanged,
 }
 
 /// DEX-side reasons a withdrawal can fail.

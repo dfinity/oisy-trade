@@ -1143,9 +1143,7 @@ mod withdraw {
 
         assert_eq!(
             result.unwrap_err().kind,
-            ErrorKind::InternalError(Some(WithdrawInternalError::LedgerError {
-                reason: "ledger fee changed between retries".to_string()
-            }))
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::LedgerFeeChanged))
         );
         // Balance credited back.
         assert_balance(deposit);

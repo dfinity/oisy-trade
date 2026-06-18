@@ -132,10 +132,8 @@ pub(crate) async fn withdraw(
                 Err(Icrc1TransferError::BadFee {
                     expected_fee: latest_fee,
                 }) => WithdrawOutcome {
-                    result: Err(WithdrawError::internal(
-                        WithdrawInternalError::LedgerError {
-                            reason: "ledger fee changed between retries".to_string(),
-                        },
+                    result: Err(WithdrawError::temporary(
+                        WithdrawTemporaryError::LedgerFeeChanged,
                     )),
                     ledger_fee: Some(latest_fee),
                 },

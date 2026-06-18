@@ -408,6 +408,9 @@ type WithdrawError = record {
             LedgerTemporarilyUnavailable;
             // The inter-canister call to the token ledger failed.
             CallFailed : record { ledger : principal; method : text; reason : text };
+            // The ledger fee changed between fetch and transfer; nothing
+            // happened on the ledger. Rare; retry.
+            LedgerFeeChanged;
         };
         InternalError : opt variant {
             // The icrc1_transfer call returned an unexpected ledger error.
