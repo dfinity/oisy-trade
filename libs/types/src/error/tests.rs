@@ -1,6 +1,8 @@
 use crate::{
-    AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError, DepositError,
-    DepositRequestError, ErrorKind,
+    AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
+    CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
+    DepositRequestError, DepositTemporaryError, ErrorKind, Principal, WithdrawError,
+    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,64 @@ fn should_serialize_add_limit_order_error() {
     ] {
         let encoded = candid::encode_one(&error).unwrap();
         let decoded: AddLimitOrderError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(error, decoded);
+    }
+}
+
+#[test]
+fn should_serialize_cancel_limit_order_error() {
+    for error in [
+        CancelLimitOrderError::request(CancelLimitOrderRequestError::OrderNotFound),
+        CancelLimitOrderError::request(CancelLimitOrderRequestError::NotOrderOwner),
+        CancelLimitOrderError::request(CancelLimitOrderRequestError::OrderAlreadyFilled),
+        CancelLimitOrderError::request(CancelLimitOrderRequestError::OrderAlreadyCanceled),
+    ] {
+        let encoded = candid::encode_one(&error).unwrap();
+        let decoded: CancelLimitOrderError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(error, decoded);
+    }
+}
+
+#[test]
+fn should_serialize_deposit_error() {
+    for error in [
+        DepositError::request(DepositRequestError::AmountExceedsMaximum),
+        DepositError::request(DepositRequestError::InsufficientFunds {
+            balance: Nat::from(42u64),
+        }),
+        DepositError::temporary(DepositTemporaryError::OperationInProgress),
+        DepositError::temporary(DepositTemporaryError::CallFailed {
+            ledger: Principal::anonymous(),
+            method: "icrc2_transfer_from".to_string(),
+            reason: "timeout".to_string(),
+        }),
+        DepositError::internal(DepositInternalError::LedgerError {
+            reason: "unexpected".to_string(),
+        }),
+    ] {
+        let encoded = candid::encode_one(&error).unwrap();
+        let decoded: DepositError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(error, decoded);
+    }
+}
+
+#[test]
+fn should_serialize_withdraw_error() {
+    for error in [
+        WithdrawError::request(WithdrawRequestError::AmountExceedsMaximum),
+        WithdrawError::request(WithdrawRequestError::AmountTooSmall {
+            min_amount: Nat::from(11u64),
+        }),
+        WithdrawError::request(WithdrawRequestError::InsufficientBalance {
+            available: Nat::from(7u64),
+        }),
+        WithdrawError::temporary(WithdrawTemporaryError::LedgerTemporarilyUnavailable),
+        WithdrawError::internal(WithdrawInternalError::LedgerInsufficientFunds {
+            balance: Nat::from(3u64),
+        }),
+    ] {
+        let encoded = candid::encode_one(&error).unwrap();
+        let decoded: WithdrawError = candid::decode_one(&encoded).unwrap();
         assert_eq!(error, decoded);
     }
 }
