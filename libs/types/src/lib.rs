@@ -77,6 +77,8 @@ where
     }
 }
 
+/// Uninhabited leaf type for disposition arms an endpoint can never produce
+/// (rendered by Candid as an empty `opt variant {}`).
 pub use never::Never;
 
 mod never {
