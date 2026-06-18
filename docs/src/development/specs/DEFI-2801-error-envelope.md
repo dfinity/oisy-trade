@@ -215,8 +215,8 @@ All errors declare all three arms (R1); a cell marked `(none)` is a declared-but
 
 | Error | `RequestError` | `TemporaryError` | `InternalError` |
 |---|---|---|---|
-| **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError` |
-| **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `LedgerInsufficientFunds`<sup>1</sup> |
+| **DepositError** | `AmountExceedsMaximum`, `UnsupportedToken`, `InsufficientFunds`, `InsufficientAllowance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed` | `LedgerError`, `CandidDecodeFailed`<sup>3</sup> |
+| **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed`, `LedgerFeeChanged`<sup>4</sup> | `LedgerError`, `LedgerInsufficientFunds`<sup>1</sup>, `CandidDecodeFailed`<sup>3</sup> |
 | **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`<sup>2</sup> | (none) |
 | **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | (none) | (none) |
 | **GetMyOrdersError** (new public) | `InvalidOrderId` | (none) | (none) |
@@ -229,6 +229,11 @@ All errors declare all three arms (R1); a cell marked `(none)` is a declared-but
 is intentional transient unavailability ("retry when trading resumes", like a ledger
 `TemporarilyUnavailable`); `InvalidNotional` (DEFI-2850) is caller-side input → `RequestError`.
 `TradingHalted`'s placement is a judgment call worth a second look.
+<sup>3</sup> `CandidDecodeFailed` — the ledger replied but the response failed to Candid-decode (a DEX-side
+type/version mismatch); since the call may have executed, it's an `InternalError` (surface, don't blindly
+retry), distinct from `CallFailed` (the call itself failed with no/rejected response → transient).
+<sup>4</sup> `LedgerFeeChanged` — the ledger fee changed between fetch and transfer so nothing was applied;
+rare and safe to retry → `TemporaryError`.
 
 ### Canister logic (`canister/src/lib.rs`, `main.rs`)
 
