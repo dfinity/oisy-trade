@@ -1043,6 +1043,7 @@ mod plan_execute {
     use proptest::collection::vec;
     use proptest::prelude::{Just, Strategy, prop_assert_eq};
     use proptest::{prop_oneof, proptest};
+    use std::collections::BTreeSet;
 
     proptest! {
         #[test]
@@ -1081,6 +1082,7 @@ mod plan_execute {
                 resting_levels(&after.asks),
                 resting_levels(&expected_after.asks)
             );
+            prop_assert_eq!(after.filled_orders, expected_after.filled_orders);
         }
     }
 
@@ -1110,6 +1112,7 @@ mod plan_execute {
     ) -> (Vec<Fill>, OrderBookSnapshot) {
         let mut after = before.clone();
         let mut fills = Vec::new();
+        let mut filled_orders: BTreeSet<OrderSeq> = after.filled_orders.iter().copied().collect();
         let mut remaining = *taker.remaining_quantity();
 
         // `bids` is stored highest-price first, `asks` lowest-price first, so
@@ -1145,11 +1148,18 @@ mod plan_execute {
                     quantity: fill_qty,
                 });
                 if maker.remaining_quantity().is_zero() {
-                    level.orders.remove(0);
+                    let maker = level.orders.remove(0);
+                    filled_orders.insert(maker.id());
                 }
             }
         }
         book_side.retain(|level| !level.orders.is_empty());
+
+        // A fully-filled taker is recorded in `filled_orders` exactly as
+        // `match_order` does (it never rests).
+        if remaining.is_zero() {
+            filled_orders.insert(taker.id());
+        }
 
         // A taker that does not fully fill rests its remainder in the book,
         // at the tail of its price level (FIFO), exactly as `match_order` does.
@@ -1174,6 +1184,7 @@ mod plan_execute {
             }
         }
 
+        after.filled_orders = filled_orders.into_iter().collect();
         (fills, after)
     }
 
