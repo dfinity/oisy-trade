@@ -1,7 +1,8 @@
 use crate::Runtime;
 use oisy_trade_types::{
-    DepositError, DepositRequest, DepositResponse, LedgerTransferError, LedgerTransferFromError,
-    WithdrawError, WithdrawResponse,
+    DepositError, DepositInternalError, DepositRequest, DepositRequestError, DepositResponse,
+    DepositTemporaryError, WithdrawError, WithdrawInternalError, WithdrawRequestError,
+    WithdrawResponse, WithdrawTemporaryError,
 };
 
 pub(crate) struct WithdrawOutcome {
@@ -57,20 +58,22 @@ pub async fn deposit(
     let response = runtime
         .call_unbounded_wait(token.ledger_id, "icrc2_transfer_from", (transfer_args,))
         .await
-        .map_err(|e| DepositError::CallFailed {
-            ledger: token.ledger_id,
-            method: "icrc2_transfer_from".to_string(),
-            reason: format!("{e}"),
+        .map_err(|e| {
+            DepositError::temporary(DepositTemporaryError::CallFailed {
+                ledger: token.ledger_id,
+                method: "icrc2_transfer_from".to_string(),
+                reason: format!("{e}"),
+            })
         })?;
 
     let (result,): (Result<candid::Nat, TransferFromError>,) =
-        response
-            .candid_tuple()
-            .map_err(|e| DepositError::CallFailed {
+        response.candid_tuple().map_err(|e| {
+            DepositError::temporary(DepositTemporaryError::CallFailed {
                 ledger: token.ledger_id,
                 method: "icrc2_transfer_from".to_string(),
                 reason: e.to_string(),
-            })?;
+            })
+        })?;
 
     let block_index = result.map_err(to_ledger_error)?;
 
@@ -104,9 +107,11 @@ pub(crate) async fn withdraw(
         Err(Icrc1TransferError::BadFee { expected_fee }) => {
             if amount <= expected_fee {
                 return WithdrawOutcome {
-                    result: Err(WithdrawError::AmountTooSmall {
-                        min_amount: expected_fee.clone() + 1u64,
-                    }),
+                    result: Err(WithdrawError::request(
+                        WithdrawRequestError::AmountTooSmall {
+                            min_amount: expected_fee.clone() + 1u64,
+                        },
+                    )),
                     ledger_fee: Some(expected_fee),
                 };
             }
@@ -127,10 +132,10 @@ pub(crate) async fn withdraw(
                 Err(Icrc1TransferError::BadFee {
                     expected_fee: latest_fee,
                 }) => WithdrawOutcome {
-                    result: Err(WithdrawError::LedgerError(
-                        LedgerTransferError::InternalError(
-                            "ledger fee changed between retries".to_string(),
-                        ),
+                    result: Err(WithdrawError::internal(
+                        WithdrawInternalError::LedgerError {
+                            reason: "ledger fee changed between retries".to_string(),
+                        },
                     )),
                     ledger_fee: Some(latest_fee),
                 },
@@ -173,20 +178,24 @@ async fn icrc1_transfer(
         .call_unbounded_wait(token.ledger_id, "icrc1_transfer", (transfer_args,))
         .await
         .map_err(|e| {
-            Icrc1TransferError::Other(WithdrawError::CallFailed {
-                ledger: token.ledger_id,
-                method: "icrc1_transfer".to_string(),
-                reason: format!("{e}"),
-            })
+            Icrc1TransferError::Other(WithdrawError::temporary(
+                WithdrawTemporaryError::CallFailed {
+                    ledger: token.ledger_id,
+                    method: "icrc1_transfer".to_string(),
+                    reason: format!("{e}"),
+                },
+            ))
         })?;
 
     let (result,): (Result<candid::Nat, icrc_ledger_types::icrc1::transfer::TransferError>,) =
         response.candid_tuple().map_err(|e| {
-            Icrc1TransferError::Other(WithdrawError::CallFailed {
-                ledger: token.ledger_id,
-                method: "icrc1_transfer".to_string(),
-                reason: e.to_string(),
-            })
+            Icrc1TransferError::Other(WithdrawError::temporary(
+                WithdrawTemporaryError::CallFailed {
+                    ledger: token.ledger_id,
+                    method: "icrc1_transfer".to_string(),
+                    reason: e.to_string(),
+                },
+            ))
         })?;
 
     match result {
@@ -201,11 +210,13 @@ async fn icrc1_transfer(
 fn to_ledger_transfer_error(e: icrc_ledger_types::icrc1::transfer::TransferError) -> WithdrawError {
     use icrc_ledger_types::icrc1::transfer::TransferError;
     match e {
+        // The OISY TRADE's own accounting credited the balance, so the ledger
+        // disagreeing is a genuine invariant violation (D5).
         TransferError::InsufficientFunds { balance } => {
-            WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { balance })
+            WithdrawError::internal(WithdrawInternalError::LedgerInsufficientFunds { balance })
         }
         TransferError::TemporarilyUnavailable => {
-            WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
+            WithdrawError::temporary(WithdrawTemporaryError::LedgerTemporarilyUnavailable)
         }
         TransferError::BadFee { .. } => {
             unreachable!("BUG: BadFee is handled by the caller before invoking this mapper")
@@ -214,9 +225,9 @@ fn to_ledger_transfer_error(e: icrc_ledger_types::icrc1::transfer::TransferError
         | TransferError::CreatedInFuture { .. }
         | TransferError::Duplicate { .. }
         | TransferError::GenericError { .. }
-        | TransferError::TooOld => {
-            WithdrawError::LedgerError(LedgerTransferError::InternalError(format!("{e}")))
-        }
+        | TransferError::TooOld => WithdrawError::internal(WithdrawInternalError::LedgerError {
+            reason: format!("{e}"),
+        }),
     }
 }
 
@@ -224,32 +235,22 @@ fn to_ledger_error(e: icrc_ledger_types::icrc2::transfer_from::TransferFromError
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
     match e {
         TransferFromError::InsufficientFunds { balance } => {
-            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { balance })
+            DepositError::request(DepositRequestError::InsufficientFunds { balance })
         }
         TransferFromError::InsufficientAllowance { allowance } => {
-            DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance { allowance })
+            DepositError::request(DepositRequestError::InsufficientAllowance { allowance })
         }
         TransferFromError::TemporarilyUnavailable => {
-            DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
+            DepositError::temporary(DepositTemporaryError::LedgerTemporarilyUnavailable)
         }
         // These should never happen, but rather than trapping we return an internal error here.
-        TransferFromError::BadFee { .. } => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
-        TransferFromError::BadBurn { .. } => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
-        TransferFromError::CreatedInFuture { .. } => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
-        TransferFromError::Duplicate { .. } => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
-        TransferFromError::GenericError { .. } => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
-        TransferFromError::TooOld => {
-            DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")))
-        }
+        TransferFromError::BadFee { .. }
+        | TransferFromError::BadBurn { .. }
+        | TransferFromError::CreatedInFuture { .. }
+        | TransferFromError::Duplicate { .. }
+        | TransferFromError::GenericError { .. }
+        | TransferFromError::TooOld => DepositError::internal(DepositInternalError::LedgerError {
+            reason: format!("{e}"),
+        }),
     }
 }

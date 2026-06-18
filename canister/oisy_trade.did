@@ -24,6 +24,25 @@
 //   notional = price × quantity / 10^8
 //            = 10_500_000 × 50_000_000 / 10^8
 //            = 5_250_000                        (= 5.25 USDT reserved)
+//
+// Error disposition contract
+// ---------------------------
+// User-facing errors are `record { kind : variant { … }; message : opt text }`.
+// The `kind` arm is the contract; branch on it and the inner leaf, never on
+// `message`:
+//   - RequestError  — caller-side; the request will not succeed as-is. Correct
+//                     the input or satisfy a precondition. Do NOT auto-retry
+//                     unchanged.
+//   - TemporaryError — transient; retry the same call after a backoff.
+//   - InternalError  — canister-side fault; surface to operators. Do NOT retry.
+// Every error declares all three arms; an arm it cannot currently produce is an
+// empty `opt variant {}`, reserved so leaves can be added later without
+// breaking clients. Each arm's payload is `opt variant`: a client built against
+// an older interface decodes an unknown future leaf as `null` while still
+// reading the arm and `message`.
+//
+// `message` is advisory, human-readable text derived from the failure; it is
+// not localized, its exact text may change, and clients MUST NOT parse it.
 
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
@@ -64,38 +83,55 @@ type LimitOrderRequest = record {
 };
 
 
-// Error returned when placing a limit order fails.
-type AddLimitOrderError = variant {
-    // The amount exceeds the maximum supported value.
-    AmountExceedsMaximum;
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
-    // The price is not a positive multiple of the tick size.
-    InvalidPrice : record { price : nat; tick_size : nat };
-    // The quantity is not a positive multiple of the lot size.
-    InvalidQuantity : record { quantity : nat; lot_size : nat };
-    // The caller's free balance in `token` is below `required`.
-    // For a `Sell`, `token` is the base and `required` is `quantity`.
-    // For a `Buy`, `token` is the quote and `required` is the scaled quote
-    // amount `price × quantity / 10^base_decimals` (in quote smallest units).
-    InsufficientBalance : record { token : TokenId; available : nat; required : nat };
-    // The order's notional (price × quantity / 10^base_decimals, in quote
-    // smallest units) is below `min` or above `max`.
-    InvalidNotional : record { notional : nat; min : nat; max : opt nat };
-    // Trading is halted (globally or on this pair); no new orders are accepted.
-    TradingHalted;
+// Error returned when placing a limit order fails. See the disposition
+// contract at the top of this file.
+type AddLimitOrderError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The amount exceeds the maximum supported value.
+            AmountExceedsMaximum;
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+            // The price is not a positive multiple of the tick size.
+            InvalidPrice : record { price : nat; tick_size : nat };
+            // The quantity is not a positive multiple of the lot size.
+            InvalidQuantity : record { quantity : nat; lot_size : nat };
+            // The caller's free balance in `token` is below `required`.
+            // For a `Sell`, `token` is the base and `required` is `quantity`.
+            // For a `Buy`, `token` is the quote and `required` is the scaled
+            // quote amount `price × quantity / 10^base_decimals`.
+            InsufficientBalance : record { token : TokenId; available : nat; required : nat };
+            // The order's notional (price × quantity / 10^base_decimals, in
+            // quote smallest units) is below `min` or above `max`.
+            InvalidNotional : record { notional : nat; min : nat; max : opt nat };
+        };
+        TemporaryError : opt variant {
+            // Trading is halted (globally or on this pair); no new orders are accepted.
+            TradingHalted;
+        };
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
-/// Error returned when canceling a limit order fails.
-type CancelLimitOrderError = variant {
-    /// No order with the given ID exists.
-    OrderNotFound;
-    /// The caller does not own the order.
-    NotOrderOwner;
-    /// The order has already been fully filled and cannot be canceled.
-    OrderAlreadyFilled;
-    /// The order has already been canceled.
-    OrderAlreadyCanceled;
+// Error returned when canceling a limit order fails. See the disposition
+// contract at the top of this file.
+type CancelLimitOrderError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // No order with the given ID exists.
+            OrderNotFound;
+            // The caller does not own the order.
+            NotOrderOwner;
+            // The order has already been fully filled and cannot be canceled.
+            OrderAlreadyFilled;
+            // The order has already been canceled.
+            OrderAlreadyCanceled;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Information about a listed trading pair.
@@ -269,27 +305,35 @@ type Token = record {
     metadata : TokenMetadata;
 };
 
-// Errors that can be returned by icrc2_transfer_from.
-type LedgerTransferFromError = variant {
-    InsufficientFunds : record { balance : nat };
-    InsufficientAllowance : record { allowance : nat };
-    TemporarilyUnavailable;
-    InternalError : text;
-};
-
-// Error returned by the deposit endpoint.
-type DepositError = variant {
-    // The amount exceeds the maximum supported value.
-    AmountExceedsMaximum;
-    // The token is not part of any registered trading pair.
-    UnsupportedToken : record { token_id : TokenId };
-    // Another deposit or withdrawal is already in flight for this
-    // (caller, token). Retry once the previous operation completes.
-    OperationInProgress;
-    // The inter-canister call to the token ledger failed.
-    CallFailed : record { ledger : principal; method : text; reason : text };
-    // The icrc2_transfer_from call to the token ledger returned an error.
-    LedgerError : LedgerTransferFromError;
+// Error returned by the deposit endpoint. See the disposition contract at the
+// top of this file.
+type DepositError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The amount exceeds the maximum supported value.
+            AmountExceedsMaximum;
+            // The token is not part of any registered trading pair.
+            UnsupportedToken : record { token_id : TokenId };
+            // The caller's external wallet does not hold enough funds.
+            InsufficientFunds : record { balance : nat };
+            // The caller's ICRC-2 allowance to the canister is not large enough.
+            InsufficientAllowance : record { allowance : nat };
+        };
+        TemporaryError : opt variant {
+            // Another deposit or withdrawal is already in flight for this
+            // (caller, token). Retry once the previous operation completes.
+            OperationInProgress;
+            // The token ledger is temporarily unavailable.
+            LedgerTemporarilyUnavailable;
+            // The inter-canister call to the token ledger failed.
+            CallFailed : record { ledger : principal; method : text; reason : text };
+        };
+        InternalError : opt variant {
+            // The icrc2_transfer_from call returned an unexpected ledger error.
+            LedgerError : record { reason : text };
+        };
+    };
+    message : opt text;
 };
 
 // Request to deposit tokens into the canister.
@@ -329,31 +373,39 @@ type WithdrawResponse = record {
     block_index : nat;
 };
 
-// Errors that can be returned by icrc1_transfer.
-type LedgerTransferError = variant {
-    InsufficientFunds : record { balance : nat };
-    TemporarilyUnavailable;
-    InternalError : text;
-};
-
-// Error returned by the withdraw endpoint.
-type WithdrawError = variant {
-    // The amount exceeds the maximum supported value.
-    AmountExceedsMaximum;
-    // The token is not part of any registered trading pair.
-    UnsupportedToken : record { token_id : TokenId };
-    // The caller does not have enough free balance.
-    InsufficientBalance : record { available : nat };
-    // The requested amount is below the ledger's transfer fee.
-    // `min_amount` is the ledger's `icrc1_fee`.
-    AmountTooSmall : record { min_amount : nat };
-    // Another deposit or withdrawal is already in flight for this
-    // (caller, token). Retry once the previous operation completes.
-    OperationInProgress;
-    // The inter-canister call to the token ledger failed.
-    CallFailed : record { ledger : principal; method : text; reason : text };
-    // The icrc1_transfer call to the token ledger returned an error.
-    LedgerError : LedgerTransferError;
+// Error returned by the withdraw endpoint. See the disposition contract at the
+// top of this file.
+type WithdrawError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The amount exceeds the maximum supported value.
+            AmountExceedsMaximum;
+            // The requested amount is below the ledger's transfer fee.
+            // `min_amount` is the ledger's `icrc1_fee` + 1.
+            AmountTooSmall : record { min_amount : nat };
+            // The token is not part of any registered trading pair.
+            UnsupportedToken : record { token_id : TokenId };
+            // The caller does not have enough free balance.
+            InsufficientBalance : record { available : nat };
+        };
+        TemporaryError : opt variant {
+            // Another deposit or withdrawal is already in flight for this
+            // (caller, token). Retry once the previous operation completes.
+            OperationInProgress;
+            // The token ledger is temporarily unavailable.
+            LedgerTemporarilyUnavailable;
+            // The inter-canister call to the token ledger failed.
+            CallFailed : record { ledger : principal; method : text; reason : text };
+        };
+        InternalError : opt variant {
+            // The icrc1_transfer call returned an unexpected ledger error.
+            LedgerError : record { reason : text };
+            // The ledger reported insufficient funds against the canister's
+            // own accounting — a genuine invariant violation.
+            LedgerInsufficientFunds : record { balance : nat };
+        };
+    };
+    message : opt text;
 };
 
 type WithdrawResult = variant { Ok : WithdrawResponse; Err : WithdrawError };

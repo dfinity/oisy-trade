@@ -8,9 +8,96 @@ mod tests;
 
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Unique identifier for an order, encoded as a hex string.
 pub type OrderId = String;
+
+/// A disposition-tagged, forward-compatible user-facing error.
+///
+/// Every fallible endpoint returns one of these: a [`kind`](Self::kind)
+/// carrying the disposition (what the caller should do) plus an advisory,
+/// human-readable [`message`](Self::message). The disposition is the contract;
+/// clients branch on `kind` and the inner leaf, and **must not** parse
+/// `message`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub struct Error<Request, Temporary, Internal> {
+    /// The disposition and, when available, the specific reason.
+    pub kind: ErrorKind<Request, Temporary, Internal>,
+    /// Advisory, human-readable text derived from the underlying leaf's
+    /// `Display`. Clients must not parse it; programmatic handling is on
+    /// [`kind`](Self::kind) and the inner leaf only.
+    pub message: Option<String>,
+}
+
+/// The disposition of an [`Error`], parameterized by its per-endpoint leaves.
+///
+/// Each arm carries an `Option` of its leaf so that a client built against an
+/// older interface decodes an unknown future leaf as `None` while still
+/// reading the arm itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum ErrorKind<Request, Temporary, Internal> {
+    /// Caller-side: the request will not succeed as-is. Correct the input,
+    /// satisfy a precondition, or stop. Do not auto-retry unchanged.
+    RequestError(Option<Request>),
+    /// Transient: retry the same call after a backoff.
+    TemporaryError(Option<Temporary>),
+    /// DEX-side fault: surface to operators. Do not retry.
+    InternalError(Option<Internal>),
+}
+
+impl<Request, Temporary, Internal> Error<Request, Temporary, Internal>
+where
+    Request: std::error::Error,
+    Temporary: std::error::Error,
+    Internal: std::error::Error,
+{
+    /// Build a `RequestError`, deriving `message` from the leaf's `Display`.
+    pub fn request(leaf: Request) -> Self {
+        Self {
+            message: Some(leaf.to_string()),
+            kind: ErrorKind::RequestError(Some(leaf)),
+        }
+    }
+
+    /// Build a `TemporaryError`, deriving `message` from the leaf's `Display`.
+    pub fn temporary(leaf: Temporary) -> Self {
+        Self {
+            message: Some(leaf.to_string()),
+            kind: ErrorKind::TemporaryError(Some(leaf)),
+        }
+    }
+
+    /// Build an `InternalError`, deriving `message` from the leaf's `Display`.
+    pub fn internal(leaf: Internal) -> Self {
+        Self {
+            message: Some(leaf.to_string()),
+            kind: ErrorKind::InternalError(Some(leaf)),
+        }
+    }
+}
+
+pub use never::Never;
+
+mod never {
+    #![allow(unreachable_code)]
+
+    use super::{CandidType, Deserialize, Serialize, fmt};
+
+    /// An uninhabited leaf type for a disposition arm an endpoint can never
+    /// produce. It still occupies the arm so leaves can be added later without
+    /// breaking clients; Candid renders it as an empty `opt variant {}`.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+    pub enum Never {}
+
+    impl fmt::Display for Never {
+        fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match *self {}
+        }
+    }
+
+    impl std::error::Error for Never {}
+}
 
 /// Side of an order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
@@ -44,8 +131,11 @@ pub struct LimitOrderRequest {
 }
 
 /// Error returned when placing a limit order fails.
+pub type AddLimitOrderError = Error<AddLimitOrderRequestError, AddLimitOrderTemporaryError, Never>;
+
+/// Caller-side reasons `add_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum AddLimitOrderError {
+pub enum AddLimitOrderRequestError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
     /// The requested trading pair is not registered.
@@ -83,13 +173,68 @@ pub enum AddLimitOrderError {
         /// The configured maximum notional, if any.
         max: Option<Nat>,
     },
+}
+
+impl fmt::Display for AddLimitOrderRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AmountExceedsMaximum => {
+                write!(f, "the amount exceeds the maximum supported value")
+            }
+            Self::UnknownTradingPair => write!(f, "the requested trading pair is not registered"),
+            Self::InvalidPrice { price, tick_size } => write!(
+                f,
+                "price {price} is not a positive multiple of tick size {tick_size}"
+            ),
+            Self::InvalidQuantity { quantity, lot_size } => write!(
+                f,
+                "quantity {quantity} is not a positive multiple of lot size {lot_size}"
+            ),
+            Self::InsufficientBalance {
+                token,
+                available,
+                required,
+            } => write!(
+                f,
+                "insufficient balance for token {}: available {available}, required {required}",
+                token.ledger_id
+            ),
+            Self::InvalidNotional { notional, min, max } => match max {
+                Some(max) => write!(
+                    f,
+                    "notional {notional} is outside the allowed range [{min}, {max}]"
+                ),
+                None => write!(f, "notional {notional} is below the minimum {min}"),
+            },
+        }
+    }
+}
+
+impl std::error::Error for AddLimitOrderRequestError {}
+
+/// Transient reasons `add_limit_order` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum AddLimitOrderTemporaryError {
     /// Trading is halted (globally or on this pair); no new orders are accepted.
     TradingHalted,
 }
 
+impl fmt::Display for AddLimitOrderTemporaryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TradingHalted => write!(f, "trading is halted; no new orders are accepted"),
+        }
+    }
+}
+
+impl std::error::Error for AddLimitOrderTemporaryError {}
+
 /// Error returned when canceling a limit order fails.
+pub type CancelLimitOrderError = Error<CancelLimitOrderRequestError, Never, Never>;
+
+/// Caller-side reasons `cancel_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum CancelLimitOrderError {
+pub enum CancelLimitOrderRequestError {
     /// No order with the given ID exists.
     OrderNotFound,
     /// The caller does not own the order.
@@ -99,6 +244,21 @@ pub enum CancelLimitOrderError {
     /// The order has already been canceled.
     OrderAlreadyCanceled,
 }
+
+impl fmt::Display for CancelLimitOrderRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OrderNotFound => write!(f, "no order with the given id exists"),
+            Self::NotOrderOwner => write!(f, "the caller does not own the order"),
+            Self::OrderAlreadyFilled => {
+                write!(f, "the order has already been fully filled")
+            }
+            Self::OrderAlreadyCanceled => write!(f, "the order has already been canceled"),
+        }
+    }
+}
+
+impl std::error::Error for CancelLimitOrderRequestError {}
 
 /// Error returned by controller-gated endpoints when the caller is not
 /// authorized to perform the requested action.
@@ -366,8 +526,11 @@ pub struct DepositRequest {
 }
 
 /// Error returned by the deposit endpoint.
+pub type DepositError = Error<DepositRequestError, DepositTemporaryError, DepositInternalError>;
+
+/// Caller-side reasons a deposit can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum DepositError {
+pub enum DepositRequestError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
     /// The token is not part of any trading pair on the OISY TRADE.
@@ -375,9 +538,47 @@ pub enum DepositError {
         /// The unsupported token.
         token_id: TokenId,
     },
+    /// The caller's external wallet does not hold enough funds for the transfer.
+    InsufficientFunds {
+        /// The current balance of the source account.
+        balance: Nat,
+    },
+    /// The caller's ICRC-2 allowance to the OISY TRADE is not large enough.
+    InsufficientAllowance {
+        /// The current allowance.
+        allowance: Nat,
+    },
+}
+
+impl fmt::Display for DepositRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AmountExceedsMaximum => {
+                write!(f, "the amount exceeds the maximum supported value")
+            }
+            Self::UnsupportedToken { token_id } => {
+                write!(f, "token {} is not supported", token_id.ledger_id)
+            }
+            Self::InsufficientFunds { balance } => {
+                write!(f, "insufficient funds: balance {balance}")
+            }
+            Self::InsufficientAllowance { allowance } => {
+                write!(f, "insufficient allowance: {allowance}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DepositRequestError {}
+
+/// Transient reasons a deposit can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum DepositTemporaryError {
     /// Another deposit or withdrawal is already in flight for this
     /// `(caller, token)`. Retry once the previous operation completes.
     OperationInProgress,
+    /// The token ledger is temporarily unavailable.
+    LedgerTemporarilyUnavailable,
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.
@@ -387,28 +588,47 @@ pub enum DepositError {
         /// The reason the call failed.
         reason: String,
     },
-    /// The icrc2_transfer_from call to the token ledger returned an error.
-    LedgerError(LedgerTransferFromError),
 }
 
-/// Errors that can be returned by the ICRC-2 `transfer_from` endpoint on a ledger canister.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum LedgerTransferFromError {
-    /// The source account does not hold enough funds.
-    InsufficientFunds {
-        /// The current balance of the source account.
-        balance: Nat,
-    },
-    /// The caller's allowance is not large enough.
-    InsufficientAllowance {
-        /// The current allowance.
-        allowance: Nat,
-    },
-    /// The ledger is temporarily unavailable.
-    TemporarilyUnavailable,
-    /// Internal error
-    InternalError(String),
+impl fmt::Display for DepositTemporaryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OperationInProgress => {
+                write!(f, "another deposit or withdrawal is already in flight")
+            }
+            Self::LedgerTemporarilyUnavailable => {
+                write!(f, "the token ledger is temporarily unavailable")
+            }
+            Self::CallFailed {
+                ledger,
+                method,
+                reason,
+            } => write!(f, "call to {ledger}.{method} failed: {reason}"),
+        }
+    }
 }
+
+impl std::error::Error for DepositTemporaryError {}
+
+/// DEX-side reasons a deposit can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum DepositInternalError {
+    /// The `icrc2_transfer_from` call returned an unexpected ledger error.
+    LedgerError {
+        /// A human-readable description of the ledger error.
+        reason: String,
+    },
+}
+
+impl fmt::Display for DepositInternalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LedgerError { reason } => write!(f, "ledger error: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for DepositInternalError {}
 
 /// Response after a successful deposit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
@@ -507,10 +727,18 @@ pub struct WithdrawResponse {
 }
 
 /// Error returned by the withdraw endpoint.
+pub type WithdrawError = Error<WithdrawRequestError, WithdrawTemporaryError, WithdrawInternalError>;
+
+/// Caller-side reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum WithdrawError {
+pub enum WithdrawRequestError {
     /// The amount exceeds the maximum supported value.
     AmountExceedsMaximum,
+    /// The requested amount is too small to cover the ledger transfer fee.
+    AmountTooSmall {
+        /// The minimum withdrawal amount (ledger fee + 1).
+        min_amount: Nat,
+    },
     /// The token is not part of any trading pair on the OISY TRADE.
     UnsupportedToken {
         /// The unsupported token.
@@ -521,14 +749,38 @@ pub enum WithdrawError {
         /// The caller's available free balance.
         available: Nat,
     },
-    /// The requested amount is too small to cover the ledger transfer fee.
-    AmountTooSmall {
-        /// The minimum withdrawal amount (ledger fee + 1).
-        min_amount: Nat,
-    },
+}
+
+impl fmt::Display for WithdrawRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AmountExceedsMaximum => {
+                write!(f, "the amount exceeds the maximum supported value")
+            }
+            Self::AmountTooSmall { min_amount } => write!(
+                f,
+                "the amount is too small; the minimum withdrawal is {min_amount}"
+            ),
+            Self::UnsupportedToken { token_id } => {
+                write!(f, "token {} is not supported", token_id.ledger_id)
+            }
+            Self::InsufficientBalance { available } => {
+                write!(f, "insufficient free balance: available {available}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WithdrawRequestError {}
+
+/// Transient reasons a withdrawal can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+pub enum WithdrawTemporaryError {
     /// Another deposit or withdrawal is already in flight for this
     /// `(caller, token)`. Retry once the previous operation completes.
     OperationInProgress,
+    /// The token ledger is temporarily unavailable.
+    LedgerTemporarilyUnavailable,
     /// The inter-canister call to the token ledger failed.
     CallFailed {
         /// The ledger canister that was called.
@@ -538,23 +790,57 @@ pub enum WithdrawError {
         /// The reason the call failed.
         reason: String,
     },
-    /// The icrc1_transfer call to the token ledger returned an error.
-    LedgerError(LedgerTransferError),
 }
 
-/// Errors that can be returned by the ICRC-1 `transfer` endpoint on a ledger canister.
+impl fmt::Display for WithdrawTemporaryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OperationInProgress => {
+                write!(f, "another deposit or withdrawal is already in flight")
+            }
+            Self::LedgerTemporarilyUnavailable => {
+                write!(f, "the token ledger is temporarily unavailable")
+            }
+            Self::CallFailed {
+                ledger,
+                method,
+                reason,
+            } => write!(f, "call to {ledger}.{method} failed: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for WithdrawTemporaryError {}
+
+/// DEX-side reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum LedgerTransferError {
-    /// The source account does not hold enough funds.
-    InsufficientFunds {
-        /// The current balance of the source account.
+pub enum WithdrawInternalError {
+    /// The `icrc1_transfer` call returned an unexpected ledger error.
+    LedgerError {
+        /// A human-readable description of the ledger error.
+        reason: String,
+    },
+    /// The ledger reported insufficient funds even though the OISY TRADE's
+    /// accounting credited the balance — a genuine invariant violation.
+    LedgerInsufficientFunds {
+        /// The balance the ledger reported for the OISY TRADE.
         balance: Nat,
     },
-    /// The ledger is temporarily unavailable.
-    TemporarilyUnavailable,
-    /// Internal error.
-    InternalError(String),
 }
+
+impl fmt::Display for WithdrawInternalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LedgerError { reason } => write!(f, "ledger error: {reason}"),
+            Self::LedgerInsufficientFunds { balance } => write!(
+                f,
+                "ledger reported insufficient funds (balance {balance}) against the OISY TRADE's own accounting"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WithdrawInternalError {}
 
 /// Error returned by the `add_trading_pair` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
