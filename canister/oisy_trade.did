@@ -39,8 +39,9 @@
 //           // Canister-side error; surface to operators. Do NOT retry.
 //           InternalError : opt variant { /* error details */ };
 //       };
-//       // Advisory, human-readable text derived from the detailed failure.
-//       // Meant for older clients that cannot parse the error detail.
+//       // Advisory, human-readable text derived from the detailed failure,
+//       // meant for older clients that cannot parse the error detail. Not
+//       // localized, the exact text may change, and clients MUST NOT parse it.
 //       message : opt text;
 //   };
 //
@@ -50,9 +51,6 @@
 // without breaking clients. Each arm's payload is `opt variant`: a client built
 // against an older interface decodes an unknown future leaf as `null` while
 // still reading the arm and `message`.
-//
-// `message` is advisory, human-readable text derived from the failure; it is
-// not localized, its exact text may change, and clients MUST NOT parse it.
 
 // Unique identifier for an order, assigned by the canister upon submission.
 // Opaque identifier, not meant to be interpreted by clients.
