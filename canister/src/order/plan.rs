@@ -140,7 +140,9 @@ impl OrderBook {
                     "BUG: plan/apply divergence — maker marked emptied but has remaining quantity"
                 );
                 let filled = queue.pop_front().expect("front exists");
-                assert!(self.resting_orders.remove(&filled.id()).is_some());
+                self.resting_orders.remove(&filled.id()).expect(
+                    "BUG: plan/apply divergence — emptied maker missing from resting_orders index",
+                );
                 self.filled_orders.insert(filled.id());
                 if queue.is_empty() {
                     cursor = None;
