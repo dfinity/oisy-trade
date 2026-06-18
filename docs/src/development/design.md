@@ -333,8 +333,8 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 - **quantity**: the original submission size as a `Quantity`.
 - **filled_quantity**: the cumulative quantity filled so far as a `Quantity`.
 - **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.
-- **created_at**: the timestamp at which the order was submitted.
-- **last_updated_at**: the timestamp of the most recent status/fill update.
+- **created_at**: the time the order was submitted, in nanoseconds since the Unix epoch.
+- **last_updated_at**: the time of the most recent modifying event (fill, status transition, or cancel), in nanoseconds since the Unix epoch; optional — `null` until the order is first modified.
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
@@ -394,10 +394,9 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 ### Main Endpoints
 
 The list below is illustrative, not exhaustive — `canister/oisy_trade.did` is the
-authoritative interface. Additional endpoints include `cancel_limit_order`,
-`get_trading_pairs`, `get_order_book_ticker`, `get_order_book_depth`,
-`get_fee_balances`, and the controller-only `add_trading_pair`, `halt_trading`,
-and `resume_trading`.
+authoritative interface. Endpoints not detailed here include `get_trading_pairs`,
+`get_order_book_ticker`, `get_order_book_depth`, `get_fee_balances`, and the
+controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
 
 **Update calls** (state-changing):
 
