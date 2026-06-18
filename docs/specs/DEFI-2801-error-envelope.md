@@ -28,6 +28,31 @@ plus an advisory free-text **`message`**:
 - **`TemporaryError`** — transient; retry the same call after a backoff.
 - **`InternalError`** — DEX-side fault; surface to operators. Do **not** retry.
 
+Candid skeleton (every user-facing error follows this shape; `DepositError` shown):
+
+```candid
+type DepositError = record {
+  kind : variant {
+    RequestError : opt variant {
+      AmountExceedsMaximum;
+      UnsupportedToken      : record { token_id : TokenId };
+      InsufficientFunds     : record { balance : nat };
+      InsufficientAllowance : record { allowance : nat };
+    };
+    TemporaryError : opt variant {
+      OperationInProgress;
+      LedgerTemporarilyUnavailable;
+      CallFailed : record { ledger : principal; method : text; reason : text };
+    };
+    InternalError : opt variant { LedgerError : record { reason : text } };
+  };
+  message : opt text;  // advisory; branch on `kind` + leaf, never parse `message`
+};
+```
+
+Arms an endpoint can't produce are still declared, as an empty `opt variant {}` (R1). See
+[Disposition membership](#disposition-membership) for the per-endpoint leaves.
+
 Two adjacent input-handling bugs are folded in because they live in the same surface: `cancel_limit_order`
 maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a missing order), and
 `get_my_orders` **traps** on a malformed `order_id` (user input can panic the canister).
