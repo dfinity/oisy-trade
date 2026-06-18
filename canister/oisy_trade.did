@@ -27,19 +27,29 @@
 //
 // Error disposition contract
 // ---------------------------
-// User-facing errors are `record { kind : variant { … }; message : opt text }`.
+// User-facing errors ALWAYS follow this structure:
+//
+//   record {
+//       kind : variant {
+//           // Caller-side error; the request will not succeed as-is. Correct
+//           // the input or satisfy a precondition. Do NOT auto-retry unchanged.
+//           RequestError : opt variant { /* error details */ };
+//           // Transient; the client MAY retry the same request with some back-off.
+//           TemporaryError : opt variant { /* error details */ };
+//           // Canister-side error; surface to operators. Do NOT retry.
+//           InternalError : opt variant { /* error details */ };
+//       };
+//       // Advisory, human-readable text derived from the detailed failure.
+//       // Meant for older clients that cannot parse the error detail.
+//       message : opt text;
+//   };
+//
 // The `kind` arm is the contract; branch on it and the inner leaf, never on
-// `message`:
-//   - RequestError  — caller-side; the request will not succeed as-is. Correct
-//                     the input or satisfy a precondition. Do NOT auto-retry
-//                     unchanged.
-//   - TemporaryError — transient; retry the same call after a backoff.
-//   - InternalError  — canister-side fault; surface to operators. Do NOT retry.
-// Every error declares all three arms; an arm it cannot currently produce is an
-// empty `opt variant {}`, reserved so leaves can be added later without
-// breaking clients. Each arm's payload is `opt variant`: a client built against
-// an older interface decodes an unknown future leaf as `null` while still
-// reading the arm and `message`.
+// `message`. Every error declares all three arms; an arm it cannot currently
+// produce is an empty `opt variant {}`, reserved so leaves can be added later
+// without breaking clients. Each arm's payload is `opt variant`: a client built
+// against an older interface decodes an unknown future leaf as `null` while
+// still reading the arm and `message`.
 //
 // `message` is advisory, human-readable text derived from the failure; it is
 // not localized, its exact text may change, and clients MUST NOT parse it.
