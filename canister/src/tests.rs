@@ -952,92 +952,65 @@ mod deposit {
     }
 
     #[tokio::test]
-    async fn should_map_insufficient_funds_to_ledger_error() {
-        init_state_with_order_book();
-        let runtime = CapturingRuntime::new(
-            USER,
-            vec![Ok(transfer_from_response(Err(
+    async fn should_map_ledger_errors_to_deposit_errors() {
+        // Variants a well-behaved ledger should never return collapse to
+        // `InternalError` (carrying the ledger's Display message) rather than
+        // trapping.
+        let internal = |e: TransferFromError| {
+            let expected =
+                DepositError::LedgerError(LedgerTransferFromError::InternalError(format!("{e}")));
+            (e, expected)
+        };
+
+        // (ledger reply, expected mapped DepositError)
+        let cases = vec![
+            (
                 TransferFromError::InsufficientFunds {
                     balance: Nat::from(42u64),
                 },
-            )))],
-        );
-
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
-
-        assert_eq!(
-            result,
-            Err(DepositError::LedgerError(
-                LedgerTransferFromError::InsufficientFunds {
-                    balance: Nat::from(42u64)
-                }
-            ))
-        );
-        assert_in_flight_empty();
-    }
-
-    #[tokio::test]
-    async fn should_map_insufficient_allowance_to_ledger_error() {
-        init_state_with_order_book();
-        let runtime = CapturingRuntime::new(
-            USER,
-            vec![Ok(transfer_from_response(Err(
+                DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds {
+                    balance: Nat::from(42u64),
+                }),
+            ),
+            (
                 TransferFromError::InsufficientAllowance {
                     allowance: Nat::from(7u64),
                 },
-            )))],
-        );
-
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
-
-        assert_eq!(
-            result,
-            Err(DepositError::LedgerError(
-                LedgerTransferFromError::InsufficientAllowance {
-                    allowance: Nat::from(7u64)
-                }
-            ))
-        );
-        assert_in_flight_empty();
-    }
-
-    // Variants the canister never expects from a well-behaved ledger collapse to
-    // `InternalError` (carrying the ledger's Display message) rather than trapping.
-    #[tokio::test]
-    async fn should_map_unexpected_ledger_errors_to_internal_error() {
-        let cases = [
-            TransferFromError::BadFee {
+                DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
+                    allowance: Nat::from(7u64),
+                }),
+            ),
+            (
+                TransferFromError::TemporarilyUnavailable,
+                DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable),
+            ),
+            internal(TransferFromError::BadFee {
                 expected_fee: Nat::from(5u64),
-            },
-            TransferFromError::BadBurn {
+            }),
+            internal(TransferFromError::BadBurn {
                 min_burn_amount: Nat::from(5u64),
-            },
-            TransferFromError::CreatedInFuture { ledger_time: 123 },
-            TransferFromError::Duplicate {
+            }),
+            internal(TransferFromError::CreatedInFuture { ledger_time: 123 }),
+            internal(TransferFromError::Duplicate {
                 duplicate_of: Nat::from(9u64),
-            },
-            TransferFromError::GenericError {
+            }),
+            internal(TransferFromError::GenericError {
                 error_code: Nat::from(1u64),
                 message: "boom".to_string(),
-            },
-            TransferFromError::TooOld,
+            }),
+            internal(TransferFromError::TooOld),
         ];
 
         // A failed deposit mutates no state and releases its guard, so a single
         // initialization is reused across the cases.
         init_state_with_order_book();
-        for err in cases {
-            let expected_message = format!("{err}");
-            let runtime = CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Err(err)))]);
+        for (ledger_error, expected) in cases {
+            let runtime =
+                CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Err(ledger_error)))]);
 
             let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
-            assert_eq!(
-                result,
-                Err(DepositError::LedgerError(
-                    LedgerTransferFromError::InternalError(expected_message)
-                ))
-            );
+            assert_eq!(result, Err(expected));
             assert_in_flight_empty();
         }
     }
