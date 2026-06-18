@@ -115,8 +115,10 @@ fn should_log_deposit_error(err: &DepositError) -> bool {
         ErrorKind::TemporaryError(Some(leaf)) => match leaf {
             DepositTemporaryError::LedgerTemporarilyUnavailable
             | DepositTemporaryError::CallFailed { .. } => true,
+            // Do not log errors due to user actions.
             DepositTemporaryError::OperationInProgress => false,
         },
+        // Do not log errors due to user actions.
         ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
     }
 }
@@ -126,9 +128,12 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
         ErrorKind::InternalError(_) => true,
         ErrorKind::TemporaryError(Some(leaf)) => match leaf {
             WithdrawTemporaryError::LedgerTemporarilyUnavailable
-            | WithdrawTemporaryError::CallFailed { .. } => true,
+            | WithdrawTemporaryError::CallFailed { .. }
+            | WithdrawTemporaryError::LedgerFeeChanged => true,
+            // Do not log errors due to user actions.
             WithdrawTemporaryError::OperationInProgress => false,
         },
+        // Do not log errors due to user actions.
         ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
     }
 }
