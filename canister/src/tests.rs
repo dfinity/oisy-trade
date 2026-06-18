@@ -1001,8 +1001,6 @@ mod deposit {
             internal(TransferFromError::TooOld),
         ];
 
-        // A failed deposit mutates no state and releases its guard, so a single
-        // initialization is reused across the cases.
         init_state_with_order_book();
         for (ledger_error, expected) in cases {
             let runtime =
