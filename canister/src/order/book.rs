@@ -282,6 +282,14 @@ impl OrderBook {
                 "BUG: plan/apply divergence — maker at level front does not match plan"
             );
 
+            assert!(
+                planned.fill_qty <= *order.remaining_quantity(),
+                "BUG: plan/apply divergence — planned fill exceeds taker remaining quantity"
+            );
+            assert!(
+                planned.fill_qty <= *resting.remaining_quantity(),
+                "BUG: plan/apply divergence — planned fill exceeds maker remaining quantity"
+            );
             order.reduce_quantity(&planned.fill_qty);
             resting.reduce_quantity(&planned.fill_qty);
 
