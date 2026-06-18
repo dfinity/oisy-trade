@@ -27,11 +27,6 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
 
 ## Requirements
 
-The execution-model decision (synchronous vs asynchronous matching — see Design Decisions) is
-**still open**. The requirements below are written to hold under either model; the few places
-where the model changes observable behavior are called out as **(model-dependent)** and
-resolved once the decision is made.
-
 - **R1 — Optional TIF, backwards compatible.** `LimitOrderRequest` accepts an optional
   `time_in_force`. An absent value defaults to `GoodTilCanceled`, so every existing client
   keeps working unchanged.
@@ -64,10 +59,11 @@ resolved once the decision is made.
   completes within a single message's instruction/heap limits; it does not allow an order to be
   accepted whose evaluation could exceed canister message limits. (A single FOK is evaluated
   atomically and therefore cannot be chunked across messages — see Design Decisions.)
-- **R11 — Outcome delivery (model-dependent).** How the caller learns the FOK outcome
-  (`Filled` / `Expired`) — whether it is returned by the `add_limit_order` call itself
-  (synchronous model) or observed via a subsequent `get_my_orders` lookup (asynchronous model)
-  — is fixed by the execution-model decision. This requirement is a placeholder until then.
+- **R11 — Async outcome, never `Open`.** `add_limit_order` enqueues a FOK and returns an
+  `OrderId` exactly as it does for a GTC order — it does not block on the matching result. The
+  FOK is evaluated when the matching engine processes it, transitioning only `Pending → Filled`
+  or `Pending → Expired`; it never reaches `Open`. The caller observes the terminal outcome via
+  `get_my_orders`.
 
 ## Non-goals
 
@@ -84,46 +80,30 @@ resolved once the decision is made.
 
 ## Design Decisions
 
-### Execution model — **OPEN (A vs B), to be decided before the contingent PR**
+### Execution model — asynchronous FOK
 
-FOK's "immediate or kill" semantics sit in tension with the engine's current shape. Matching is
-**asynchronous and timer-driven**: `add_limit_order` validates the order, reserves balance,
-enqueues it as `Pending`, and returns an `OrderId`; a separately-scheduled zero-delay timer
-(`drive_matching`) then matches it in a later message (`docs/src/development/design.md`,
-Matching Engine). Trade matching and settlement are **fully synchronous with no inter-canister
-calls** (design.md "No async complexity during matching") — settlement just moves reserved
-balances between users — so an inline matching path is technically feasible; the timer exists for
-*chunking* (instruction-limit headroom, DEFI-2724), not because settlement needs async.
+A FOK order queues as `Pending` exactly like a GTC order; the existing timer-driven executor
+evaluates it when it pulls the order for matching, transitioning it only `Pending → Filled` or
+`Pending → Expired` — never `Open`, since a FOK never rests.
 
-**Option A — synchronous FOK.** A FOK order bypasses the pending queue and is matched inline,
-within the `add_limit_order` update call. The caller gets the terminal `Filled` / `Expired`
-outcome in a single round-trip.
-- *Pro:* delivers the swap UX literally — one Candid call returns the result; the book state at
-  submission is the state matched against.
-- *Con:* a second matching entry path alongside the timer-driven one.
-- *Con:* a single FOK is atomic and so **cannot be chunked**; a FOK sweeping many price levels
-  does all that work in one message, so R10 becomes a hard acceptance gate rather than headroom.
-- *Con:* inline matching jumps ahead of GTC orders already waiting in the pending queue,
-  breaking strict FIFO unless the queue is drained first.
+**Rationale.** Time-in-force governs how long an order stays *active in the book* — and
+`add_limit_order` does not put the order in the book. It lands in a pre-processing (pending)
+queue and only reaches the book when the matching engine processes it. So the correct moment to
+evaluate "can this fill in full" is when the engine pulls the order for matching, not at the
+Candid call. This is also exactly Binance's wording — a FOK *"will expire if the full order
+cannot be filled upon execution"* — and it keeps FOK on the same execution path, FIFO ordering,
+and message-chunking as every other order: no second matching entry point, no per-call
+instruction-bound special case.
 
-**Option B — asynchronous FOK.** A FOK order queues as `Pending` like GTC; the existing
-timer/executor evaluates it, transitioning it only `Pending → Filled` or `Pending → Expired`
-(never `Open`).
-- *Pro:* zero architectural change — reuses the executor, the chunking, and FIFO ordering.
-- *Con:* "immediate" means "book state when the timer fires", not "at submission". With the
-  existing zero-delay kick this is typically the very next message, but other orders in the same
-  burst are processed first.
-- *Con:* not a single-call swap — the caller must poll `get_my_orders` for the outcome.
+Matching is **asynchronous and timer-driven**: `add_limit_order` validates the order, reserves
+balance, enqueues it as `Pending`, and returns an `OrderId`; a separately-scheduled zero-delay
+timer (`drive_matching`) then matches it in a later message (`docs/src/development/design.md`,
+Matching Engine). FOK reuses this unchanged. The caller observes the terminal `Filled` /
+`Expired` outcome via `get_my_orders`; with the existing zero-delay kick the result is typically
+available on the very next poll. (Why not synchronous inline matching — see Discussed
+Alternatives.)
 
-**Recommendation: lean A**, because the swap motivation (single-call "swap and tell me the
-result") is the entire reason FOK exists, and synchronous settlement makes it feasible. The two
-real costs to weigh before committing are the **per-message instruction bound** (R10) and
-**FIFO fairness** versus already-queued orders. **This decision does not block the bulk of the
-work** — see the PR sequence: the TIF data model, the `Expired` status, the always-taker fee
-rule, and the atomic-fill primitive are all model-independent and ship first; only the final
-wiring PR depends on A vs B.
-
-### FOK atomicity needs a non-mutating liquidity check — independent of A/B
+### FOK atomicity needs a non-mutating liquidity check
 
 `OrderBook::match_order` fills greedily and **mutates the book as it goes** (it reduces resting
 quantities and pops fully-consumed makers in `fill_against_queue`). So "fill fully or do
@@ -131,8 +111,8 @@ nothing" cannot be expressed by calling `match_order` and reacting to a `Partial
 result — by then the book is already mutated and partial fills already exist. FOK therefore
 needs the fill to be *gated*: first determine whether the full quantity is satisfiable at the
 order's price or better **without mutating**, then either execute (which is guaranteed to fully
-fill) or kill (touching nothing). This primitive is the same regardless of whether it runs
-inline (A) or in the timer (B), which is why it lands in the model-independent PR.
+fill) or kill (touching nothing). This primitive is the matching-engine half of FOK and is
+self-contained, which is why it lands in its own PR ahead of the execution wiring.
 
 ### `Expired` is a unit variant, matching the current `Canceled`
 
@@ -214,23 +194,24 @@ of every fill the FOK produced. GTC assignment is unchanged (R7).
 > }
 > ```
 
-### Execution wiring — **gated on the A/B decision**
+### Execution wiring — `canister/src/execute`, `canister/src/state` (`record_matching_event`)
 
-- **If A (synchronous):** in `canister/src/lib.rs::add_limit_order`, branch on TIF after
-  validation; for FOK, run the gated atomic match inline (against the live book, after deciding
-  how to order relative to any queued GTC orders — R10/FIFO), settle on success, record
-  `Filled` or `Expired`, release the reservation on kill, and return the terminal outcome (R11
-  shape: a richer `Ok` payload or an immediate status). Bound the inline sweep (R10).
-- **If B (asynchronous):** enqueue the FOK as `Pending` as today; in the executor / 
-  `record_matching_event`, when dequeuing a FOK use the gated atomic match and transition
-  `Pending → Filled` or `Pending → Expired` (never `Open`), releasing the reservation on kill.
-  `add_limit_order` keeps returning `OrderId`; the caller polls `get_my_orders` (R11).
+`add_limit_order` is unchanged: it validates, reserves balance, and enqueues the FOK as
+`Pending`, returning an `OrderId` (R11). In the executor / `record_matching_event`, when a
+dequeued order is a FOK, use the gated atomic match: if its full quantity is satisfiable at
+price-or-better, run the match (guaranteed `Filled`); otherwise transition `Pending → Expired`,
+mutating no book state and releasing the reservation taken at placement. A FOK never transitions
+to `Open`. This is the only site that distinguishes FOK from GTC in the matching path; GTC keeps
+its `Pending → Open` / `Filled` transitions. The reservation-release on kill reuses the same
+unreserve/refund computation the cancel path already performs (R4, R5).
 
 ### Docs — `docs/src/development/design.md`
 
-Document the `time_in_force` field, the **chosen** execution model (sync vs async) and why, and
-the `Canceled` (user-initiated) vs `Expired` (system-initiated FOK kill) distinction, including
-that a FOK never reaches `Open`. (R8, plus the AC requiring the design doc to record the model.)
+Document the `time_in_force` field, the asynchronous execution model (FOK is evaluated when the
+engine processes it — "upon execution" — and so transitions `Pending → Filled` or
+`Pending → Expired` and never rests), and the `Canceled` (user-initiated) vs `Expired`
+(system-initiated FOK kill) distinction. (R8, plus the AC requiring the design doc to record the
+model.)
 
 ### Test plan
 
@@ -273,23 +254,20 @@ cargo test -p oisy_trade_int_tests
 
 ### Delivery / PR sequence
 
-Structured so the open A/B decision blocks only the last PR.
+Split by reviewability; both PRs can proceed back-to-back.
 
-- **PR 1 (1/2) — model-independent foundation.** `TimeInForce` enum; optional `time_in_force`
+- **PR 1 (1/2) — data model + fill primitive.** `TimeInForce` enum; optional `time_in_force`
   on `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal + public + Candid);
   `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the non-mutating
   liquidity check + gated atomic-fill primitive in `OrderBook`; the always-taker fee rule for
   FOK in `compute_balance_operations`. Covers R1, R2, R6, R7, R8, R9, and the primitive behind
-  R3/R4/R5/R10. At this point a FOK request is *accepted and parsed* and the engine *can* fully-
-  fill-or-kill, but nothing yet routes FOK orders down the kill path end-to-end.
+  R3/R4/R5/R10. At this point a FOK request is *accepted and parsed* and the engine *can*
+  fully-fill-or-kill, but nothing yet routes FOK orders down the kill path end-to-end.
   - *Acceptance:* R1, R2, R6, R7, R8, R9; unit coverage of the fill primitive (R3/R4/R5/R10).
-- **PR 2 (2/2) — execution wiring (gated on A vs B).** Route FOK orders through the chosen
-  model (inline for A, executor for B), wire the terminal outcome / reservation release, update
-  `design.md` with the chosen model, and add the end-to-end integration tests.
+- **PR 2 (2/2) — execution wiring.** Route dequeued FOK orders through the gated atomic match in
+  the executor / `record_matching_event`, wire the `Pending → Expired` transition and
+  reservation release, update `design.md`, and add the end-to-end integration tests.
   - *Acceptance:* R3, R4, R5, R10, R11, and the design-doc AC.
-
-If the A/B decision is made up front, the two PRs can merge back-to-back; if not, PR 1 proceeds
-independently and PR 2 waits on the decision.
 
 ## Discussed Alternatives
 
@@ -301,6 +279,16 @@ independently and PR 2 waits on the decision.
   already moved per-order fill data to flat `OrderRecord` fields and made `Canceled` a unit
   variant. A unit `Expired` is consistent with the current model; the "executedQty == 0"
   property is expressed by the existing `filled_quantity` field, not a status payload.
+- **Synchronous inline FOK (match within the `add_limit_order` call).** This would match a FOK
+  against the live book inside the update call and return the terminal outcome in one round-trip
+  (closer to Coinbase's "filled immediately at submission"). Rejected: time-in-force describes
+  how long an order stays *active in the book*, and the Candid call does not put the order in the
+  book — it enqueues it for pre-processing. Evaluating "fill or kill" at the call would conflate
+  submission with book-entry. It would also add a second matching entry point, jump the FOK
+  ahead of GTC orders already queued (breaking FIFO), and make the per-message instruction bound
+  a hard gate because a single atomic FOK cannot be chunked. The asynchronous model (Binance's
+  "upon execution") avoids all of this; the only cost is that the caller polls `get_my_orders`
+  for the outcome instead of reading it from the call result.
 - **Reacting to `match_order`'s `PartiallyFilled` result instead of pre-checking liquidity.**
   Rejected: `match_order` mutates the book and creates real fills as it runs, so by the time it
   reports `PartiallyFilled` the partial execution has already happened and would need rolling
