@@ -202,6 +202,7 @@ type OrderBookDepth = record {
 };
 
 // Error returned by the `get_order_book_ticker` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 type GetOrderBookTickerError = variant {
     // The requested trading pair is not registered.
     UnknownTradingPair;
@@ -221,6 +222,7 @@ type GetOrderBookDepthRequest = record {
 };
 
 // Error returned by the `get_order_book_depth` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 type GetOrderBookDepthError = variant {
     // The requested trading pair is not registered.
     UnknownTradingPair;
@@ -439,6 +441,7 @@ type UserTokenBalance = record {
 };
 
 // Per-entry error reported in `get_balances` responses.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 type GetBalancesError = variant {
     TokenNotSupported : FilterToken;
 };
@@ -451,6 +454,7 @@ type GetBalanceResult = variant {
 
 // Whole-request error reported when `get_balances` rejects the request
 // before any per-entry lookup runs.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 type GetBalancesRequestError = variant {
     FilterTooLarge : record { len : nat32; max : nat32 };
 };

@@ -127,6 +127,7 @@ pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 pub const MAX_DEPTH_LIMIT: u32 = 1_000;
 
 /// Error returned by the `get_order_book_ticker` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookTickerError {
     /// The requested trading pair is not registered on the OISY TRADE.
@@ -147,6 +148,7 @@ pub struct GetOrderBookDepthRequest {
 }
 
 /// Error returned by the `get_order_book_depth` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookDepthError {
     /// The requested trading pair is not registered on the OISY TRADE.
@@ -354,6 +356,7 @@ pub struct UserTokenBalance {
 }
 
 /// Per-entry error reported in [`get_balances`] responses.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesError {
     /// The filter referenced a token that the OISY TRADE does not support.
@@ -362,6 +365,7 @@ pub enum GetBalancesError {
 
 /// Whole-request error reported when [`get_balances`] rejects the
 /// request before any per-entry lookup runs.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesRequestError {
     /// The filter exceeded [`MAX_FILTER_LEN`] entries.
