@@ -71,9 +71,10 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
 
 - **IOC (Immediate-Or-Cancel).** Conceptually the sibling of FOK (same `TimeInForce` enum, same
   always-taker fee, same `Expired` terminal state — see R8) but it *does* allow partial fill of
-  the available quantity. Deferred to a follow-up; it reuses the plan/execute matching this
-  ticket introduces — `execute(order, require_full = false)` that cancels the remainder instead
-  of resting it.
+  the available quantity. Deferred to a follow-up; it reuses the same plan/execute matching this
+  ticket introduces — applying whatever crosses, then **canceling** the unfilled remainder. That
+  is a third remainder disposition alongside GTC's *rest* and FOK's *require-full-or-kill*, not
+  simply `require_full = false` (which is the GTC path, and rests the remainder).
 - **`LIMIT_MAKER` / post-only.** The opposite end of the TIF spectrum (reject if it would
   cross). Separate scope.
 - **Self-Trade Prevention and `EXPIRED_IN_MATCH`.** STP is not in scope, so there is no distinct
@@ -127,9 +128,11 @@ Chosen over the two narrower alternatives (a non-mutating liquidity *pre-check* 
 the unchanged `match_order`, and an *operation-log rollback* that undoes a partial match — both
 in Discussed Alternatives) because plan/execute makes the no-mutation-on-kill guarantee
 **structural** rather than test-enforced, keeps a single matching traversal with no duplicated
-crossing predicate, and **generalizes to other time-in-force values**: a future IOC is just
-`execute(order, require_full = false)` that cancels the remainder instead of resting it, reusing
-the same plan. The cost is a constant-factor second pass on the GTC hot path (see Performance).
+crossing predicate, and **generalizes to other time-in-force values**: the time-in-force selects
+what happens to the taker's unfilled remainder after whatever crossed has been applied — GTC
+rests it, FOK requires the whole order to fill or kills it (`require_full`), and a future IOC
+would cancel it — all on the same single plan/apply traversal. The cost is a constant-factor
+second pass on the GTC hot path (see Performance).
 
 ### `Expired` is a unit variant, matching the current `Canceled`
 
