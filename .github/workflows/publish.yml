@@ -5,11 +5,10 @@ on:
 
 jobs:
   # Tag the crates whose version was bumped by a merged release-plz PR and
-  # publish oisy_trade_types to crates.io. The released crates
-  # (oisy_trade_canister, oisy_trade_types) each set git_release_enable = false,
-  # so this job creates no GitHub releases; the canister's draft release is
-  # created by the publish-canister job below. Triggered manually after the
-  # release PR is merged; a no-op if there is nothing new to release.
+  # publish oisy_trade_types to crates.io. git_release_enable defaults to false
+  # (workspace), so this job creates no GitHub releases; the canister's draft
+  # release is created by the publish-canister job below. Triggered manually
+  # after the release PR is merged; a no-op if there is nothing new to release.
   release:
     name: Release-plz tag & release
     runs-on: ubuntu-latest
