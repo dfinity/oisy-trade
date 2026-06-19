@@ -315,15 +315,17 @@ cargo test -p oisy_trade_int_tests
 
 ### Delivery / PR sequence
 
-A stack of three PRs, each independently compilable/testable, that isolate the
-behavior-preserving refactor from the FOK feature itself.
+A stack, each PR independently compilable/testable, isolating the behavior-preserving refactors
+from the FOK feature itself. The plan/execute PR sits on a **separately-extracted,
+behavior-preserving `OrderQueue` storage refactor** — its own base PR off `main` — so each layer
+reviews on its own. The FOK delivery proper is the three PRs below.
 
 - **PR 1 (1/3) — plan/execute refactor (pure implementation detail).** Introduce `plan_fills`
   and `apply_plan`, rewrite `match_order` as plan-then-apply, and add the always-on
   plan/apply-divergence check. **No new public types, no behavior change, no new requirement** —
   this is purely how matching is structured internally. The acceptance signal is that **every
-  existing order-book/matching test passes unmodified**; the only test addition is an optional
-  new property test asserting plan-then-apply equals the prior `match_order` output. The
+  existing order-book/matching test passes unmodified** — that is the behavior-preservation
+  proof; no parallel reference-matcher test is needed. The
   `require_full` gate, `Killed` outcome, and `expired_orders` are *not* introduced here (they
   have no caller yet and would be dead code) — they arrive with the FOK wiring in PR 3.
   - *Acceptance:* existing matching tests green without edits (behavior preserved, R2).
