@@ -329,9 +329,12 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 
 - **owner**: the `Principal` that submitted the order.
 - **side**: `Buy` or `Sell`.
-- **price**: the limit price as a `u64`.
+- **price**: the limit price, a `u128` (exposed as `nat` in the Candid interface).
 - **quantity**: the original submission size as a `Quantity`.
+- **filled_quantity**: the cumulative quantity filled so far as a `Quantity`.
 - **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.
+- **created_at**: the time the order was submitted, in nanoseconds since the Unix epoch.
+- **last_updated_at**: the time of the most recent modifying event (fill, status transition, or cancel), in nanoseconds since the Unix epoch; optional — `null` until the order is first modified.
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
@@ -390,12 +393,17 @@ Inter-canister calls (ICRC-2 `transfer_from` for deposits, ICRC-1 `transfer` for
 
 ### Main Endpoints
 
+The list below is illustrative, not exhaustive — `canister/oisy_trade.did` is the
+authoritative interface. Endpoints not detailed here include `get_trading_pairs`,
+`get_order_book_ticker`, `get_order_book_depth`, `get_fee_balances`, and the
+controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
+
 **Update calls** (state-changing):
 
 - **`deposit(token, amount)`**: transfers tokens into the canister via `icrc2_transfer_from`. Credits the user's available balance on success. Involves one async inter-canister call. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
 - **`withdraw(token, amount)`**: transfers tokens from the canister to the user's wallet via `icrc1_transfer`. Debits the user's available balance. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
 - **`add_limit_order(pair, side, price, quantity)`**: validates the order (balance, tick/lot size), debits the required amount from the user's available balance to reserved, enqueues the order, and returns an order ID. Fully synchronous — no inter-canister calls. Time: O(1). Memory: O(1) for the queued order.
-- **`cancel_order(order_id)`**: removes a resting order from the book and returns reserved tokens to the user's available balance. Time: O(log p + k) where p is the number of price levels and k is the queue depth at the order's price level (to find and remove the order from the `VecDeque`). Memory: frees the canceled order.
+- **`cancel_limit_order(order_id)`**: removes a resting order from the book and returns reserved tokens to the user's available balance. Time: O(log p + k) where p is the number of price levels and k is the queue depth at the order's price level (to find and remove the order from the `VecDeque`). Memory: frees the canceled order.
 
 **Timer-driven** (internal):
 
