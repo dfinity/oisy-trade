@@ -239,16 +239,16 @@ impl OrderBook {
     /// front of its level, then partially fills the maker named in
     /// `plan.last_partial()` (if any). Asserts the taker's remaining quantity
     /// matches `plan.taker_remaining()` at the end.
-    fn apply_plan(&mut self, plan: FillPlan, order: &mut Order) -> Vec<Fill> {
+    fn apply_plan(&mut self, plan: FillPlan, taker_order: &mut Order) -> Vec<Fill> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::apply_plan");
         assert_eq!(
-            order.id(),
+            taker_order.id(),
             plan.taker_order(),
             "BUG: plan/apply divergence — taker order mismatch"
         );
-        let side = order.side();
-        let taker_price = order.price();
+        let side = taker_order.side();
+        let taker_price = taker_order.price();
         let mut fills = Vec::new();
 
         for &maker_seq in plan.filled_makers() {
@@ -263,9 +263,9 @@ impl OrderBook {
                 "BUG: plan/apply divergence — maker at level front does not match plan"
             );
             let full_qty = *filled.remaining_quantity();
-            order.reduce_quantity(&full_qty);
+            taker_order.reduce_quantity(&full_qty);
             fills.push(Fill {
-                taker_order_seq: order.id(),
+                taker_order_seq: taker_order.id(),
                 taker_side: side,
                 taker_price,
                 maker_order_seq: maker_seq,
@@ -275,7 +275,7 @@ impl OrderBook {
             self.filled_orders.insert(filled.id());
         }
 
-        if let Some((maker_seq, maker_remaining_after)) = plan.last_partial() {
+        if let Some((maker_seq, fill_qty)) = plan.last_partial() {
             let (maker_price, resting) = match side {
                 Side::Buy => self.asks_front_mut(),
                 Side::Sell => self.bids_front_mut(),
@@ -286,14 +286,15 @@ impl OrderBook {
                 maker_seq,
                 "BUG: plan/apply divergence — partial-fill maker not at level front"
             );
-            let fill_qty = resting
-                .remaining_quantity()
-                .checked_sub(maker_remaining_after)
-                .expect("BUG: plan/apply divergence — partial leaves more than maker had");
             resting.reduce_quantity(&fill_qty);
-            order.reduce_quantity(&fill_qty);
+            assert_ne!(
+                *resting.remaining_quantity(),
+                Quantity::ZERO,
+                "BUG: plan/apply divergence - partial-fill maker cannot be fully filled"
+            );
+            taker_order.reduce_quantity(&fill_qty);
             fills.push(Fill {
-                taker_order_seq: order.id(),
+                taker_order_seq: taker_order.id(),
                 taker_side: side,
                 taker_price,
                 maker_order_seq: maker_seq,
@@ -303,7 +304,7 @@ impl OrderBook {
         }
 
         assert_eq!(
-            *order.remaining_quantity(),
+            *taker_order.remaining_quantity(),
             plan.taker_remaining(),
             "BUG: plan/apply divergence — taker remaining mismatch"
         );

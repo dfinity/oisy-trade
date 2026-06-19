@@ -8,7 +8,7 @@ use super::{Order, OrderSeq, Quantity, RestingOrder};
 /// the last one. The plan therefore records only:
 ///
 /// - the fully-consumed makers, in execution order, by sequence;
-/// - the optional last partial fill, as `(maker_seq, maker_remaining_after)`;
+/// - the optional last partial fill, as `(maker_seq, fill_qty)`;
 /// - the taker's remaining quantity after the plan executes (zero ⇒ filled).
 ///
 /// Build a plan by constructing it with [`FillPlan::new`] and calling
@@ -71,7 +71,7 @@ impl FillPlan {
                 Quantity::ZERO,
                 "BUG: partial fill of maker can only happen if taker fully consumed"
             );
-            self.last_partial = Some((maker_seq, maker_remaining_after));
+            self.last_partial = Some((maker_seq, fill_qty));
         }
     }
 
