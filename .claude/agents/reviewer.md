@@ -47,8 +47,7 @@ branches, or PR state beyond posting your review.
   (e.g. in safe Rust, a method taking `&self` where the receiver has no interior mutability
   (no `UnsafeCell`, e.g. `Cell`/`RefCell`/`Mutex`/`RwLock`/atomics) cannot mutate the receiver's fields).
   Do NOT ask to add assertions to a test that should not exist in the first place.
-  Establish coverage by EVIDENCE, not inspection: before
-  the relevant production line (never committed — revert it immediately; this is the one
+- Establish coverage by EVIDENCE, not inspection: mutate the relevant production line (never committed — revert it immediately; this is the one
   allowed deviation from "never modify code", a throwaway experiment) and check which
   tests fail. If a "missing assertion" you were about to flag is already caught by other
   tests, the gap is not real, so recommend deleting the redundant test rather than
