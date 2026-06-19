@@ -4,9 +4,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Tag and create the (draft) GitHub releases for any crates whose version was
-  # bumped by a merged release-plz PR. Triggered manually after the release PR
-  # is merged; a no-op if there is nothing new to release.
+  # Tag the crates whose version was bumped by a merged release-plz PR and
+  # publish oisy_trade_types to crates.io. No GitHub releases are created here
+  # (git_release_enable = false for every crate); the canister's draft release
+  # is created by the publish-canister job below. Triggered manually after the
+  # release PR is merged; a no-op if there is nothing new to release.
   release:
     name: Release-plz tag & release
     runs-on: ubuntu-latest
@@ -40,9 +42,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  # Build the canister wasm fresh from the released commit and finalize its
-  # GitHub release with the wasm.gz, its SHA-256, the candid interface, and the
-  # deployment-status table.
+  # Build the canister wasm fresh from the released commit and create its
+  # (draft) GitHub release with the wasm.gz, its SHA-256, the candid interface,
+  # and the deployment-status table.
   publish-canister:
     name: Publish canister artifacts
     needs: release
