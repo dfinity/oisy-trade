@@ -137,6 +137,16 @@ fn order_queue_remove_returns_none_when_predicate_matches_nothing() {
     assert_eq!(queue.remove(1, |v| *v == "z"), None);
 }
 
+#[test]
+fn order_queue_from_levels_drops_empty_levels() {
+    let queue = OrderQueue::from_levels(map_of([(1u32, vec![]), (2, vec!["b"]), (3, vec![])]));
+    // Empty levels are dropped, so the best level is non-empty and pop_front
+    // does not trap.
+    assert_eq!(queue.len(), 1);
+    let items: Vec<_> = queue.iter().map(|(k, v)| (*k, *v)).collect();
+    assert_eq!(items, vec![(2, "b")]);
+}
+
 fn map_of<K, V, I>(entries: I) -> BTreeMap<K, VecDeque<V>>
 where
     K: Ord,
