@@ -41,9 +41,8 @@ impl FillPlan {
     /// `filled_makers`; otherwise it becomes the (final) partial fill and
     /// the plan is locked against further fills.
     ///
-    /// Panics if a partial fill is already recorded, or if `resting.id()`
-    /// equals the taker or a previously-recorded maker — a plan must
-    /// reference distinct orders.
+    /// Panics if a partial fill is already recorded (no fill may follow a
+    /// partial), or if `resting.id()` equals the taker — a self-fill.
     pub fn add_fill(&mut self, resting: &RestingOrder) {
         assert!(
             self.last_partial.is_none(),
