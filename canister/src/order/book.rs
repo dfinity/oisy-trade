@@ -1,11 +1,10 @@
 use super::plan::FillPlan;
+use super::queue::{OrderQueue, OrderQueueIter};
 use super::{
     FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
 };
-use crate::order::iter::OrderIter;
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
-use std::collections::btree_map;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
 
@@ -33,9 +32,9 @@ pub struct OrderBook {
     /// Orders awaiting matching, processed by the timer.
     pending_orders: VecDeque<Order>,
     /// Buy side, sorted by price descending (highest first) via [`Reverse<Price>`].
-    bids: BTreeMap<Reverse<Price>, VecDeque<RestingOrder>>,
+    bids: OrderQueue<Reverse<Price>, RestingOrder>,
     /// Sell side, sorted by price ascending (lowest first).
-    asks: BTreeMap<Price, VecDeque<RestingOrder>>,
+    asks: OrderQueue<Price, RestingOrder>,
     /// Index mapping order sequences to their location (side, price) for O(log n) lookup.
     resting_orders: BTreeMap<OrderSeq, (Side, Price)>,
     /// Sequences of orders that were fully filled since the last drain.
@@ -61,8 +60,8 @@ impl OrderBook {
             max_notional,
             fee_rates,
             pending_orders: VecDeque::new(),
-            bids: BTreeMap::new(),
-            asks: BTreeMap::new(),
+            bids: OrderQueue::new(),
+            asks: OrderQueue::new(),
             resting_orders: BTreeMap::new(),
             filled_orders: BTreeSet::new(),
         }
@@ -105,24 +104,16 @@ impl OrderBook {
         self.fee_rates
     }
 
-    fn bids_iter(&self) -> OrderIter<'_, Reverse<Price>, RestingOrder> {
-        OrderIter::new(&self.bids)
+    fn bids_iter(&self) -> OrderQueueIter<'_, Reverse<Price>, RestingOrder> {
+        self.bids.iter()
     }
 
-    fn asks_iter(&self) -> OrderIter<'_, Price, RestingOrder> {
-        OrderIter::new(&self.asks)
+    fn asks_iter(&self) -> OrderQueueIter<'_, Price, RestingOrder> {
+        self.asks.iter()
     }
 
     pub(crate) fn asks_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
-        let mut entry = self.asks.first_entry()?;
-        let price = *entry.key();
-        let resting = entry
-            .get_mut()
-            .pop_front()
-            .expect("BUG: empty queue at price level");
-        if entry.get().is_empty() {
-            entry.remove();
-        }
+        let (price, resting) = self.asks.pop_front()?;
         self.resting_orders
             .remove(&resting.id())
             .expect("BUG: popped order missing from resting_orders index");
@@ -130,15 +121,7 @@ impl OrderBook {
     }
 
     pub(crate) fn bids_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
-        let mut entry = self.bids.first_entry()?;
-        let Reverse(price) = *entry.key();
-        let resting = entry
-            .get_mut()
-            .pop_front()
-            .expect("BUG: empty queue at price level");
-        if entry.get().is_empty() {
-            entry.remove();
-        }
+        let (Reverse(price), resting) = self.bids.pop_front()?;
         self.resting_orders
             .remove(&resting.id())
             .expect("BUG: popped order missing from resting_orders index");
@@ -146,14 +129,11 @@ impl OrderBook {
     }
 
     pub(crate) fn asks_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
-        let (&price, queue) = self.asks.iter_mut().next()?;
-        let resting = queue.front_mut().expect("BUG: empty queue at price level");
-        Some((price, resting))
+        self.asks.front_mut()
     }
 
     pub(crate) fn bids_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
-        let (&Reverse(price), queue) = self.bids.iter_mut().next()?;
-        let resting = queue.front_mut().expect("BUG: empty queue at price level");
+        let (Reverse(price), resting) = self.bids.front_mut()?;
         Some((price, resting))
     }
 
@@ -410,12 +390,8 @@ impl OrderBook {
         assert_eq!(self.resting_orders.insert(order.id(), (side, price)), None);
         let resting = RestingOrder::from(order);
         match side {
-            Side::Buy => self
-                .bids
-                .entry(Reverse(price))
-                .or_default()
-                .push_back(resting),
-            Side::Sell => self.asks.entry(price).or_default().push_back(resting),
+            Side::Buy => self.bids.push_back(Reverse(price), resting),
+            Side::Sell => self.asks.push_back(price, resting),
         }
     }
 
@@ -425,15 +401,15 @@ impl OrderBook {
     /// then in the pending orders (O(num_pending_orders)).
     pub(crate) fn remove_order(&mut self, seq: OrderSeq) -> Option<RemovedOrder> {
         if let Some((side, price)) = self.resting_orders.remove(&seq) {
-            let remaining_quantity = match side {
-                Side::Buy => remove_from_level(self.bids.entry(Reverse(price)), seq),
-                Side::Sell => remove_from_level(self.asks.entry(price), seq),
+            let removed = match side {
+                Side::Buy => self.bids.remove(Reverse(price), |o| o.id() == seq),
+                Side::Sell => self.asks.remove(price, |o| o.id() == seq),
             }
             .expect("BUG: resting_orders index inconsistent with bids/asks");
             return Some(RemovedOrder {
                 side,
                 price,
-                remaining_quantity,
+                remaining_quantity: *removed.remaining_quantity(),
             });
         }
         let pos = self.pending_orders.iter().position(|o| o.id() == seq)?;
@@ -470,7 +446,7 @@ impl OrderBook {
     /// Each level aggregates the remaining quantities of all resting orders at that price.
     pub fn bid_levels(&self, limit: usize) -> impl Iterator<Item = (Price, Quantity)> + '_ {
         self.bids
-            .iter()
+            .levels()
             .take(limit)
             .map(|(Reverse(price), queue)| (*price, sum_remaining(queue)))
     }
@@ -479,7 +455,7 @@ impl OrderBook {
     /// Each level aggregates the remaining quantities of all resting orders at that price.
     pub fn ask_levels(&self, limit: usize) -> impl Iterator<Item = (Price, Quantity)> + '_ {
         self.asks
-            .iter()
+            .levels()
             .take(limit)
             .map(|(price, queue)| (*price, sum_remaining(queue)))
     }
@@ -509,22 +485,6 @@ pub struct RemovedOrder {
     pub side: Side,
     pub price: Price,
     pub remaining_quantity: Quantity,
-}
-
-fn remove_from_level<K: Ord>(
-    entry: btree_map::Entry<'_, K, VecDeque<RestingOrder>>,
-    seq: OrderSeq,
-) -> Option<Quantity> {
-    let btree_map::Entry::Occupied(mut occupied) = entry else {
-        return None;
-    };
-    let queue = occupied.get_mut();
-    let pos = queue.iter().position(|o| o.id() == seq)?;
-    let removed = queue.remove(pos).expect("position is valid");
-    if queue.is_empty() {
-        occupied.remove();
-    }
-    Some(*removed.remaining_quantity())
 }
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
@@ -690,7 +650,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
             pending_orders: book.pending_orders.iter().cloned().collect(),
             bids: book
                 .bids
-                .iter()
+                .levels()
                 .map(|(Reverse(price), orders)| PriceLevel {
                     price: *price,
                     orders: orders.iter().cloned().collect(),
@@ -698,7 +658,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
                 .collect(),
             asks: book
                 .asks
-                .iter()
+                .levels()
                 .map(|(price, orders)| PriceLevel {
                     price: *price,
                     orders: orders.iter().cloned().collect(),
@@ -765,8 +725,8 @@ impl From<OrderBookSnapshot> for OrderBook {
             max_notional: snapshot.max_notional,
             fee_rates: snapshot.fee_rates,
             pending_orders,
-            bids,
-            asks,
+            bids: OrderQueue::from_levels(bids),
+            asks: OrderQueue::from_levels(asks),
             resting_orders,
             filled_orders,
         }
