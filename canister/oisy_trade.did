@@ -318,8 +318,8 @@ type WithdrawRequest = record {
     // The amount to withdraw from the caller's free balance, in the
     // token's base units. The ledger transfer fee is deducted from this
     // amount, so the caller receives `amount - ledger_fee` on the ledger;
-    // `amount` must therefore be ≥ `ledger_fee` (otherwise the call rejects
-    // with `AmountTooSmall`).
+    // `amount` must therefore be strictly greater than `ledger_fee`
+    // (otherwise the call returns `Err(AmountTooSmall)`).
     amount : nat;
 };
 
@@ -344,8 +344,9 @@ type WithdrawError = variant {
     UnsupportedToken : record { token_id : TokenId };
     // The caller does not have enough free balance.
     InsufficientBalance : record { available : nat };
-    // The requested amount is below the ledger's transfer fee.
-    // `min_amount` is the ledger's `icrc1_fee`.
+    // The requested amount does not exceed the ledger's transfer fee; the
+    // withdrawal amount must be strictly greater than the fee. `min_amount`
+    // is `icrc1_fee + 1`.
     AmountTooSmall : record { min_amount : nat };
     // Another deposit or withdrawal is already in flight for this
     // (caller, token). Retry once the previous operation completes.
@@ -666,7 +667,8 @@ service : (OisyTradeArg) -> {
     // free balance and transfers `amount - ledger_fee` to the caller via
     // `icrc1_transfer` on the token ledger.
     //
-    // `amount` must be ≥ the token ledger's fee (otherwise `AmountTooSmall`).
+    // `amount` must be strictly greater than the token ledger's fee
+    // (otherwise `AmountTooSmall`).
     // Only free balance is eligible — funds reserved by open orders are not
     // withdrawable until the order fills or is canceled.
     withdraw : (WithdrawRequest) -> (WithdrawResult);
