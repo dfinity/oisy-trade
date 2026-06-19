@@ -4,7 +4,7 @@ pub mod tokens;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
-    Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::user::{UserId, UserRegistry};
@@ -110,6 +110,7 @@ pub fn limit_order_request() -> LimitOrderRequest {
         side: oisy_trade_types::Side::Buy,
         price: candid::Nat::from(100 * PRICE_SCALE),
         quantity: candid::Nat::from(u64::from(LOT_SIZE)),
+        time_in_force: None,
     }
 }
 
@@ -168,6 +169,7 @@ fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) 
         side,
         price: Price::new(price.into()),
         quantity: Quantity::from(quantity.into()),
+        time_in_force: TimeInForce::GoodTilCanceled,
     }
     .into_order(OrderSeq::new(id))
 }
@@ -336,6 +338,7 @@ where
         side,
         price: Price::new(price),
         quantity: quantity.into(),
+        time_in_force: TimeInForce::GoodTilCanceled,
     };
     let (token, amount) = match side {
         Side::Buy => (
@@ -374,6 +377,7 @@ pub fn place_limit_order(
             side,
             price: candid::Nat::from(price),
             quantity: candid::Nat::from(quantity),
+            time_in_force: None,
         },
         &mocks::mock_runtime_for(user),
     )
@@ -445,7 +449,7 @@ pub mod arbitrary {
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
         OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
-        TickSize, TokenId, TokenMetadata,
+        TickSize, TimeInForce, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -473,12 +477,16 @@ pub mod arbitrary {
             arb_side(),
             1..1_000u64, // price in ticks
             1..1_000u64, // quantity in lots
+            arb_time_in_force(),
         )
-            .prop_map(move |(side, price_ticks, qty_lots)| PendingOrder {
-                side,
-                price: Price::new(price_ticks as u128 * tick),
-                quantity: Quantity::from(qty_lots * lot),
-            })
+            .prop_map(
+                move |(side, price_ticks, qty_lots, time_in_force)| PendingOrder {
+                    side,
+                    price: Price::new(price_ticks as u128 * tick),
+                    quantity: Quantity::from(qty_lots * lot),
+                    time_in_force,
+                },
+            )
     }
 
     /// Strategy for a single pending order whose price falls strictly on one
@@ -495,11 +503,13 @@ pub mod arbitrary {
             side: Side::Buy,
             price: Price::new(p as u128 * tick),
             quantity: Quantity::from(q * lot),
+            time_in_force: TimeInForce::GoodTilCanceled,
         });
         let ask = ((mid_ticks + 1)..max_ticks, 1u64..100u64).prop_map(move |(p, q)| PendingOrder {
             side: Side::Sell,
             price: Price::new(p as u128 * tick),
             quantity: Quantity::from(q * lot),
+            time_in_force: TimeInForce::GoodTilCanceled,
         });
         prop_oneof![bid, ask]
     }
@@ -582,6 +592,14 @@ pub mod arbitrary {
             Just(OrderStatus::Open),
             Just(OrderStatus::Filled),
             Just(OrderStatus::Canceled),
+            Just(OrderStatus::Expired),
+        ]
+    }
+
+    pub fn arb_time_in_force() -> impl Strategy<Value = TimeInForce> {
+        prop_oneof![
+            Just(TimeInForce::GoodTilCanceled),
+            Just(TimeInForce::FillOrKill),
         ]
     }
 
@@ -624,9 +642,19 @@ pub mod arbitrary {
             arb_order_status(),
             arb_timestamp(),             // created_at
             option::of(arb_timestamp()), // last_updated_at
+            option::of(arb_time_in_force()),
         )
             .prop_flat_map(
-                move |(owner, side, price_ticks, qty_lots, status, created_at, last_updated_at)| {
+                move |(
+                    owner,
+                    side,
+                    price_ticks,
+                    qty_lots,
+                    status,
+                    created_at,
+                    last_updated_at,
+                    time_in_force,
+                )| {
                     (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
                         owner,
                         side,
@@ -636,6 +664,7 @@ pub mod arbitrary {
                         status,
                         created_at,
                         last_updated_at,
+                        time_in_force,
                     })
                 },
             )
@@ -789,16 +818,18 @@ pub mod arbitrary {
             arb_side(),
             arb_price(),
             arb_quantity(),
+            option::of(arb_time_in_force()),
         )
-            .prop_map(
-                |(user, order_id, side, price, quantity)| AddLimitOrderEvent {
+            .prop_map(|(user, order_id, side, price, quantity, time_in_force)| {
+                AddLimitOrderEvent {
                     user,
                     order_id,
                     side,
                     price,
                     quantity,
-                },
-            )
+                    time_in_force,
+                }
+            })
     }
 
     pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {

@@ -49,6 +49,16 @@ type TradingPair = record {
 };
 
 // Request to place a new limit order.
+// Time-in-force policy governing how long a limit order stays active in the
+// order book.
+type TimeInForce = variant {
+    // Rests in the book until filled or canceled; may fill partially over time.
+    GoodTilCanceled;
+    // Must fill in full when the engine processes it, otherwise the whole order
+    // is killed with zero execution. Never rests.
+    FillOrKill;
+};
+
 type LimitOrderRequest = record {
     // The trading pair to place the order on.
     pair : TradingPair;
@@ -61,6 +71,8 @@ type LimitOrderRequest = record {
     // Order quantity in base-token smallest units. Must be a positive
     // multiple of the pair's `lot_size`.
     quantity : nat;
+    // Time-in-force policy. Absent defaults to GoodTilCanceled.
+    time_in_force : opt TimeInForce;
 };
 
 
@@ -196,6 +208,9 @@ type OrderStatus = variant {
     Filled;
     /// The order has been canceled.
     Canceled;
+    // The order was terminated by the engine because its time-in-force could
+    // not be honored (a Fill-or-Kill that could not fully fill).
+    Expired;
 };
 
 /// Full view of an order as stored by the canister.
@@ -219,6 +234,8 @@ type OrderRecord = record {
     /// Time of the most recent modifying event (fill, status transition, or
     /// cancel) in nanoseconds since the Unix epoch; null until first modified.
     last_updated_at : opt nat64;
+    /// Time-in-force policy the order was placed with.
+    time_in_force : TimeInForce;
 };
 
 /// Request for `get_my_orders`.
@@ -526,6 +543,7 @@ type AddLimitOrderEvent = record {
     side : Side;
     price : nat;
     quantity : nat;
+    time_in_force : TimeInForce;
 };
 
 // Event payload for a deposit.

@@ -21,6 +21,17 @@ pub enum Side {
     Sell,
 }
 
+/// Time-in-force policy governing how long a limit order stays active in the
+/// order book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
+pub enum TimeInForce {
+    /// Rests in the book until filled or canceled; may fill partially over time.
+    GoodTilCanceled,
+    /// Must fill in full against resting liquidity when the engine processes it,
+    /// otherwise the whole order is killed with zero execution. Never rests.
+    FillOrKill,
+}
+
 /// A trading pair identified by the base and quote token ledger principals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
 pub struct TradingPair {
@@ -41,6 +52,9 @@ pub struct LimitOrderRequest {
     pub price: Nat,
     /// Order quantity in base token units.
     pub quantity: Nat,
+    /// Time-in-force policy. Absent defaults to
+    /// [`TimeInForce::GoodTilCanceled`].
+    pub time_in_force: Option<TimeInForce>,
 }
 
 /// Error returned when placing a limit order fails.
@@ -219,6 +233,9 @@ pub enum OrderStatus {
     Filled,
     /// The order has been canceled.
     Canceled,
+    /// The order was terminated by the engine because its time-in-force could
+    /// not be honored (a Fill-or-Kill that could not fully fill).
+    Expired,
 }
 
 /// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
@@ -244,6 +261,8 @@ pub struct OrderRecord {
     /// Time of the most recent modifying event (fill, status transition, or
     /// cancel) in nanoseconds since the Unix epoch; `None` until first modified.
     pub last_updated_at: Option<u64>,
+    /// Time-in-force policy the order was placed with.
+    pub time_in_force: TimeInForce,
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.

@@ -218,7 +218,7 @@ mod record_trading_pair {
 }
 
 mod add_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
@@ -248,6 +248,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: Price::new(100 * PRICE_SCALE),
             quantity: Quantity::from(LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         let result = state.validate_limit_order(user, pair, pending);
 
@@ -512,7 +513,7 @@ mod cancel_limit_order {
 }
 
 mod record_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side, TimeInForce};
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
@@ -553,6 +554,7 @@ mod record_limit_order {
                     side: Side::Sell,
                     price: Price::new(100 * PRICE_SCALE),
                     quantity: lot.into(),
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             )
             .unwrap();
@@ -651,7 +653,7 @@ mod get_user_orders {
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::arbitrary::arb_side;
@@ -716,6 +718,7 @@ mod validate_overflow_invariant {
                     side,
                     price,
                     quantity,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
 
@@ -733,7 +736,7 @@ mod validate_overflow_invariant {
 }
 
 mod validate_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::state::State;
     use crate::test_fixtures;
@@ -778,6 +781,7 @@ mod validate_limit_order {
             side: Side::Buy,
             price: Price::new(ticks * TICK_SIZE.get()),
             quantity: Quantity::from(lots * LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         state
             .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
@@ -862,6 +866,7 @@ mod validate_limit_order {
             side: Side::Buy,
             price: Price::new(TICK_SIZE.get() + 1),
             quantity: Quantity::from(6 * LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         assert_matches!(
             state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
@@ -994,7 +999,9 @@ mod settle_fills {
     #[test]
     fn should_settle_fill_with_price_exceeding_u64() {
         use crate::Timestamp;
-        use crate::order::{LotSize, PendingOrder, TickSize, TokenId, TokenMetadata, TradingPair};
+        use crate::order::{
+            LotSize, PendingOrder, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+        };
         use crate::state::StableMemoryOptions;
         use std::num::{NonZeroU64, NonZeroU128};
 
@@ -1048,6 +1055,7 @@ mod settle_fills {
                         side,
                         price,
                         quantity,
+                        time_in_force: TimeInForce::GoodTilCanceled,
                     },
                 )
                 .expect("validate_limit_order failed");
@@ -1605,7 +1613,7 @@ mod settle_fills {
 
     mod order_status {
         use super::*;
-        use crate::order::{OrderRecord, OrderStatus};
+        use crate::order::{OrderRecord, OrderStatus, TimeInForce};
 
         /// The persisted record for `order_id` as `owner` sees it via
         /// `get_user_order`.
@@ -1732,6 +1740,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
+                    time_in_force: Some(TimeInForce::GoodTilCanceled),
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1774,6 +1783,7 @@ mod settle_fills {
                     status: OrderStatus::Filled,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
+                    time_in_force: Some(TimeInForce::GoodTilCanceled),
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1789,6 +1799,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: buy.created_at,
                     last_updated_at: buy.last_updated_at,
+                    time_in_force: Some(TimeInForce::GoodTilCanceled),
                 },
             );
         }

@@ -57,6 +57,75 @@ mod order_id {
     }
 }
 
+mod time_in_force {
+    use crate::order::{Order, OrderSeq, PendingOrder, Price, Quantity, Side, TimeInForce};
+
+    fn request(
+        time_in_force: Option<oisy_trade_types::TimeInForce>,
+    ) -> oisy_trade_types::LimitOrderRequest {
+        oisy_trade_types::LimitOrderRequest {
+            pair: crate::test_fixtures::icp_ckbtc_trading_pair().into(),
+            side: oisy_trade_types::Side::Buy,
+            price: candid::Nat::from(100u64),
+            quantity: candid::Nat::from(1_000u64),
+            time_in_force,
+        }
+    }
+
+    #[test]
+    fn absent_time_in_force_defaults_to_good_til_canceled() {
+        let pending = PendingOrder::try_from(request(None)).unwrap();
+        assert_eq!(pending.time_in_force, TimeInForce::GoodTilCanceled);
+    }
+
+    #[test]
+    fn explicit_fill_or_kill_is_preserved() {
+        let pending =
+            PendingOrder::try_from(request(Some(oisy_trade_types::TimeInForce::FillOrKill)))
+                .unwrap();
+        assert_eq!(pending.time_in_force, TimeInForce::FillOrKill);
+    }
+
+    #[test]
+    fn order_roundtrips_fill_or_kill_through_minicbor() {
+        let order = PendingOrder {
+            side: Side::Buy,
+            price: Price::new(100),
+            quantity: Quantity::from(1_000u64),
+            time_in_force: TimeInForce::FillOrKill,
+        }
+        .into_order(OrderSeq::new(7));
+
+        let mut bytes = vec![];
+        minicbor::encode(&order, &mut bytes).unwrap();
+        let decoded: Order = minicbor::decode(&bytes).unwrap();
+
+        assert_eq!(decoded.time_in_force(), TimeInForce::FillOrKill);
+        assert_eq!(decoded, order);
+    }
+
+    /// An `Order` encoded before the `time_in_force` field existed (a 4-element
+    /// array) must decode with the field absent and resolve to GTC.
+    #[test]
+    fn legacy_order_without_field_decodes_as_good_til_canceled() {
+        let mut bytes = vec![];
+        let mut enc = minicbor::Encoder::new(&mut bytes);
+        enc.array(4)
+            .unwrap()
+            .encode(OrderSeq::new(3))
+            .unwrap()
+            .encode(Side::Sell)
+            .unwrap()
+            .encode(Price::new(42))
+            .unwrap()
+            .encode(Quantity::from(5u64))
+            .unwrap();
+
+        let decoded: Order = minicbor::decode(&bytes).unwrap();
+        assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
+    }
+}
+
 mod quantity {
     use crate::order::{LotSize, Quantity};
     use candid::Nat;
@@ -912,6 +981,7 @@ mod order_book {
         fn should_saturate_aggregated_quantity_on_overflow() {
             use crate::order::{
                 FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
+                TimeInForce,
             };
             use crate::test_fixtures::MIN_NOTIONAL;
             use std::num::{NonZeroU64, NonZeroU128};
@@ -931,6 +1001,7 @@ mod order_book {
                     side: Side::Buy,
                     price: Price::new(1),
                     quantity: Quantity::MAX,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 }
                 .into_order(OrderSeq::new(seq))
             };

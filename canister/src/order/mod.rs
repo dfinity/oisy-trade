@@ -60,8 +60,36 @@ impl From<Side> for oisy_trade_types::Side {
     }
 }
 
-/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
-/// states of [`oisy_trade_types::OrderStatus`].
+/// Time-in-force policy governing how long an order stays active in the book.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub enum TimeInForce {
+    #[n(0)]
+    #[default]
+    GoodTilCanceled,
+    #[n(1)]
+    FillOrKill,
+}
+
+impl From<oisy_trade_types::TimeInForce> for TimeInForce {
+    fn from(tif: oisy_trade_types::TimeInForce) -> Self {
+        match tif {
+            oisy_trade_types::TimeInForce::GoodTilCanceled => TimeInForce::GoodTilCanceled,
+            oisy_trade_types::TimeInForce::FillOrKill => TimeInForce::FillOrKill,
+        }
+    }
+}
+
+impl From<TimeInForce> for oisy_trade_types::TimeInForce {
+    fn from(tif: TimeInForce) -> Self {
+        match tif {
+            TimeInForce::GoodTilCanceled => oisy_trade_types::TimeInForce::GoodTilCanceled,
+            TimeInForce::FillOrKill => oisy_trade_types::TimeInForce::FillOrKill,
+        }
+    }
+}
+
+/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the real states
+/// of [`oisy_trade_types::OrderStatus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub enum OrderStatus {
     #[n(0)]
@@ -72,6 +100,8 @@ pub enum OrderStatus {
     Filled,
     #[n(3)]
     Canceled,
+    #[n(4)]
+    Expired,
 }
 
 impl From<OrderStatus> for oisy_trade_types::OrderStatus {
@@ -81,6 +111,7 @@ impl From<OrderStatus> for oisy_trade_types::OrderStatus {
             OrderStatus::Open => oisy_trade_types::OrderStatus::Open,
             OrderStatus::Filled => oisy_trade_types::OrderStatus::Filled,
             OrderStatus::Canceled => oisy_trade_types::OrderStatus::Canceled,
+            OrderStatus::Expired => oisy_trade_types::OrderStatus::Expired,
         }
     }
 }
@@ -817,6 +848,7 @@ pub struct PendingOrder {
     pub side: Side,
     pub price: Price,
     pub quantity: Quantity,
+    pub time_in_force: TimeInForce,
 }
 
 impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
@@ -829,6 +861,10 @@ impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
                 u128::try_from(&request.price.0).map_err(|_| QuantityOverflowError)?,
             ),
             quantity: Quantity::try_from(request.quantity)?,
+            time_in_force: request
+                .time_in_force
+                .map(TimeInForce::from)
+                .unwrap_or_default(),
         })
     }
 }
@@ -840,6 +876,7 @@ impl PendingOrder {
             side: self.side,
             price: self.price,
             remaining_quantity: self.quantity,
+            time_in_force: Some(self.time_in_force),
         }
     }
 }
@@ -854,6 +891,11 @@ pub struct Order {
     price: Price,
     #[n(3)]
     remaining_quantity: Quantity,
+    /// Append-only trailing field. Orders encoded before it existed decode as
+    /// `None`, which [`Order::time_in_force`] resolves to
+    /// [`TimeInForce::GoodTilCanceled`].
+    #[n(4)]
+    time_in_force: Option<TimeInForce>,
 }
 
 impl Order {
@@ -867,6 +909,10 @@ impl Order {
 
     pub fn price(&self) -> Price {
         self.price
+    }
+
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.time_in_force.unwrap_or_default()
     }
 
     pub fn remaining_quantity(&self) -> &Quantity {
@@ -909,6 +955,7 @@ impl RestingOrder {
             side,
             price,
             remaining_quantity: self.remaining_quantity,
+            time_in_force: Some(TimeInForce::GoodTilCanceled),
         }
     }
 

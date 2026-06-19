@@ -1,4 +1,4 @@
-use super::{OrderId, OrderStatus, Price, Quantity, Side};
+use super::{OrderId, OrderStatus, Price, Quantity, Side, TimeInForce};
 use crate::Timestamp;
 use crate::user::UserId;
 use candid::Principal;
@@ -42,6 +42,19 @@ pub struct OrderRecord {
     /// cancel); `None` until the order is first modified.
     #[n(7)]
     pub last_updated_at: Option<Timestamp>,
+    /// Time-in-force policy the order was placed with. Append-only trailing
+    /// field; records written before it existed decode as `None`, resolved to
+    /// [`TimeInForce::GoodTilCanceled`] by [`OrderRecord::time_in_force`].
+    #[n(8)]
+    pub time_in_force: Option<TimeInForce>,
+}
+
+impl OrderRecord {
+    /// Resolves the durable optional field, treating absence (pre-existing
+    /// records) as [`TimeInForce::GoodTilCanceled`].
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.time_in_force.unwrap_or_default()
+    }
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -55,6 +68,7 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             status: record.status.into(),
             created_at: record.created_at.as_nanos(),
             last_updated_at: record.last_updated_at.map(|t| t.as_nanos()),
+            time_in_force: record.time_in_force().into(),
         }
     }
 }

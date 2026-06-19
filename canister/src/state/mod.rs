@@ -268,6 +268,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     status: OrderStatus::Pending,
                     created_at: timestamp,
                     last_updated_at: None,
+                    time_in_force: Some(order.time_in_force()),
                 },
             );
         }
@@ -331,7 +332,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
             OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+            OrderStatus::Canceled | OrderStatus::Expired => {
+                Err(CancelLimitOrderError::OrderAlreadyCanceled)
+            }
         }
     }
 

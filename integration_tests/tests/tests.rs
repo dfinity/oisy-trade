@@ -80,6 +80,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         };
 
         let required = 1_000_000_000u64;
@@ -146,6 +147,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: 1000u64.into(),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         };
         let before_placement = setup.time_nanos().await;
         let mut alice_ids = vec![];
@@ -229,6 +231,7 @@ mod add_limit_order {
             side: Side::Sell,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         };
 
         let required = 1_000_000u64;
@@ -314,6 +317,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         };
         let required_quote_amount = 1_000_000_000u64;
         setup
@@ -335,6 +339,7 @@ mod add_limit_order {
             side: Side::Sell,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         };
         let required_base_amount = 1_000_000u64;
         setup
@@ -438,6 +443,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: price.clone(),
             quantity: Nat::from(lots * LOT_SIZE),
+            time_in_force: None,
         };
 
         // 1 lot -> notional 1_000_000_000 < min: rejected.
@@ -482,6 +488,7 @@ mod cancel_limit_order {
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
         Balance, CancelLimitOrderError, LimitOrderRequest, OrderRecord, OrderStatus, Side,
+        TimeInForce,
     };
 
     #[tokio::test]
@@ -518,6 +525,7 @@ mod cancel_limit_order {
                 side: Side::Buy,
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 3_000_000u64.into(),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -528,6 +536,7 @@ mod cancel_limit_order {
                 side: Side::Sell,
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: 1_000_000u64.into(),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -592,6 +601,7 @@ mod cancel_limit_order {
                 status: OrderStatus::Canceled,
                 created_at: canceled.created_at,
                 last_updated_at: canceled.last_updated_at,
+                time_in_force: TimeInForce::GoodTilCanceled,
             }
         );
 
@@ -1101,6 +1111,7 @@ async fn should_replay_events_on_upgrade() {
             side: oisy_trade_types::Side::Sell,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: Nat::from(deposit_amount),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -1127,6 +1138,7 @@ async fn should_replay_events_on_upgrade() {
                 side: oisy_trade_types::Side::Sell,
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
+                time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             });
         });
         assert_matches!(&events[4], EventType::Matching(e) => {
@@ -1159,6 +1171,7 @@ async fn should_replay_events_on_upgrade() {
             side: oisy_trade_types::Side::Buy,
             price: Nat::from(price),
             quantity: Nat::from(deposit_amount),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -1200,6 +1213,7 @@ async fn should_replay_events_on_upgrade() {
                 side: oisy_trade_types::Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(deposit_amount),
+                time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             });
         });
         assert_matches!(&events[7], EventType::Matching(e) => {
@@ -1392,6 +1406,7 @@ async fn should_complete_for_users_walkthrough() {
             side: Side::Sell,
             price: Nat::from(price),
             quantity: Nat::from(quantity),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -1401,6 +1416,7 @@ async fn should_complete_for_users_walkthrough() {
             side: Side::Buy,
             price: Nat::from(price),
             quantity: Nat::from(quantity),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -1627,6 +1643,7 @@ async fn should_fail_withdraw_on_negative_cases() {
                 side: Side::Sell,
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -1856,6 +1873,7 @@ mod order_book {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -1877,6 +1895,7 @@ mod order_book {
                 side: Side::Sell,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -2016,6 +2035,7 @@ mod chunked_matching {
                     side: Side::Buy,
                     price: Nat::from(PRICE),
                     quantity: Nat::from(QUANTITY),
+                    time_in_force: None,
                 })
                 .await
                 .unwrap();
@@ -2102,6 +2122,7 @@ async fn should_expose_metrics() {
             side: Side::Buy,
             price: Nat::from(10_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -2119,6 +2140,7 @@ async fn should_expose_metrics() {
             side: Side::Sell,
             price: Nat::from(20_000 * PRICE_SCALE),
             quantity: 1_000_000u64.into(),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -2422,6 +2444,7 @@ mod halt {
                     side: Side::Buy,
                     price: Nat::from(price),
                     quantity: Nat::from(quantity),
+                    time_in_force: None,
                 })
                 .await
                 .unwrap();
@@ -2438,6 +2461,7 @@ mod halt {
                     side: Side::Sell,
                     price: Nat::from(price),
                     quantity: Nat::from(quantity),
+                    time_in_force: None,
                 })
                 .await
                 .unwrap();
@@ -2626,6 +2650,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             };
 
             // Place a resting buy order before the halt.
@@ -2724,6 +2749,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             };
             assert_eq!(
                 client.add_limit_order(order.clone()).await,
@@ -2808,6 +2834,7 @@ mod halt {
                     side: Side::Buy,
                     price: Nat::from(price),
                     quantity: Nat::from(quantity),
+                    time_in_force: None,
                 })
                 .await,
             Err(AddLimitOrderError::TradingHalted)
@@ -2820,6 +2847,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -2907,6 +2935,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -2916,6 +2945,7 @@ mod halt {
                 side: Side::Sell,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -2932,6 +2962,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -2941,6 +2972,7 @@ mod halt {
                 side: Side::Sell,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .unwrap();
@@ -3127,6 +3159,7 @@ mod halt {
                 side: Side::Buy,
                 price: Nat::from(price),
                 quantity: Nat::from(quantity),
+                time_in_force: None,
             })
             .await
             .expect("orders accepted after the global resume clears the pair halt");
