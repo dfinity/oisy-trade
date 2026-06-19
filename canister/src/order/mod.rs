@@ -1,6 +1,7 @@
 mod book;
 mod fees;
 mod history;
+mod iter;
 mod plan;
 #[cfg(test)]
 mod tests;

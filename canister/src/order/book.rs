@@ -2,6 +2,7 @@ use super::plan::{FillPlan, PlannedFill};
 use super::{
     FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
 };
+use crate::order::iter::OrderIter;
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::btree_map;
@@ -104,18 +105,26 @@ impl OrderBook {
         self.fee_rates
     }
 
+    pub fn bids_iter(&self) -> OrderIter<'_, Reverse<Price>, RestingOrder> {
+        OrderIter::new(&self.bids)
+    }
+
+    pub fn asks_iter(&self) -> OrderIter<'_, Price, RestingOrder> {
+        OrderIter::new(&self.asks)
+    }
+
     /// Returns the best (highest price) bid order, or `None` if the bid side is empty.
     pub fn best_bid(&self) -> Option<Order> {
-        let (&Reverse(price), queue) = self.bids.first_key_value()?;
-        let resting = queue.front()?;
-        Some(resting.to_order(Side::Buy, price))
+        self.bids_iter()
+            .next()
+            .map(|(&Reverse(price), resting)| resting.to_order(Side::Buy, price))
     }
 
     /// Returns the best (lowest price) ask order, or `None` if the ask side is empty.
     pub fn best_ask(&self) -> Option<Order> {
-        let (&price, queue) = self.asks.first_key_value()?;
-        let resting = queue.front()?;
-        Some(resting.to_order(Side::Sell, price))
+        self.asks_iter()
+            .next()
+            .map(|(&price, resting)| resting.to_order(Side::Sell, price))
     }
 
     /// Match an incoming order against the book.
