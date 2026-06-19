@@ -105,15 +105,15 @@ impl OrderBook {
         self.fee_rates
     }
 
-    pub fn bids_iter(&self) -> OrderIter<'_, Reverse<Price>, RestingOrder> {
+    fn bids_iter(&self) -> OrderIter<'_, Reverse<Price>, RestingOrder> {
         OrderIter::new(&self.bids)
     }
 
-    pub fn asks_iter(&self) -> OrderIter<'_, Price, RestingOrder> {
+    fn asks_iter(&self) -> OrderIter<'_, Price, RestingOrder> {
         OrderIter::new(&self.asks)
     }
 
-    pub fn asks_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
+    pub(crate) fn asks_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
         let mut entry = self.asks.first_entry()?;
         let price = *entry.key();
         let resting = entry
@@ -129,7 +129,7 @@ impl OrderBook {
         Some((price, resting))
     }
 
-    pub fn bids_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
+    pub(crate) fn bids_pop_front(&mut self) -> Option<(Price, RestingOrder)> {
         let mut entry = self.bids.first_entry()?;
         let Reverse(price) = *entry.key();
         let resting = entry
@@ -145,13 +145,13 @@ impl OrderBook {
         Some((price, resting))
     }
 
-    pub fn asks_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
+    pub(crate) fn asks_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
         let (&price, queue) = self.asks.iter_mut().next()?;
         let resting = queue.front_mut().expect("BUG: empty queue at price level");
         Some((price, resting))
     }
 
-    pub fn bids_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
+    pub(crate) fn bids_front_mut(&mut self) -> Option<(Price, &mut RestingOrder)> {
         let (&Reverse(price), queue) = self.bids.iter_mut().next()?;
         let resting = queue.front_mut().expect("BUG: empty queue at price level");
         Some((price, resting))
