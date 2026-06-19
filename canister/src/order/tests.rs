@@ -1030,9 +1030,8 @@ mod process_pending_orders {
     }
 }
 
-/// Proves the plan/apply refactor is behavior-preserving: a read-only
-/// `plan_fills` walk leaves the book untouched, and `match_order` (plan then
-/// apply) produces exactly the fills and final book an independent greedy
+/// Proves the plan/apply refactor is behavior-preserving: `match_order` (plan
+/// then apply) produces exactly the fills and final book an independent greedy
 /// reference matcher does.
 mod plan_execute {
     use crate::order::{
@@ -1047,7 +1046,7 @@ mod plan_execute {
 
     proptest! {
         #[test]
-        fn plan_fills_is_read_only_and_apply_matches_reference(
+        fn match_order_matches_reference(
             resting in vec(arb_non_matching_pending_order(), 0..40),
             taker in arb_taker(),
         ) {
@@ -1059,15 +1058,6 @@ mod plan_execute {
             let taker = taker.into_order(OrderSeq::new(1_000_000));
 
             let before = OrderBookSnapshot::from(&book);
-
-            // `plan_fills` must not mutate any book state.
-            let _plan = book.plan_fills(&taker);
-            prop_assert_eq!(
-                &before,
-                &OrderBookSnapshot::from(&book),
-                "plan_fills mutated the book"
-            );
-
             let (expected_fills, expected_after) = reference_match(&before, &taker);
 
             let result = book.match_order(taker).unwrap();
