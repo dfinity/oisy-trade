@@ -21,7 +21,16 @@ impl<K, V> OrderQueue<K, V> {
         }
     }
 
-    pub fn from_levels(levels: BTreeMap<K, VecDeque<V>>) -> Self {
+    /// Builds an `OrderQueue` from existing levels, **dropping any empty
+    /// level** so the non-empty-levels invariant holds regardless of the input
+    /// (e.g. a snapshot or an externally-constructed map). Without this, an
+    /// empty `VecDeque` at the best price would later trap in
+    /// `pop_front`/`front_mut`.
+    pub fn from_levels(mut levels: BTreeMap<K, VecDeque<V>>) -> Self
+    where
+        K: Ord,
+    {
+        levels.retain(|_, queue| !queue.is_empty());
         Self { levels }
     }
 
