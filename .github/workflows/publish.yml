@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Tag and create the (draft) GitHub releases for any crates whose version was
-  # bumped by a merged release-plz PR. Triggered manually after the release PR
-  # is merged; a no-op if there is nothing new to release.
+  # Tag the crates whose version was bumped by a merged release-plz PR and
+  # publish oisy_trade_types to crates.io. The released crates
+  # (oisy_trade_canister, oisy_trade_types) each set git_release_enable = false,
+  # so this job creates no GitHub releases; the canister's draft release is
+  # created by the publish-canister job below. Triggered manually after the
+  # release PR is merged; a no-op if there is nothing new to release.
   release:
     name: Release-plz tag & release
     runs-on: ubuntu-latest
@@ -40,9 +43,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  # Build the canister wasm fresh from the released commit and finalize its
-  # GitHub release with the wasm.gz, its SHA-256, the candid interface, and the
-  # deployment-status table.
+  # Build the canister wasm fresh from the released commit and create its
+  # (draft) GitHub release with the wasm.gz, its SHA-256, the candid interface,
+  # and the deployment-status table.
   publish-canister:
     name: Publish canister artifacts
     needs: release
@@ -117,11 +120,14 @@ jobs:
             envsubst '$OISY_TRADE_CANISTER_WASM_GZ_SHA256 $RELEASE_TAG $CHANGELOG' \
             < release_notes.md > "${{ github.workspace }}-RELEASE.txt"
 
-      - name: 'Publish GitHub release'
+      - name: 'Create draft GitHub release'
         if: steps.meta.outputs.has_canister == 'true'
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
-          draft: false
+          # Created as a draft for manual review before publishing. release-plz
+          # does not create the canister release (git_release_enable = false), so
+          # this step creates it fresh with the templated body.
+          draft: true
           tag_name: ${{ steps.meta.outputs.tag }}
           body_path: ${{ github.workspace }}-RELEASE.txt
           files: |

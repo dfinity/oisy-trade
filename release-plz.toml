@@ -33,6 +33,10 @@ publish_allow_dirty = false
 name = "oisy_trade_canister"
 semver_check = false # binary canister, no public Rust API to guard
 publish = false # the canister is released as a wasm asset, never to crates.io
+# The Publish workflow owns the canister's GitHub release: it builds the wasm
+# fresh from the tagged commit and creates the (draft) release with the wasm.gz,
+# its SHA-256, and the templated notes. release-plz only creates the git tag here.
+git_release_enable = false
 
 [[package]]
 name = "oisy_trade_client"
