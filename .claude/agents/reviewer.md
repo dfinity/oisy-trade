@@ -44,10 +44,10 @@ branches, or PR state beyond posting your review.
   duplicates behaviour already covered by existing tests, reimplements production logic
   in a parallel "reference" oracle to compare against (a second implementation drifts
   and carries its own bugs), or asserts a property already guaranteed by construction
-  (e.g. a method taking `&self` with no interior mutability (no `UnsafeCell`, e.g.
-  `Cell`/`RefCell`/`Mutex`/`RwLock`/atomics) cannot mutate the receiver). Do NOT ask to add assertions to a test that should not
-  exist in the first place. Establish coverage by EVIDENCE, not inspection: before
-  claiming a behaviour is or isn't covered, probe it with a LOCAL, TEMPORARY mutation of
+  (e.g. in safe Rust, a method taking `&self` where the receiver has no interior mutability
+  (no `UnsafeCell`, e.g. `Cell`/`RefCell`/`Mutex`/`RwLock`/atomics) cannot mutate the receiver's fields).
+  Do NOT ask to add assertions to a test that should not exist in the first place.
+  Establish coverage by EVIDENCE, not inspection: before
   the relevant production line (never committed — revert it immediately; this is the one
   allowed deviation from "never modify code", a throwaway experiment) and check which
   tests fail. If a "missing assertion" you were about to flag is already caught by other
