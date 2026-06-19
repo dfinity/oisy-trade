@@ -8,8 +8,10 @@ changelog_update = true
 # update dependencies with `cargo update`
 dependencies_update = true
 
-# Enable git releases for all packages by default
-git_release_enable = true
+# No GitHub releases by default — opt in per package with `git_release_enable = true`.
+# The canister's draft GitHub release is created by the Publish workflow (publish.yml),
+# not by release-plz; oisy_trade_types is git tag + crates.io only.
+git_release_enable = false
 
 # Enable git tags for all packages by default
 git_tag_enable = true
@@ -33,10 +35,6 @@ publish_allow_dirty = false
 name = "oisy_trade_canister"
 semver_check = false # binary canister, no public Rust API to guard
 publish = false # the canister is released as a wasm asset, never to crates.io
-# The Publish workflow owns the canister's GitHub release: it builds the wasm
-# fresh from the tagged commit and creates the (draft) release with the wasm.gz,
-# its SHA-256, and the templated notes. release-plz only creates the git tag here.
-git_release_enable = false
 
 [[package]]
 name = "oisy_trade_client"
@@ -48,7 +46,6 @@ name = "oisy_trade_types"
 # published to crates.io so oisy_trade_client can depend on the released version;
 # no separate GitHub release (the crates.io publish + git tag is enough)
 publish = true
-git_release_enable = false
 
 [[package]]
 name = "oisy_trade_types_internal"
