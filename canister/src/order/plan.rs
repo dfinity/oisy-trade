@@ -60,10 +60,9 @@ impl FillPlan {
             .taker_remaining
             .checked_sub(fill_qty)
             .expect("BUG: fill_qty exceeds taker_remaining");
-        let maker_remaining_after = maker_qty
-            .checked_sub(fill_qty)
-            .expect("BUG: fill_qty exceeds maker_qty");
-        if maker_remaining_after.is_zero() {
+        // `fill_qty == min(taker_remaining, maker_qty)`, so the maker is fully
+        // consumed exactly when `fill_qty == maker_qty` — no subtraction needed.
+        if fill_qty == maker_qty {
             self.filled_makers.push(maker_seq);
         } else {
             assert_eq!(
