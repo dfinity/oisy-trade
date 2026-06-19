@@ -142,7 +142,7 @@ impl OrderBook {
         match order.side() {
             Side::Buy => {
                 while !order.remaining_quantity().is_zero() {
-                    let Some((&maker_price, _)) = self.asks.iter().next() else {
+                    let Some((&maker_price, _)) = self.asks.levels().next() else {
                         break;
                     };
                     if maker_price > order.price() {
@@ -161,7 +161,7 @@ impl OrderBook {
             }
             Side::Sell => {
                 while !order.remaining_quantity().is_zero() {
-                    let Some((&Reverse(maker_price), _)) = self.bids.iter().next() else {
+                    let Some((&Reverse(maker_price), _)) = self.bids.levels().next() else {
                         break;
                     };
                     if maker_price < order.price() {
