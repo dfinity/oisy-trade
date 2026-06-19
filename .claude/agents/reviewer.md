@@ -41,15 +41,18 @@ branches, or PR state beyond posting your review.
   - Challenge an integration test if it's already covered by unit tests.
 - Challenge whether a test earns its place BEFORE auditing its internals. Treat as a
   net liability — and prefer recommending REMOVAL over strengthening — any test that
-  duplicates behavior already covered by existing tests, reimplements production logic
+  duplicates behaviour already covered by existing tests, reimplements production logic
   in a parallel "reference" oracle to compare against (a second implementation drifts
-  and carries its own bugs), or asserts something the type system already guarantees
-  (e.g. a `&self` method "does not mutate"). Do NOT ask to add assertions to a test
-  that should not exist in the first place. Establish coverage by EVIDENCE, not
-  inspection: before claiming a behavior is or isn't covered, mutate the relevant
-  production line and check which tests fail — if a "missing assertion" you were about
-  to flag is already caught by other tests, the gap is not real, so recommend deleting
-  the redundant test rather than patching it.
+  and carries its own bugs), or asserts a property already guaranteed by construction
+  (e.g. a method taking `&self` with no interior mutability — `Cell`/`RefCell`/atomics —
+  cannot mutate the receiver). Do NOT ask to add assertions to a test that should not
+  exist in the first place. Establish coverage by EVIDENCE, not inspection: before
+  claiming a behaviour is or isn't covered, probe it with a LOCAL, TEMPORARY mutation of
+  the relevant production line (never committed — revert it immediately; this is the one
+  allowed deviation from "never modify code", a throwaway experiment) and check which
+  tests fail. If a "missing assertion" you were about to flag is already caught by other
+  tests, the gap is not real, so recommend deleting the redundant test rather than
+  patching it.
 - Assertions must be able to fail on a regression:
   - Tautological assertions — an expected literal pulling a field from the actual
     value (`Foo { ..., bar: actual.bar }`) — are trivially self-equal and make that
