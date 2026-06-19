@@ -1061,7 +1061,7 @@ mod plan_execute {
             let before = OrderBookSnapshot::from(&book);
 
             // `plan_fills` must not mutate any book state.
-            let _plan = book.plan_fills(taker.side(), taker.price(), *taker.remaining_quantity());
+            let _plan = book.plan_fills(&taker);
             prop_assert_eq!(
                 &before,
                 &OrderBookSnapshot::from(&book),

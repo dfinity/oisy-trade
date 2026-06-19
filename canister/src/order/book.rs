@@ -139,7 +139,7 @@ impl OrderBook {
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
-        let plan = self.plan_fills(order.side(), order.price(), *order.remaining_quantity());
+        let plan = self.plan_fills(&order);
         let mut fills = Vec::new();
         self.apply_plan(order.side(), &plan, &mut order, &mut fills);
 
@@ -160,20 +160,21 @@ impl OrderBook {
         }
     }
 
-    /// Read-only walk of the crossing price levels, recording the fills an
-    /// incoming order of `side`/`price`/`quantity` *would* make.
+    /// Read-only walk of the crossing price levels, recording the fills the
+    /// incoming `order` *would* make.
     ///
-    /// Iterates best-first (asks ascending while `ask_price <= price`; bids
-    /// descending while `bid_price >= price`) and, FIFO within each level,
-    /// records one [`PlannedFill`] per maker it would touch, accumulating until
-    /// the order is satisfied. Mutates no book state. Allocation-free until the
-    /// first crossing maker is pushed.
-    pub(crate) fn plan_fills(&self, side: Side, price: Price, quantity: Quantity) -> FillPlan {
+    /// Iterates best-first (asks ascending while `ask_price <= order.price()`;
+    /// bids descending while `bid_price >= order.price()`) and, FIFO within
+    /// each level, records one [`PlannedFill`] per maker it would touch,
+    /// accumulating until the order is satisfied. Mutates no book state.
+    /// Allocation-free until the first crossing maker is pushed.
+    pub(crate) fn plan_fills(&self, order: &Order) -> FillPlan {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::plan_fills");
+        let price = order.price();
         let mut fills = Vec::new();
-        let mut remaining = quantity;
-        match side {
+        let mut remaining = *order.remaining_quantity();
+        match order.side() {
             Side::Buy => {
                 for (&ask_price, queue) in &self.asks {
                     if ask_price > price || remaining.is_zero() {
