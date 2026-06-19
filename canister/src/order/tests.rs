@@ -941,6 +941,115 @@ mod order_book {
             assert_eq!(quantity, Quantity::MAX);
         }
     }
+
+    mod pop_front {
+        use super::*;
+        use crate::order::{OrderBook, Price, RestingOrder, Side};
+
+        fn pop_best(book: &mut OrderBook, side: Side) -> Option<(Price, RestingOrder)> {
+            match side {
+                Side::Buy => book.bids_pop_front(),
+                Side::Sell => book.asks_pop_front(),
+            }
+        }
+
+        fn rest(book: &mut OrderBook, side: Side, seq: u64, price: u128, quantity: u64) {
+            match side {
+                Side::Buy => book.match_order(buy(seq, price, quantity)).unwrap(),
+                Side::Sell => book.match_order(sell(seq, price, quantity)).unwrap(),
+            };
+        }
+
+        fn levels_len(book: &OrderBook, side: Side) -> usize {
+            match side {
+                Side::Buy => book.bids_len(),
+                Side::Sell => book.asks_len(),
+            }
+        }
+
+        #[test]
+        fn should_return_none_on_empty_side() {
+            for side in [Side::Buy, Side::Sell] {
+                let mut book = order_book();
+                assert_eq!(pop_best(&mut book, side), None);
+            }
+        }
+
+        #[test]
+        fn should_pop_front_of_best_level_and_remove_it_from_the_book() {
+            for side in [Side::Buy, Side::Sell] {
+                let mut book = order_book();
+                let lot = u64::from(LOT_SIZE);
+                rest(&mut book, side, 0, 100 * PRICE_SCALE, lot);
+
+                let (price, popped) = pop_best(&mut book, side).expect("a resting order");
+                assert_eq!(price, Price::new(100 * PRICE_SCALE));
+                assert_eq!(popped.id(), OrderSeq::ZERO);
+
+                // The popped order is no longer resting: gone from the index and
+                // from its price level (which is removed once empty).
+                assert_eq!(book.remove_order(OrderSeq::ZERO), None);
+                assert_eq!(book.resting_orders_len(), 0);
+                assert_eq!(levels_len(&book, side), 0);
+                assert!(book.is_empty());
+            }
+        }
+
+        #[test]
+        fn should_pop_fifo_within_a_level() {
+            for side in [Side::Buy, Side::Sell] {
+                let mut book = order_book();
+                let lot = u64::from(LOT_SIZE);
+                rest(&mut book, side, 0, 100 * PRICE_SCALE, lot);
+                rest(&mut book, side, 1, 100 * PRICE_SCALE, 2 * lot);
+
+                let (price, first) = pop_best(&mut book, side).expect("first resting order");
+                assert_eq!(price, Price::new(100 * PRICE_SCALE));
+                assert_eq!(first.id(), OrderSeq::ZERO);
+                // First popped order is gone; the level still holds the second.
+                assert_eq!(book.remove_order(OrderSeq::ZERO), None);
+                assert_eq!(book.resting_orders_len(), 1);
+                assert_eq!(levels_len(&book, side), 1);
+
+                let (price, second) = pop_best(&mut book, side).expect("second resting order");
+                assert_eq!(price, Price::new(100 * PRICE_SCALE));
+                assert_eq!(second.id(), OrderSeq::ONE);
+                assert_eq!(second.remaining_quantity(), &Quantity::from(2 * lot));
+                assert_eq!(book.remove_order(OrderSeq::ONE), None);
+                assert_eq!(book.resting_orders_len(), 0);
+                assert_eq!(levels_len(&book, side), 0);
+            }
+        }
+
+        #[test]
+        fn should_advance_to_next_best_level_after_a_level_empties() {
+            // Buy side: best bid is the highest price; sell side: best ask is
+            // the lowest. `best_then_next` lists the prices in pop order.
+            let cases = [
+                (Side::Buy, [100 * PRICE_SCALE, 90 * PRICE_SCALE]),
+                (Side::Sell, [100 * PRICE_SCALE, 110 * PRICE_SCALE]),
+            ];
+            for (side, [best_price, next_price]) in cases {
+                let mut book = order_book();
+                let lot = u64::from(LOT_SIZE);
+                rest(&mut book, side, 0, best_price, lot);
+                rest(&mut book, side, 1, next_price, lot);
+                assert_eq!(levels_len(&book, side), 2);
+
+                let (price, first) = pop_best(&mut book, side).expect("best level order");
+                assert_eq!(price, Price::new(best_price));
+                assert_eq!(first.id(), OrderSeq::ZERO);
+                assert_eq!(levels_len(&book, side), 1);
+                assert_eq!(book.resting_orders_len(), 1);
+
+                let (price, second) = pop_best(&mut book, side).expect("next level order");
+                assert_eq!(price, Price::new(next_price));
+                assert_eq!(second.id(), OrderSeq::ONE);
+                assert_eq!(levels_len(&book, side), 0);
+                assert!(book.is_empty());
+            }
+        }
+    }
 }
 
 mod process_pending_orders {
