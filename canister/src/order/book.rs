@@ -1,4 +1,4 @@
-use super::plan::{FillPlan, PlannedFill};
+use super::plan::FillPlan;
 use super::{
     FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
 };
@@ -141,7 +141,7 @@ impl OrderBook {
 
         let plan = self.plan_fills(&order);
         let mut fills = Vec::new();
-        self.apply_plan(order.side(), &plan, &mut order, &mut fills);
+        self.apply_plan(&plan, &mut order, &mut fills);
 
         if order.remaining_quantity().is_zero() {
             self.filled_orders.insert(order.id());
@@ -160,160 +160,145 @@ impl OrderBook {
         }
     }
 
-    /// Read-only walk of the crossing price levels, recording the fills the
-    /// incoming `order` *would* make.
-    ///
-    /// Iterates best-first (asks ascending while `ask_price <= order.price()`;
-    /// bids descending while `bid_price >= order.price()`) and, FIFO within
-    /// each level, records one [`PlannedFill`] per maker it would touch,
-    /// accumulating until the order is satisfied. Mutates no book state.
-    /// Allocation-free until the first crossing maker is pushed.
+    /// Read-only walk of the crossing makers, building a [`FillPlan`] of the
+    /// fills the incoming `order` would make.
     pub(crate) fn plan_fills(&self, order: &Order) -> FillPlan {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::plan_fills");
-        let price = order.price();
-        let mut fills = Vec::new();
-        let mut remaining = *order.remaining_quantity();
+        let taker_price = order.price();
+        let mut plan = FillPlan::new(order);
+
         match order.side() {
             Side::Buy => {
-                for (&ask_price, queue) in &self.asks {
-                    if ask_price > price || remaining.is_zero() {
+                for (&maker_price, resting) in self.asks_iter() {
+                    if maker_price > taker_price || plan.taker_remaining().is_zero() {
                         break;
                     }
-                    Self::plan_level(ask_price, queue, &mut remaining, &mut fills);
+                    plan.add_fill(resting);
                 }
             }
             Side::Sell => {
-                for (&Reverse(bid_price), queue) in &self.bids {
-                    if bid_price < price || remaining.is_zero() {
+                for (&Reverse(maker_price), resting) in self.bids_iter() {
+                    if maker_price < taker_price || plan.taker_remaining().is_zero() {
                         break;
                     }
-                    Self::plan_level(bid_price, queue, &mut remaining, &mut fills);
+                    plan.add_fill(resting);
                 }
             }
         }
 
-        FillPlan {
-            fills,
-            fully_filled: remaining.is_zero(),
-        }
-    }
-
-    /// Record FIFO fills against a single crossing price level, decrementing
-    /// `remaining` as it goes.
-    fn plan_level(
-        maker_price: Price,
-        queue: &VecDeque<RestingOrder>,
-        remaining: &mut Quantity,
-        fills: &mut Vec<PlannedFill>,
-    ) {
-        for resting in queue {
-            if remaining.is_zero() {
-                break;
-            }
-            let fill_qty = *std::cmp::min(&*remaining, resting.remaining_quantity());
-            *remaining = remaining
-                .checked_sub(fill_qty)
-                .expect("BUG: fill_qty exceeds remaining");
-            let maker_emptied = fill_qty == *resting.remaining_quantity();
-            fills.push(PlannedFill {
-                maker_seq: resting.id(),
-                maker_price,
-                fill_qty,
-                maker_emptied,
-            });
-        }
+        plan
     }
 
     /// Replay a [`FillPlan`] against the book, performing the mutations.
     ///
-    /// For each [`PlannedFill`]: reduce the maker (the level cursor is held
-    /// across consecutive fills at the same level and only re-acquired when
-    /// `maker_price` changes), reduce the taker, push the [`Fill`], and on
-    /// `maker_emptied` pop the maker, drop its `resting_orders` index entry,
-    /// insert into `filled_orders`, and remove the level if its queue empties.
-    fn apply_plan(
-        &mut self,
-        side: Side,
-        plan: &FillPlan,
-        order: &mut Order,
-        fills: &mut Vec<Fill>,
-    ) {
+    /// Fully consumes each maker listed in `plan.filled_makers()` from the
+    /// front of its level, then partially fills the maker named in
+    /// `plan.last_partial()` (if any). Asserts the taker's remaining quantity
+    /// matches `plan.taker_remaining()` at the end.
+    fn apply_plan(&mut self, plan: &FillPlan, order: &mut Order, fills: &mut Vec<Fill>) {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::apply_plan");
-        let mut cursor: Option<(Price, &mut VecDeque<RestingOrder>)> = None;
+        assert_eq!(
+            order.id(),
+            plan.taker_order(),
+            "BUG: plan/apply divergence — taker order mismatch"
+        );
+        let side = order.side();
+        let taker_price = order.price();
 
-        for planned in &plan.fills {
-            // Re-acquire the level only when the price changes; otherwise hold
-            // the cursor across consecutive fills at the same level.
-            if cursor
-                .as_ref()
-                .is_none_or(|(cursor_price, _)| *cursor_price != planned.maker_price)
-            {
-                let queue = match side {
-                    Side::Buy => self
-                        .asks
-                        .get_mut(&planned.maker_price)
-                        .expect("BUG: planned ask level missing"),
-                    Side::Sell => self
-                        .bids
-                        .get_mut(&Reverse(planned.maker_price))
-                        .expect("BUG: planned bid level missing"),
-                };
-                cursor = Some((planned.maker_price, queue));
-            }
-            let queue = &mut cursor.as_mut().expect("cursor set above").1;
-
-            let resting = queue.front_mut().expect("BUG: planned maker level empty");
+        for &maker_seq in plan.filled_makers() {
+            let &(maker_side, maker_price) = self
+                .resting_orders
+                .get(&maker_seq)
+                .expect("BUG: planned maker missing from resting_orders index");
+            let queue = match maker_side {
+                Side::Buy => self
+                    .bids
+                    .get_mut(&Reverse(maker_price))
+                    .expect("BUG: planned bid level missing"),
+                Side::Sell => self
+                    .asks
+                    .get_mut(&maker_price)
+                    .expect("BUG: planned ask level missing"),
+            };
+            let resting = queue.front().expect("BUG: planned maker level empty");
             assert_eq!(
                 resting.id(),
-                planned.maker_seq,
+                maker_seq,
                 "BUG: plan/apply divergence — maker at level front does not match plan"
             );
-
-            assert!(
-                planned.fill_qty <= *order.remaining_quantity(),
-                "BUG: plan/apply divergence — planned fill exceeds taker remaining quantity"
-            );
-            assert!(
-                planned.fill_qty <= *resting.remaining_quantity(),
-                "BUG: plan/apply divergence — planned fill exceeds maker remaining quantity"
-            );
-            order.reduce_quantity(&planned.fill_qty);
-            resting.reduce_quantity(&planned.fill_qty);
-
+            let full_qty = *resting.remaining_quantity();
+            order.reduce_quantity(&full_qty);
             fills.push(Fill {
                 taker_order_seq: order.id(),
-                taker_side: order.side(),
-                taker_price: order.price(),
-                maker_order_seq: planned.maker_seq,
-                maker_price: planned.maker_price,
-                quantity: planned.fill_qty,
+                taker_side: side,
+                taker_price,
+                maker_order_seq: maker_seq,
+                maker_price,
+                quantity: full_qty,
             });
 
-            if planned.maker_emptied {
-                assert!(
-                    resting.remaining_quantity().is_zero(),
-                    "BUG: plan/apply divergence — maker marked emptied but has remaining quantity"
-                );
-                let filled = queue.pop_front().expect("front exists");
-                self.resting_orders.remove(&filled.id()).expect(
-                    "BUG: plan/apply divergence — emptied maker missing from resting_orders index",
-                );
-                self.filled_orders.insert(filled.id());
-                if queue.is_empty() {
-                    cursor = None;
-                    match side {
-                        Side::Buy => {
-                            self.asks.remove(&planned.maker_price);
-                        }
-                        Side::Sell => {
-                            self.bids.remove(&Reverse(planned.maker_price));
-                        }
+            let filled = queue.pop_front().expect("front exists");
+            let level_empty = queue.is_empty();
+            self.resting_orders.remove(&filled.id()).expect(
+                "BUG: plan/apply divergence — emptied maker missing from resting_orders index",
+            );
+            self.filled_orders.insert(filled.id());
+            if level_empty {
+                match maker_side {
+                    Side::Buy => {
+                        self.bids.remove(&Reverse(maker_price));
+                    }
+                    Side::Sell => {
+                        self.asks.remove(&maker_price);
                     }
                 }
             }
         }
+
+        if let Some((maker_seq, maker_remaining_after)) = plan.last_partial() {
+            let &(maker_side, maker_price) = self
+                .resting_orders
+                .get(&maker_seq)
+                .expect("BUG: partial-fill maker missing from resting_orders index");
+            let queue = match maker_side {
+                Side::Buy => self
+                    .bids
+                    .get_mut(&Reverse(maker_price))
+                    .expect("BUG: partial-fill bid level missing"),
+                Side::Sell => self
+                    .asks
+                    .get_mut(&maker_price)
+                    .expect("BUG: partial-fill ask level missing"),
+            };
+            let resting = queue.front_mut().expect("BUG: partial-fill level empty");
+            assert_eq!(
+                resting.id(),
+                maker_seq,
+                "BUG: plan/apply divergence — partial-fill maker not at level front"
+            );
+            let fill_qty = resting
+                .remaining_quantity()
+                .checked_sub(maker_remaining_after)
+                .expect("BUG: plan/apply divergence — partial leaves more than maker had");
+            resting.reduce_quantity(&fill_qty);
+            order.reduce_quantity(&fill_qty);
+            fills.push(Fill {
+                taker_order_seq: order.id(),
+                taker_side: side,
+                taker_price,
+                maker_order_seq: maker_seq,
+                maker_price,
+                quantity: fill_qty,
+            });
+        }
+
+        assert_eq!(
+            *order.remaining_quantity(),
+            plan.taker_remaining(),
+            "BUG: plan/apply divergence — taker remaining mismatch"
+        );
     }
 
     pub fn validate_order(&self, price: Price, quantity: &Quantity) -> Result<(), MatchOrderError> {
