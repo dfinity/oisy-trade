@@ -41,15 +41,18 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
   rests), and moves no balances (the reservation taken at placement is fully released).
 - **R5 — No partial FOK.** The "some liquidity but not enough" case is killed exactly like the
   "no liquidity" case: `Expired`, `filled_quantity == 0`. FOK never settles a partial fill.
-- **R6 — FOK always pays taker.** Every fill produced by a FOK order is charged the taker fee
-  rate (`FeeRates.taker`), on both the base and quote legs as applicable, regardless of pair
-  and regardless of which resting order it crossed. A FOK can never be a maker.
+- **R6 — FOK pays taker; its counterparty keeps the maker rate.** A FOK never rests, so in every
+  fill it produces it is the crossing (taker) side and pays `FeeRates.taker`, regardless of pair.
+  The resting order it crosses is the maker and keeps `FeeRates.maker` — choosing FOK must not
+  penalize the liquidity provider it fills against. This falls out of the existing
+  resting-side→maker / crossing-side→taker assignment with **no FOK-specific fee logic** (see Fee
+  logic).
 - **R7 — GTC fees unchanged.** GTC fee assignment is untouched: the resting side of a fill pays
   the maker rate, the incoming (crossing) side pays the taker rate, exactly as today.
 - **R8 — `Expired` is distinct from `Canceled`.** `OrderStatus` gains a new **unit** variant
-  `Expired`, surfaced in the public Candid type. `Canceled` keeps its current meaning —
-  user-initiated termination (`cancel_limit_order`, admin sweep) — and `Expired` is reserved for
-  system-initiated, time-in-force-driven terminations. This ticket produces exactly one such
+  `Expired`, surfaced in the public Candid type. `Canceled` keeps its current meaning — explicit
+  cancellation initiated by a user or an administrator (`cancel_limit_order`, admin sweep) — and
+  `Expired` is reserved for system-initiated, time-in-force-driven terminations. This ticket produces exactly one such
   case (a FOK that cannot fully fill); a future IOC would terminate as `Expired` too. A client
   can distinguish "I changed my mind" (`Canceled`) from "the engine couldn't honor my
   time-in-force" (`Expired`).
@@ -57,10 +60,12 @@ FOK is the matching-engine half of the swap story; the value to the client is a 
   record, surfaced on `OrderRecord` in the query API, and round-trips through the state
   snapshot and event-log replay. The matching engine can always determine an order's TIF when
   it evaluates it.
-- **R10 — Bounded cost.** A worst-case FOK that must inspect liquidity across many price levels
-  completes within a single message's instruction/heap limits; it does not allow an order to be
-  accepted whose evaluation could exceed canister message limits. (A single FOK is evaluated
-  atomically and therefore cannot be chunked across messages — see Design Decisions.)
+- **R10 — Bounded cost.** A FOK is evaluated atomically and cannot be chunked across messages, so
+  its cost must fit one message. The work is bounded by the number of resting orders it crosses:
+  the plan pass is a flattened iteration over the crossing `BTreeMap<_, VecDeque<_>>` levels, and
+  apply + settlement is one step per fill. The worst case — a single large FOK that sweeps one
+  fully-populated, fragmented side of the book — is covered by a canbench benchmark that must
+  stay within the per-message instruction limit.
 - **R11 — Async outcome, never `Open`.** `add_limit_order` enqueues a FOK and returns an
   `OrderId` exactly as it does for a GTC order — it does not block on the matching result. The
   FOK is evaluated when the matching engine processes it, transitioning only `Pending → Filled`
@@ -102,10 +107,18 @@ instruction-bound special case.
 Matching is **asynchronous and timer-driven**: `add_limit_order` validates the order, reserves
 balance, enqueues it as `Pending`, and returns an `OrderId`; a separately-scheduled zero-delay
 timer (`drive_matching`) then matches it in a later message (`docs/src/development/design.md`,
-Matching Engine). FOK reuses this unchanged. The caller observes the terminal `Filled` /
-`Expired` outcome via `get_my_orders`; with the existing zero-delay kick the result is typically
-available on the very next poll. (Why not synchronous inline matching — see Discussed
-Alternatives.)
+Matching Engine). FOK reuses this unchanged; the caller observes the terminal `Filled` /
+`Expired` outcome via `get_my_orders`.
+
+Time-to-evaluation is **best-effort, not immediate**. The executor schedules books by pending
+backlog, so under sustained load on busier books a FOK in a quieter book can wait — and while it
+waits it holds its placement reservation. This is a pre-existing, non-FOK-specific property of
+the cross-book scheduler (it delays GTC too); scheduling fairness is tracked separately in
+**DEFI-2899** and is out of scope here. What this ticket pins down is the *meaning*:
+`time_in_force` is a constraint on how long an order may **rest in the book**, evaluated when the
+engine processes it — not measured from submission. (Of Binance/Kraken/Coinbase, only Coinbase is
+explicit that it is measured from submission; we adopt the rest-in-book reading.) (Why not
+synchronous inline matching — see Discussed Alternatives.)
 
 ### Split matching into a read-only *plan* and a mutating *execute*
 
@@ -160,7 +173,11 @@ beyond confirming the path is shared (R-coverage in the test plan).
   `state::audit::process_event` and re-applied on replay; matching results are applied by
   `State::record_matching_event` **only under `StableMemoryOptions::Write`** (replay runs
   `Skip`). Any new persistence (the TIF field, the `Expired` transition) must flow through this
-  chain and respect the `Write` gate so replay does not double-apply.
+  chain and respect the `Write` gate so replay does not double-apply. In particular,
+  **`AddLimitOrderEvent` itself must carry `time_in_force`** (append-only minicbor field,
+  defaulting to `GoodTilCanceled` for pre-existing events): a FOK logged as `Pending` and
+  replayed before `process_pending_orders` runs must reconstruct as a FOK, not default to GTC and
+  rest (R9).
 - Matching/settlement are synchronous and free of inter-canister calls, but bounded by the
   per-message instruction limit; the timer-driven model chunks GTC matching to stay within it. A
   single FOK is atomic and cannot be chunked (R10).
@@ -219,20 +236,13 @@ Refactor `match_order` into a read-only **plan** and a mutating **apply**, joine
 ### Fee logic — `canister/src/state` (`compute_balance_operations`)
 
 Fees are assigned per fill from `fill.taker_side` (resting side → maker rate, crossing side →
-taker rate). For a FOK fill, **both** legs use the taker rate (R6): the engine must know the
-order's TIF at settlement time. Thread the taker order's `time_in_force` into the fee
-computation; when it is `FillOrKill`, charge `FeeRates.taker` on both the maker and taker legs
-of every fill the FOK produced. GTC assignment is unchanged (R7).
-
-> Helper shape (from the ticket), adapted to the unit-status world:
-> ```rust
-> fn fee_rate_for_fill(tif: TimeInForce, was_maker: bool, rates: &FeeRates) -> BasisPoint {
->     match tif {
->         TimeInForce::FillOrKill => rates.taker,
->         TimeInForce::GoodTilCanceled => if was_maker { rates.maker } else { rates.taker },
->     }
-> }
-> ```
+taker rate). **No FOK-specific fee logic is needed:** a FOK never rests, so it is always the
+crossing side of any fill it produces — the existing assignment already bills it `FeeRates.taker`
+and leaves the resting counterparty on `FeeRates.maker` (R6). Billing the resting maker the taker
+rate merely because the crosser chose FOK would penalize the liquidity provider and is **not**
+intended; the ticket's `fee_rate_for_fill` sketch that returned the taker rate for both legs is
+dropped. GTC assignment is unchanged (R7). The only fee work is a test asserting a FOK fill bills
+the FOK side the taker rate and its resting counterparty the maker rate.
 
 ### Execution wiring — `canister/src/execute`, `canister/src/state` (`record_matching_event`)
 
@@ -280,13 +290,15 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
     — compared via the `OrderBookSnapshot` round-trip (no `PartialEq` on `OrderBook` needed)
     (R4, R5). Covers the *some-but-insufficient* liquidity case explicitly (R5).
   - **Boundary + fill:** available liquidity exactly equal to `quantity` ⇒ `Filled` (inclusive);
-    a fillable FOK produces `Filled` with the expected fills (R3). A deep-book worst case stays
-    within expected instruction bounds (R10).
+    a fillable FOK produces `Filled` with the expected fills (R3).
+- `canister/src/benchmarks.rs` (canbench): a worst-case FOK that sweeps one fully-populated,
+  fragmented side of the book in a single message, asserting it stays within the per-message
+  instruction limit (R10).
 - `state/tests.rs`: a FOK that fully fills records `Filled` / `filled_quantity == quantity` and
   releases nothing extra (R3); a FOK that can't fill records `Expired` / `filled_quantity == 0`,
-  no book trace, reservation released (R4, R5); FOK fills are charged `FeeRates.taker` on both
-  legs (R6); GTC fee assignment unchanged — maker when resting, taker when crossing (R7);
-  defaulted TIF is `GoodTilCanceled` (R1, R2).
+  no book trace, reservation released (R4, R5); a FOK fill bills the FOK side the taker rate and
+  its resting counterparty the maker rate (R6); GTC fee assignment unchanged — maker when
+  resting, taker when crossing (R7); defaulted TIF is `GoodTilCanceled` (R1, R2).
 - `order/history` + `state/snapshot` tests: `time_in_force` round-trips through the record and a
   snapshot; replay under `Skip` does not re-settle a FOK (R9).
 
@@ -297,7 +309,8 @@ criteria end-to-end:
 - FOK against no liquidity ⇒ `Expired`, `filled_quantity == 0`, no resting trace (R4).
 - FOK against insufficient liquidity (some, but < quantity) ⇒ `Expired`, `filled_quantity == 0`
   (R5 — the no-partial guarantee).
-- Fee on a FOK fill equals the taker rate, on an asymmetric-decimal pair (R6).
+- Fee on a FOK fill: the FOK side is billed the taker rate and its resting counterparty the maker
+  rate, on an asymmetric-decimal pair (R6).
 - GTC fees unchanged: maker-if-resting, taker-on-immediate-cross (R7).
 - `Expired` is distinct from `Canceled` in the Candid surface; a user cancel still yields
   `Canceled` (R8).
@@ -329,18 +342,20 @@ reviews on its own. The FOK delivery proper is the three PRs below.
   `require_full` gate, `Killed` outcome, and `expired_orders` are *not* introduced here (they
   have no caller yet and would be dead code) — they arrive with the FOK wiring in PR 3.
   - *Acceptance:* existing matching tests green without edits (behavior preserved, R2).
-- **PR 2 (2/3) — FOK data model + fee rule.** `TimeInForce` enum; optional `time_in_force` on
+- **PR 2 (2/3) — FOK data model.** `TimeInForce` enum; optional `time_in_force` on
   `LimitOrderRequest` defaulting to GTC; `OrderStatus::Expired` (internal + public + Candid);
-  `time_in_force` on the order model, record, snapshot, and `OrderRecord`; the always-taker fee
-  rule (`fee_rate_for_fill`), unit-tested directly. Types are defined and surfaced but FOK is
-  not yet routed through matching.
-  - *Acceptance:* R1, R2, R6, R7, R8, R9.
+  `time_in_force` on the order model, record, snapshot, `AddLimitOrderEvent`, and `OrderRecord`.
+  No fee code: R6 needs none (a FOK is always the crossing/taker side, so the existing fee
+  assignment already bills it the taker rate — see Fee logic). Types are defined and surfaced but
+  FOK is not yet routed through matching.
+  - *Acceptance:* R1, R2, R7, R8, R9. (R6 is satisfied structurally; its fill test lands in PR 3
+    with the routing.)
 - **PR 3 (3/3) — FOK matching gate + execution wiring.** Add the `require_full` gate to
   `execute` (the `Killed` outcome) and `expired_orders` to `MatchingOutput`; drive `require_full`
   from `time_in_force` in `process_pending_orders`; map `expired_orders` to `Pending → Expired`
   plus reservation release in `record_matching_event`; update `design.md`; add unit + end-to-end
   integration tests.
-  - *Acceptance:* R3, R4, R5, R10, R11, and the design-doc AC.
+  - *Acceptance:* R3, R4, R5, R6, R10, R11, and the design-doc AC.
 
 ## Discussed Alternatives
 
