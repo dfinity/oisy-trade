@@ -43,5 +43,12 @@ When I give you a specification to build:
    Do NOT approve and do NOT merge — marking ready, final approval, and merge are mine
    to do manually.
 
+For stacked PRs: whenever a PR is added to, removed from, or reordered within a stack,
+refresh the "📚 PR stack" section of every *other* PR in the stack (and the spec's
+**Delivery / PR sequence**) so they all stay consistent — e.g. opening PR N means going
+back to PRs 1..N-1 and adding PR N to their stack lists. This is the orchestrator's job:
+the `implementer` only maintains the stack section of the PR it is building, since it is
+scoped to a single PR and shouldn't reach into siblings.
+
 Never end the loop on your own judgment — it ends only when the reviewer's VERDICT is
 READY and no unresolved comments remain. Final approval is always mine.
