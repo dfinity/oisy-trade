@@ -376,25 +376,20 @@ pub enum GetOrderBookDepthRequestError {
     },
 }
 
-/// Per-entry error reported in `get_balances` / `get_fee_balances` responses.
-pub type GetBalancesError = Error<GetBalancesTokenError, Never, Never>;
+/// Error returned by the `get_balances` / `get_fee_balances` queries.
+///
+/// These are read endpoints, so a failure dooms the whole call: the response is
+/// either every requested balance or this single error (see the spec's
+/// batch-semantic design decision). A blind retry of a read is cheap and
+/// side-effect-free, so there is no per-entry partial-success result.
+pub type GetBalancesError = Error<GetBalancesRequestError, Never, Never>;
 
-/// Caller-side reasons a single `get_balances` entry can fail.
+/// Caller-side reasons `get_balances` / `get_fee_balances` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
-pub enum GetBalancesTokenError {
+pub enum GetBalancesRequestError {
     /// The filter referenced a token that the OISY TRADE does not support.
     #[error("the filter referenced an unsupported token {0:?}")]
     TokenNotSupported(FilterToken),
-}
-
-/// Whole-request error reported when `get_balances` / `get_fee_balances` reject
-/// the request before any per-entry lookup runs.
-pub type GetBalancesRequestError = Error<GetBalancesFilterError, Never, Never>;
-
-/// Caller-side reasons a `get_balances` request is rejected before per-entry
-/// lookup.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
-pub enum GetBalancesFilterError {
     /// The filter exceeded the maximum number of entries.
     #[error("the filter has {len} entries, exceeding the maximum {max}")]
     FilterTooLarge {

@@ -461,32 +461,14 @@ type UserTokenBalance = record {
     balance : Balance;
 };
 
-// Per-entry error reported in `get_balances` responses. See the disposition
-// contract at the top of this file.
+// Error reported by `get_balances` / `get_fee_balances`. These are read
+// endpoints, so a failure dooms the whole call (no per-entry partial success).
+// See the disposition contract at the top of this file.
 type GetBalancesError = record {
     kind : variant {
         RequestError : opt variant {
             // The filter referenced a token that the canister does not support.
             TokenNotSupported : FilterToken;
-        };
-        TemporaryError : opt variant {};
-        InternalError : opt variant {};
-    };
-    message : opt text;
-};
-
-// Per-entry result.
-type GetBalanceResult = variant {
-    Ok : UserTokenBalance;
-    Err : GetBalancesError;
-};
-
-// Whole-request error reported when `get_balances` rejects the request
-// before any per-entry lookup runs. See the disposition contract at the top of
-// this file.
-type GetBalancesRequestError = record {
-    kind : variant {
-        RequestError : opt variant {
             // The filter exceeded the maximum number of entries.
             FilterTooLarge : record { len : nat32; max : nat32 };
         };
@@ -498,8 +480,8 @@ type GetBalancesRequestError = record {
 
 // Response shape for `get_balances`.
 type GetBalancesResponse = variant {
-    Ok : vec GetBalanceResult;
-    Err : GetBalancesRequestError;
+    Ok : vec UserTokenBalance;
+    Err : GetBalancesError;
 };
 
 // Request to add a new trading pair to the canister.
@@ -777,23 +759,26 @@ service : (OisyTradeArg) -> {
     //
     // - `null`: returns every token the caller holds with non-zero balance.
     // - `opt vec { ... }`: looks up each entry in the filter (including
-    //   zero balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicate filter entries are collapsed and
-    //   reported only once. An empty filter (`opt vec {}`) returns an
-    //   empty `Ok` vector, and is semantically distinct from `null`.
+    //   zero balances). Duplicate filter entries are collapsed and returned
+    //   only once. An empty filter (`opt vec {}`) returns an empty `Ok`
+    //   vector, and is semantically distinct from `null`.
     //
-    // The order of entries in the returned `vec GetBalanceResult` is
-    // unspecified; callers must identify each result by the `token` field
-    // (or the `FilterToken` echoed by `TokenNotSupported`).
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // a token the canister does not support — reads are cheap to re-issue, so
+    // there is no per-entry partial success.
+    //
+    // The order of entries in the returned `vec UserTokenBalance` is
+    // unspecified; callers must identify each result by the `token` field.
     get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
 
     // Query the canister-owned fee pool. Mirrors `get_balances` shape:
     //
     // - `null`: returns every token with a non-zero fee balance.
-    // - `opt vec { ... }`: looks up each entry (including zero
-    //   balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicates collapsed; empty filter returns
-    //   an empty `Ok` vector.
+    // - `opt vec { ... }`: looks up each entry (including zero balances).
+    //   Duplicates collapsed; empty filter returns an empty `Ok` vector.
+    //
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // an unsupported token.
     //
     // Each returned `Balance` carries the fee amount in `free`;
     // `reserved` is always zero (fees have no reserved concept).

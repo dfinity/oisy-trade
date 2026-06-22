@@ -1,8 +1,7 @@
 use crate::{
     DepositError, DepositRequestError, ErrorKind, FilterToken, GetBalancesError,
-    GetBalancesFilterError, GetBalancesRequestError, GetBalancesTokenError, GetOrderBookDepthError,
-    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError,
-    TokenId,
+    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
+    GetOrderBookTickerError, GetOrderBookTickerRequestError, TokenId,
 };
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
@@ -140,8 +139,8 @@ fn should_place_get_order_book_depth_leaves_under_request_error() {
 }
 
 #[test]
-fn should_place_get_balances_token_leaf_under_request_error() {
-    let leaf = GetBalancesTokenError::TokenNotSupported(FilterToken::ById(TokenId {
+fn should_place_get_balances_token_not_supported_under_request_error() {
+    let leaf = GetBalancesRequestError::TokenNotSupported(FilterToken::ById(TokenId {
         ledger_id: Principal::from_slice(&[0xFF]),
     }));
     let error = GetBalancesError::request(leaf.clone());
@@ -151,9 +150,9 @@ fn should_place_get_balances_token_leaf_under_request_error() {
 }
 
 #[test]
-fn should_place_get_balances_filter_leaf_under_request_error() {
-    let leaf = GetBalancesFilterError::FilterTooLarge { len: 101, max: 100 };
-    let error = GetBalancesRequestError::request(leaf.clone());
+fn should_place_get_balances_filter_too_large_under_request_error() {
+    let leaf = GetBalancesRequestError::FilterTooLarge { len: 101, max: 100 };
+    let error = GetBalancesError::request(leaf.clone());
     assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
     assert_eq!(error.message, Some(leaf.to_string()));
     assert!(!error.message.unwrap().is_empty());

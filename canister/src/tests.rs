@@ -454,7 +454,7 @@ mod add_limit_order {
     fn balance_of(token: oisy_trade_types::TokenId, caller: Principal) -> Balance {
         let mut result = get_balances(Some(vec![FilterToken::ById(token)]), caller).unwrap();
         assert_eq!(result.len(), 1);
-        result.remove(0).unwrap().balance
+        result.remove(0).balance
     }
 
     #[test]
@@ -1953,7 +1953,7 @@ mod get_balances {
     use crate::test_fixtures::arbitrary::arb_filter_tokens;
     use crate::test_fixtures::init_state_with_order_book;
     use candid::Principal;
-    use oisy_trade_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use oisy_trade_types::{GetBalancesError, MAX_FILTER_LEN};
     use proptest::{prop_assert, prop_assert_eq, proptest};
 
     const USER: Principal = Principal::from_slice(&[0xAA]);
@@ -1968,19 +1968,20 @@ mod get_balances {
             let len = filter.len() as u32;
 
             let result = get_balances(Some(filter), USER);
+            let too_large = GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::FilterTooLarge {
+                    len,
+                    max: MAX_FILTER_LEN,
+                },
+            );
 
             if len <= MAX_FILTER_LEN {
-                prop_assert!(result.is_ok());
+                // Within the cap, arbitrary (unsupported) tokens may fail the
+                // whole call with `TokenNotSupported`, but never with
+                // `FilterTooLarge`.
+                prop_assert!(result.as_ref().err() != Some(&too_large));
             } else {
-                prop_assert_eq!(
-                    result.unwrap_err(),
-                    GetBalancesRequestError::request(
-                        oisy_trade_types::GetBalancesFilterError::FilterTooLarge {
-                            len,
-                            max: MAX_FILTER_LEN,
-                        }
-                    )
-                );
+                prop_assert_eq!(result.unwrap_err(), too_large);
             }
         }
     }
@@ -1991,7 +1992,7 @@ mod get_fee_balances {
     use crate::state::reset_state;
     use crate::test_fixtures::arbitrary::arb_filter_tokens;
     use crate::test_fixtures::init_state_with_order_book;
-    use oisy_trade_types::{GetBalancesRequestError, MAX_FILTER_LEN};
+    use oisy_trade_types::{GetBalancesError, MAX_FILTER_LEN};
     use proptest::{prop_assert, prop_assert_eq, proptest};
 
     proptest! {
@@ -2004,19 +2005,20 @@ mod get_fee_balances {
             let len = filter.len() as u32;
 
             let result = get_fee_balances(Some(filter));
+            let too_large = GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::FilterTooLarge {
+                    len,
+                    max: MAX_FILTER_LEN,
+                },
+            );
 
             if len <= MAX_FILTER_LEN {
-                prop_assert!(result.is_ok());
+                // Within the cap, arbitrary (unsupported) tokens may fail the
+                // whole call with `TokenNotSupported`, but never with
+                // `FilterTooLarge`.
+                prop_assert!(result.as_ref().err() != Some(&too_large));
             } else {
-                prop_assert_eq!(
-                    result.unwrap_err(),
-                    GetBalancesRequestError::request(
-                        oisy_trade_types::GetBalancesFilterError::FilterTooLarge {
-                            len,
-                            max: MAX_FILTER_LEN,
-                        }
-                    )
-                );
+                prop_assert_eq!(result.unwrap_err(), too_large);
             }
         }
     }

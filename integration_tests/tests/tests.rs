@@ -2278,20 +2278,20 @@ mod get_fee_balances {
         assert_eq!(
             with_filter,
             vec![
-                Ok(UserTokenBalance {
+                UserTokenBalance {
                     token: fills.base.clone(),
                     balance: Balance {
                         free: Nat::from(fills.base_fee_raw),
                         reserved: Nat::from(0u64),
                     },
-                }),
-                Ok(UserTokenBalance {
+                },
+                UserTokenBalance {
                     token: fills.quote.clone(),
                     balance: Balance {
                         free: Nat::from(fills.quote_fee_raw),
                         reserved: Nat::from(0u64),
                     },
-                }),
+                },
             ],
         );
 
@@ -2329,8 +2329,7 @@ mod get_balances {
     use oisy_trade_int_tests::Setup;
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_types::{
-        ErrorKind, FilterToken, GetBalancesFilterError, GetBalancesTokenError, MAX_FILTER_LEN,
-        Never, TokenId,
+        ErrorKind, FilterToken, GetBalancesRequestError, MAX_FILTER_LEN, Never, TokenId,
     };
 
     #[tokio::test]
@@ -2360,7 +2359,7 @@ mod get_balances {
             .await
             .unwrap();
         assert_eq!(result.len(), 1);
-        let entry = result[0].as_ref().unwrap();
+        let entry = &result[0];
         assert_eq!(entry.token.id, token);
         assert_eq!(entry.balance.free, Nat::from(deposit));
 
@@ -2368,23 +2367,21 @@ mod get_balances {
     }
 
     #[tokio::test]
-    async fn should_return_token_not_supported_for_unknown_filter_entry() {
+    async fn should_fail_whole_call_for_unknown_filter_entry() {
         let setup = Setup::new().await.with_trading_pair().await;
         let unknown = TokenId {
             ledger_id: Principal::from_slice(&[0xFF]),
         };
 
-        let result = setup
+        let error = setup
             .oisy_trade_client()
             .get_balances(Some(vec![FilterToken::ById(unknown.clone())]))
             .await
-            .unwrap();
-        assert_eq!(result.len(), 1);
-        let error = result[0].as_ref().unwrap_err();
+            .unwrap_err();
         assert_eq!(
             error.kind,
-            ErrorKind::<GetBalancesTokenError, Never, Never>::RequestError(Some(
-                GetBalancesTokenError::TokenNotSupported(FilterToken::ById(unknown))
+            ErrorKind::<GetBalancesRequestError, Never, Never>::RequestError(Some(
+                GetBalancesRequestError::TokenNotSupported(FilterToken::ById(unknown))
             ))
         );
         assert!(!error.message.as_ref().unwrap().is_empty());
@@ -2406,8 +2403,8 @@ mod get_balances {
             .unwrap_err();
         assert_eq!(
             error.kind,
-            ErrorKind::<GetBalancesFilterError, Never, Never>::RequestError(Some(
-                GetBalancesFilterError::FilterTooLarge {
+            ErrorKind::<GetBalancesRequestError, Never, Never>::RequestError(Some(
+                GetBalancesRequestError::FilterTooLarge {
                     len,
                     max: MAX_FILTER_LEN,
                 }

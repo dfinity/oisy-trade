@@ -12,9 +12,9 @@ pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
     DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
-    GetBalancesFilterError, GetBalancesRequestError, GetBalancesTokenError, GetOrderBookDepthError,
-    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
-    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
+    GetOrderBookTickerError, GetOrderBookTickerRequestError, Never, WithdrawError,
+    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
