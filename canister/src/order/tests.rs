@@ -1066,7 +1066,7 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq};
+    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq, Price, Quantity, Side};
     use crate::test_fixtures::{LOT_SIZE, PRICE_SCALE, order_book};
     use std::collections::BTreeSet;
 
@@ -1149,6 +1149,123 @@ mod process_pending_orders {
 
         let second = process_all_pending_orders(&mut book);
         assert!(second.filled_orders.is_empty());
+    }
+
+    mod fill_or_kill {
+        use super::*;
+        use crate::order::OrderBookSnapshot;
+        use crate::test_fixtures::{fok_buy, fok_sell};
+
+        fn fok_buy_pending(book: &mut OrderBook, price: u128, quantity: u64) -> OrderSeq {
+            let seq = book.next_seq();
+            book.add_pending_order(fok_buy(seq.get(), price, quantity));
+            seq
+        }
+
+        /// The resting state of the book — every field except the monotonic
+        /// `next_seq`, which legitimately advances when a (later-killed) FOK is
+        /// enqueued. A killed FOK must leave this resting state untouched.
+        fn resting_state(book: &OrderBook) -> OrderBookSnapshot {
+            OrderBookSnapshot {
+                next_seq: OrderSeq::ZERO,
+                ..OrderBookSnapshot::from(book)
+            }
+        }
+
+        #[test]
+        fn should_fill_fok_fully_against_sufficient_liquidity() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            book.add_pending_order(sell(0, 100 * PRICE_SCALE, 3 * lot));
+            let _ = process_all_pending_orders(&mut book);
+
+            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 3 * lot);
+            let output = process_all_pending_orders(&mut book);
+
+            assert_eq!(output.fills.len(), 1);
+            assert!(output.filled_orders.contains(&taker));
+            assert!(output.expired_orders.is_empty());
+            assert!(output.resting_orders.is_empty());
+            assert!(book.is_empty());
+        }
+
+        #[test]
+        fn should_fill_fok_when_liquidity_exactly_equals_quantity() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            book.add_pending_order(sell(0, 100 * PRICE_SCALE, lot));
+            book.add_pending_order(sell(1, 100 * PRICE_SCALE, lot));
+            let _ = process_all_pending_orders(&mut book);
+
+            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 2 * lot);
+            let output = process_all_pending_orders(&mut book);
+
+            assert_eq!(output.fills.len(), 2);
+            assert!(output.filled_orders.contains(&taker));
+            assert!(output.expired_orders.is_empty());
+            assert!(book.is_empty());
+        }
+
+        #[test]
+        fn should_kill_fok_against_no_liquidity_without_mutating_book() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            book.add_pending_order(sell(0, 110 * PRICE_SCALE, lot));
+            let _ = process_all_pending_orders(&mut book);
+            let before = resting_state(&book);
+
+            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, lot);
+            let output = process_all_pending_orders(&mut book);
+
+            assert!(output.fills.is_empty());
+            assert!(output.filled_orders.is_empty());
+            assert!(output.resting_orders.is_empty());
+            assert!(output.expired_orders.contains_key(&taker));
+            assert_eq!(resting_state(&book), before);
+        }
+
+        #[test]
+        fn should_kill_fok_against_insufficient_liquidity_without_partial_fill() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            // Only one lot of liquidity, but the FOK wants three.
+            book.add_pending_order(sell(0, 100 * PRICE_SCALE, lot));
+            let _ = process_all_pending_orders(&mut book);
+            let before = resting_state(&book);
+
+            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 3 * lot);
+            let output = process_all_pending_orders(&mut book);
+
+            assert!(
+                output.fills.is_empty(),
+                "FOK must not settle a partial fill"
+            );
+            assert!(output.filled_orders.is_empty());
+            assert!(output.resting_orders.is_empty());
+            assert!(output.expired_orders.contains_key(&taker));
+            assert_eq!(
+                resting_state(&book),
+                before,
+                "killed FOK must leave the resting book untouched"
+            );
+        }
+
+        #[test]
+        fn should_carry_killed_order_side_price_quantity_for_refund() {
+            let mut book = order_book();
+            let lot = u64::from(LOT_SIZE);
+            book.add_pending_order(buy(0, 90 * PRICE_SCALE, lot));
+            let _ = process_all_pending_orders(&mut book);
+
+            let seq = book.next_seq();
+            book.add_pending_order(fok_sell(seq.get(), 100 * PRICE_SCALE, 2 * lot));
+            let output = process_all_pending_orders(&mut book);
+
+            let removed = output.expired_orders.get(&seq).expect("FOK was killed");
+            assert_eq!(removed.side, Side::Sell);
+            assert_eq!(removed.price, Price::new(100 * PRICE_SCALE));
+            assert_eq!(removed.remaining_quantity, Quantity::from(2 * lot));
+        }
     }
 }
 

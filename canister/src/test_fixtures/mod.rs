@@ -182,6 +182,24 @@ pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order 
     order(id, Side::Sell, price, quantity)
 }
 
+fn fok_order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
+    PendingOrder {
+        side,
+        price: Price::new(price.into()),
+        quantity: Quantity::from(quantity.into()),
+        time_in_force: TimeInForce::FillOrKill,
+    }
+    .into_order(OrderSeq::new(id))
+}
+
+pub fn fok_buy(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
+    fok_order(id, Side::Buy, price, quantity)
+}
+
+pub fn fok_sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
+    fok_order(id, Side::Sell, price, quantity)
+}
+
 /// Construct a [`Fill`] for use in test assertions.
 ///
 /// `taker` provides the taker context (seq, side, price).
@@ -334,11 +352,60 @@ where
     MH: ic_stable_structures::Memory,
     MB: ic_stable_structures::Memory,
 {
+    place_order_with_tif(
+        state,
+        user,
+        pair,
+        side,
+        price,
+        quantity,
+        TimeInForce::GoodTilCanceled,
+    )
+}
+
+/// Like [`place_order`] but for a fill-or-kill order.
+pub fn place_fok_order<MH, MB>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u128,
+    quantity: impl Into<Quantity>,
+) -> order::OrderId
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    place_order_with_tif(
+        state,
+        user,
+        pair,
+        side,
+        price,
+        quantity,
+        TimeInForce::FillOrKill,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_order_with_tif<MH, MB>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u128,
+    quantity: impl Into<Quantity>,
+    time_in_force: TimeInForce,
+) -> order::OrderId
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
     let pending = PendingOrder {
         side,
         price: Price::new(price),
         quantity: quantity.into(),
-        time_in_force: TimeInForce::GoodTilCanceled,
+        time_in_force,
     };
     let (token, amount) = match side {
         Side::Buy => (
@@ -855,6 +922,7 @@ pub mod arbitrary {
                 fills,
                 resting_orders,
                 filled_orders,
+                expired_orders: std::collections::BTreeMap::new(),
             })
     }
 
