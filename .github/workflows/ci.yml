@@ -186,6 +186,53 @@ jobs:
             --hidden ./canister/hidden_endpoints.conf \
             --candid ./canister/oisy_trade.did
 
+  candid-backward-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check for candid-breaking-change override'
+        id: check-override
+        if: github.event_name == 'pull_request'
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          has_label=$(echo "$LABELS" | jq 'map(select(. == "candid-breaking-change")) | length > 0')
+          if [[ "$has_label" == "true" ]] && \
+             [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?!: ]]; then
+            echo "Override active: candid-breaking-change label with breaking-commit title."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 'Install didc'
+        run: |
+          curl -fsSL https://github.com/dfinity/candid/releases/download/2025-12-18/didc-linux64 \
+            -o /usr/local/bin/didc
+          echo "32693c76d9c6fe0f273f2c1ebf7e48ba3c383e925e5afd17dd264a06aed9fbcc  /usr/local/bin/didc" | sha256sum --check
+          chmod +x /usr/local/bin/didc
+
+      - name: 'Download released Candid interface'
+        id: download-released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --limit 20 --json tagName \
+            --jq '[.[] | select(.tagName | startswith("oisy_trade_canister-v"))] | first | .tagName')
+          if [ -z "$tag" ]; then
+            echo "No canister release found; skipping backward-compat check."
+          else
+            echo "Checking backward compatibility against $tag"
+            gh release download "$tag" --pattern 'oisy_trade.did' --output released_oisy_trade.did
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Check Candid backward compatibility'
+        if: steps.download-released.outputs.tag != ''
+        continue-on-error: ${{ steps.check-override.outputs.skip == 'true' }}
+        run: didc check canister/oisy_trade.did released_oisy_trade.did
+
   benchmark:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -249,6 +296,7 @@ jobs:
       - unit-tests
       - integration-tests
       - check-canister-wasm-endpoints
+      - candid-backward-compat
       - benchmark
       - conventional-pr-title
     runs-on: ubuntu-latest
