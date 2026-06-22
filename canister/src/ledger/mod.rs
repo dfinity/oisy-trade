@@ -28,8 +28,6 @@ pub async fn deposit(
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
-    // TODO(DEFI-2741): Consider adding a check for supported tokens to disallow users to deposit
-    //  funds that are not supported by the OISY TRADE.
     let token = request.token_id;
     let amount = request.amount;
     let caller = runtime.msg_caller();
@@ -45,10 +43,6 @@ pub async fn deposit(
             subaccount: None,
         },
         amount: amount.clone(),
-        // TODO(DEFI-2741): Not strictly necessary to set a fee for deposits, since it is deducted
-        //  from the from account, but for withdrawals we will need to know the fee to be able to
-        //  deduct it from the amount, so for consistency we should consider setting it for deposits
-        //  as well.
         fee: None,
         memo: None,
         created_at_time: None,
