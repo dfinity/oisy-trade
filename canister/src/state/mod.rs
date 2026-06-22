@@ -427,12 +427,32 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             for seq in &output.filled_orders {
                 updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
             }
+            for seq in output.expired_orders.keys() {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
+            }
             for (seq, update) in updates {
                 let order_id = OrderId::new(event.book_id, seq);
                 self.order_history.apply_update(&order_id, update, now);
             }
         }
-        let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
+        let mut balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
+        for (seq, killed) in &output.expired_orders {
+            let (refund_token, refund_amount) = match killed.side {
+                Side::Buy => (
+                    PairToken::Quote,
+                    killed
+                        .price
+                        .checked_mul_quantity_scaled(&killed.remaining_quantity, base_scale)
+                        .expect("BUG: price * quantity overflow — validated at placement"),
+                ),
+                Side::Sell => (PairToken::Base, killed.remaining_quantity),
+            };
+            balance_operations.push(event::BalanceOperation::Unreserve {
+                order: *seq,
+                token: refund_token,
+                amount: refund_amount,
+            });
+        }
         if !balance_operations.is_empty() {
             self.pending_settling_events
                 .push_back(event::SettlingEvent {

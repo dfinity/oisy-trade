@@ -2,6 +2,7 @@ use super::plan::FillPlan;
 use super::queue::{OrderQueue, OrderQueueIter};
 use super::{
     FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
+    TimeInForce,
 };
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
@@ -151,19 +152,43 @@ impl OrderBook {
             .map(|(&price, resting)| resting.to_order(Side::Sell, price))
     }
 
-    /// Match an incoming order against the book.
+    /// Match an incoming GTC order against the book.
     ///
     /// Validates tick size, lot size, and rejects zero price/quantity, then attempts
     /// to fill the order against the opposite side. Returns:
     /// - [`MatchResult::Filled`] if the order is fully filled.
     /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
     /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
-    pub(crate) fn match_order(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
+    #[cfg(test)]
+    pub(crate) fn match_order(&mut self, order: Order) -> Result<MatchResult, MatchOrderError> {
+        self.execute(order, false)
+    }
+
+    /// Plan-then-apply matching for an incoming order, gated by `require_full`.
+    ///
+    /// Validates the order, then plans the fills it would make against the
+    /// crossing side (read-only). When `require_full` is set (FOK) and the plan
+    /// does not fully fill the order, returns [`MatchResult::Killed`] **before**
+    /// any mutation, so the book is provably untouched. Otherwise applies the
+    /// plan and either reports [`MatchResult::Filled`] or rests the remainder
+    /// ([`MatchResult::PartiallyFilled`] / [`MatchResult::Resting`]).
+    pub(crate) fn execute(
+        &mut self,
+        mut order: Order,
+        require_full: bool,
+    ) -> Result<MatchResult, MatchOrderError> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let plan = self.plan_fills(&order);
+
+        if require_full && !plan.taker_remaining().is_zero() {
+            return Ok(MatchResult::Killed {
+                killed_order_seq: order.id(),
+            });
+        }
+
         let fills = self.apply_plan(plan, &mut order);
 
         if order.remaining_quantity().is_zero() {
@@ -337,6 +362,7 @@ impl OrderBook {
     pub(crate) fn process_pending_orders(&mut self, expected_seqs: &[OrderSeq]) -> MatchingOutput {
         let mut all_fills = Vec::new();
         let mut resting_order_seqs = BTreeSet::new();
+        let mut expired_orders = BTreeMap::new();
         for expected_seq in expected_seqs {
             let order = self
                 .pending_orders
@@ -347,7 +373,19 @@ impl OrderBook {
                 *expected_seq,
                 "BUG: pending order seq mismatch at the head of the queue"
             );
-            match self.match_order(order) {
+            let require_full = matches!(order.time_in_force(), TimeInForce::FillOrKill);
+            let killed = require_full.then(|| RemovedOrder {
+                side: order.side(),
+                price: order.price(),
+                remaining_quantity: *order.remaining_quantity(),
+            });
+            match self.execute(order, require_full) {
+                Ok(MatchResult::Killed { killed_order_seq }) => {
+                    expired_orders.insert(
+                        killed_order_seq,
+                        killed.expect("BUG: Killed outcome only when require_full"),
+                    );
+                }
                 Ok(result) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
                         resting_order_seqs.insert(resting_order_seq);
@@ -379,6 +417,7 @@ impl OrderBook {
             fills: all_fills,
             resting_orders,
             filled_orders,
+            expired_orders,
         }
     }
 
@@ -478,12 +517,15 @@ fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
 /// `side` determines the token (quote for Buy, base for Sell) and
 /// `price × remaining_quantity` (or just `remaining_quantity` for Sell) is
 /// the amount to unreserve.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 #[must_use = "RemovedOrder must be applied to order_history via `record_cancel_limit_order`; \
               dropping it leaves the order book and order_history out of sync"]
 pub struct RemovedOrder {
+    #[n(0)]
     pub side: Side,
+    #[n(1)]
     pub price: Price,
+    #[n(2)]
     pub remaining_quantity: Quantity,
 }
 
@@ -502,6 +544,11 @@ pub struct MatchingOutput {
     /// Orders that were fully filled and removed from the book.
     #[n(2)]
     pub filled_orders: BTreeSet<OrderSeq>,
+    /// Fill-or-kill orders that could not fully fill and were killed without
+    /// resting or producing a fill. Each maps to the killed order's side,
+    /// price, and full quantity so the placement reservation can be released.
+    #[n(3)]
+    pub expired_orders: BTreeMap<OrderSeq, RemovedOrder>,
 }
 
 /// The result of matching an incoming order against the book.
@@ -516,13 +563,16 @@ pub enum MatchResult {
     },
     /// No match was found; the order is resting in the book.
     Resting { resting_order_seq: OrderSeq },
+    /// A fill-or-kill order that could not fully fill. It was not applied to the
+    /// book and produced no fill (R4, R5).
+    Killed { killed_order_seq: OrderSeq },
 }
 
 impl MatchResult {
     pub fn fills(&self) -> &[Fill] {
         match self {
             MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
-            MatchResult::Resting { .. } => &[],
+            MatchResult::Resting { .. } | MatchResult::Killed { .. } => &[],
         }
     }
 
@@ -532,14 +582,14 @@ impl MatchResult {
                 resting_order_seq, ..
             }
             | MatchResult::Resting { resting_order_seq } => Some(*resting_order_seq),
-            MatchResult::Filled { .. } => None,
+            MatchResult::Filled { .. } | MatchResult::Killed { .. } => None,
         }
     }
 
     pub fn into_fills(self) -> Vec<Fill> {
         match self {
             MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
-            MatchResult::Resting { .. } => Vec::new(),
+            MatchResult::Resting { .. } | MatchResult::Killed { .. } => Vec::new(),
         }
     }
 }
