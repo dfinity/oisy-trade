@@ -98,24 +98,35 @@ mod time_in_force {
         }
     }
 
-    /// An `Order` encoded before the `time_in_force` field existed (a 4-element
-    /// array) must decode with the field absent and resolve to GTC.
+    /// Mirrors the `Order` field layout *before* `time_in_force` was appended,
+    /// keeping the same field indices. Encoding an instance and decoding it as
+    /// the current `Order` proves legacy data (no `time_in_force`) resolves to
+    /// `GoodTilCanceled`.
+    #[derive(minicbor::Encode)]
+    struct LegacyOrder {
+        #[n(0)]
+        id: OrderSeq,
+        #[n(1)]
+        side: Side,
+        #[n(2)]
+        price: Price,
+        #[n(3)]
+        remaining_quantity: Quantity,
+    }
+
     #[test]
     fn legacy_order_without_field_decodes_as_good_til_canceled() {
-        let mut bytes = vec![];
-        let mut enc = minicbor::Encoder::new(&mut bytes);
-        enc.array(4)
-            .unwrap()
-            .encode(OrderSeq::new(3))
-            .unwrap()
-            .encode(Side::Sell)
-            .unwrap()
-            .encode(Price::new(42))
-            .unwrap()
-            .encode(Quantity::from(5u64))
-            .unwrap();
+        let legacy = LegacyOrder {
+            id: OrderSeq::new(3),
+            side: Side::Sell,
+            price: Price::new(42),
+            remaining_quantity: Quantity::from(5u64),
+        };
 
+        let mut bytes = vec![];
+        minicbor::encode(&legacy, &mut bytes).unwrap();
         let decoded: Order = minicbor::decode(&bytes).unwrap();
+
         assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
     }
 }
