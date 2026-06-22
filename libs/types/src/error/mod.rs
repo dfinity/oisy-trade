@@ -383,7 +383,7 @@ pub type GetBalancesError = Error<GetBalancesTokenError, Never, Never>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum GetBalancesTokenError {
     /// The filter referenced a token that the OISY TRADE does not support.
-    #[error("the filter referenced an unsupported token")]
+    #[error("the filter referenced an unsupported token {0:?}")]
     TokenNotSupported(FilterToken),
 }
 
