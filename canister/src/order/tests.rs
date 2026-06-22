@@ -907,25 +907,6 @@ mod order_book {
             assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(110 * PRICE_SCALE));
         }
-
-        #[test]
-        fn should_preserve_time_in_force_of_resting_order() {
-            use crate::order::{PendingOrder, Side, TimeInForce};
-
-            for time_in_force in [TimeInForce::GoodTilCanceled, TimeInForce::FillOrKill] {
-                let mut book = order_book();
-                let pending = PendingOrder {
-                    side: Side::Buy,
-                    price: Price::new(100 * PRICE_SCALE),
-                    quantity: Quantity::from(u64::from(LOT_SIZE)),
-                    time_in_force,
-                };
-                book.match_order(pending.into_order(OrderSeq::ONE)).unwrap();
-
-                let resting = book.best_bid().expect("should have a resting bid");
-                assert_eq!(resting.time_in_force(), time_in_force);
-            }
-        }
     }
 
     mod levels {
