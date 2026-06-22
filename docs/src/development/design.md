@@ -129,10 +129,12 @@ Since deposits are a separate step, the user's balance is already available when
                matching engine
                processes queue
                       |
-                      v
-               +------------+
-               |    Open     |  <-- resting in the book (unfilled remainder)
-               +--+----------+
+            FOK can't fully fill
+                      |----------------------+
+                      v                       v
+               +------------+           +------------+
+               |    Open     |          |  Expired   |
+               +--+----------+          +------------+
                ^       |      \
                |     filled   cancel_limit_order
           partial      |          |
@@ -145,7 +147,15 @@ Since deposits are a separate step, the user's balance is already available when
 1. **Pending**: The order is submitted. The required funds are debited from the user's available balance (quote tokens for buys, base tokens for sells). The order is placed in a queue and an order ID is returned immediately. If the user has insufficient balance, the order is rejected.
 2. **Open**: The timer-driven matching engine dequeues the order and matches it against the opposite side of the book. If the order is fully filled during this initial matching, it transitions directly to `Filled` without ever resting in the book. If only partially filled, the filled portion is settled immediately (proceeds credited to the user's available balance) and the remaining quantity rests in the book at the specified price level, where it can be matched against future incoming orders.
 3. **Filled**: The order has been fully matched (either immediately or after resting in the book). Proceeds from the final fill are credited to the user's available balance.
-4. **Canceled**: The user canceled the order via `cancel_limit_order`. Reserved tokens are returned to the user's available balance.
+4. **Canceled**: The user (or an administrator) canceled the order via `cancel_limit_order`. `Canceled` is **user-initiated**. Reserved tokens are returned to the user's available balance.
+5. **Expired**: A **system-initiated** termination driven by the order's `time_in_force` — the engine could not honor the order's time-in-force constraint. Today the only such case is a fill-or-kill order that cannot fully fill (see Time-in-Force). The order never rests, moves no balances, and the placement reservation is fully released. A client distinguishes "I changed my mind" (`Canceled`) from "the engine couldn't honor my time-in-force" (`Expired`).
+
+#### Time-in-Force
+
+Each limit order carries a `time_in_force` policy that constrains **how long the order may rest in the book**. It is evaluated when the matching engine processes the order — *upon execution* — not when `add_limit_order` is called, because the Candid call only enqueues the order; it does not place it in the book.
+
+- **GoodTilCanceled (GTC)** — the default, applied when `time_in_force` is absent. The order may rest in the book until it is filled or canceled, and may fill partially over time.
+- **FillOrKill (FOK)** — when the engine processes the order, the entire quantity must fill against resting liquidity at the order's price or better, all at once. Otherwise the whole order is killed with **zero** execution: it never rests and produces no partial fill. A FOK therefore transitions only `Pending → Filled` or `Pending → Expired`; it never reaches `Open`. As with GTC, `add_limit_order` returns an order ID immediately and the caller observes the terminal outcome via `get_my_orders`.
 
 ### Order Book Data Structure
 
@@ -332,7 +342,8 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 - **price**: the limit price, a `u128` (exposed as `nat` in the Candid interface).
 - **quantity**: the original submission size as a `Quantity`.
 - **filled_quantity**: the cumulative quantity filled so far as a `Quantity`.
-- **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, or `Canceled`.
+- **status**: the current lifecycle state — `Pending`, `Open`, `Filled`, `Canceled`, or `Expired`.
+- **time_in_force**: the order's time-in-force policy — `GoodTilCanceled` or `FillOrKill` (see Order Lifecycle / Time-in-Force).
 - **created_at**: the time the order was submitted, in nanoseconds since the Unix epoch.
 - **last_updated_at**: the time of the most recent modifying event (fill, status transition, or cancel), in nanoseconds since the Unix epoch; optional — `null` until the order is first modified.
 
