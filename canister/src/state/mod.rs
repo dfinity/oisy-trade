@@ -723,11 +723,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Shared body for the `Some(filter)` branch of both [`Self::get_balances`]
     /// and [`Self::get_fee_balances`]: dedupe filter entries, look up the
     /// token in `self.tokens`, and resolve each entry's balance via the
-    /// caller-supplied `balance_lookup`. An unknown token fails the whole call
-    /// with a [`oisy_trade_types::GetBalancesError`] envelope carrying
-    /// `kind = RequestError(Some(`[`TokenNotSupported`]`(..)))`.
-    ///
-    /// [`TokenNotSupported`]: oisy_trade_types::GetBalancesRequestError::TokenNotSupported
+    /// caller-supplied `balance_lookup`. Unknown tokens are reported as a
+    /// [`oisy_trade_types::GetBalancesError`] envelope with
+    /// `kind = RequestError(Some(TokenNotSupported(..)))`.
     fn apply_filter<F>(
         &self,
         filter: &[oisy_trade_types::FilterToken],
