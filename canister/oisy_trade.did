@@ -201,11 +201,18 @@ type OrderBookDepth = record {
     asks : vec PriceLevel;
 };
 
-// Error returned by the `get_order_book_ticker` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookTickerError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
+// Error returned by the `get_order_book_ticker` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookTickerError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBookTickerError };
@@ -221,13 +228,20 @@ type GetOrderBookDepthRequest = record {
     limit : opt nat32;
 };
 
-// Error returned by the `get_order_book_depth` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookDepthError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
-    // The requested depth limit exceeds the maximum supported value (1000).
-    LimitTooLarge : record { requested : nat32; max : nat32 };
+// Error returned by the `get_order_book_depth` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookDepthError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+            // The requested depth limit exceeds the maximum supported value (1000).
+            LimitTooLarge : record { requested : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBookDepthError };
@@ -447,10 +461,18 @@ type UserTokenBalance = record {
     balance : Balance;
 };
 
-// Per-entry error reported in `get_balances` responses.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesError = variant {
-    TokenNotSupported : FilterToken;
+// Per-entry error reported in `get_balances` responses. See the disposition
+// contract at the top of this file.
+type GetBalancesError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The filter referenced a token that the canister does not support.
+            TokenNotSupported : FilterToken;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Per-entry result.
@@ -460,10 +482,18 @@ type GetBalanceResult = variant {
 };
 
 // Whole-request error reported when `get_balances` rejects the request
-// before any per-entry lookup runs.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesRequestError = variant {
-    FilterTooLarge : record { len : nat32; max : nat32 };
+// before any per-entry lookup runs. See the disposition contract at the top of
+// this file.
+type GetBalancesRequestError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The filter exceeded the maximum number of entries.
+            FilterTooLarge : record { len : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Response shape for `get_balances`.

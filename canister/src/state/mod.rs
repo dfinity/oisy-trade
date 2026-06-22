@@ -686,7 +686,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// Returns the canister-owned fee pool, shaped like [`get_balances`].
     /// - `None`: every token with a non-zero fee pool entry.
     /// - `Some(filter)`: each filter entry resolved per-entry; unsupported
-    ///   tokens are reported as [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
+    ///   tokens are reported as [`oisy_trade_types::GetBalancesTokenError::TokenNotSupported`].
     ///   Registered tokens with no accrual return `Balance::ZERO`.
     pub fn get_fee_balances(
         &self,
@@ -722,7 +722,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// and [`Self::get_fee_balances`]: dedupe filter entries, look up the
     /// token in `self.tokens`, and resolve each entry's balance via the
     /// caller-supplied `balance_lookup`. Unknown tokens are reported as
-    /// [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
+    /// [`oisy_trade_types::GetBalancesTokenError::TokenNotSupported`].
     fn apply_filter<F>(
         &self,
         filter: &[oisy_trade_types::FilterToken],
@@ -740,8 +740,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     oisy_trade_types::FilterToken::ById(t) => TokenId::from(t.clone()),
                 };
                 match self.tokens.get(&internal_token) {
-                    None => Err(oisy_trade_types::GetBalancesError::TokenNotSupported(
-                        ft.clone(),
+                    None => Err(oisy_trade_types::GetBalancesError::request(
+                        oisy_trade_types::GetBalancesTokenError::TokenNotSupported(ft.clone()),
                     )),
                     Some(metadata) => Ok(oisy_trade_types::UserTokenBalance {
                         token: oisy_trade_types::Token {

@@ -1572,7 +1572,9 @@ mod get_order_book_ticker {
         init_state_with_order_book();
         assert_eq!(
             get_order_book_ticker(unknown_pair),
-            Err(GetOrderBookTickerError::UnknownTradingPair),
+            Err(GetOrderBookTickerError::request(
+                oisy_trade_types::GetOrderBookTickerRequestError::UnknownTradingPair
+            )),
         );
     }
 
@@ -1658,7 +1660,9 @@ mod get_order_book_depth {
         init_state_with_order_book();
         assert_eq!(
             get_order_book_depth(request(unknown_pair, None)),
-            Err(GetOrderBookDepthError::UnknownTradingPair),
+            Err(GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::UnknownTradingPair
+            )),
         );
     }
 
@@ -1750,10 +1754,12 @@ mod get_order_book_depth {
         init_state_with_order_book();
         assert_eq!(
             get_order_book_depth(request(icp_ckbtc_trading_pair().into(), Some(1_001))),
-            Err(GetOrderBookDepthError::LimitTooLarge {
-                requested: 1_001,
-                max: 1_000,
-            }),
+            Err(GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::LimitTooLarge {
+                    requested: 1_001,
+                    max: 1_000,
+                }
+            )),
         );
     }
 
@@ -1968,10 +1974,12 @@ mod get_balances {
             } else {
                 prop_assert_eq!(
                     result.unwrap_err(),
-                    GetBalancesRequestError::FilterTooLarge {
-                        len,
-                        max: MAX_FILTER_LEN,
-                    }
+                    GetBalancesRequestError::request(
+                        oisy_trade_types::GetBalancesFilterError::FilterTooLarge {
+                            len,
+                            max: MAX_FILTER_LEN,
+                        }
+                    )
                 );
             }
         }
@@ -2002,10 +2010,12 @@ mod get_fee_balances {
             } else {
                 prop_assert_eq!(
                     result.unwrap_err(),
-                    GetBalancesRequestError::FilterTooLarge {
-                        len,
-                        max: MAX_FILTER_LEN,
-                    }
+                    GetBalancesRequestError::request(
+                        oisy_trade_types::GetBalancesFilterError::FilterTooLarge {
+                            len,
+                            max: MAX_FILTER_LEN,
+                        }
+                    )
                 );
             }
         }

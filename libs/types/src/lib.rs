@@ -11,8 +11,10 @@ mod error;
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
-    DepositRequestError, DepositTemporaryError, Error, ErrorKind, Never, WithdrawError,
-    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
+    GetBalancesFilterError, GetBalancesRequestError, GetBalancesTokenError, GetOrderBookDepthError,
+    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
+    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
@@ -123,16 +125,8 @@ pub struct OrderBookDepth {
 pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 
 /// Maximum depth (levels per side) that `get_order_book_depth` will serve.
-/// Requests for more than this return [`GetOrderBookDepthError::LimitTooLarge`].
+/// Requests for more than this return [`GetOrderBookDepthRequestError::LimitTooLarge`].
 pub const MAX_DEPTH_LIMIT: u32 = 1_000;
-
-/// Error returned by the `get_order_book_ticker` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetOrderBookTickerError {
-    /// The requested trading pair is not registered on the OISY TRADE.
-    UnknownTradingPair,
-}
 
 /// Request for the `get_order_book_depth` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -142,24 +136,9 @@ pub struct GetOrderBookDepthRequest {
     /// Maximum number of price levels returned per side.
     /// When `None`, [`DEFAULT_DEPTH_LIMIT`] is used. Values greater than
     /// [`MAX_DEPTH_LIMIT`] are rejected with
-    /// [`GetOrderBookDepthError::LimitTooLarge`]. A value of `Some(0)` is
+    /// [`GetOrderBookDepthRequestError::LimitTooLarge`]. A value of `Some(0)` is
     /// accepted and returns empty bids/asks vectors.
     pub limit: Option<u32>,
-}
-
-/// Error returned by the `get_order_book_depth` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetOrderBookDepthError {
-    /// The requested trading pair is not registered on the OISY TRADE.
-    UnknownTradingPair,
-    /// The requested depth limit exceeds [`MAX_DEPTH_LIMIT`].
-    LimitTooLarge {
-        /// The rejected limit.
-        requested: u32,
-        /// The maximum limit the OISY TRADE will serve.
-        max: u32,
-    },
 }
 
 /// Status of an order.
@@ -353,28 +332,6 @@ pub struct UserTokenBalance {
     pub token: Token,
     /// The caller's free + reserved holdings for `token`.
     pub balance: Balance,
-}
-
-/// Per-entry error reported in [`get_balances`] responses.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetBalancesError {
-    /// The filter referenced a token that the OISY TRADE does not support.
-    TokenNotSupported(FilterToken),
-}
-
-/// Whole-request error reported when [`get_balances`] rejects the
-/// request before any per-entry lookup runs.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetBalancesRequestError {
-    /// The filter exceeded [`MAX_FILTER_LEN`] entries.
-    FilterTooLarge {
-        /// The submitted filter length.
-        len: u32,
-        /// The maximum allowed filter length ([`MAX_FILTER_LEN`]).
-        max: u32,
-    },
 }
 
 /// Request to add a new trading pair to the OISY TRADE.

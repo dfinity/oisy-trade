@@ -141,9 +141,11 @@ pub fn get_order_book_ticker(
 ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
     let internal_pair = order::TradingPair::from(pair);
     state::with_state(|s| {
-        let book = s
-            .get_order_book(&internal_pair)
-            .ok_or(GetOrderBookTickerError::UnknownTradingPair)?;
+        let book = s.get_order_book(&internal_pair).ok_or_else(|| {
+            GetOrderBookTickerError::request(
+                oisy_trade_types::GetOrderBookTickerRequestError::UnknownTradingPair,
+            )
+        })?;
         Ok(OrderBookTicker {
             bid: book.bid_levels(1).next().map(to_price_level),
             ask: book.ask_levels(1).next().map(to_price_level),
@@ -158,17 +160,21 @@ pub fn get_order_book_depth(
         None => DEFAULT_DEPTH_LIMIT,
         Some(n) if n <= MAX_DEPTH_LIMIT => n,
         Some(n) => {
-            return Err(GetOrderBookDepthError::LimitTooLarge {
-                requested: n,
-                max: MAX_DEPTH_LIMIT,
-            });
+            return Err(GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::LimitTooLarge {
+                    requested: n,
+                    max: MAX_DEPTH_LIMIT,
+                },
+            ));
         }
     };
     let internal_pair = order::TradingPair::from(request.trading_pair);
     state::with_state(|s| {
-        let book = s
-            .get_order_book(&internal_pair)
-            .ok_or(GetOrderBookDepthError::UnknownTradingPair)?;
+        let book = s.get_order_book(&internal_pair).ok_or_else(|| {
+            GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::UnknownTradingPair,
+            )
+        })?;
         let limit = limit as usize;
         Ok(OrderBookDepth {
             bids: book.bid_levels(limit).map(to_price_level).collect(),
@@ -612,10 +618,12 @@ fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalances
     if let Some(f) = filter
         && (f.len() as u32) > MAX_FILTER_LEN
     {
-        return Err(GetBalancesRequestError::FilterTooLarge {
-            len: f.len() as u32,
-            max: MAX_FILTER_LEN,
-        });
+        return Err(GetBalancesRequestError::request(
+            oisy_trade_types::GetBalancesFilterError::FilterTooLarge {
+                len: f.len() as u32,
+                max: MAX_FILTER_LEN,
+            },
+        ));
     }
     Ok(())
 }

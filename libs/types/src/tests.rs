@@ -1,8 +1,7 @@
 use crate::{
-    Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderStatus, PriceLevel, Side, Token, TokenId, TokenMetadata, TradingPair,
-    TradingPairInfo, TradingStatus,
+    Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, GetOrderBookDepthRequest,
+    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, Token,
+    TokenId, TokenMetadata, TradingPair, TradingPairInfo, TradingStatus,
 };
 use candid::{Nat, Principal};
 
@@ -191,29 +190,6 @@ fn should_serialize_get_order_book_depth_request() {
         let encoded = candid::encode_one(&request).unwrap();
         let decoded: GetOrderBookDepthRequest = candid::decode_one(&encoded).unwrap();
         assert_eq!(request, decoded);
-    }
-}
-
-#[test]
-fn should_serialize_get_order_book_ticker_error() {
-    let err = GetOrderBookTickerError::UnknownTradingPair;
-    let encoded = candid::encode_one(&err).unwrap();
-    let decoded: GetOrderBookTickerError = candid::decode_one(&encoded).unwrap();
-    assert_eq!(err, decoded);
-}
-
-#[test]
-fn should_serialize_get_order_book_depth_error() {
-    for err in [
-        GetOrderBookDepthError::UnknownTradingPair,
-        GetOrderBookDepthError::LimitTooLarge {
-            requested: 5_000,
-            max: 1_000,
-        },
-    ] {
-        let encoded = candid::encode_one(&err).unwrap();
-        let decoded: GetOrderBookDepthError = candid::decode_one(&encoded).unwrap();
-        assert_eq!(err, decoded);
     }
 }
 

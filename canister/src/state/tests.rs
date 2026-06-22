@@ -2511,9 +2511,11 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
+            vec![Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesTokenError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))
+            ))],
         );
     }
 
@@ -2536,9 +2538,11 @@ mod get_balances {
             state.get_balances(&USER, Some(&filter)),
             vec![
                 ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                    unknown.into()
-                ))),
+                Err(GetBalancesError::request(
+                    oisy_trade_types::GetBalancesTokenError::TokenNotSupported(FilterToken::ById(
+                        unknown.into()
+                    ))
+                )),
             ],
         );
     }
@@ -2567,9 +2571,11 @@ mod get_balances {
             vec![
                 ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
                 ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                    unknown.into()
-                ))),
+                Err(GetBalancesError::request(
+                    oisy_trade_types::GetBalancesTokenError::TokenNotSupported(FilterToken::ById(
+                        unknown.into()
+                    ))
+                )),
             ],
         );
     }
@@ -2671,9 +2677,11 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
+            vec![Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesTokenError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))
+            ))],
         );
     }
 
