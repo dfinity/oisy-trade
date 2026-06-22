@@ -74,7 +74,7 @@ pub async fn deposit(
     Ok(DepositResponse { block_index })
 }
 
-/// Transfer tokens from the OISY TRADE canister to `to` via `icrc1_transfer`.
+/// Transfer tokens from this canister to `to` via `icrc1_transfer`.
 ///
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
 /// `BadFee`, the correct fee is used for a single retry. The amount shall
