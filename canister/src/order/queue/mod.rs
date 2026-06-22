@@ -34,7 +34,7 @@ impl<K, V> OrderQueue<K, V> {
         Self { levels }
     }
 
-    pub fn levels(&self) -> btree_map::Iter<'_, K, VecDeque<V>> {
+    pub fn levels(&self) -> impl Iterator<Item = (&K, &VecDeque<V>)> + '_ {
         self.levels.iter()
     }
 
