@@ -935,6 +935,11 @@ pub struct RestingOrder {
     id: OrderSeq,
     #[n(1)]
     remaining_quantity: Quantity,
+    /// Append-only trailing field. Resting orders encoded before it existed
+    /// decode as `None`, which [`RestingOrder::time_in_force`] resolves to
+    /// [`TimeInForce::GoodTilCanceled`].
+    #[n(2)]
+    time_in_force: Option<TimeInForce>,
 }
 
 impl From<Order> for RestingOrder {
@@ -942,6 +947,7 @@ impl From<Order> for RestingOrder {
         Self {
             id: order.id,
             remaining_quantity: order.remaining_quantity,
+            time_in_force: Some(order.time_in_force()),
         }
     }
 }
@@ -955,12 +961,16 @@ impl RestingOrder {
             side,
             price,
             remaining_quantity: self.remaining_quantity,
-            time_in_force: Some(TimeInForce::GoodTilCanceled),
+            time_in_force: Some(self.time_in_force()),
         }
     }
 
     pub fn id(&self) -> OrderSeq {
         self.id
+    }
+
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.time_in_force.unwrap_or_default()
     }
 
     pub fn remaining_quantity(&self) -> &Quantity {

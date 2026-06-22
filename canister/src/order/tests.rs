@@ -58,7 +58,9 @@ mod order_id {
 }
 
 mod time_in_force {
-    use crate::order::{Order, OrderSeq, PendingOrder, Price, Quantity, Side, TimeInForce};
+    use crate::order::{
+        Order, OrderSeq, PendingOrder, Price, Quantity, RestingOrder, Side, TimeInForce,
+    };
     use crate::test_fixtures::arbitrary::arb_order;
     use proptest::prelude::*;
 
@@ -128,6 +130,57 @@ mod time_in_force {
         let decoded: Order = minicbor::decode(&bytes).unwrap();
 
         assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
+    }
+
+    proptest! {
+        #[test]
+        fn resting_order_preserves_time_in_force_through_to_order(order in arb_order()) {
+            let side = order.side();
+            let price = order.price();
+            let resting = RestingOrder::from(order.clone());
+            prop_assert_eq!(resting.time_in_force(), order.time_in_force());
+            let rebuilt = resting.to_order(side, price);
+            prop_assert_eq!(rebuilt.time_in_force(), order.time_in_force());
+        }
+
+        #[test]
+        fn resting_order_roundtrips_through_minicbor(order in arb_order()) {
+            let resting = RestingOrder::from(order);
+            let mut bytes = vec![];
+            minicbor::encode(&resting, &mut bytes).unwrap();
+            let decoded: RestingOrder = minicbor::decode(&bytes).unwrap();
+            prop_assert_eq!(decoded, resting);
+        }
+    }
+
+    /// Mirrors the `RestingOrder` field layout *before* `time_in_force` was
+    /// appended, keeping the same field indices. Encoding an instance and
+    /// decoding it as the current `RestingOrder` proves legacy data (no
+    /// `time_in_force`) resolves to `GoodTilCanceled`.
+    #[derive(minicbor::Encode)]
+    struct LegacyRestingOrder {
+        #[n(0)]
+        id: OrderSeq,
+        #[n(1)]
+        remaining_quantity: Quantity,
+    }
+
+    #[test]
+    fn legacy_resting_order_without_field_decodes_as_good_til_canceled() {
+        let legacy = LegacyRestingOrder {
+            id: OrderSeq::new(7),
+            remaining_quantity: Quantity::from(11u64),
+        };
+
+        let mut bytes = vec![];
+        minicbor::encode(&legacy, &mut bytes).unwrap();
+        let decoded: RestingOrder = minicbor::decode(&bytes).unwrap();
+
+        assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
+        assert_eq!(
+            decoded.to_order(Side::Buy, Price::new(1)).time_in_force(),
+            TimeInForce::GoodTilCanceled
+        );
     }
 }
 
@@ -853,6 +906,25 @@ mod order_book {
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(110 * PRICE_SCALE));
+        }
+
+        #[test]
+        fn should_preserve_time_in_force_of_resting_order() {
+            use crate::order::{PendingOrder, Side, TimeInForce};
+
+            for time_in_force in [TimeInForce::GoodTilCanceled, TimeInForce::FillOrKill] {
+                let mut book = order_book();
+                let pending = PendingOrder {
+                    side: Side::Buy,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(u64::from(LOT_SIZE)),
+                    time_in_force,
+                };
+                book.match_order(pending.into_order(OrderSeq::ONE)).unwrap();
+
+                let resting = book.best_bid().expect("should have a resting bid");
+                assert_eq!(resting.time_in_force(), time_in_force);
+            }
         }
     }
 
