@@ -332,7 +332,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
             OrderStatus::Filled | OrderStatus::Canceled | OrderStatus::Expired => {
-                Err(CancelLimitOrderError::OrderNotCancelable)
+                Err(CancelLimitOrderError::OrderAlreadyTerminal)
             }
         }
     }
@@ -1100,7 +1100,7 @@ pub enum AddLimitOrderError {
 pub enum CancelLimitOrderError {
     OrderNotFound,
     NotOrderOwner,
-    OrderNotCancelable,
+    OrderAlreadyTerminal,
 }
 
 impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
@@ -1112,8 +1112,8 @@ impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
             CancelLimitOrderError::NotOrderOwner => {
                 oisy_trade_types::CancelLimitOrderError::NotOrderOwner
             }
-            CancelLimitOrderError::OrderNotCancelable => {
-                oisy_trade_types::CancelLimitOrderError::OrderNotCancelable
+            CancelLimitOrderError::OrderAlreadyTerminal => {
+                oisy_trade_types::CancelLimitOrderError::OrderAlreadyTerminal
             }
         }
     }
