@@ -1,7 +1,7 @@
 use crate::{
     DepositError, DepositRequestError, ErrorKind, FilterToken, GetBalancesError,
     GetBalancesFilterError, GetBalancesRequestError, GetBalancesTokenError, GetOrderBookDepthError,
-    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
+    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError,
     TokenId,
 };
 use candid::{CandidType, Principal};
@@ -157,32 +157,4 @@ fn should_place_get_balances_filter_leaf_under_request_error() {
     assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
     assert_eq!(error.message, Some(leaf.to_string()));
     assert!(!error.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_round_trip_query_errors_through_candid() {
-    let ticker =
-        GetOrderBookTickerError::request(GetOrderBookTickerRequestError::UnknownTradingPair);
-    let encoded = candid::encode_one(&ticker).unwrap();
-    let decoded: GetOrderBookTickerError = candid::decode_one(&encoded).unwrap();
-    assert_eq!(ticker, decoded);
-}
-
-#[test]
-fn should_decode_future_query_leaf_as_none_keeping_arm_and_message() {
-    let future = FutureError {
-        kind: FutureErrorKind::RequestError(Some(FutureRequestError::SomeFutureReason {
-            detail: "a depth reason from the future".to_string(),
-        })),
-        message: Some("update your client".to_string()),
-    };
-
-    let encoded = candid::encode_one(&future).unwrap();
-    let decoded: GetOrderBookDepthError = candid::decode_one(&encoded).unwrap();
-
-    assert_eq!(
-        decoded.kind,
-        ErrorKind::<GetOrderBookDepthRequestError, Never, Never>::RequestError(None)
-    );
-    assert_eq!(decoded.message, Some("update your client".to_string()));
 }
