@@ -350,7 +350,7 @@ pub enum WithdrawInternalError {
 pub type GetOrderBookTickerError = Error<GetOrderBookTickerRequestError, Never, Never>;
 
 /// Caller-side reasons `get_order_book_ticker` can fail.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum GetOrderBookTickerRequestError {
     /// The requested trading pair is not registered on the OISY TRADE.
     #[error("the requested trading pair is not registered")]
@@ -361,7 +361,7 @@ pub enum GetOrderBookTickerRequestError {
 pub type GetOrderBookDepthError = Error<GetOrderBookDepthRequestError, Never, Never>;
 
 /// Caller-side reasons `get_order_book_depth` can fail.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum GetOrderBookDepthRequestError {
     /// The requested trading pair is not registered on the OISY TRADE.
     #[error("the requested trading pair is not registered")]
@@ -380,7 +380,7 @@ pub enum GetOrderBookDepthRequestError {
 pub type GetBalancesError = Error<GetBalancesTokenError, Never, Never>;
 
 /// Caller-side reasons a single `get_balances` entry can fail.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum GetBalancesTokenError {
     /// The filter referenced a token that the OISY TRADE does not support.
     #[error("the filter referenced an unsupported token")]
@@ -393,7 +393,7 @@ pub type GetBalancesRequestError = Error<GetBalancesFilterError, Never, Never>;
 
 /// Caller-side reasons a `get_balances` request is rejected before per-entry
 /// lookup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum GetBalancesFilterError {
     /// The filter exceeded the maximum number of entries.
     #[error("the filter has {len} entries, exceeding the maximum {max}")]
