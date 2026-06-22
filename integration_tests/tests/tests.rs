@@ -6,8 +6,9 @@ use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LED
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    LedgerTransferFromError, LimitOrderRequest, OrderStatus, Side, Token, TokenId, TokenMetadata,
-    TradingPairInfo, TradingStatus, WithdrawError, WithdrawRequest,
+    DepositRequestError, DepositTemporaryError, ErrorKind, LimitOrderRequest, OrderStatus, Side,
+    Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus, WithdrawRequest,
+    WithdrawRequestError, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -57,8 +58,8 @@ mod add_limit_order {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        AddLimitOrderError, AddTradingPairRequest, Balance, GetMyOrdersArgs, LimitOrderRequest,
-        OrderId, OrderStatus, Side,
+        AddLimitOrderRequestError, AddTradingPairRequest, Balance, ErrorKind, GetMyOrdersArgs,
+        LimitOrderRequest, OrderId, OrderStatus, Side,
     };
     use pocket_ic::{RejectCode, RejectResponse};
 
@@ -84,12 +85,16 @@ mod add_limit_order {
 
         let required = 1_000_000_000u64;
         assert_eq!(
-            client.add_limit_order(order.clone()).await,
-            Err(AddLimitOrderError::InsufficientBalance {
+            client
+                .add_limit_order(order.clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(AddLimitOrderRequestError::InsufficientBalance {
                 token: token_id.clone(),
                 available: 0u64.into(),
                 required: required.into(),
-            })
+            }))
         );
 
         setup
@@ -233,12 +238,16 @@ mod add_limit_order {
 
         let required = 1_000_000u64;
         assert_eq!(
-            client.add_limit_order(order.clone()).await,
-            Err(AddLimitOrderError::InsufficientBalance {
+            client
+                .add_limit_order(order.clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(AddLimitOrderRequestError::InsufficientBalance {
                 token: token_id.clone(),
                 available: 0u64.into(),
                 required: required.into(),
-            })
+            }))
         );
 
         setup
@@ -442,22 +451,22 @@ mod add_limit_order {
 
         // 1 lot -> notional 1_000_000_000 < min: rejected.
         assert_eq!(
-            client.add_limit_order(order(1)).await,
-            Err(AddLimitOrderError::InvalidNotional {
+            client.add_limit_order(order(1)).await.unwrap_err().kind,
+            ErrorKind::RequestError(Some(AddLimitOrderRequestError::InvalidNotional {
                 notional: Nat::from(1_000_000_000u64),
                 min: Nat::from(min_notional),
                 max: Some(Nat::from(max_notional)),
-            })
+            }))
         );
 
         // 6 lots -> notional 6_000_000_000 > max: rejected.
         assert_eq!(
-            client.add_limit_order(order(6)).await,
-            Err(AddLimitOrderError::InvalidNotional {
+            client.add_limit_order(order(6)).await.unwrap_err().kind,
+            ErrorKind::RequestError(Some(AddLimitOrderRequestError::InvalidNotional {
                 notional: Nat::from(6_000_000_000u64),
                 min: Nat::from(min_notional),
                 max: Some(Nat::from(max_notional)),
-            })
+            }))
         );
 
         // 3 lots -> notional 3_000_000_000 within [min, max]: accepted once funded.
@@ -481,7 +490,8 @@ mod cancel_limit_order {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        Balance, CancelLimitOrderError, LimitOrderRequest, OrderRecord, OrderStatus, Side,
+        Balance, CancelLimitOrderRequestError, ErrorKind, LimitOrderRequest, OrderRecord,
+        OrderStatus, Side,
     };
 
     #[tokio::test]
@@ -553,8 +563,12 @@ mod cancel_limit_order {
         );
 
         assert_eq!(
-            seller_client.cancel_limit_order(buy_id.clone()).await,
-            Err(CancelLimitOrderError::NotOrderOwner),
+            seller_client
+                .cancel_limit_order(buy_id.clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
             "only buyer can cancel buy order"
         );
 
@@ -635,15 +649,20 @@ mod cancel_limit_order {
         assert_eq!(
             client
                 .cancel_limit_order("ffffffffffffffffffffffffffffffff".to_string())
-                .await,
-            Err(CancelLimitOrderError::OrderNotFound)
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
         );
-        // Malformed id is also rejected cleanly.
+        // Malformed id is also rejected cleanly; it is currently mapped to
+        // OrderNotFound (a distinct InvalidOrderId leaf may be introduced later).
         assert_eq!(
             client
                 .cancel_limit_order("not-a-valid-id".to_string())
-                .await,
-            Err(CancelLimitOrderError::OrderNotFound)
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
         );
 
         setup.drop().await;
@@ -859,7 +878,7 @@ async fn should_fail_deposit_with_insufficient_funds() {
         approve_amount: 5_000_000,
         deposit_amount: 2_000_000,
         expected_error: |fee| {
-            DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds {
+            DepositError::request(DepositRequestError::InsufficientFunds {
                 // The user's balance is the minted amount minus the fee charged for icrc2_approve
                 balance: Nat::from(1_000_000u64) - fee,
             })
@@ -875,7 +894,7 @@ async fn should_fail_deposit_with_insufficient_allowance() {
         approve_amount: 500_000,
         deposit_amount: 1_000_000,
         expected_error: |_fee| {
-            DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
+            DepositError::request(DepositRequestError::InsufficientAllowance {
                 allowance: Nat::from(500_000u64),
             })
         },
@@ -901,10 +920,10 @@ async fn should_fail_deposit_with_unsupported_token() {
         .await;
 
     assert_eq!(
-        result,
-        Err(DepositError::UnsupportedToken {
+        result.unwrap_err().kind,
+        ErrorKind::RequestError(Some(DepositRequestError::UnsupportedToken {
             token_id: fake_token,
-        })
+        }))
     );
 
     setup.drop().await;
@@ -934,8 +953,9 @@ async fn should_fail_deposit_when_ledger_is_stopped() {
         .await;
 
     assert_matches!(
-        result,
-        Err(DepositError::CallFailed { reason, .. }) if reason.contains("is stopped")
+        result.unwrap_err().kind,
+        ErrorKind::TemporaryError(Some(DepositTemporaryError::CallFailed { reason, .. }))
+            if reason.contains("is stopped")
     );
 
     setup.drop().await;
@@ -1515,10 +1535,10 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::UnsupportedToken {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::UnsupportedToken {
                 token_id: unknown_token,
-            })
+            }))
         );
     }
 
@@ -1537,10 +1557,10 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::InsufficientBalance {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::InsufficientBalance {
                 available: Nat::from(0u64),
-            })
+            }))
         );
     }
 
@@ -1566,10 +1586,10 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::InsufficientBalance {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::InsufficientBalance {
                 available: Nat::from(deposit_amount),
-            })
+            }))
         );
 
         assert_eq!(
@@ -1600,10 +1620,10 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::AmountTooSmall {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountTooSmall {
                 min_amount: fee.clone() + 1u64,
-            })
+            }))
         );
     }
 
@@ -1647,10 +1667,10 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::InsufficientBalance {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::InsufficientBalance {
                 available: Nat::from(0u64),
-            })
+            }))
         );
 
         assert_eq!(
@@ -1690,8 +1710,9 @@ async fn should_fail_withdraw_on_negative_cases() {
             .await;
 
         assert_matches!(
-            result,
-            Err(WithdrawError::CallFailed { reason, .. }) if reason.contains("is stopped")
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::CallFailed { reason, .. }))
+                if reason.contains("is stopped")
         );
 
         assert_eq!(
@@ -2349,8 +2370,8 @@ mod halt {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        AddLimitOrderError, Balance, LimitOrderRequest, OrderStatus, Side, TradingPair,
-        TradingStatus, UnauthorizedError, WithdrawRequest,
+        AddLimitOrderTemporaryError, Balance, ErrorKind, LimitOrderRequest, OrderStatus, Side,
+        TradingPair, TradingStatus, UnauthorizedError, WithdrawRequest,
     };
     use pocket_ic::{RejectCode, RejectResponse};
 
@@ -2646,8 +2667,12 @@ mod halt {
 
             // New orders are rejected.
             assert_eq!(
-                client.add_limit_order(order.clone()).await,
-                Err(AddLimitOrderError::TradingHalted),
+                client
+                    .add_limit_order(order.clone())
+                    .await
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::TemporaryError(Some(AddLimitOrderTemporaryError::TradingHalted)),
                 "{mode:?}: new orders must be rejected while halted"
             );
 
@@ -2726,8 +2751,12 @@ mod halt {
                 quantity: Nat::from(quantity),
             };
             assert_eq!(
-                client.add_limit_order(order.clone()).await,
-                Err(AddLimitOrderError::TradingHalted),
+                client
+                    .add_limit_order(order.clone())
+                    .await
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::TemporaryError(Some(AddLimitOrderTemporaryError::TradingHalted)),
                 "{mode:?}: halt must survive the upgrade"
             );
 
@@ -2809,8 +2838,10 @@ mod halt {
                     price: Nat::from(price),
                     quantity: Nat::from(quantity),
                 })
-                .await,
-            Err(AddLimitOrderError::TradingHalted)
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::TemporaryError(Some(AddLimitOrderTemporaryError::TradingHalted))
         );
 
         // Orders on pair B still succeed.

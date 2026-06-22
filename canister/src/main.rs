@@ -1,12 +1,12 @@
 use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LedgerTransferError, LedgerTransferFromError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError,
+    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -73,26 +73,15 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             "[deposit]: successful deposit for request {deposit_dbg}, block_index={}",
             response.block_index
         ),
-        Err(err) => match err {
-            DepositError::CallFailed { .. }
-            | DepositError::LedgerError(LedgerTransferFromError::TemporarilyUnavailable)
-            | DepositError::LedgerError(LedgerTransferFromError::InternalError(_)) => {
+        Err(err) => {
+            if should_log_deposit_error(err) {
                 canlog::log!(
                     Priority::Debug,
                     "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
                     err
                 )
             }
-            DepositError::AmountExceedsMaximum
-            | DepositError::UnsupportedToken { .. }
-            | DepositError::OperationInProgress
-            | DepositError::LedgerError(LedgerTransferFromError::InsufficientFunds { .. })
-            | DepositError::LedgerError(LedgerTransferFromError::InsufficientAllowance {
-                ..
-            }) => {
-                // do not log errors due to user actions
-            }
-        },
+        }
     }
     result
 }
@@ -107,27 +96,46 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             "[withdraw]: successful withdrawal for request {withdraw_dbg}, block_index={}",
             response.block_index
         ),
-        Err(err) => match err {
-            WithdrawError::CallFailed { .. }
-            | WithdrawError::LedgerError(LedgerTransferError::TemporarilyUnavailable)
-            | WithdrawError::LedgerError(LedgerTransferError::InternalError(_))
-            | WithdrawError::LedgerError(LedgerTransferError::InsufficientFunds { .. }) => {
+        Err(err) => {
+            if should_log_withdraw_error(err) {
                 canlog::log!(
                     Priority::Debug,
                     "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
                     err
                 )
             }
-            WithdrawError::AmountExceedsMaximum
-            | WithdrawError::UnsupportedToken { .. }
-            | WithdrawError::InsufficientBalance { .. }
-            | WithdrawError::AmountTooSmall { .. }
-            | WithdrawError::OperationInProgress => {
-                // do not log errors due to user actions
-            }
-        },
+        }
     }
     result
+}
+
+fn should_log_deposit_error(err: &DepositError) -> bool {
+    match &err.kind {
+        ErrorKind::InternalError(_) => true,
+        ErrorKind::TemporaryError(Some(leaf)) => match leaf {
+            DepositTemporaryError::LedgerTemporarilyUnavailable
+            | DepositTemporaryError::CallFailed { .. } => true,
+            // Do not log errors due to user actions.
+            DepositTemporaryError::OperationInProgress => false,
+        },
+        // Do not log errors due to user actions.
+        ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
+    }
+}
+
+fn should_log_withdraw_error(err: &WithdrawError) -> bool {
+    match &err.kind {
+        ErrorKind::InternalError(_) => true,
+        ErrorKind::TemporaryError(Some(leaf)) => match leaf {
+            WithdrawTemporaryError::LedgerTemporarilyUnavailable
+            | WithdrawTemporaryError::CallFailed { .. }
+            | WithdrawTemporaryError::LedgerFeeChanged => true,
+            // Do not log errors due to user actions.
+            WithdrawTemporaryError::OperationInProgress => false,
+        },
+        // Do not log errors due to user actions.
+        ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
+    }
 }
 
 #[ic_cdk::query]
