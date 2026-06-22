@@ -941,6 +941,52 @@ mod order_book {
             assert_eq!(quantity, Quantity::MAX);
         }
     }
+
+    mod pop_front {
+        use super::*;
+        use crate::order::{OrderBook, Price, RestingOrder, Side};
+
+        fn pop_best(book: &mut OrderBook, side: Side) -> Option<(Price, RestingOrder)> {
+            match side {
+                Side::Buy => book.bids_pop_front(),
+                Side::Sell => book.asks_pop_front(),
+            }
+        }
+
+        fn rest(book: &mut OrderBook, side: Side, seq: u64, price: u128, quantity: u64) {
+            match side {
+                Side::Buy => book.match_order(buy(seq, price, quantity)).unwrap(),
+                Side::Sell => book.match_order(sell(seq, price, quantity)).unwrap(),
+            };
+        }
+
+        fn levels_len(book: &OrderBook, side: Side) -> usize {
+            match side {
+                Side::Buy => book.bids_len(),
+                Side::Sell => book.asks_len(),
+            }
+        }
+
+        #[test]
+        fn should_pop_front_of_best_level_and_remove_it_from_the_book() {
+            for side in [Side::Buy, Side::Sell] {
+                let mut book = order_book();
+                let lot = u64::from(LOT_SIZE);
+                rest(&mut book, side, 0, 100 * PRICE_SCALE, lot);
+
+                let (price, popped) = pop_best(&mut book, side).expect("a resting order");
+                assert_eq!(price, Price::new(100 * PRICE_SCALE));
+                assert_eq!(popped.id(), OrderSeq::ZERO);
+
+                // The popped order is no longer resting: gone from the index and
+                // from its price level (which is removed once empty).
+                assert_eq!(book.remove_order(OrderSeq::ZERO), None);
+                assert_eq!(book.resting_orders_len(), 0);
+                assert_eq!(levels_len(&book, side), 0);
+                assert!(book.is_empty());
+            }
+        }
+    }
 }
 
 mod process_pending_orders {
