@@ -951,6 +951,23 @@ mod deposit {
         assert_in_flight_empty();
     }
 
+    #[tokio::test]
+    async fn should_reject_unsupported_token() {
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let unsupported = TokenId::new(Principal::from_slice(&[0xAB]));
+        let result = deposit(deposit_request(unsupported), &runtime).await;
+
+        assert_eq!(
+            result,
+            Err(DepositError::UnsupportedToken {
+                token_id: unsupported.into(),
+            })
+        );
+        assert!(runtime.captured_calls().is_empty());
+    }
+
     fn deposit_request(token: TokenId) -> DepositRequest {
         DepositRequest {
             token_id: token.into(),
