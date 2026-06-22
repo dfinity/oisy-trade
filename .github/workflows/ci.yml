@@ -219,7 +219,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag=$(gh release list --limit 100 --json tagName \
-            --jq '[.[] | select(.tagName | startswith("oisy_trade_canister-v"))] | first | .tagName')
+            --jq '[.[] | select(.tagName | startswith("oisy_trade_canister-v"))] | first | .tagName // empty')
           if [ -z "$tag" ]; then
             echo "::warning::No oisy_trade_canister-v* release found; backward-compat check skipped."
           else
