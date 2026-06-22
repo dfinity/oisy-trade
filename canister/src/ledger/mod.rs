@@ -208,7 +208,7 @@ async fn icrc1_transfer(
 fn to_ledger_transfer_error(e: icrc_ledger_types::icrc1::transfer::TransferError) -> WithdrawError {
     use icrc_ledger_types::icrc1::transfer::TransferError;
     match e {
-        // The OISY TRADE's own accounting credited the balance, so the ledger
+        // The canister's own accounting credited the balance, so the ledger
         // disagreeing is a genuine invariant violation.
         TransferError::InsufficientFunds { balance } => {
             WithdrawError::internal(WithdrawInternalError::LedgerInsufficientFunds { balance })

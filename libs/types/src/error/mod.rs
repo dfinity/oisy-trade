@@ -199,7 +199,7 @@ pub enum DepositRequestError {
     /// The amount exceeds the maximum supported value.
     #[error("the amount exceeds the maximum supported value")]
     AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the OISY TRADE.
+    /// The token is not part of any trading pair on this canister.
     #[error("token {} is not supported", token_id.ledger_id)]
     UnsupportedToken {
         /// The unsupported token.
@@ -211,7 +211,7 @@ pub enum DepositRequestError {
         /// The current balance of the source account.
         balance: Nat,
     },
-    /// The caller's ICRC-2 allowance to the OISY TRADE is not large enough.
+    /// The caller's ICRC-2 allowance to this canister is not large enough.
     #[error("insufficient allowance: {allowance}")]
     InsufficientAllowance {
         /// The current allowance.
@@ -241,7 +241,7 @@ pub enum DepositTemporaryError {
     },
 }
 
-/// DEX-side reasons a deposit can fail.
+/// Canister-side reasons a deposit can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum DepositInternalError {
     /// The `icrc2_transfer_from` call returned an unexpected ledger error.
@@ -277,7 +277,7 @@ pub enum WithdrawRequestError {
         /// The minimum withdrawal amount (ledger fee + 1).
         min_amount: Nat,
     },
-    /// The token is not part of any trading pair on the OISY TRADE.
+    /// The token is not part of any trading pair on this canister.
     #[error("token {} is not supported", token_id.ledger_id)]
     UnsupportedToken {
         /// The unsupported token.
@@ -317,7 +317,7 @@ pub enum WithdrawTemporaryError {
     LedgerFeeChanged,
 }
 
-/// DEX-side reasons a withdrawal can fail.
+/// Canister-side reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum WithdrawInternalError {
     /// The `icrc1_transfer` call returned an unexpected ledger error.
@@ -326,13 +326,13 @@ pub enum WithdrawInternalError {
         /// A human-readable description of the ledger error.
         reason: String,
     },
-    /// The ledger reported insufficient funds even though the OISY TRADE's
+    /// The ledger reported insufficient funds even though this canister's
     /// accounting credited the balance — a genuine invariant violation.
     #[error(
-        "ledger reported insufficient funds (balance {balance}) against the OISY TRADE's own accounting"
+        "ledger reported insufficient funds (balance {balance}) against OISY TRADE's own accounting"
     )]
     LedgerInsufficientFunds {
-        /// The balance the ledger reported for the OISY TRADE.
+        /// The balance the ledger reported for this canister.
         balance: Nat,
     },
     /// The ledger's response could not be Candid-decoded.
