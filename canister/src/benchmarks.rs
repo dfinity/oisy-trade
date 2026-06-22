@@ -60,6 +60,59 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
     res
 }
 
+/// Benchmark a worst-case fill-or-kill order that sweeps the entire ask side
+/// (5000 fragmented levels from the Binance depth snapshot) in a single
+/// message. The FOK is priced at the worst ask and sized to the total ask
+/// depth, so it fully fills — exercising the plan pass plus an `apply_plan`
+/// replay and one settlement step per level, all atomically. Asserts the FOK
+/// reaches a terminal state and the ask side is emptied (R10).
+#[bench(raw)]
+fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let mut state = new_state();
+
+    populate_state(&mut state, &depth);
+
+    let pair = trading_pair();
+    let (worst_ask_price, total_ask_qty) = depth.asks.iter().fold(
+        (0u128, 0u128),
+        |(max_price, total_qty), (price_str, qty_str)| {
+            (
+                max_price.max(parse_decimal_8(price_str)),
+                total_qty + parse_decimal_8(qty_str),
+            )
+        },
+    );
+
+    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, taker);
+    place_order(
+        &mut state,
+        taker,
+        PendingOrder {
+            side: Side::Buy,
+            price: Price::new(worst_ask_price),
+            quantity: Quantity::from_u128(total_ask_qty),
+            time_in_force: TimeInForce::FillOrKill,
+        },
+    );
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 1);
+    assert_eq!(book.asks_len(), depth.asks.len());
+
+    state.set_execution_policy(ExecutionPolicy::MAX);
+    let res = canbench_rs::bench_fn(|| {
+        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
+    });
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+    assert_eq!(book.asks_len(), 0);
+
+    res
+}
+
 /// Benchmark processing 1000 incoming orders against a fully populated order book
 /// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
 /// Each order is placed by a different user (worst case for balance lookups).
