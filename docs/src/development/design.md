@@ -129,18 +129,20 @@ Since deposits are a separate step, the user's balance is already available when
                matching engine
                processes queue
                       |
-            FOK can't fully fill
-                      |----------------------+
-                      v                       v
-               +------------+           +------------+
-               |    Open     |          |  Expired   |
-               +--+----------+          +------------+
-               ^       |      \
-               |     filled   cancel_limit_order
-          partial      |          |
-          fill         v          v
-               |     +-----------+  +------------+
-               +--+->|  Filled   |  | Canceled   |
+        +-------------+--------------------+
+        |             |                    |
+   fully fills   rests / partial    FOK can't fully fill
+        |             |                    |
+        |             v                    v
+        |      +------------+        +------------+
+        |      |    Open     |       |  Expired   |
+        |      +--+----------+       +------------+
+        |      ^       |      \
+        |      |     filled   cancel_limit_order
+        |  partial      |          |
+        |  fill         v          v
+        |      |     +-----------+  +------------+
+        +------+--+->|  Filled   |  | Canceled   |
                      +-----------+  +------------+
 ```
 
