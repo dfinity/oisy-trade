@@ -437,7 +437,7 @@ mod cancel_limit_order {
 
         let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
 
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderNotCancelable));
     }
 
     /// Cancels `order_id` owned by `user` and asserts that exactly

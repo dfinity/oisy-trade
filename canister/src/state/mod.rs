@@ -331,9 +331,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
-            OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled | OrderStatus::Expired => {
-                Err(CancelLimitOrderError::OrderAlreadyCanceled)
+            OrderStatus::Filled | OrderStatus::Canceled | OrderStatus::Expired => {
+                Err(CancelLimitOrderError::OrderNotCancelable)
             }
         }
     }
@@ -1101,8 +1100,7 @@ pub enum AddLimitOrderError {
 pub enum CancelLimitOrderError {
     OrderNotFound,
     NotOrderOwner,
-    OrderAlreadyFilled,
-    OrderAlreadyCanceled,
+    OrderNotCancelable,
 }
 
 impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
@@ -1114,11 +1112,8 @@ impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
             CancelLimitOrderError::NotOrderOwner => {
                 oisy_trade_types::CancelLimitOrderError::NotOrderOwner
             }
-            CancelLimitOrderError::OrderAlreadyFilled => {
-                oisy_trade_types::CancelLimitOrderError::OrderAlreadyFilled
-            }
-            CancelLimitOrderError::OrderAlreadyCanceled => {
-                oisy_trade_types::CancelLimitOrderError::OrderAlreadyCanceled
+            CancelLimitOrderError::OrderNotCancelable => {
+                oisy_trade_types::CancelLimitOrderError::OrderNotCancelable
             }
         }
     }

@@ -108,10 +108,9 @@ pub enum CancelLimitOrderError {
     OrderNotFound,
     /// The caller does not own the order.
     NotOrderOwner,
-    /// The order has already been fully filled and cannot be canceled.
-    OrderAlreadyFilled,
-    /// The order has already been canceled.
-    OrderAlreadyCanceled,
+    /// The order is in a terminal state (filled, canceled, or expired) and is
+    /// no longer cancelable.
+    OrderNotCancelable,
 }
 
 /// Error returned by controller-gated endpoints when the caller is not

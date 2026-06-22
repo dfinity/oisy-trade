@@ -735,7 +735,7 @@ mod cancel_limit_order {
 
         let result = cancel_limit_order(order_id, &mock_runtime_at(owner, Timestamp::new(333)));
 
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyCanceled));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderNotCancelable));
     }
 
     #[test]
@@ -753,7 +753,7 @@ mod cancel_limit_order {
         crate::process_pending_orders(&mock_runtime_for(buyer));
 
         let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderNotCancelable));
     }
 
     #[test]
