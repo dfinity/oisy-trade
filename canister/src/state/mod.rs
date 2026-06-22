@@ -356,15 +356,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         } = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let (refund_token, refund_amount) = match side {
-            Side::Buy => (
-                PairToken::Quote,
-                price
-                    .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
-                    .expect("BUG: price * remaining overflow — validated at placement"),
-            ),
-            Side::Sell => (PairToken::Base, remaining_quantity),
-        };
+        let (refund_token, refund_amount) = refund_for(side, price, remaining_quantity, base_scale);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
@@ -437,16 +429,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
         let mut balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
         for (seq, killed) in &output.expired_orders {
-            let (refund_token, refund_amount) = match killed.side {
-                Side::Buy => (
-                    PairToken::Quote,
-                    killed
-                        .price
-                        .checked_mul_quantity_scaled(&killed.remaining_quantity, base_scale)
-                        .expect("BUG: price * quantity overflow — validated at placement"),
-                ),
-                Side::Sell => (PairToken::Base, killed.remaining_quantity),
-            };
+            let (refund_token, refund_amount) = refund_for(
+                killed.side,
+                killed.price,
+                killed.remaining_quantity,
+                base_scale,
+            );
             balance_operations.push(event::BalanceOperation::Unreserve {
                 order: *seq,
                 token: refund_token,
@@ -984,6 +972,23 @@ fn compute_balance_operations(
         });
     }
     ops
+}
+
+fn refund_for(
+    side: Side,
+    price: order::Price,
+    remaining_quantity: Quantity,
+    base_scale: NonZeroU64,
+) -> (PairToken, Quantity) {
+    match side {
+        Side::Buy => (
+            PairToken::Quote,
+            price
+                .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
+                .expect("BUG: price * remaining overflow — validated at placement"),
+        ),
+        Side::Sell => (PairToken::Base, remaining_quantity),
+    }
 }
 
 /// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for
