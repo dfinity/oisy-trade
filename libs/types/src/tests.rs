@@ -1,8 +1,8 @@
 use crate::{
-    AddLimitOrderError, Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage,
-    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, TimeInForce, Token, TokenId,
-    TokenMetadata, TradingPair, TradingPairInfo, TradingStatus,
+    Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderStatus, PriceLevel, Side, TimeInForce, Token, TokenId, TokenMetadata,
+    TradingPair, TradingPairInfo, TradingStatus,
 };
 use candid::{Nat, Principal};
 
@@ -250,24 +250,5 @@ fn should_serialize_get_my_orders_args() {
         let encoded = candid::encode_one(&args).unwrap();
         let decoded: GetMyOrdersArgs = candid::decode_one(&encoded).unwrap();
         assert_eq!(args, decoded);
-    }
-}
-
-#[test]
-fn should_serialize_add_limit_order_error() {
-    for error in [
-        AddLimitOrderError::UnknownTradingPair,
-        AddLimitOrderError::InvalidPrice {
-            price: Nat::from(7u64),
-            tick_size: Nat::from(10u64),
-        },
-        AddLimitOrderError::InvalidQuantity {
-            quantity: Nat::from(500_000u64),
-            lot_size: Nat::from(1_000_000u64),
-        },
-    ] {
-        let encoded = candid::encode_one(&error).unwrap();
-        let decoded: AddLimitOrderError = candid::decode_one(&encoded).unwrap();
-        assert_eq!(error, decoded);
     }
 }

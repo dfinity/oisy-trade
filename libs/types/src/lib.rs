@@ -6,6 +6,15 @@
 #[cfg(test)]
 mod tests;
 
+mod error;
+
+pub use error::{
+    AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
+    CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
+    DepositRequestError, DepositTemporaryError, Error, ErrorKind, Never, WithdrawError,
+    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+};
+
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
 
@@ -55,62 +64,6 @@ pub struct LimitOrderRequest {
     /// Time-in-force policy. Absent defaults to
     /// [`TimeInForce::GoodTilCanceled`].
     pub time_in_force: Option<TimeInForce>,
-}
-
-/// Error returned when placing a limit order fails.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum AddLimitOrderError {
-    /// The amount exceeds the maximum supported value.
-    AmountExceedsMaximum,
-    /// The requested trading pair is not registered.
-    UnknownTradingPair,
-    /// The price is not a positive multiple of the tick size.
-    InvalidPrice {
-        /// The rejected price.
-        price: Nat,
-        /// The required tick size.
-        tick_size: Nat,
-    },
-    /// The quantity is not a positive multiple of the lot size.
-    InvalidQuantity {
-        /// The rejected quantity.
-        quantity: Nat,
-        /// The required lot size.
-        lot_size: Nat,
-    },
-    /// The user does not have enough balance to place the order.
-    InsufficientBalance {
-        /// The token for which the balance is insufficient.
-        token: TokenId,
-        /// The user's available balance.
-        available: Nat,
-        /// The balance required to place the order.
-        required: Nat,
-    },
-    /// The order's notional (`price × quantity / 10^base_decimals`, in quote
-    /// smallest units) is below `min` or above `max`.
-    InvalidNotional {
-        /// The order's notional in quote token smallest units.
-        notional: Nat,
-        /// The configured minimum notional.
-        min: Nat,
-        /// The configured maximum notional, if any.
-        max: Option<Nat>,
-    },
-    /// Trading is halted (globally or on this pair); no new orders are accepted.
-    TradingHalted,
-}
-
-/// Error returned when canceling a limit order fails.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum CancelLimitOrderError {
-    /// No order with the given ID exists.
-    OrderNotFound,
-    /// The caller does not own the order.
-    NotOrderOwner,
-    /// The order has reached a terminal state (Filled, Canceled, or Expired)
-    /// and can no longer be canceled.
-    OrderAlreadyTerminal,
 }
 
 /// Error returned by controller-gated endpoints when the caller is not
@@ -188,6 +141,7 @@ pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 pub const MAX_DEPTH_LIMIT: u32 = 1_000;
 
 /// Error returned by the `get_order_book_ticker` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookTickerError {
     /// The requested trading pair is not registered on the OISY TRADE.
@@ -208,6 +162,7 @@ pub struct GetOrderBookDepthRequest {
 }
 
 /// Error returned by the `get_order_book_depth` query.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetOrderBookDepthError {
     /// The requested trading pair is not registered on the OISY TRADE.
@@ -383,51 +338,6 @@ pub struct DepositRequest {
     pub amount: Nat,
 }
 
-/// Error returned by the deposit endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum DepositError {
-    /// The amount exceeds the maximum supported value.
-    AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the OISY TRADE.
-    UnsupportedToken {
-        /// The unsupported token.
-        token_id: TokenId,
-    },
-    /// Another deposit or withdrawal is already in flight for this
-    /// `(caller, token)`. Retry once the previous operation completes.
-    OperationInProgress,
-    /// The inter-canister call to the token ledger failed.
-    CallFailed {
-        /// The ledger canister that was called.
-        ledger: Principal,
-        /// The name of the method that was called.
-        method: String,
-        /// The reason the call failed.
-        reason: String,
-    },
-    /// The icrc2_transfer_from call to the token ledger returned an error.
-    LedgerError(LedgerTransferFromError),
-}
-
-/// Errors that can be returned by the ICRC-2 `transfer_from` endpoint on a ledger canister.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum LedgerTransferFromError {
-    /// The source account does not hold enough funds.
-    InsufficientFunds {
-        /// The current balance of the source account.
-        balance: Nat,
-    },
-    /// The caller's allowance is not large enough.
-    InsufficientAllowance {
-        /// The current allowance.
-        allowance: Nat,
-    },
-    /// The ledger is temporarily unavailable.
-    TemporarilyUnavailable,
-    /// Internal error
-    InternalError(String),
-}
-
 /// Response after a successful deposit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct DepositResponse {
@@ -465,6 +375,7 @@ pub struct UserTokenBalance {
 }
 
 /// Per-entry error reported in [`get_balances`] responses.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesError {
     /// The filter referenced a token that the OISY TRADE does not support.
@@ -473,6 +384,7 @@ pub enum GetBalancesError {
 
 /// Whole-request error reported when [`get_balances`] rejects the
 /// request before any per-entry lookup runs.
+// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub enum GetBalancesRequestError {
     /// The filter exceeded [`MAX_FILTER_LEN`] entries.
@@ -522,56 +434,6 @@ pub struct WithdrawRequest {
 pub struct WithdrawResponse {
     /// The block index of the transfer on the token ledger.
     pub block_index: Nat,
-}
-
-/// Error returned by the withdraw endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum WithdrawError {
-    /// The amount exceeds the maximum supported value.
-    AmountExceedsMaximum,
-    /// The token is not part of any trading pair on the OISY TRADE.
-    UnsupportedToken {
-        /// The unsupported token.
-        token_id: TokenId,
-    },
-    /// The caller does not have enough free balance.
-    InsufficientBalance {
-        /// The caller's available free balance.
-        available: Nat,
-    },
-    /// The requested amount is too small to cover the ledger transfer fee.
-    AmountTooSmall {
-        /// The minimum withdrawal amount (ledger fee + 1).
-        min_amount: Nat,
-    },
-    /// Another deposit or withdrawal is already in flight for this
-    /// `(caller, token)`. Retry once the previous operation completes.
-    OperationInProgress,
-    /// The inter-canister call to the token ledger failed.
-    CallFailed {
-        /// The ledger canister that was called.
-        ledger: Principal,
-        /// The name of the method that was called.
-        method: String,
-        /// The reason the call failed.
-        reason: String,
-    },
-    /// The icrc1_transfer call to the token ledger returned an error.
-    LedgerError(LedgerTransferError),
-}
-
-/// Errors that can be returned by the ICRC-1 `transfer` endpoint on a ledger canister.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
-pub enum LedgerTransferError {
-    /// The source account does not hold enough funds.
-    InsufficientFunds {
-        /// The current balance of the source account.
-        balance: Nat,
-    },
-    /// The ledger is temporarily unavailable.
-    TemporarilyUnavailable,
-    /// Internal error.
-    InternalError(String),
 }
 
 /// Error returned by the `add_trading_pair` endpoint.

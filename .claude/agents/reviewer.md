@@ -39,6 +39,19 @@ branches, or PR state beyond posting your review.
     proptest strategies live in `test_fixtures`.
   - Any API change is accompanied by a new or modified integration test.
   - Challenge an integration test if it's already covered by unit tests.
+- Challenge whether a test earns its place BEFORE auditing its internals. Treat as a
+  net liability — and prefer recommending REMOVAL over strengthening — any test that
+  duplicates behaviour already covered by existing tests, reimplements production logic
+  in a parallel "reference" oracle to compare against (a second implementation drifts
+  and carries its own bugs), or asserts a property already guaranteed by construction
+  (e.g. in safe Rust, a method taking `&self` where the receiver has no interior mutability
+  (no `UnsafeCell`, e.g. `Cell`/`RefCell`/`Mutex`/`RwLock`/atomics) cannot mutate the receiver's fields).
+  Do NOT ask to add assertions to a test that should not exist in the first place.
+- Establish coverage by EVIDENCE, not inspection: mutate the relevant production line (never committed — revert it immediately; this is the one
+  allowed deviation from "never modify code", a throwaway experiment) and check which
+  tests fail. If a "missing assertion" you were about to flag is already caught by other
+  tests, the gap is not real, so recommend deleting the redundant test rather than
+  patching it.
 - Assertions must be able to fail on a regression:
   - Tautological assertions — an expected literal pulling a field from the actual
     value (`Foo { ..., bar: actual.bar }`) — are trivially self-equal and make that

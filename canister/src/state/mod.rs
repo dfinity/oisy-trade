@@ -1105,17 +1105,13 @@ pub enum CancelLimitOrderError {
 
 impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
     fn from(err: CancelLimitOrderError) -> Self {
-        match err {
-            CancelLimitOrderError::OrderNotFound => {
-                oisy_trade_types::CancelLimitOrderError::OrderNotFound
-            }
-            CancelLimitOrderError::NotOrderOwner => {
-                oisy_trade_types::CancelLimitOrderError::NotOrderOwner
-            }
-            CancelLimitOrderError::OrderAlreadyTerminal => {
-                oisy_trade_types::CancelLimitOrderError::OrderAlreadyTerminal
-            }
-        }
+        use oisy_trade_types::CancelLimitOrderRequestError as Leaf;
+        let leaf = match err {
+            CancelLimitOrderError::OrderNotFound => Leaf::OrderNotFound,
+            CancelLimitOrderError::NotOrderOwner => Leaf::NotOrderOwner,
+            CancelLimitOrderError::OrderAlreadyTerminal => Leaf::OrderAlreadyTerminal,
+        };
+        oisy_trade_types::CancelLimitOrderError::request(leaf)
     }
 }
 
@@ -1132,45 +1128,47 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
 
 impl From<AddLimitOrderError> for oisy_trade_types::AddLimitOrderError {
     fn from(err: AddLimitOrderError) -> Self {
+        use oisy_trade_types::AddLimitOrderRequestError as Req;
+        use oisy_trade_types::AddLimitOrderTemporaryError as Tmp;
         match err {
             AddLimitOrderError::AmountExceedsMaximum => {
-                oisy_trade_types::AddLimitOrderError::AmountExceedsMaximum
+                oisy_trade_types::AddLimitOrderError::request(Req::AmountExceedsMaximum)
             }
             AddLimitOrderError::UnknownTradingPair => {
-                oisy_trade_types::AddLimitOrderError::UnknownTradingPair
+                oisy_trade_types::AddLimitOrderError::request(Req::UnknownTradingPair)
             }
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidTickSize {
                 price,
                 tick_size,
-            }) => oisy_trade_types::AddLimitOrderError::InvalidPrice {
+            }) => oisy_trade_types::AddLimitOrderError::request(Req::InvalidPrice {
                 price: candid::Nat::from(price),
                 tick_size: candid::Nat::from(tick_size),
-            },
+            }),
             AddLimitOrderError::InvalidOrder(MatchOrderError::InvalidLotSize {
                 quantity,
                 lot_size,
-            }) => oisy_trade_types::AddLimitOrderError::InvalidQuantity {
+            }) => oisy_trade_types::AddLimitOrderError::request(Req::InvalidQuantity {
                 quantity: quantity.into(),
                 lot_size: candid::Nat::from(lot_size),
-            },
+            }),
             AddLimitOrderError::InsufficientBalance {
                 token,
                 available,
                 required,
-            } => oisy_trade_types::AddLimitOrderError::InsufficientBalance {
+            } => oisy_trade_types::AddLimitOrderError::request(Req::InsufficientBalance {
                 token: oisy_trade_types::TokenId::from(token),
                 available: available.into(),
                 required: required.into(),
-            },
+            }),
             AddLimitOrderError::InvalidNotional { notional, min, max } => {
-                oisy_trade_types::AddLimitOrderError::InvalidNotional {
+                oisy_trade_types::AddLimitOrderError::request(Req::InvalidNotional {
                     notional: notional.into(),
                     min: min.into(),
                     max: max.map(Into::into),
-                }
+                })
             }
             AddLimitOrderError::TradingHalted => {
-                oisy_trade_types::AddLimitOrderError::TradingHalted
+                oisy_trade_types::AddLimitOrderError::temporary(Tmp::TradingHalted)
             }
         }
     }

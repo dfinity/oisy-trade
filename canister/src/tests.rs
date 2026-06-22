@@ -482,8 +482,10 @@ mod add_limit_order {
         };
         let result = add_limit_order(request, &runtime);
         assert_eq!(
-            result,
-            Err(oisy_trade_types::AddLimitOrderError::UnknownTradingPair)
+            result.unwrap_err().kind,
+            oisy_trade_types::ErrorKind::RequestError(Some(
+                oisy_trade_types::AddLimitOrderRequestError::UnknownTradingPair
+            ))
         );
     }
 
@@ -498,11 +500,13 @@ mod add_limit_order {
             request.price = candid::Nat::from(price);
             let result = add_limit_order(request, &runtime);
             assert_eq!(
-                result,
-                Err(oisy_trade_types::AddLimitOrderError::InvalidPrice {
-                    price: candid::Nat::from(price),
-                    tick_size: candid::Nat::from(TICK_SIZE.get()),
-                }),
+                result.unwrap_err().kind,
+                oisy_trade_types::ErrorKind::RequestError(Some(
+                    oisy_trade_types::AddLimitOrderRequestError::InvalidPrice {
+                        price: candid::Nat::from(price),
+                        tick_size: candid::Nat::from(TICK_SIZE.get()),
+                    }
+                )),
                 "case: {name}"
             );
         }
@@ -523,11 +527,13 @@ mod add_limit_order {
             request.quantity = candid::Nat::from(quantity);
             let result = add_limit_order(request, &runtime);
             assert_eq!(
-                result,
-                Err(oisy_trade_types::AddLimitOrderError::InvalidQuantity {
-                    quantity: candid::Nat::from(quantity),
-                    lot_size: candid::Nat::from(1_000_000u64),
-                }),
+                result.unwrap_err().kind,
+                oisy_trade_types::ErrorKind::RequestError(Some(
+                    oisy_trade_types::AddLimitOrderRequestError::InvalidQuantity {
+                        quantity: candid::Nat::from(quantity),
+                        lot_size: candid::Nat::from(1_000_000u64),
+                    }
+                )),
                 "case: {name}"
             );
         }
@@ -542,15 +548,17 @@ mod add_limit_order {
         let request = limit_order_request(); // Buy, price=100, quantity=1_000_000
         let result = add_limit_order(request, &runtime);
         assert_eq!(
-            result,
-            Err(oisy_trade_types::AddLimitOrderError::InsufficientBalance {
-                token: oisy_trade_types::TokenId {
-                    ledger_id: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
-                },
-                available: candid::Nat::from(0u64),
-                // price * quantity = 100 * 1_000_000
-                required: candid::Nat::from(100_000_000u64),
-            })
+            result.unwrap_err().kind,
+            oisy_trade_types::ErrorKind::RequestError(Some(
+                oisy_trade_types::AddLimitOrderRequestError::InsufficientBalance {
+                    token: oisy_trade_types::TokenId {
+                        ledger_id: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+                    },
+                    available: candid::Nat::from(0u64),
+                    // price * quantity = 100 * 1_000_000
+                    required: candid::Nat::from(100_000_000u64),
+                }
+            ))
         );
     }
 
@@ -563,14 +571,16 @@ mod add_limit_order {
         request.side = oisy_trade_types::Side::Sell;
         let result = add_limit_order(request, &runtime);
         assert_eq!(
-            result,
-            Err(oisy_trade_types::AddLimitOrderError::InsufficientBalance {
-                token: oisy_trade_types::TokenId {
-                    ledger_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
-                },
-                available: candid::Nat::from(0u64),
-                required: candid::Nat::from(1_000_000u64),
-            })
+            result.unwrap_err().kind,
+            oisy_trade_types::ErrorKind::RequestError(Some(
+                oisy_trade_types::AddLimitOrderRequestError::InsufficientBalance {
+                    token: oisy_trade_types::TokenId {
+                        ledger_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+                    },
+                    available: candid::Nat::from(0u64),
+                    required: candid::Nat::from(1_000_000u64),
+                }
+            ))
         );
     }
 
@@ -663,7 +673,7 @@ mod cancel_limit_order {
     };
     use crate::{add_limit_order, cancel_limit_order};
     use candid::Principal;
-    use oisy_trade_types::CancelLimitOrderError;
+    use oisy_trade_types::{CancelLimitOrderRequestError, ErrorKind};
     use oisy_trade_types_internal::Mode;
 
     #[test]
@@ -686,7 +696,10 @@ mod cancel_limit_order {
 
         for unknown_order_id in [OrderId::ZERO.to_string(), "not-a-valid-id".to_string()] {
             let result = cancel_limit_order(unknown_order_id, &runtime);
-            assert_eq!(result, Err(CancelLimitOrderError::OrderNotFound));
+            assert_eq!(
+                result.unwrap_err().kind,
+                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
+            );
         }
     }
 
@@ -700,7 +713,10 @@ mod cancel_limit_order {
         let order_id = add_limit_order(limit_order_request(), &mock_runtime_for(owner)).unwrap();
 
         let result = cancel_limit_order(order_id, &mock_runtime_for(stranger));
-        assert_eq!(result, Err(CancelLimitOrderError::NotOrderOwner));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner))
+        );
     }
 
     #[test]
@@ -735,7 +751,10 @@ mod cancel_limit_order {
 
         let result = cancel_limit_order(order_id, &mock_runtime_at(owner, Timestamp::new(333)));
 
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyTerminal))
+        );
     }
 
     #[test]
@@ -753,7 +772,10 @@ mod cancel_limit_order {
         crate::process_pending_orders(&mock_runtime_for(buyer));
 
         let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyTerminal))
+        );
     }
 
     #[test]
@@ -876,7 +898,7 @@ mod deposit {
     };
     use candid::{Nat, Principal};
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
-    use oisy_trade_types::{DepositError, DepositRequest, LedgerTransferFromError};
+    use oisy_trade_types::{DepositRequest, DepositRequestError, DepositTemporaryError, ErrorKind};
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const OTHER_USER: Principal = Principal::from_slice(&[0x43]);
@@ -889,7 +911,10 @@ mod deposit {
 
         let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
-        assert_eq!(result, Err(DepositError::OperationInProgress));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(DepositTemporaryError::OperationInProgress))
+        );
         assert!(runtime.captured_calls().is_empty());
     }
 
@@ -947,12 +972,27 @@ mod deposit {
         let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
-            result,
-            Err(DepositError::LedgerError(
-                LedgerTransferFromError::TemporarilyUnavailable
-            ))
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(DepositTemporaryError::LedgerTemporarilyUnavailable))
         );
         assert_in_flight_empty();
+    }
+
+    #[tokio::test]
+    async fn should_reject_unsupported_token() {
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let unsupported = TokenId::new(Principal::from_slice(&[0xAB]));
+        let result = deposit(deposit_request(unsupported), &runtime).await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::UnsupportedToken {
+                token_id: unsupported.into(),
+            }))
+        );
+        assert!(runtime.captured_calls().is_empty());
     }
 
     fn deposit_request(token: TokenId) -> DepositRequest {
@@ -983,7 +1023,10 @@ mod withdraw {
     use ic_cdk::call::Response;
     use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
     use mockall::Sequence;
-    use oisy_trade_types::{LedgerTransferError, WithdrawError, WithdrawRequest};
+    use oisy_trade_types::{
+        ErrorKind, WithdrawInternalError, WithdrawRequest, WithdrawRequestError,
+        WithdrawTemporaryError,
+    };
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const TOKEN_LEDGER: Principal = Principal::from_slice(&[0xAA]);
@@ -1120,12 +1163,8 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::LedgerError(
-                LedgerTransferError::InternalError(
-                    "ledger fee changed between retries".to_string()
-                )
-            ))
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::LedgerFeeChanged))
         );
         // Balance credited back.
         assert_balance(deposit);
@@ -1166,10 +1205,8 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::LedgerError(
-                LedgerTransferError::TemporarilyUnavailable
-            ))
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::LedgerTemporarilyUnavailable))
         );
         assert_balance(deposit);
         assert_cached_fee(5_000);
@@ -1198,12 +1235,10 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::LedgerError(
-                LedgerTransferError::InsufficientFunds {
-                    balance: Nat::from(0u64)
-                }
-            ))
+            result.unwrap_err().kind,
+            ErrorKind::InternalError(Some(WithdrawInternalError::LedgerInsufficientFunds {
+                balance: Nat::from(0u64)
+            }))
         );
         assert_balance(deposit);
         assert_no_withdraw_event();
@@ -1292,10 +1327,10 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::UnsupportedToken {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::UnsupportedToken {
                 token_id: token_id(),
-            })
+            }))
         );
         assert_no_withdraw_event();
     }
@@ -1319,10 +1354,10 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::AmountTooSmall {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountTooSmall {
                 min_amount: Nat::from(1u64),
-            })
+            }))
         );
         // Balance untouched — no debit happened.
         assert_balance(deposit);
@@ -1361,10 +1396,10 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::AmountTooSmall {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountTooSmall {
                 min_amount: Nat::from(real_fee + 1),
-            })
+            }))
         );
         // Balance credited back.
         assert_balance(deposit);
@@ -1397,10 +1432,10 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::InsufficientBalance {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::InsufficientBalance {
                 available: Nat::from(deposit),
-            })
+            }))
         );
         assert_balance(deposit);
         assert_no_withdraw_event();
@@ -1435,7 +1470,10 @@ mod withdraw {
         )
         .await;
 
-        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::OperationInProgress))
+        );
         // Balance untouched, no event recorded.
         assert_balance(deposit);
         assert_no_withdraw_event();
@@ -1460,7 +1498,10 @@ mod withdraw {
         )
         .await;
 
-        assert_eq!(result, Err(WithdrawError::OperationInProgress));
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::OperationInProgress))
+        );
         assert_balance(deposit);
     }
 
@@ -1503,10 +1544,8 @@ mod withdraw {
         .await;
 
         assert_eq!(
-            result,
-            Err(WithdrawError::LedgerError(
-                LedgerTransferError::TemporarilyUnavailable
-            ))
+            result.unwrap_err().kind,
+            ErrorKind::TemporaryError(Some(WithdrawTemporaryError::LedgerTemporarilyUnavailable))
         );
         // Rollback fully restored the free balance, the guard was released,
         // and no event was emitted for the failed withdrawal.

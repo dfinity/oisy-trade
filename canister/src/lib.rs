@@ -61,8 +61,11 @@ pub fn add_limit_order(
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
     let pair = order::TradingPair::from(request.pair);
-    let pending = order::PendingOrder::try_from(request)
-        .map_err(|_| AddLimitOrderError::AmountExceedsMaximum)?;
+    let pending = order::PendingOrder::try_from(request).map_err(|_| {
+        AddLimitOrderError::request(
+            oisy_trade_types::AddLimitOrderRequestError::AmountExceedsMaximum,
+        )
+    })?;
     let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
 
     state::with_state_mut(|s| {
@@ -95,9 +98,11 @@ pub fn cancel_limit_order(
 ) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
-    let id = order_id
-        .parse::<order::OrderId>()
-        .map_err(|_| CancelLimitOrderError::OrderNotFound)?;
+    let id = order_id.parse::<order::OrderId>().map_err(|_| {
+        CancelLimitOrderError::request(
+            oisy_trade_types::CancelLimitOrderRequestError::OrderNotFound,
+        )
+    })?;
     let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
     Ok(record.into())
 }
@@ -229,14 +234,18 @@ pub async fn deposit(
     let token_id = request.token_id.clone();
     let internal_token = order::TokenId::from(token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
-        return Err(DepositError::UnsupportedToken { token_id });
+        return Err(DepositError::request(
+            oisy_trade_types::DepositRequestError::UnsupportedToken { token_id },
+        ));
     }
-    let amount = order::Quantity::try_from(request.amount.clone())
-        .map_err(|_| DepositError::AmountExceedsMaximum)?;
+    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+        DepositError::request(oisy_trade_types::DepositRequestError::AmountExceedsMaximum)
+    })?;
     let caller = runtime.msg_caller();
 
-    let _guard =
-        guard::UserOpGuard::new(caller, internal_token).ok_or(DepositError::OperationInProgress)?;
+    let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
+        DepositError::temporary(oisy_trade_types::DepositTemporaryError::OperationInProgress)
+    })?;
 
     let existing = state::with_state(|s| s.get_balance(&caller, &internal_token));
     if existing
@@ -245,7 +254,9 @@ pub async fn deposit(
         .and_then(|held| held.checked_add(amount))
         .is_none()
     {
-        return Err(DepositError::AmountExceedsMaximum);
+        return Err(DepositError::request(
+            oisy_trade_types::DepositRequestError::AmountExceedsMaximum,
+        ));
     }
 
     let pre = state::with_state(|s| s.permissions().permit_deposit(caller));
@@ -277,28 +288,36 @@ pub async fn withdraw(
     let token_id = request.token_id.clone();
     let internal_token = order::TokenId::from(token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
-        return Err(WithdrawError::UnsupportedToken { token_id });
+        return Err(WithdrawError::request(
+            oisy_trade_types::WithdrawRequestError::UnsupportedToken { token_id },
+        ));
     }
     let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
 
     if request.amount == 0u64 {
-        return Err(WithdrawError::AmountTooSmall {
-            min_amount: cached_fee + 1u64,
-        });
+        return Err(WithdrawError::request(
+            oisy_trade_types::WithdrawRequestError::AmountTooSmall {
+                min_amount: cached_fee + 1u64,
+            },
+        ));
     }
 
     let caller = runtime.msg_caller();
-    let amount = order::Quantity::try_from(request.amount.clone())
-        .map_err(|_| WithdrawError::AmountExceedsMaximum)?;
+    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+        WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
+    })?;
 
-    let _guard = guard::UserOpGuard::new(caller, internal_token)
-        .ok_or(WithdrawError::OperationInProgress)?;
+    let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
+        WithdrawError::temporary(oisy_trade_types::WithdrawTemporaryError::OperationInProgress)
+    })?;
 
     // Debit the full amount from the user's free balance.
     state::with_state_mut(|s| s.withdraw(caller, internal_token, amount)).map_err(|e| {
-        WithdrawError::InsufficientBalance {
-            available: e.available.into(),
-        }
+        WithdrawError::request(
+            oisy_trade_types::WithdrawRequestError::InsufficientBalance {
+                available: e.available.into(),
+            },
+        )
     })?;
 
     let pre = state::with_state(|s| s.permissions().permit_withdraw(caller));
