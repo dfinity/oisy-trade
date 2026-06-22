@@ -894,7 +894,7 @@ mod deposit {
     };
     use candid::{Nat, Principal};
     use icrc_ledger_types::icrc2::transfer_from::TransferFromError;
-    use oisy_trade_types::{DepositRequest, DepositTemporaryError, ErrorKind};
+    use oisy_trade_types::{DepositRequest, DepositRequestError, DepositTemporaryError, ErrorKind};
 
     const USER: Principal = Principal::from_slice(&[0x42]);
     const OTHER_USER: Principal = Principal::from_slice(&[0x43]);
@@ -983,10 +983,10 @@ mod deposit {
         let result = deposit(deposit_request(unsupported), &runtime).await;
 
         assert_eq!(
-            result,
-            Err(DepositError::UnsupportedToken {
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::UnsupportedToken {
                 token_id: unsupported.into(),
-            })
+            }))
         );
         assert!(runtime.captured_calls().is_empty());
     }
