@@ -20,6 +20,7 @@
   - [DEFI-2849 — Circuit Breaker](development/specs/DEFI-2849-circuit-breaker.md)
   - [DEFI-2850 — Min/Max Notional](development/specs/DEFI-2850-min-max-notional.md)
   - [DEFI-2852 — Order Status / Partial Fill](development/specs/DEFI-2852-order-status-partial-fill.md)
+  - [DEFI-2853 — Fill-or-Kill Orders](development/specs/DEFI-2853-add-fill-or-kill-orders-fok.md)
 
 # Reference
 
