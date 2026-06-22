@@ -517,37 +517,30 @@ fn sum_remaining(queue: &VecDeque<RestingOrder>) -> Quantity {
 /// `side` determines the token (quote for Buy, base for Sell) and
 /// `price × remaining_quantity` (or just `remaining_quantity` for Sell) is
 /// the amount to unreserve.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use = "RemovedOrder must be applied to order_history via `record_cancel_limit_order`; \
               dropping it leaves the order book and order_history out of sync"]
 pub struct RemovedOrder {
-    #[n(0)]
     pub side: Side,
-    #[n(1)]
     pub price: Price,
-    #[n(2)]
     pub remaining_quantity: Quantity,
 }
 
 /// Output of [`OrderBook::process_pending_orders`]: the fills produced,
 /// orders that began resting in the book, and orders that were fully filled.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use = "MatchingOutput must be applied to order_history via `record_matching_event`; \
               dropping it leaves the order book and order_history out of sync"]
 pub struct MatchingOutput {
     /// Fills executed during this matching round, in execution order.
-    #[n(0)]
     pub fills: Vec<Fill>,
     /// Orders that were not fully filled and are now resting in the book.
-    #[n(1)]
     pub resting_orders: BTreeSet<OrderSeq>,
     /// Orders that were fully filled and removed from the book.
-    #[n(2)]
     pub filled_orders: BTreeSet<OrderSeq>,
     /// Fill-or-kill orders that could not fully fill and were killed without
     /// resting or producing a fill. Each maps to the killed order's side,
     /// price, and full quantity so the placement reservation can be released.
-    #[n(3)]
     pub expired_orders: BTreeMap<OrderSeq, RemovedOrder>,
 }
 
