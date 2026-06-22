@@ -65,8 +65,9 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   an arm it cannot currently produce carries an always-`null` `opt variant {}`, reserving the slot so that
   leaves can be added to any arm later without breaking clients (and an arm is never *added*).
   Applies to `add_limit_order`, `cancel_limit_order`, `deposit`, `withdraw`, `get_my_orders`,
-  `get_order_book_ticker`, `get_order_book_depth`, and both the per-token and request-level errors of
-  `get_balances` / `get_fee_balances`. Admin endpoints are out of scope.
+  `get_order_book_ticker`, `get_order_book_depth`, and the single `GetBalancesError` of
+  `get_balances` / `get_fee_balances` (these reads return one whole-call error — see D8). Admin
+  endpoints are out of scope.
 - **R2**: The `kind` arm is the contract (documented in `oisy_trade.did`):
   `RequestError` ⇒ caller-side, do not auto-retry unchanged; `TemporaryError` ⇒ retry after backoff;
   `InternalError` ⇒ DEX-side fault, surface, do not retry.
@@ -102,9 +103,10 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   matching on it (R3). It is not localized and its exact text may change.
 - **Admin endpoints are out of scope** (e.g. `add_trading_pair`): controller-only, not part of the
   multi-language client surface this targets.
-- **Deferred to a follow-up PR**: reshaping `get_my_orders` to the `get_balances` pattern (outer result
-  + per-item inner results, via a `ByIds : vec OrderId` selector). This PR keeps the single-`Result`
-  `get_my_orders` (R8); the batch/per-item form is future work.
+- **Deferred to a follow-up PR**: any two-level batch result (outer whole-request error + per-item inner
+  results, e.g. a future write `add_limit_orders`, or a `get_my_orders` `ByIds : vec OrderId` selector).
+  This PR keeps the single-`Result` `get_my_orders` (R8) and a single whole-call `GetBalancesError` for
+  the reads (D8); the two-level batch form is future work.
 - **No changes to internal/state-layer error types** (`canister/src/state`, `order`, `lib`,
   `ledger` — incl. the internal `GetMyOrdersError` / `OrderIdParseError`) beyond mapping them to the
   disposition-tagged public types at the boundary.
@@ -146,6 +148,29 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   structurally identical across the whole surface and can't drift. The `impl` bounds each leaf on
   `std::error::Error` and derives `message` from the leaf's `to_string()`, so the human text is produced
   uniformly rather than hand-set per call site.
+
+### Batch-semantic endpoints
+
+- **D8 — Two-level results are for *write* batches only; *read* batches return a single error.**
+  A batch endpoint MAY adopt a two-level result `Result<Vec<Result<T, ItemError>>, BatchError>`, where
+  **both** `ItemError` (per-item) and `BatchError` (whole-request) are the disposition-tagged
+  `{ kind; message }` shape of R1. `BatchError` is the set of failures that doom the whole call (e.g.
+  the request never gets far enough to process any item); each inner `ItemError` fails exactly one item
+  while the others still return `Ok`, i.e. partial success.
+
+  **This two-level shape is reserved for state-mutating (write) batch endpoints.** Partial success
+  matters there because re-issuing a write is costly and risky: a blind retry of a half-applied batch
+  could double-apply the items that already succeeded, so the caller needs to know precisely which items
+  went through. **Read/query batch endpoints do *not* use it.** Re-issuing a read is cheap and
+  side-effect-free, so a read that cannot fully satisfy the request returns a **single**
+  disposition-tagged error for the whole call rather than a per-item result vector. This mirrors how
+  Binance/Kraken/Coinbase expose per-item results for batch *order placement* (writes) but a single
+  whole-call error for balance *reads*.
+
+  No write batch endpoint exists yet; a future `add_limit_orders` would adopt the two-level shape. The
+  only multi-item endpoints today are reads — `get_balances` / `get_fee_balances` — which therefore
+  return a single `GetBalancesError` for the whole call (an unsupported token in the filter fails the
+  whole call; there is no per-item partial result).
 
 ## Implementation
 
@@ -224,8 +249,7 @@ future leaves without breaking clients. (`variant {}` is valid Candid; the canis
 | **GetMyOrdersError** (new public) | `InvalidOrderId` | (none) | (none) |
 | **GetOrderBookTickerError** | `UnknownTradingPair` | (none) | (none) |
 | **GetOrderBookDepthError** | `UnknownTradingPair`, `LimitTooLarge` | (none) | (none) |
-| **GetBalancesError** | `TokenNotSupported` | (none) | (none) |
-| **GetBalancesRequestError** | `FilterTooLarge` | (none) | (none) |
+| **GetBalancesError** | `TokenNotSupported`, `FilterTooLarge` | (none) | (none) |
 
 <sup>1</sup> withdraw's ledger-reported `InsufficientFunds` (D5). <sup>2</sup> `TradingHalted` (DEFI-2849) — a global halt
 is intentional transient unavailability ("retry when trading resumes", like a ledger
@@ -280,8 +304,8 @@ Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each 
    map internal→public at the boundary (incl. `message`); `oisy_trade.did` + contract doc block; tests.
    *Accepts*: R1 (these four), R2, R3, R4, R5, R9.
 2. **PR2 — Extend to query errors.** Same shape for `GetOrderBookTickerError`, `GetOrderBookDepthError`,
-   `GetBalancesError`, `GetBalancesRequestError` (the latter two cover **both** `get_balances` and
-   `get_fee_balances`); `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R4 (remainder), R9.
+   and a single `GetBalancesError` covering **both** `get_balances` and `get_fee_balances` (one whole-call
+   error per D8); `oisy_trade.did`; tests. *Accepts*: R1 (remainder), R4 (remainder), R9.
 3. **PR3 — Stop conflating / trapping on malformed order IDs.** Bare `InvalidOrderId` on
    `CancelLimitOrderError`; new public `GetMyOrdersError`; `get_my_orders` returns a result (no `panic!`);
    `oisy_trade.did`; tests. *Accepts*: R7, R8, R9.
