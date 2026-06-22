@@ -214,6 +214,8 @@ jobs:
 
       - name: 'Checkout'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: 'Install didc'
         run: |
@@ -222,25 +224,30 @@ jobs:
           echo "32693c76d9c6fe0f273f2c1ebf7e48ba3c383e925e5afd17dd264a06aed9fbcc  /usr/local/bin/didc" | sha256sum --check
           chmod +x /usr/local/bin/didc
 
-      - name: 'Download released Candid interface'
-        id: download-released
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: 'Check if Candid interface changed'
+        id: did-changed
         run: |
-          tag=$(gh release list --limit 100 --json tagName,isDraft \
-            --jq '[.[] | select(.isDraft == false and (.tagName | startswith("oisy_trade_canister-v")))] | first | .tagName // empty')
-          if [ -z "$tag" ]; then
-            echo "::warning::No oisy_trade_canister-v* release found; backward-compat check skipped."
-          elif gh release download "$tag" --pattern 'oisy_trade.did' --output released_oisy_trade.did; then
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "merge_group" ]]; then
+            base_sha="${{ github.event.merge_group.base_sha }}"
           else
-            echo "::warning::Failed to download oisy_trade.did from $tag; skipping backward-compat check."
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          if ! git cat-file -e "$base_sha:canister/oisy_trade.did" 2>/dev/null; then
+            echo "canister/oisy_trade.did is new in this branch; skipping backward-compat check."
+          elif git diff --quiet "$base_sha" HEAD -- canister/oisy_trade.did; then
+            echo "canister/oisy_trade.did unchanged; skipping backward-compat check."
+          else
+            echo "base=$base_sha" >> "$GITHUB_OUTPUT"
           fi
 
       - name: 'Check Candid backward compatibility'
-        if: steps.download-released.outputs.tag != ''
+        if: steps.did-changed.outputs.base != ''
         continue-on-error: ${{ steps.check-override.outputs.skip == 'true' }}
-        run: didc check canister/oisy_trade.did released_oisy_trade.did
+        run: |
+          git show "${{ steps.did-changed.outputs.base }}:canister/oisy_trade.did" > base_oisy_trade.did
+          didc check canister/oisy_trade.did base_oisy_trade.did
 
   benchmark:
     if: github.event_name == 'pull_request'
