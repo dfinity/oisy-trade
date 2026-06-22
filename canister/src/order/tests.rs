@@ -59,6 +59,8 @@ mod order_id {
 
 mod time_in_force {
     use crate::order::{Order, OrderSeq, PendingOrder, Price, Quantity, Side, TimeInForce};
+    use crate::test_fixtures::arbitrary::arb_order;
+    use proptest::prelude::*;
 
     fn request(
         time_in_force: Option<oisy_trade_types::TimeInForce>,
@@ -86,22 +88,14 @@ mod time_in_force {
         assert_eq!(pending.time_in_force, TimeInForce::FillOrKill);
     }
 
-    #[test]
-    fn order_roundtrips_fill_or_kill_through_minicbor() {
-        let order = PendingOrder {
-            side: Side::Buy,
-            price: Price::new(100),
-            quantity: Quantity::from(1_000u64),
-            time_in_force: TimeInForce::FillOrKill,
+    proptest! {
+        #[test]
+        fn order_roundtrips_through_minicbor(order in arb_order()) {
+            let mut bytes = vec![];
+            minicbor::encode(&order, &mut bytes).unwrap();
+            let decoded: Order = minicbor::decode(&bytes).unwrap();
+            prop_assert_eq!(decoded, order);
         }
-        .into_order(OrderSeq::new(7));
-
-        let mut bytes = vec![];
-        minicbor::encode(&order, &mut bytes).unwrap();
-        let decoded: Order = minicbor::decode(&bytes).unwrap();
-
-        assert_eq!(decoded.time_in_force(), TimeInForce::FillOrKill);
-        assert_eq!(decoded, order);
     }
 
     /// An `Order` encoded before the `time_in_force` field existed (a 4-element

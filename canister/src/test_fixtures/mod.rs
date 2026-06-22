@@ -447,7 +447,7 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, OrderBookId, OrderId,
+        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
         OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
         TickSize, TimeInForce, TokenId, TokenMetadata,
     };
@@ -487,6 +487,12 @@ pub mod arbitrary {
                     time_in_force,
                 },
             )
+    }
+
+    /// Strategy for a valid [`Order`] with a tick-aligned price, a lot-aligned
+    /// non-zero quantity, and a fuzzed `time_in_force`.
+    pub fn arb_order() -> impl Strategy<Value = Order> {
+        (arb_order_seq(), arb_pending_order()).prop_map(|(seq, pending)| pending.into_order(seq))
     }
 
     /// Strategy for a single pending order whose price falls strictly on one
