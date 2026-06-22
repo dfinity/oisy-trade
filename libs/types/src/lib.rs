@@ -125,7 +125,8 @@ pub struct OrderBookDepth {
 pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 
 /// Maximum depth (levels per side) that `get_order_book_depth` will serve.
-/// Requests for more than this return [`GetOrderBookDepthRequestError::LimitTooLarge`].
+/// Requests for more than this return a [`GetOrderBookDepthError`] carrying
+/// [`GetOrderBookDepthRequestError::LimitTooLarge`] under `kind = RequestError`.
 pub const MAX_DEPTH_LIMIT: u32 = 1_000;
 
 /// Request for the `get_order_book_depth` query.
@@ -135,9 +136,10 @@ pub struct GetOrderBookDepthRequest {
     pub trading_pair: TradingPair,
     /// Maximum number of price levels returned per side.
     /// When `None`, [`DEFAULT_DEPTH_LIMIT`] is used. Values greater than
-    /// [`MAX_DEPTH_LIMIT`] are rejected with
-    /// [`GetOrderBookDepthRequestError::LimitTooLarge`]. A value of `Some(0)` is
-    /// accepted and returns empty bids/asks vectors.
+    /// [`MAX_DEPTH_LIMIT`] are rejected with a [`GetOrderBookDepthError`]
+    /// carrying [`GetOrderBookDepthRequestError::LimitTooLarge`] under
+    /// `kind = RequestError`. A value of `Some(0)` is accepted and returns
+    /// empty bids/asks vectors.
     pub limit: Option<u32>,
 }
 
