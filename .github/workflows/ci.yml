@@ -191,14 +191,23 @@ jobs:
     steps:
       - name: 'Check for candid-breaking-change override'
         id: check-override
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MG_HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: |
-          has_label=$(echo "$LABELS" | jq 'map(select(. == "candid-breaking-change")) | length > 0')
+          if [[ "$EVENT" == "pull_request" ]]; then
+            pr="$PR_NUMBER"
+          else
+            pr=$(echo "$MG_HEAD_REF" | grep -oP 'pr-\K[0-9]+')
+          fi
+          labels=$(gh pr view "$pr" --json labels --jq '[.labels[].name]')
+          title=$(gh pr view "$pr" --json title --jq '.title')
+          has_label=$(echo "$labels" | jq 'map(select(. == "candid-breaking-change")) | length > 0')
           if [[ "$has_label" == "true" ]] && \
-             [[ "$TITLE" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?!: ]]; then
+             [[ "$title" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?!: ]]; then
             echo "Override active: candid-breaking-change label with breaking-commit title."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
@@ -218,14 +227,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(gh release list --limit 100 --json tagName \
-            --jq '[.[] | select(.tagName | startswith("oisy_trade_canister-v"))] | first | .tagName // empty')
+          tag=$(gh release list --limit 100 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft == false and (.tagName | startswith("oisy_trade_canister-v")))] | first | .tagName // empty')
           if [ -z "$tag" ]; then
             echo "::warning::No oisy_trade_canister-v* release found; backward-compat check skipped."
-          else
-            echo "Checking backward compatibility against $tag"
-            gh release download "$tag" --pattern 'oisy_trade.did' --output released_oisy_trade.did
+          elif gh release download "$tag" --pattern 'oisy_trade.did' --output released_oisy_trade.did; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Failed to download oisy_trade.did from $tag; skipping backward-compat check."
           fi
 
       - name: 'Check Candid backward compatibility'
