@@ -11,8 +11,9 @@ mod error;
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
-    DepositRequestError, DepositTemporaryError, Error, ErrorKind, Never, WithdrawError,
-    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetMyOrdersError,
+    GetMyOrdersRequestError, Never, WithdrawError, WithdrawInternalError, WithdrawRequestError,
+    WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};

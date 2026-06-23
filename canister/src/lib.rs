@@ -100,7 +100,7 @@ pub fn cancel_limit_order(
     let caller = runtime.msg_caller();
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
-            oisy_trade_types::CancelLimitOrderRequestError::OrderNotFound,
+            oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
         )
     })?;
     let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;

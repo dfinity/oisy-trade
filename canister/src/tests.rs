@@ -694,13 +694,23 @@ mod cancel_limit_order {
         init_state_with_order_book();
         let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
 
-        for unknown_order_id in [OrderId::ZERO.to_string(), "not-a-valid-id".to_string()] {
-            let result = cancel_limit_order(unknown_order_id, &runtime);
-            assert_eq!(
-                result.unwrap_err().kind,
-                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
-            );
-        }
+        let result = cancel_limit_order(OrderId::ZERO.to_string(), &runtime);
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
+        );
+    }
+
+    #[test]
+    fn should_reject_cancel_of_malformed_order_id() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
+
+        let result = cancel_limit_order("not-a-valid-id".to_string(), &runtime);
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::InvalidOrderId))
+        );
     }
 
     #[test]

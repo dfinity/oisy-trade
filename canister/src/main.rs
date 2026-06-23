@@ -2,11 +2,11 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
-    WithdrawTemporaryError,
+    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetMyOrdersError,
+    GetMyOrdersRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -154,14 +154,13 @@ fn get_fee_balances(
 }
 
 #[ic_cdk::query]
-fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Vec<UserOrder> {
+fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Result<Vec<UserOrder>, GetMyOrdersError> {
     use oisy_trade_canister::Runtime;
-    match oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()) {
-        Ok(orders) => orders,
-        Err(oisy_trade_canister::GetMyOrdersError::InvalidOrderId(e)) => {
-            panic!("ERROR: invalid order id: {e}")
-        }
-    }
+    oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()).map_err(
+        |oisy_trade_canister::GetMyOrdersError::InvalidOrderId(_)| {
+            GetMyOrdersError::request(GetMyOrdersRequestError::InvalidOrderId)
+        },
+    )
 }
 
 #[ic_cdk::query]

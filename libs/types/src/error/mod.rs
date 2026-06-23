@@ -176,6 +176,9 @@ pub type CancelLimitOrderError = Error<CancelLimitOrderRequestError, Never, Neve
 /// Caller-side reasons `cancel_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum CancelLimitOrderRequestError {
+    /// The supplied order id was not a well-formed order id.
+    #[error("the supplied order id is not a well-formed order id")]
+    InvalidOrderId,
     /// No order with the given ID exists.
     #[error("no order with the given id exists")]
     OrderNotFound,
@@ -186,6 +189,18 @@ pub enum CancelLimitOrderRequestError {
     /// and can no longer be canceled.
     #[error("the order has reached a terminal state and can no longer be canceled")]
     OrderAlreadyTerminal,
+}
+
+/// Error returned by the `get_my_orders` query.
+pub type GetMyOrdersError = Error<GetMyOrdersRequestError, Never, Never>;
+
+/// Caller-side reasons `get_my_orders` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetMyOrdersRequestError {
+    /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
+    /// not a well-formed order id.
+    #[error("the supplied order id is not a well-formed order id")]
+    InvalidOrderId,
 }
 
 /// Error returned by the deposit endpoint.

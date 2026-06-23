@@ -53,15 +53,13 @@ async fn assert_balances<R: Runtime>(
 }
 
 mod add_limit_order {
-    use assert_matches::assert_matches;
-    use candid::{Encode, Nat, Principal};
+    use candid::{Nat, Principal};
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
     use oisy_trade_types::{
         AddLimitOrderRequestError, AddTradingPairRequest, Balance, ErrorKind, GetMyOrdersArgs,
-        LimitOrderRequest, OrderId, OrderStatus, Side,
+        GetMyOrdersRequestError, LimitOrderRequest, OrderId, OrderStatus, Side,
     };
-    use pocket_ic::{RejectCode, RejectResponse};
 
     /// A `ByPage` filter, matching the previous flat `after`/`length` args.
     fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
@@ -165,7 +163,7 @@ mod add_limit_order {
 
         // Alice sees only her own orders, newest first — bob's interleaved
         // orders don't leak in.
-        let orders = alice.get_my_orders(by_page(None, 10)).await;
+        let orders = alice.get_my_orders(by_page(None, 10)).await.unwrap();
         assert_eq!(
             orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![
@@ -189,7 +187,7 @@ mod add_limit_order {
         }
 
         // Bob likewise sees only his own.
-        let bob_orders = bob.get_my_orders(by_page(None, 10)).await;
+        let bob_orders = bob.get_my_orders(by_page(None, 10)).await.unwrap();
         assert_eq!(
             bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
@@ -199,7 +197,8 @@ mod add_limit_order {
         // Cursor pagination: resume after the newest, take one → the next order.
         let page = alice
             .get_my_orders(by_page(Some(alice_ids[2].clone()), 1))
-            .await;
+            .await
+            .unwrap();
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, alice_ids[1]);
 
@@ -218,7 +217,13 @@ mod add_limit_order {
 
         // A caller that placed nothing sees none.
         let stranger = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0xAB]));
-        assert!(stranger.get_my_orders(by_page(None, 10)).await.is_empty());
+        assert!(
+            stranger
+                .get_my_orders(by_page(None, 10))
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         setup.drop().await;
     }
@@ -280,32 +285,37 @@ mod add_limit_order {
     }
 
     #[tokio::test]
-    async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
+    async fn should_return_nothing_for_unknown_order_and_reject_malformed_id() {
         let setup = Setup::new().await;
+        let client = setup.oisy_trade_client();
 
         // A well-formed but unknown id resolves to nothing — absence from
         // the result is the sole not-found signal.
-        let not_found = setup
-            .oisy_trade_client()
+        let not_found = client
             .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
             .await;
         assert!(not_found.is_none());
 
-        // A malformed id traps, consistent with the existing id/cursor parsing.
-        let result = setup
-            .env()
-            .query_call(
-                setup.oisy_trade_id(),
-                Principal::anonymous(),
-                "get_my_orders",
-                Encode!(&Some(by_page(Some("not-a-valid-id".to_string()), 10))).unwrap(),
-            )
-            .await;
+        // A well-formed but unknown cursor returns an empty page, not an error.
+        assert_eq!(
+            client
+                .get_my_orders(by_page(
+                    Some("ffffffffffffffffffffffffffffffff".to_string()),
+                    10
+                ))
+                .await
+                .unwrap(),
+            Vec::new()
+        );
 
-        assert_matches!(
-            result,
-            Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
-            if reject_message.contains("invalid order id")
+        // A malformed id is rejected cleanly (no trap) with InvalidOrderId.
+        assert_eq!(
+            client
+                .get_my_orders(by_page(Some("not-a-valid-id".to_string()), 10))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::InvalidOrderId))
         );
 
         setup.drop().await;
@@ -663,15 +673,15 @@ mod cancel_limit_order {
                 .kind,
             ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
         );
-        // Malformed id is also rejected cleanly; it is currently mapped to
-        // OrderNotFound (a distinct InvalidOrderId leaf may be introduced later).
+        // A malformed id is rejected with a distinct InvalidOrderId leaf,
+        // separate from OrderNotFound.
         assert_eq!(
             client
                 .cancel_limit_order("not-a-valid-id".to_string())
                 .await
                 .unwrap_err()
                 .kind,
-            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::InvalidOrderId))
         );
 
         setup.drop().await;
