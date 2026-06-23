@@ -47,12 +47,6 @@ pub struct OrderRecord {
     pub time_in_force: TimeInForce,
 }
 
-impl OrderRecord {
-    pub fn time_in_force(&self) -> TimeInForce {
-        self.time_in_force
-    }
-}
-
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
     fn from(record: OrderRecord) -> Self {
         oisy_trade_types::OrderRecord {
@@ -64,7 +58,7 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             status: record.status.into(),
             created_at: record.created_at.as_nanos(),
             last_updated_at: record.last_updated_at.map(|t| t.as_nanos()),
-            time_in_force: record.time_in_force().into(),
+            time_in_force: record.time_in_force.into(),
         }
     }
 }

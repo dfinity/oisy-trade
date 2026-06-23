@@ -66,7 +66,7 @@ fn record_roundtrips_fill_or_kill_through_history() {
     history.insert_once(UserId::new(0), id, record.clone());
 
     let loaded = history.get(&id).unwrap();
-    assert_eq!(loaded.time_in_force(), TimeInForce::FillOrKill);
+    assert_eq!(loaded.time_in_force, TimeInForce::FillOrKill);
     assert_eq!(loaded, record);
 }
 
