@@ -294,11 +294,13 @@ type OrderRecord = record {
     price : nat;
     quantity : nat;
     filled_quantity : nat;     // base, cumulative, gross of fees (DEFI-2852)
+    status : OrderStatus;
+    created_at : nat64;        // nanoseconds since the Unix epoch
+    last_updated_at : opt nat64;
+    time_in_force : TimeInForce;  // existing field (DEFI-2853) — keep it
+    // the two new trailing fields appended after the existing ones:
     filled_quote : nat;        // quote, cumulative realized notional (R1)
     filled_fee : nat;          // realized fee, in the order's receive token (R2)
-    status : OrderStatus;
-    created_at : nat64;
-    last_updated_at : opt nat64;
 };
 ```
 
@@ -317,8 +319,13 @@ type Trade = record {
     fee : nat;              // realized fee charged to this side
     fee_token : PairToken;  // base for a buy, quote for a sell
     is_maker : bool;        // this side's role on this fill
-    timestamp : nat64;
+    timestamp : nat64;      // settlement time, nanoseconds since the Unix epoch
 };
+
+// Opaque, caller-supplied pagination cursor — a text token (like `OrderId`,
+// which is `text`), NOT a number. Treating it as opaque text lets `get_my_trades`
+// distinguish a malformed token (Err) from a well-formed-but-unknown one (Ok []) per R5.
+type FillCursor = text;
 
 type TradesFilter = variant {
     ByOrder   : record { order_id : OrderId; after : opt FillCursor; length : nat32 };
@@ -330,8 +337,9 @@ type TradesFilter = variant {
 get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 ```
 
-`FillCursor` is the opaque pagination cursor — the global fill sequence (see below), encoded like
-`OrderId`. `GetMyTradesError` is an instantiation of the DEFI-2801 generic error envelope.
+`FillCursor` is the opaque pagination cursor — an opaque `text` token (like `OrderId`) encoding the
+global fill sequence (see below); callers pass back the last value they received and never parse it.
+`GetMyTradesError` is an instantiation of the DEFI-2801 generic error envelope.
 `MAX_FILLS_PER_RESPONSE` mirrors `MAX_ORDERS_PER_RESPONSE`.
 
 ### Internal fill store
