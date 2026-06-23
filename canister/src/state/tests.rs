@@ -264,7 +264,7 @@ mod cancel_limit_order {
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
-        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_order,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_fok_order, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -434,6 +434,37 @@ mod cancel_limit_order {
             crate::state::StableMemoryOptions::Write,
         );
         assert!(state.has_pending_settling_events());
+
+        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_cancel_pending_fok_into_canceled_and_refund() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        // A FOK sits Pending in the queue until matching runs; cancel it before
+        // the engine processes it. It must end Canceled (a user cancel), not
+        // Expired (the engine kill), with the placement reservation refunded.
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Pending));
+
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn should_reject_canceling_expired_fok() {
+        use crate::state::CancelLimitOrderError;
+
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        // FOK against an empty book: matching kills it, ending Expired.
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
         let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
 
