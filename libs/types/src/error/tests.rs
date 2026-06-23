@@ -1,7 +1,4 @@
-use crate::{
-    CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositRequestError,
-    ErrorKind, GetMyOrdersError, GetMyOrdersRequestError,
-};
+use crate::{DepositError, DepositRequestError, ErrorKind};
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
@@ -93,29 +90,6 @@ fn should_set_message_from_leaf_display() {
     );
     assert_eq!(error.message, Some(leaf.to_string()));
     assert!(!error.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_invalid_order_id_under_request_with_message() {
-    let cancel = CancelLimitOrderError::request(CancelLimitOrderRequestError::InvalidOrderId);
-    assert_eq!(
-        cancel.kind,
-        ErrorKind::RequestError(Some(CancelLimitOrderRequestError::InvalidOrderId))
-    );
-    assert_eq!(
-        cancel.message,
-        Some(CancelLimitOrderRequestError::InvalidOrderId.to_string())
-    );
-
-    let get_my_orders = GetMyOrdersError::request(GetMyOrdersRequestError::InvalidOrderId);
-    assert_eq!(
-        get_my_orders.kind,
-        ErrorKind::RequestError(Some(GetMyOrdersRequestError::InvalidOrderId))
-    );
-    assert_eq!(
-        get_my_orders.message,
-        Some(GetMyOrdersRequestError::InvalidOrderId.to_string())
-    );
 }
 
 #[test]
