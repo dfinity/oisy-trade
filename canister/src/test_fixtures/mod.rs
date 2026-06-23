@@ -57,6 +57,13 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
+pub fn ckusdt_metadata() -> TokenMetadata {
+    TokenMetadata {
+        symbol: "ckUSDT".to_string(),
+        decimals: 6,
+    }
+}
+
 pub fn base_metadata() -> TokenMetadata {
     TokenMetadata {
         symbol: "BASE".to_string(),
@@ -156,8 +163,22 @@ pub fn icp_ckbtc_trading_pair() -> TradingPair {
     }
 }
 
+/// ICP (base, 8 decimals) / ckUSDT (quote, 6 decimals) pair for the DEFI-2901
+/// worked example. Base stays ICP, so `base_scale = 10^8` is unchanged from the
+/// ckBTC pair; only the quote token's decimals differ.
+pub fn icp_ckusdt_trading_pair() -> TradingPair {
+    TradingPair {
+        base: icp_token_id(),
+        quote: ckusdt_token_id(),
+    }
+}
+
 pub fn ckbtc_token_id() -> TokenId {
     TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
+}
+
+pub fn ckusdt_token_id() -> TokenId {
+    TokenId::new(Principal::from_text("cngnf-vqaaa-aaaar-qag4q-cai").unwrap())
 }
 
 pub fn icp_token_id() -> TokenId {
@@ -661,23 +682,32 @@ pub mod arbitrary {
                     last_updated_at,
                     time_in_force,
                 )| {
-                    (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
-                        owner,
-                        side,
-                        price: Price::new(price_ticks as u128 * tick),
-                        quantity: Quantity::from(qty_lots * lot),
-                        filled_quantity: Quantity::from(filled_lots * lot),
-                        status,
-                        created_at,
-                        last_updated_at,
-                        time_in_force,
-                        filled_quote: Quantity::from(
-                            u128::from(filled_lots)
-                                * u128::from(lot)
-                                * u128::from(price_ticks)
-                                * tick,
-                        ),
-                        filled_fee: Quantity::from(u128::from(filled_lots)),
+                    (0..=qty_lots).prop_map(move |filled_lots| {
+                        let price = Price::new(price_ticks as u128 * tick);
+                        let filled_quantity = Quantity::from(filled_lots * lot);
+                        // Realized quote notional, derived exactly as the engine
+                        // does: `maker_price × filled_quantity / base_scale`
+                        // (cf. `Fill::quote_amount`), with `base_scale = 10^8`
+                        // for this fixture.
+                        let filled_quote = price
+                            .checked_mul_quantity_scaled(
+                                &filled_quantity,
+                                NonZeroU64::new(100_000_000).unwrap(),
+                            )
+                            .expect("fixture notional fits in 256 bits");
+                        OrderRecord {
+                            owner,
+                            side,
+                            price,
+                            quantity: Quantity::from(qty_lots * lot),
+                            filled_quantity,
+                            status,
+                            created_at,
+                            last_updated_at,
+                            time_in_force,
+                            filled_quote,
+                            filled_fee: Quantity::from(u128::from(filled_lots)),
+                        }
                     })
                 },
             )
