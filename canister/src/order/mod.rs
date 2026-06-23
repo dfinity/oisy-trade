@@ -1,6 +1,8 @@
 mod book;
 mod fees;
 mod history;
+mod plan;
+mod queue;
 #[cfg(test)]
 mod tests;
 
@@ -58,8 +60,36 @@ impl From<Side> for oisy_trade_types::Side {
     }
 }
 
-/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the four real
-/// states of [`oisy_trade_types::OrderStatus`].
+/// Time-in-force policy governing how long an order stays active in the book.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub enum TimeInForce {
+    #[n(0)]
+    #[default]
+    GoodTilCanceled,
+    #[n(1)]
+    FillOrKill,
+}
+
+impl From<oisy_trade_types::TimeInForce> for TimeInForce {
+    fn from(tif: oisy_trade_types::TimeInForce) -> Self {
+        match tif {
+            oisy_trade_types::TimeInForce::GoodTilCanceled => TimeInForce::GoodTilCanceled,
+            oisy_trade_types::TimeInForce::FillOrKill => TimeInForce::FillOrKill,
+        }
+    }
+}
+
+impl From<TimeInForce> for oisy_trade_types::TimeInForce {
+    fn from(tif: TimeInForce) -> Self {
+        match tif {
+            TimeInForce::GoodTilCanceled => oisy_trade_types::TimeInForce::GoodTilCanceled,
+            TimeInForce::FillOrKill => oisy_trade_types::TimeInForce::FillOrKill,
+        }
+    }
+}
+
+/// Lifecycle state persisted with each [`OrderRecord`]. Mirrors the real states
+/// of [`oisy_trade_types::OrderStatus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub enum OrderStatus {
     #[n(0)]
@@ -70,6 +100,8 @@ pub enum OrderStatus {
     Filled,
     #[n(3)]
     Canceled,
+    #[n(4)]
+    Expired,
 }
 
 impl From<OrderStatus> for oisy_trade_types::OrderStatus {
@@ -79,6 +111,7 @@ impl From<OrderStatus> for oisy_trade_types::OrderStatus {
             OrderStatus::Open => oisy_trade_types::OrderStatus::Open,
             OrderStatus::Filled => oisy_trade_types::OrderStatus::Filled,
             OrderStatus::Canceled => oisy_trade_types::OrderStatus::Canceled,
+            OrderStatus::Expired => oisy_trade_types::OrderStatus::Expired,
         }
     }
 }
@@ -815,6 +848,7 @@ pub struct PendingOrder {
     pub side: Side,
     pub price: Price,
     pub quantity: Quantity,
+    pub time_in_force: TimeInForce,
 }
 
 impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
@@ -827,6 +861,10 @@ impl TryFrom<oisy_trade_types::LimitOrderRequest> for PendingOrder {
                 u128::try_from(&request.price.0).map_err(|_| QuantityOverflowError)?,
             ),
             quantity: Quantity::try_from(request.quantity)?,
+            time_in_force: request
+                .time_in_force
+                .map(TimeInForce::from)
+                .unwrap_or_default(),
         })
     }
 }
@@ -838,6 +876,7 @@ impl PendingOrder {
             side: self.side,
             price: self.price,
             remaining_quantity: self.quantity,
+            time_in_force: self.time_in_force,
         }
     }
 }
@@ -852,6 +891,8 @@ pub struct Order {
     price: Price,
     #[n(3)]
     remaining_quantity: Quantity,
+    #[n(4)]
+    time_in_force: TimeInForce,
 }
 
 impl Order {
@@ -867,6 +908,10 @@ impl Order {
         self.price
     }
 
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.time_in_force
+    }
+
     pub fn remaining_quantity(&self) -> &Quantity {
         &self.remaining_quantity
     }
@@ -879,14 +924,16 @@ impl Order {
     }
 }
 
-/// An order resting in the order book. Only carries the ID and remaining
-/// quantity — side and price are implicit from the book's structure.
+/// An order resting in the order book. Carries the ID, remaining quantity, and
+/// time-in-force — side and price are implicit from the book's structure.
 #[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct RestingOrder {
     #[n(0)]
     id: OrderSeq,
     #[n(1)]
     remaining_quantity: Quantity,
+    #[n(2)]
+    time_in_force: TimeInForce,
 }
 
 impl From<Order> for RestingOrder {
@@ -894,6 +941,7 @@ impl From<Order> for RestingOrder {
         Self {
             id: order.id,
             remaining_quantity: order.remaining_quantity,
+            time_in_force: order.time_in_force(),
         }
     }
 }
@@ -907,11 +955,16 @@ impl RestingOrder {
             side,
             price,
             remaining_quantity: self.remaining_quantity,
+            time_in_force: self.time_in_force,
         }
     }
 
     pub fn id(&self) -> OrderSeq {
         self.id
+    }
+
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.time_in_force
     }
 
     pub fn remaining_quantity(&self) -> &Quantity {
