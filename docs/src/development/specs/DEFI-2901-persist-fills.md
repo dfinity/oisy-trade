@@ -107,26 +107,37 @@ This spec separates two distinct deliverables, which must not be conflated:
 
 ## Worked example
 
-Easy round numbers (assume `base_scale = 1`, i.e. one whole base token = 1 unit, so notional is
-just `price × quantity`). Fee rates: **taker 10 bps (0.10%)**, **maker 5 bps (0.05%)**.
+Pair **ICP / ckUSDT** — base **ICP** (8 decimals), quote **ckUSDT** (6 decimals). Prices below
+are written in ckUSDT per whole ICP. Fee rates: **taker 10 bps (0.10%)**, **maker 5 bps
+(0.05%)**.
 
-A maker is resting a **sell of 10 BASE @ 100** quote/BASE. A taker submits a **buy of 10 BASE
-with limit 105** (it crosses above the resting ask).
+Internally the engine works in smallest units: `Price` is quote-smallest-units per whole base
+(`ckUSDT/ICP × 10⁶`), `quantity` is base-smallest-units (`ICP × 10⁸`), and
+`notional = price × quantity / base_scale` with `base_scale = 10⁸`. For example Fill 1 below
+(2 ICP @ 10) is `price = 10·10⁶`, `quantity = 2·10⁸`, so
+`notional = 10·10⁶ × 2·10⁸ / 10⁸ = 20·10⁶ = 20 ckUSDT`. The table uses whole-token values for
+readability.
 
-- The fill executes at the **maker price 100**, not the taker's 105. `quantity = 10`,
-  `notional = 100 × 10 = 1000` quote.
-- The taker buyer had reserved `105 × 10 = 1050` quote; the `50` quote surplus is **refunded**
-  (`Unreserve`). So the **buy** order's `filled_quote = 1000` (realized, the 50 excluded) and
-  its VWAP `= 1000 / 10 = 100` = the maker price.
-- Fees (receive-side):
-  - Buyer (taker) pays in **base**: `10 bps × 10 = 0.01 BASE`. Buy order: `filled_fee = 0.01`,
-    `fee_token = Base`. Net base received `= filled_quantity − filled_fee = 10 − 0.01 = 9.99`.
-  - Seller (maker) pays in **quote**: `5 bps × 1000 = 0.5 quote`. Sell order: `filled_fee = 0.5`,
-    `fee_token = Quote`. Net quote received `= 1000 − 0.5 = 999.5`.
-- Two side-projected fill records are written. The buy order's: `{ price: 100, quantity: 10,
-  notional: 1000, fee: 0.01, fee_token: Base, is_maker: false, side: Buy }`. The sell order's:
-  `{ price: 100, quantity: 10, notional: 1000, fee: 0.5, fee_token: Quote, is_maker: true,
-  side: Sell }`. Neither names the counterparty.
+Two resting asks: **Maker A** sells **2 ICP @ 10**, **Maker B** sells **3 ICP @ 11**. A taker
+submits a **buy of 5 ICP with limit 12** — it crosses and **sweeps both levels**, producing two
+fills, each writing a taker-leg and a maker-leg record (counterparty never named):
+
+| Fill | Taker leg (the buy order) | Maker leg (the resting sell) |
+|---|---|---|
+| **Fill 1**<br>2 ICP @ 10 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 10<br>• `quantity`: 2 ICP<br>• `notional`: 20 ckUSDT<br>• `fee`: 0.002 ICP *(10 bps × 2 ICP)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 10<br>• `quantity`: 2 ICP<br>• `notional`: 20 ckUSDT<br>• `fee`: 0.01 ckUSDT *(5 bps × 20)*<br>• `fee_token`: ckUSDT (Quote) |
+| **Fill 2**<br>3 ICP @ 11 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 11<br>• `quantity`: 3 ICP<br>• `notional`: 33 ckUSDT<br>• `fee`: 0.003 ICP *(10 bps × 3 ICP)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 11<br>• `quantity`: 3 ICP<br>• `notional`: 33 ckUSDT<br>• `fee`: 0.0165 ckUSDT *(5 bps × 33)*<br>• `fee_token`: ckUSDT (Quote) |
+
+Order-level rollups (`OrderRecord` scalars):
+
+- **Taker buy order** (both fills): `filled_quantity = 5 ICP`, `filled_quote = 20 + 33 = 53
+  ckUSDT`, VWAP `= 53 / 5 = 10.6` ckUSDT/ICP (between the two maker prices), `filled_fee = 0.002 +
+  0.003 = 0.005 ICP` (`fee_token` ICP). It had reserved `5 × 12 = 60` ckUSDT at its limit; only 53
+  is spent, so **7 ckUSDT is released** back to its balance (`Unreserve`) — never part of
+  `filled_quote`. Net ICP received `= filled_quantity − filled_fee = 5 − 0.005 = 4.995`.
+- **Maker A sell order** (Fill 1): `filled_quantity = 2 ICP`, `filled_quote = 20 ckUSDT`,
+  `filled_fee = 0.01 ckUSDT`. Net ckUSDT received `= 20 − 0.01 = 19.99`.
+- **Maker B sell order** (Fill 2): `filled_quantity = 3 ICP`, `filled_quote = 33 ckUSDT`,
+  `filled_fee = 0.0165 ckUSDT`. Net ckUSDT received `= 33 − 0.0165 = 32.9835`.
 
 ## Non-goals
 
@@ -399,10 +410,11 @@ Unit (`*/tests.rs`, helpers/fixtures per repo convention):
   fills newest-first and excludes another order's (R4 `ByOrder`); `trades_after` returns a user's
   fills across orders newest-first (R4 `ByAccount`); unknown cursor → empty page; `length` clamped
   (R10); counterparty fields absent from the record (R3).
-- `state/tests.rs`: the [Worked example](#worked-example) numbers — a price-improving buy taker
-  records `filled_quote = 1000` (surplus excluded), VWAP `100`, base-denominated `filled_fee`
-  `0.01`, and a maker `filled_fee` `0.5` in quote (R1, R2, R6); a taker sweeping several maker
-  levels records one fill per level at its own maker price (R6); an order that crosses then
+- `state/tests.rs`: the [Worked example](#worked-example) numbers — a buy taker sweeping two
+  maker levels (2 ICP @ 10, 3 ICP @ 11) records `filled_quote = 53 ckUSDT`, VWAP `10.6`,
+  base-denominated `filled_fee = 0.005 ICP`, with the 7-ckUSDT reservation surplus released (not
+  in `filled_quote`), and the two maker orders' `filled_fee` `0.01` / `0.0165 ckUSDT` in quote
+  (R1, R2, R6); one fill per swept level at its own maker price (R6); an order that crosses then
   rests-and-is-hit records a taker fill (`is_maker = false`) and a maker fill (`is_maker = true`)
   (R6); replay under `Skip` writes no fills and no scalar deltas (R8).
 
