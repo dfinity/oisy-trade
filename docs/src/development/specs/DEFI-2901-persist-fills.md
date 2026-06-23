@@ -42,15 +42,17 @@ This spec separates two distinct deliverables, which must not be conflated:
 ## Requirements
 
 - **R1 — Cumulative quote on the order.** `OrderRecord` exposes `filled_quote`: the cumulative
-  **realized** quote notional transacted, summed as `Σ (maker_price × fill_quantity)` over the
-  order's fills. It is always **quote-denominated** and is the *realized* notional: the price
-  the trade actually executed at, `maker_price × quantity`. (A buy taker that crossed below its
+  **realized** quote notional transacted, summed as `Σ (maker_price × fill_quantity / base_scale)`
+  over the order's fills (`base_scale = 10^base_decimals`; the division converts base
+  smallest-units to whole base, matching the engine's `quote_amount`). It is always
+  **quote-denominated** and is the *realized* notional: the price the trade actually executed at,
+  `maker_price × quantity / base_scale`. (A buy taker that crossed below its
   limit reserved quote at its *limit* price; when it fills cheaper, the difference between that
   reservation and the executed notional is released back to its balance — a reservation
   artifact that was never part of the trade value, not a figure deducted from it. Recording a
   trade at its execution price is universal — see
   [Cross-exchange comparison](#cross-exchange-comparison).) VWAP is derivable as
-  `filled_quote / filled_quantity`.
+  `filled_quote × base_scale / filled_quantity`.
 - **R2 — Cumulative fee on the order.** `OrderRecord` exposes `filled_fee`: the cumulative
   **realized** fee charged to the order across its fills. It is denominated in the order's
   **receive token** — base for a buy, quote for a sell (the receive-side fee convention in
@@ -71,13 +73,13 @@ This spec separates two distinct deliverables, which must not be conflated:
   its `order_id` so a client can group by order. `ByOrder` for an order owned by another
   principal (or an unknown id) returns an empty page.
 - **R5 — Non-trapping, error-enveloped.** `get_my_trades` never traps; it returns the
-  DEFI-2801 error envelope (`docs/.../DEFI-2801-error-envelope.md` R8). A malformed `order_id`
+  DEFI-2801 error envelope (`docs/src/development/specs/DEFI-2801-error-envelope.md`, R8). A malformed `order_id`
   or `after` cursor returns `Err(RequestError(...))`; a well-formed but unknown / not-owned id,
   or an unknown cursor, returns `Ok([])`; otherwise `Ok(<trades>)`.
 - **R6 — Correct values under price improvement, sweeping, and refund.** For a fill, `price`
   equals the maker's execution price (never the taker's limit); `notional` equals
-  `maker_price × quantity` — the executed price, so a buy taker's reservation surplus is not
-  part of it; `fee` equals the
+  `maker_price × quantity / base_scale` — the executed price, so a buy taker's reservation
+  surplus is not part of it; `fee` equals the
   amount actually withheld for that side; `is_maker` reflects that side's role on that fill. An
   order that fills partly as taker and partly as maker (crosses on entry, then rests and is hit)
   records each fill with its own role and rate — the role is **per fill**, not per order.
@@ -88,7 +90,7 @@ This spec separates two distinct deliverables, which must not be conflated:
 - **R8 — Write-gated, replay-safe, durable.** Fill persistence happens only under
   `StableMemoryOptions::Write`, so event-log replay at `post_upgrade` does not double-write
   fills. Fill records and the order-level scalars live in stable memory and survive upgrade. The
-  fill sequence is canister-global and monotonic (see [Internal fill store](#internal-fill-store--canistersrcorderfills-new-module)).
+  fill sequence is canister-global and monotonic (see [Internal fill store](#internal-fill-store)).
 - **R9 — Monotonic invariants.** `filled_quote` and `filled_fee` are monotonic non-decreasing;
   each delta is applied with `checked_add` guarded by an **always-on** trap on overflow (a
   `BUG:` panic, matching the codebase convention — not a `debug_assert!`, which is compiled out
@@ -107,16 +109,17 @@ This spec separates two distinct deliverables, which must not be conflated:
 
 ## Worked example
 
-Pair **ICP / ckUSDT** — base **ICP** (8 decimals), quote **ckUSDT** (6 decimals). Prices below
-are written in ckUSDT per whole ICP. Fee rates: **taker 10 bps (0.10%)**, **maker 5 bps
-(0.05%)**.
+Pair **ICP / ckUSDT** — base **ICP** (8 decimals), quote **ckUSDT** (6 decimals). Fee rates:
+**taker 10 bps (0.10%)**, **maker 5 bps (0.05%)**.
 
-Internally the engine works in smallest units: `Price` is quote-smallest-units per whole base
-(`ckUSDT/ICP × 10⁶`), `quantity` is base-smallest-units (`ICP × 10⁸`), and
-`notional = price × quantity / base_scale` with `base_scale = 10⁸`. For example Fill 1 below
-(2 ICP @ 10) is `price = 10·10⁶`, `quantity = 2·10⁸`, so
-`notional = 10·10⁶ × 2·10⁸ / 10⁸ = 20·10⁶ = 20 ckUSDT`. The table uses whole-token values for
-readability.
+The engine stores everything in **smallest units**; the human-readable value and the stored
+value (Rust `_` digit grouping) are given side by side throughout, as `human (`stored`)`:
+
+- `Price` is quote-smallest-units per **whole** base: `10 ckUSDT/ICP` → `10 × 10⁶ = 10_000_000`.
+- `quantity` is base-smallest-units: `2 ICP` → `2 × 10⁸ = 200_000_000`.
+- `base_scale = 10^base_decimals = 100_000_000`.
+- `notional = price × quantity / base_scale`. Fill 1: `10_000_000 × 200_000_000 / 100_000_000 =
+  20_000_000` (`= 20 ckUSDT`).
 
 Two resting asks: **Maker A** sells **2 ICP @ 10**, **Maker B** sells **3 ICP @ 11**. A taker
 submits a **buy of 5 ICP with limit 12** — it crosses and **sweeps both levels**, producing two
@@ -124,25 +127,29 @@ fills, each writing a taker-leg and a maker-leg record (counterparty never named
 
 | Fill | Taker leg (the buy order) | Maker leg (the resting sell) |
 |---|---|---|
-| **Fill 1**<br>2 ICP @ 10 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 10<br>• `quantity`: 2 ICP<br>• `notional`: 20 ckUSDT<br>• `fee`: 0.002 ICP *(10 bps × 2 ICP)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 10<br>• `quantity`: 2 ICP<br>• `notional`: 20 ckUSDT<br>• `fee`: 0.01 ckUSDT *(5 bps × 20)*<br>• `fee_token`: ckUSDT (Quote) |
-| **Fill 2**<br>3 ICP @ 11 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 11<br>• `quantity`: 3 ICP<br>• `notional`: 33 ckUSDT<br>• `fee`: 0.003 ICP *(10 bps × 3 ICP)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 11<br>• `quantity`: 3 ICP<br>• `notional`: 33 ckUSDT<br>• `fee`: 0.0165 ckUSDT *(5 bps × 33)*<br>• `fee_token`: ckUSDT (Quote) |
+| **Fill 1**<br>2 ICP @ 10 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 10 (`10_000_000`)<br>• `quantity`: 2 ICP (`200_000_000`)<br>• `notional`: 20 ckUSDT (`20_000_000`)<br>• `fee`: 0.002 ICP (`200_000`) *(10 bps × qty)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 10 (`10_000_000`)<br>• `quantity`: 2 ICP (`200_000_000`)<br>• `notional`: 20 ckUSDT (`20_000_000`)<br>• `fee`: 0.01 ckUSDT (`10_000`) *(5 bps × notional)*<br>• `fee_token`: ckUSDT (Quote) |
+| **Fill 2**<br>3 ICP @ 11 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 11 (`11_000_000`)<br>• `quantity`: 3 ICP (`300_000_000`)<br>• `notional`: 33 ckUSDT (`33_000_000`)<br>• `fee`: 0.003 ICP (`300_000`) *(10 bps × qty)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 11 (`11_000_000`)<br>• `quantity`: 3 ICP (`300_000_000`)<br>• `notional`: 33 ckUSDT (`33_000_000`)<br>• `fee`: 0.0165 ckUSDT (`16_500`) *(5 bps × notional)*<br>• `fee_token`: ckUSDT (Quote) |
 
-Order-level rollups (`OrderRecord` scalars):
+Order-level rollups (`OrderRecord` scalars), `human (`stored`)`:
 
-- **Taker buy order** (both fills): `filled_quantity = 5 ICP`, `filled_quote = 20 + 33 = 53
-  ckUSDT`, VWAP `= 53 / 5 = 10.6` ckUSDT/ICP (between the two maker prices), `filled_fee = 0.002 +
-  0.003 = 0.005 ICP` (`fee_token` ICP). It had reserved `5 × 12 = 60` ckUSDT at its limit; only 53
-  is spent, so **7 ckUSDT is released** back to its balance (`Unreserve`) — never part of
-  `filled_quote`. Net ICP received `= filled_quantity − filled_fee = 5 − 0.005 = 4.995`.
-- **Maker A sell order** (Fill 1): `filled_quantity = 2 ICP`, `filled_quote = 20 ckUSDT`,
-  `filled_fee = 0.01 ckUSDT`. Net ckUSDT received `= 20 − 0.01 = 19.99`.
-- **Maker B sell order** (Fill 2): `filled_quantity = 3 ICP`, `filled_quote = 33 ckUSDT`,
-  `filled_fee = 0.0165 ckUSDT`. Net ckUSDT received `= 33 − 0.0165 = 32.9835`.
+- **Taker buy order** (both fills): `filled_quantity` = 5 ICP (`500_000_000`), `filled_quote` =
+  20 + 33 = 53 ckUSDT (`53_000_000`), `filled_fee` = 0.002 + 0.003 = 0.005 ICP (`500_000`,
+  `fee_token` ICP). VWAP `= filled_quote × base_scale / filled_quantity = 53_000_000 ×
+  100_000_000 / 500_000_000 = 10_600_000` (`= 10.6 ckUSDT/ICP`, between the two maker prices). It
+  reserved 60 ckUSDT (`60_000_000`) at its limit (12 × 5); only 53 ckUSDT is spent, so **7 ckUSDT
+  (`7_000_000`) is released** back to its balance (`Unreserve`) — never part of `filled_quote`.
+  Net ICP received = `filled_quantity − filled_fee` = 4.995 ICP (`499_500_000`).
+- **Maker A sell order** (Fill 1): `filled_quantity` = 2 ICP (`200_000_000`), `filled_quote` = 20
+  ckUSDT (`20_000_000`), `filled_fee` = 0.01 ckUSDT (`10_000`). Net ckUSDT received = 19.99
+  (`19_990_000`).
+- **Maker B sell order** (Fill 2): `filled_quantity` = 3 ICP (`300_000_000`), `filled_quote` = 33
+  ckUSDT (`33_000_000`), `filled_fee` = 0.0165 ckUSDT (`16_500`). Net ckUSDT received = 32.9835
+  (`32_983_500`).
 
 ## Non-goals
 
 - **A stored average / VWAP field.** VWAP is derived client-side as
-  `filled_quote / filled_quantity`. An integer `Price` cannot represent a fractional average
+  `filled_quote × base_scale / filled_quantity`. An integer `Price` cannot represent a fractional average
   exactly; storing `filled_quote` (exact) and dividing on read avoids a lossy field. (Kraken /
   Coinbase expose a pre-divided average; we follow Binance — see
   [Cross-exchange comparison](#cross-exchange-comparison).)
@@ -212,8 +219,8 @@ Order-level rollups (`OrderRecord` scalars):
 
 - **Compute the per-fill values in settlement, not in the matcher (R11).** The matcher
   (`OrderBook::match_order`) has the `fee_rates` but **not** the base-token scale: `OrderBook` is
-  deliberately token-scale-agnostic, and `notional = maker_price × quantity` scaled by
-  `base_scale` needs that scale, which lives in `State`'s token registry (`base_scale_for_book`).
+  deliberately token-scale-agnostic, and `notional = maker_price × quantity / base_scale` needs
+  that scale, which lives in `State`'s token registry (`base_scale_for_book`).
   Settlement (`compute_balance_operations`) is the first point where both `fee_rates` and
   `base_scale` are in scope; it already derives `notional`, `quote_fee`, `base_fee`, and the
   maker/taker roles. Computing the fill values there reuses that single computation and avoids
@@ -241,7 +248,7 @@ only deliberate divergence is deriving VWAP rather than storing it.
 | Order cumulative base | `executedQty` | `filled_size` | `vol_exec` | `filled_quantity` (DEFI-2852) |
 | Order cumulative quote | `cummulativeQuoteQty` | (derived) | `cost` | `filled_quote` |
 | Order cumulative fee | (per-trade) | `total_fees` | `fee` | `filled_fee` |
-| Order average price | derive | `average_filled_price` | `price` | **derive** (`filled_quote / filled_quantity`) |
+| Order average price | derive | `average_filled_price` | `price` | **derive** (`filled_quote × base_scale / filled_quantity`) |
 
 Notes on the divergences:
 
@@ -249,8 +256,8 @@ Notes on the divergences:
   at the maker price or better; all three venues record the trade's notional at the *execution*
   price (`quoteQty` / `cost` / `price × size`), never at the submitting order's limit. Our
   "refunded surplus" is just the accounting artifact of reserving quote at the taker's limit and
-  releasing the unused part; the reported `notional` / `filled_quote` is execution-price ×
-  quantity, exactly as on Binance / Coinbase / Kraken.
+  releasing the unused part; the reported `notional` / `filled_quote` is the executed notional
+  (`maker_price × quantity / base_scale`), exactly as on Binance / Coinbase / Kraken.
 - **VWAP is derived, not stored.** Coinbase and Kraken expose a pre-computed average fill price;
   they denominate prices as decimal strings, so a fractional average is representable. We use
   integer `Price`, where a fractional average is not exactly representable — so, like Binance, we
@@ -306,7 +313,7 @@ type Trade = record {
     side : Side;            // this order's side
     price : nat;            // execution (maker) price
     quantity : nat;         // base filled
-    notional : nat;         // quote transacted = price * quantity (realized)
+    notional : nat;         // quote transacted = price × quantity / base_scale (realized)
     fee : nat;              // realized fee charged to this side
     fee_token : PairToken;  // base for a buy, quote for a sell
     is_maker : bool;        // this side's role on this fill
@@ -327,9 +334,9 @@ get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesEr
 `OrderId`. `GetMyTradesError` is an instantiation of the DEFI-2801 generic error envelope.
 `MAX_FILLS_PER_RESPONSE` mirrors `MAX_ORDERS_PER_RESPONSE`.
 
-### Internal fill store — `canister/src/order/fills` (new module)
+### Internal fill store
 
-Mirrors `OrderHistory`:
+A new module, `canister/src/order/fills`, mirroring `OrderHistory`:
 
 - **The fill sequence (`FillSeq`).** A canister-global, monotonic `u64` assigned to each
   side-projected record as it is appended — so the two legs of one fill get two consecutive
@@ -423,7 +430,7 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 - Place a maker, hit it with a price-improving taker; `get_my_trades { ByOrder }` on each order
   returns the fill at the maker price with correct `notional`/`fee`/`is_maker`/`side`, counterparty
   absent (R3, R4, R6). `get_my_orders` shows `filled_quote` / `filled_fee` consistent with the
-  fills, and `filled_quote / filled_quantity` is the expected VWAP (R1, R2).
+  fills, and `filled_quote × base_scale / filled_quantity` is the expected VWAP (R1, R2).
 - `get_my_trades { ByOrder }` for an unknown id and for an id owned by another principal →
   `Ok([])`; a malformed id / cursor → `Err` (R4, R5).
 - `get_my_trades { ByAccount }` returns fills across multiple orders newest-first, paginates by
