@@ -135,7 +135,7 @@ impl WorstCaseEvent {
             Self::AddTradingPair => 225,
             Self::Deposit => 96,
             Self::Withdraw => 105,
-            Self::AddLimitOrder => 107,
+            Self::AddLimitOrder => 110,
             Self::CancelLimitOrder => 36,
             Self::Matching => 10_028,
             Self::Settling => 127_328,
@@ -202,6 +202,7 @@ fn add_limit_order() -> EventType {
         side: Side::Buy,
         price: Price::new(u128::MAX),
         quantity: max_quantity(),
+        time_in_force: crate::order::TimeInForce::FillOrKill,
     })
 }
 
