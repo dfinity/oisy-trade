@@ -2517,22 +2517,6 @@ mod get_balances {
     }
 
     #[test]
-    fn should_fail_whole_call_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
-        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
-
-        assert_eq!(
-            state.get_balances(&USER, Some(&filter)),
-            Err(GetBalancesError::request(
-                oisy_trade_types::GetBalancesRequestError::TokenNotSupported(FilterToken::ById(
-                    unknown.into()
-                ))
-            )),
-        );
-    }
-
-    #[test]
     fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
         let (mut state, a_id, _) = test_fixtures::two_token_state();
         state.deposit(
@@ -2672,10 +2656,14 @@ mod get_fee_balances {
     }
 
     #[test]
-    fn should_fail_whole_call_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
+    fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
