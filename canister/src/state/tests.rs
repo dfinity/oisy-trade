@@ -1741,6 +1741,8 @@ mod settle_fills {
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
                     time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(100 * lot),
+                    filled_fee: Quantity::ZERO,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1784,6 +1786,8 @@ mod settle_fills {
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
                     time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(100 * lot),
+                    filled_fee: Quantity::ZERO,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1800,6 +1804,8 @@ mod settle_fills {
                     created_at: buy.created_at,
                     last_updated_at: buy.last_updated_at,
                     time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(100 * lot),
+                    filled_fee: Quantity::ZERO,
                 },
             );
         }
@@ -1997,6 +2003,11 @@ mod settle_fills {
             let buy = record_of(&state, BUYER, buy_id);
             assert_eq!(buy.status, OrderStatus::Pending);
             assert_eq!(buy.filled_quantity, Quantity::ZERO);
+            // The realized-value scalars are written under the same `Write`
+            // gate as `filled_quantity`, so replay under `Skip` leaves them at
+            // zero too — no double-counting of quote or fee.
+            assert_eq!(buy.filled_quote, Quantity::ZERO);
+            assert_eq!(buy.filled_fee, Quantity::ZERO);
             assert_eq!(buy.last_updated_at, None);
         }
     }
@@ -2025,11 +2036,12 @@ mod settle_fills {
             use crate::order::{self, PairToken};
             use crate::state::event::BalanceOperation;
 
-            let ops = super::super::compute_balance_operations(
+            let settlements = super::super::fill_settlements(
                 &output,
                 FeeRates::default(),
                 std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
             );
+            let ops = super::super::compute_balance_operations(&settlements);
             let fills_len = output.fills.len();
 
             prop_assert!(
@@ -2311,6 +2323,137 @@ mod settle_fills {
                 },
             );
             state
+        }
+    }
+
+    /// Order-level `filled_quote` / `filled_fee` from the DEFI-2901 worked
+    /// example. The pair is ICP (base, 8 decimals) / ckUSDT (quote); the test
+    /// fixture's base scale is `10^8`, so every stored figure below matches the
+    /// spec's smallest-unit numbers exactly.
+    mod realized_scalars {
+        use super::{BUYER, SELLER, TestState};
+        use crate::EXECUTOR;
+        use crate::order::{
+            BasisPoint, FeeRates, OrderBookId, OrderId, OrderStatus, Quantity, Side,
+        };
+        use crate::test_fixtures::mocks::mock_runtime_for;
+        use crate::test_fixtures::{
+            self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+            icp_ckbtc_trading_pair, icp_metadata,
+        };
+        use candid::Principal;
+
+        // Maker B and the two distinct maker levels need a third principal.
+        const MAKER_B: Principal = Principal::from_slice(&[0x03]);
+
+        // Prices and quantities in smallest units (base scale = 10^8).
+        const PRICE_10: u128 = 10_000_000;
+        const PRICE_11: u128 = 11_000_000;
+        const PRICE_12: u128 = 12_000_000;
+        const QTY_2: u128 = 200_000_000;
+        const QTY_3: u128 = 300_000_000;
+        const QTY_5: u128 = 500_000_000;
+
+        fn setup(maker_bps: u16, taker_bps: u16) -> TestState {
+            let mut state = test_fixtures::state();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                icp_ckbtc_trading_pair(),
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                FeeRates {
+                    maker: BasisPoint::new(maker_bps).unwrap(),
+                    taker: BasisPoint::new(taker_bps).unwrap(),
+                },
+            );
+            state
+        }
+
+        fn record(state: &TestState, owner: Principal, id: OrderId) -> crate::order::OrderRecord {
+            state
+                .get_user_order(&owner, id)
+                .map(|(_, _, record)| record)
+                .expect("order record present")
+        }
+
+        /// A buy taker sweeps two maker levels (2 ICP @ 10, 3 ICP @ 11) with
+        /// taker 10 bps / maker 5 bps. The taker's `filled_quote` is the realized
+        /// notional 53 ckUSDT (the 7-ckUSDT reservation surplus is excluded), and
+        /// its `filled_fee` is the base-denominated 0.005 ICP. Each maker records
+        /// its own quote-denominated fee.
+        #[test]
+        fn buy_taker_sweeping_two_levels_rolls_up_quote_and_fee() {
+            let mut state = setup(5, 10);
+            let pair = icp_ckbtc_trading_pair();
+
+            let maker_a =
+                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+            let maker_b =
+                test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_11, QTY_3);
+            let taker =
+                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_12, QTY_5);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // Taker buy: gross 5 ICP filled, realized notional 20 + 33 = 53
+            // ckUSDT, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
+            // 7-ckUSDT reservation surplus is released, not part of filled_quote.
+            let taker = record(&state, BUYER, taker);
+            assert_eq!(taker.status, OrderStatus::Filled);
+            assert_eq!(taker.filled_quantity, Quantity::from(QTY_5));
+            assert_eq!(taker.filled_quote, Quantity::from(53_000_000u128));
+            assert_eq!(taker.filled_fee, Quantity::from(500_000u128));
+            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckUSDT/ICP.
+            let base_scale = 100_000_000u128;
+            let vwap = taker.filled_quote.as_u128().unwrap() * base_scale
+                / taker.filled_quantity.as_u128().unwrap();
+            assert_eq!(vwap, 10_600_000);
+
+            // Maker A (Fill 1): 20 ckUSDT notional, 0.01 ckUSDT fee (quote).
+            let maker_a = record(&state, SELLER, maker_a);
+            assert_eq!(maker_a.filled_quantity, Quantity::from(QTY_2));
+            assert_eq!(maker_a.filled_quote, Quantity::from(20_000_000u128));
+            assert_eq!(maker_a.filled_fee, Quantity::from(10_000u128));
+
+            // Maker B (Fill 2): 33 ckUSDT notional, 0.0165 ckUSDT fee (quote).
+            let maker_b = record(&state, MAKER_B, maker_b);
+            assert_eq!(maker_b.filled_quantity, Quantity::from(QTY_3));
+            assert_eq!(maker_b.filled_quote, Quantity::from(33_000_000u128));
+            assert_eq!(maker_b.filled_fee, Quantity::from(16_500u128));
+        }
+
+        /// A single order that crosses on entry (taker leg) and then rests and is
+        /// hit (maker leg) within the same batch accrues both fills' realized
+        /// quote and fee, written exactly once. The taker leg is charged the
+        /// taker rate, the maker leg the maker rate.
+        #[test]
+        fn order_filling_both_ways_in_one_batch_writes_once() {
+            let mut state = setup(5, 10);
+            let pair = icp_ckbtc_trading_pair();
+
+            // A resting ask the middle order will cross as taker.
+            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+            // The order under test: a buy for 5 ICP @ 10 — crosses the 2-ICP ask
+            // (taker), then rests with 3 ICP open.
+            let pivot =
+                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_5);
+            // A sell that hits the pivot's resting 3 ICP (pivot is now maker).
+            test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // Taker leg: 2 ICP @ 10 → notional 20 ckUSDT. Maker leg: 3 ICP @ 10
+            // → notional 30 ckUSDT. filled_quote = 20 + 30 = 50 ckUSDT.
+            let pivot = record(&state, BUYER, pivot);
+            assert_eq!(pivot.status, OrderStatus::Filled);
+            assert_eq!(pivot.filled_quantity, Quantity::from(QTY_5));
+            assert_eq!(pivot.filled_quote, Quantity::from(50_000_000u128));
+            // Buyer pays base fee on both legs: taker leg 10 bps × 2 ICP =
+            // 0.002 ICP (200_000); maker leg 5 bps × 3 ICP = 0.0015 ICP
+            // (150_000). Total 0.0035 ICP (350_000), all base-denominated.
+            assert_eq!(pivot.filled_fee, Quantity::from(350_000u128));
         }
     }
 

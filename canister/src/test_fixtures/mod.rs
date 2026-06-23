@@ -671,6 +671,13 @@ pub mod arbitrary {
                         created_at,
                         last_updated_at,
                         time_in_force,
+                        filled_quote: Quantity::from(
+                            u128::from(filled_lots)
+                                * u128::from(lot)
+                                * u128::from(price_ticks)
+                                * tick,
+                        ),
+                        filled_fee: Quantity::from(u128::from(filled_lots)),
                     })
                 },
             )

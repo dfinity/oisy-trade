@@ -746,6 +746,8 @@ mod cancel_limit_order {
                 created_at: 111,
                 last_updated_at: Some(222),
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+                filled_quote: candid::Nat::from(0u64),
+                filled_fee: candid::Nat::from(0u64),
             })
         );
 
@@ -805,6 +807,8 @@ mod cancel_limit_order {
             created_at: 111,
             last_updated_at: Some(222),
             time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+            filled_quote: candid::Nat::from(0u64),
+            filled_fee: candid::Nat::from(0u64),
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(

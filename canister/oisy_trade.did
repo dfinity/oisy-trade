@@ -281,6 +281,13 @@ type OrderRecord = record {
     last_updated_at : opt nat64;
     /// Time-in-force policy the order was placed with.
     time_in_force : TimeInForce;
+    /// Cumulative realized quote notional transacted across the order's fills,
+    /// in quote-token smallest units. A buy taker's released reservation
+    /// surplus is excluded; VWAP is `filled_quote × base_scale / filled_quantity`.
+    filled_quote : nat;
+    /// Cumulative realized fee charged across the order's fills, in the order's
+    /// receive token — base for a buy, quote for a sell.
+    filled_fee : nat;
 };
 
 /// Request for `get_my_orders`.

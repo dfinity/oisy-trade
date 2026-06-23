@@ -615,6 +615,8 @@ mod cancel_limit_order {
                 created_at: canceled.created_at,
                 last_updated_at: canceled.last_updated_at,
                 time_in_force: TimeInForce::GoodTilCanceled,
+                filled_quote: Nat::from(1_000_000_000u64),
+                filled_fee: Nat::from(0u64),
             }
         );
 

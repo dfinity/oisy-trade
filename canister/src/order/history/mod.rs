@@ -45,6 +45,15 @@ pub struct OrderRecord {
     /// Time-in-force policy the order was placed with.
     #[n(8)]
     pub time_in_force: TimeInForce,
+    /// Cumulative realized quote notional transacted across the order's fills,
+    /// `Σ (maker_price × fill_quantity / base_scale)`. Always quote-denominated;
+    /// a buy taker's released reservation surplus is excluded.
+    #[n(9)]
+    pub filled_quote: Quantity,
+    /// Cumulative realized fee charged across the order's fills, denominated in
+    /// the order's receive token — base for a buy, quote for a sell.
+    #[n(10)]
+    pub filled_fee: Quantity,
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -59,17 +68,22 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             created_at: record.created_at.as_nanos(),
             last_updated_at: record.last_updated_at.map(|t| t.as_nanos()),
             time_in_force: record.time_in_force.into(),
+            filled_quote: record.filled_quote.into(),
+            filled_fee: record.filled_fee.into(),
         }
     }
 }
 
 /// A combined update to an order record, applied in a single read-modify-write
-/// by [`OrderHistory::apply_update`]: an optional status transition plus a
-/// fill delta to add to `filled_quantity`.
+/// by [`OrderHistory::apply_update`]: an optional status transition plus the
+/// fill, quote, and fee deltas to add to `filled_quantity`, `filled_quote`, and
+/// `filled_fee`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OrderUpdate {
     pub status: Option<OrderStatus>,
     pub filled_delta: Quantity,
+    pub quote_delta: Quantity,
+    pub fee_delta: Quantity,
 }
 
 impl OrderUpdate {
@@ -78,6 +92,8 @@ impl OrderUpdate {
         Self {
             status: Some(status),
             filled_delta: Quantity::ZERO,
+            quote_delta: Quantity::ZERO,
+            fee_delta: Quantity::ZERO,
         }
     }
 
@@ -86,6 +102,8 @@ impl OrderUpdate {
         Self {
             status: None,
             filled_delta,
+            quote_delta: Quantity::ZERO,
+            fee_delta: Quantity::ZERO,
         }
     }
 
@@ -94,13 +112,16 @@ impl OrderUpdate {
     /// # Panics
     ///
     /// `filled_quantity` is monotonic non-decreasing and must never exceed
-    /// `quantity`; this invariant is enforced by an always-on check that traps
-    /// on violation.
+    /// `quantity`; `filled_quote` and `filled_fee` are monotonic
+    /// non-decreasing. These invariants are enforced by always-on checks that
+    /// trap on violation.
     pub fn apply(self, order: &mut OrderRecord) -> bool {
         let mut changed = false;
         let OrderUpdate {
             status,
             filled_delta,
+            quote_delta,
+            fee_delta,
         } = self;
 
         if let Some(new_status) = status
@@ -124,6 +145,22 @@ impl OrderUpdate {
                 order.quantity,
                 order.created_at,
             );
+        }
+
+        if quote_delta != Quantity::ZERO {
+            changed = true;
+            order.filled_quote = order
+                .filled_quote
+                .checked_add(quote_delta)
+                .expect("BUG: filled_quote overflow");
+        }
+
+        if fee_delta != Quantity::ZERO {
+            changed = true;
+            order.filled_fee = order
+                .filled_fee
+                .checked_add(fee_delta)
+                .expect("BUG: filled_fee overflow");
         }
         changed
     }
