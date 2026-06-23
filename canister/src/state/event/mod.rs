@@ -107,11 +107,9 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
-    /// Time-in-force policy. Append-only trailing field; events logged before
-    /// it existed decode as `None` and replay as
-    /// [`TimeInForce::GoodTilCanceled`].
+    /// Time-in-force policy.
     #[n(5)]
-    pub time_in_force: Option<TimeInForce>,
+    pub time_in_force: TimeInForce,
 }
 
 /// Orders processed by the matching engine.

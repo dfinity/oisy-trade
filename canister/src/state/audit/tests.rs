@@ -209,7 +209,7 @@ impl Scenario {
                 side,
                 price,
                 quantity,
-                time_in_force: Some(time_in_force),
+                time_in_force,
             }),
         });
         (self, order_id)
@@ -321,7 +321,7 @@ impl Scenario {
             .order_history
             .get(&order_id)
             .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
-            .time_in_force();
+            .time_in_force;
         assert_eq!(tif, expected, "unexpected time_in_force for {order_id:?}");
         self
     }

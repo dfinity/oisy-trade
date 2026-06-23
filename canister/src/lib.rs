@@ -79,7 +79,7 @@ pub fn add_limit_order(
             side: order.side(),
             price: order.price(),
             quantity: *order.remaining_quantity(),
-            time_in_force: Some(order.time_in_force()),
+            time_in_force: order.time_in_force(),
         };
         state::audit::process_event(
             s,

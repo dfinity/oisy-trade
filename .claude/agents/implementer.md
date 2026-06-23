@@ -27,9 +27,10 @@ You implement code against a specification.
 - Then give a bullet list summary of how specification requirements are covered.
 - Only when the stack has more than one PR, end the PR description with a PR stack
   overview under a section titled exactly "📚 PR stack": all PRs in the stack listed in
-  merge order (bottom to top), with a "you are here" marker on the current one. Keep it
-  consistent across the stack and update it if the stack changes. For a lone PR, omit the
-  stack section entirely.
+  merge order (bottom to top), with a "you are here" marker on the current one. Maintain
+  the stack section of THIS PR only; keeping the *other* PRs in the stack consistent when
+  the stack changes is the orchestrator's job, not yours. For a lone PR, omit the stack
+  section entirely.
 - Report the PR number back to the orchestrator.
 
 ## Commits

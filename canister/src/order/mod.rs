@@ -876,7 +876,7 @@ impl PendingOrder {
             side: self.side,
             price: self.price,
             remaining_quantity: self.quantity,
-            time_in_force: Some(self.time_in_force),
+            time_in_force: self.time_in_force,
         }
     }
 }
@@ -891,11 +891,8 @@ pub struct Order {
     price: Price,
     #[n(3)]
     remaining_quantity: Quantity,
-    /// Append-only trailing field. Orders encoded before it existed decode as
-    /// `None`, which [`Order::time_in_force`] resolves to
-    /// [`TimeInForce::GoodTilCanceled`].
     #[n(4)]
-    time_in_force: Option<TimeInForce>,
+    time_in_force: TimeInForce,
 }
 
 impl Order {
@@ -912,7 +909,7 @@ impl Order {
     }
 
     pub fn time_in_force(&self) -> TimeInForce {
-        self.time_in_force.unwrap_or_default()
+        self.time_in_force
     }
 
     pub fn remaining_quantity(&self) -> &Quantity {
@@ -927,19 +924,16 @@ impl Order {
     }
 }
 
-/// An order resting in the order book. Only carries the ID and remaining
-/// quantity — side and price are implicit from the book's structure.
+/// An order resting in the order book. Carries the ID, remaining quantity, and
+/// time-in-force — side and price are implicit from the book's structure.
 #[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct RestingOrder {
     #[n(0)]
     id: OrderSeq,
     #[n(1)]
     remaining_quantity: Quantity,
-    /// Append-only trailing field. Resting orders encoded before it existed
-    /// decode as `None`, which [`RestingOrder::time_in_force`] resolves to
-    /// [`TimeInForce::GoodTilCanceled`].
     #[n(2)]
-    time_in_force: Option<TimeInForce>,
+    time_in_force: TimeInForce,
 }
 
 impl From<Order> for RestingOrder {
@@ -947,7 +941,7 @@ impl From<Order> for RestingOrder {
         Self {
             id: order.id,
             remaining_quantity: order.remaining_quantity,
-            time_in_force: Some(order.time_in_force()),
+            time_in_force: order.time_in_force(),
         }
     }
 }
@@ -961,7 +955,7 @@ impl RestingOrder {
             side,
             price,
             remaining_quantity: self.remaining_quantity,
-            time_in_force: Some(self.time_in_force()),
+            time_in_force: self.time_in_force,
         }
     }
 
@@ -970,7 +964,7 @@ impl RestingOrder {
     }
 
     pub fn time_in_force(&self) -> TimeInForce {
-        self.time_in_force.unwrap_or_default()
+        self.time_in_force
     }
 
     pub fn remaining_quantity(&self) -> &Quantity {

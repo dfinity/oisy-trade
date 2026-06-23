@@ -36,12 +36,32 @@ When I give you a specification to build:
    `repos/{owner}/{repo}/pulls/<n>/comments`, review summaries at
    `repos/{owner}/{repo}/pulls/<n>/reviews`; review-thread resolution state via the
    GraphQL `reviewThreads` field (not exposed by `gh pr view --json`).
+   After ANY push to the PR — an `implementer` fix, a `main`-merge, a rebase — re-run
+   *both* the CI check (`gh pr checks`) and this unresolved-comment check before going
+   idle; never poll one without the other (a push that re-triggers CI also re-triggers
+   bot review).
 4. The automated loop is DONE only when the reviewer returns VERDICT: READY AND the PR
    has no unresolved comments. Then: do NOT mark the PR ready for review — leave it as a
    draft and post a comment saying the PR is ready for my review, then summarize the
    state and STOP.
+   This STOP is a pause, not the end: while the PR stays open it keeps accruing activity
+   (my review, a bot re-review, a `main`-merge), so any new commit or unresolved comment
+   on it re-enters the loop at step 3 — do not treat an open PR as finished.
    Do NOT approve and do NOT merge — marking ready, final approval, and merge are mine
    to do manually.
+
+For stacked PRs: whenever a PR is added to, removed from, or reordered within a stack,
+refresh the "📚 PR stack" section of every *other* PR in the stack (and the spec's
+**Delivery / PR sequence**) so they all stay consistent — e.g. opening PR N means going
+back to PRs 1..N-1 and adding PR N to their stack lists. This is the orchestrator's job:
+the `implementer` only maintains the stack section of the PR it is building, since it is
+scoped to a single PR and shouldn't reach into siblings.
+
+When a stack's base PR merges, bring each dependent PR up to date: retarget its base to
+the new parent (usually `main`), merge the parent in and resolve conflicts (keeping the
+dependent's own changes), re-run its checks until green, and refresh its stack section
+(mark the merged PR ✅). Don't leave a dependent PR pointing at a deleted branch or
+showing a stale diff.
 
 Never end the loop on your own judgment — it ends only when the reviewer's VERDICT is
 READY and no unresolved comments remain. Final approval is always mine.

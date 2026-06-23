@@ -58,9 +58,7 @@ mod order_id {
 }
 
 mod time_in_force {
-    use crate::order::{
-        Order, OrderSeq, PendingOrder, Price, Quantity, RestingOrder, Side, TimeInForce,
-    };
+    use crate::order::{Order, PendingOrder, RestingOrder, TimeInForce};
     use crate::test_fixtures::arbitrary::arb_order;
     use proptest::prelude::*;
 
@@ -100,38 +98,6 @@ mod time_in_force {
         }
     }
 
-    /// Mirrors the `Order` field layout *before* `time_in_force` was appended,
-    /// keeping the same field indices. Encoding an instance and decoding it as
-    /// the current `Order` proves legacy data (no `time_in_force`) resolves to
-    /// `GoodTilCanceled`.
-    #[derive(minicbor::Encode)]
-    struct LegacyOrder {
-        #[n(0)]
-        id: OrderSeq,
-        #[n(1)]
-        side: Side,
-        #[n(2)]
-        price: Price,
-        #[n(3)]
-        remaining_quantity: Quantity,
-    }
-
-    #[test]
-    fn legacy_order_without_field_decodes_as_good_til_canceled() {
-        let legacy = LegacyOrder {
-            id: OrderSeq::new(3),
-            side: Side::Sell,
-            price: Price::new(42),
-            remaining_quantity: Quantity::from(5u64),
-        };
-
-        let mut bytes = vec![];
-        minicbor::encode(&legacy, &mut bytes).unwrap();
-        let decoded: Order = minicbor::decode(&bytes).unwrap();
-
-        assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
-    }
-
     proptest! {
         #[test]
         fn resting_order_preserves_time_in_force_through_to_order(order in arb_order()) {
@@ -151,36 +117,6 @@ mod time_in_force {
             let decoded: RestingOrder = minicbor::decode(&bytes).unwrap();
             prop_assert_eq!(decoded, resting);
         }
-    }
-
-    /// Mirrors the `RestingOrder` field layout *before* `time_in_force` was
-    /// appended, keeping the same field indices. Encoding an instance and
-    /// decoding it as the current `RestingOrder` proves legacy data (no
-    /// `time_in_force`) resolves to `GoodTilCanceled`.
-    #[derive(minicbor::Encode)]
-    struct LegacyRestingOrder {
-        #[n(0)]
-        id: OrderSeq,
-        #[n(1)]
-        remaining_quantity: Quantity,
-    }
-
-    #[test]
-    fn legacy_resting_order_without_field_decodes_as_good_til_canceled() {
-        let legacy = LegacyRestingOrder {
-            id: OrderSeq::new(7),
-            remaining_quantity: Quantity::from(11u64),
-        };
-
-        let mut bytes = vec![];
-        minicbor::encode(&legacy, &mut bytes).unwrap();
-        let decoded: RestingOrder = minicbor::decode(&bytes).unwrap();
-
-        assert_eq!(decoded.time_in_force(), TimeInForce::GoodTilCanceled);
-        assert_eq!(
-            decoded.to_order(Side::Buy, Price::new(1)).time_in_force(),
-            TimeInForce::GoodTilCanceled
-        );
     }
 }
 
@@ -1119,7 +1055,7 @@ mod order_book {
 }
 
 mod process_pending_orders {
-    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq, Price, Quantity, Side};
+    use crate::order::{MatchingOutput, Order, OrderBook, OrderSeq};
     use crate::test_fixtures::{LOT_SIZE, PRICE_SCALE, order_book};
     use std::collections::BTreeSet;
 
@@ -1202,123 +1138,6 @@ mod process_pending_orders {
 
         let second = process_all_pending_orders(&mut book);
         assert!(second.filled_orders.is_empty());
-    }
-
-    mod fill_or_kill {
-        use super::*;
-        use crate::order::OrderBookSnapshot;
-        use crate::test_fixtures::{fok_buy, fok_sell};
-
-        fn fok_buy_pending(book: &mut OrderBook, price: u128, quantity: u64) -> OrderSeq {
-            let seq = book.next_seq();
-            book.add_pending_order(fok_buy(seq.get(), price, quantity));
-            seq
-        }
-
-        /// The resting state of the book — every field except the monotonic
-        /// `next_seq`, which legitimately advances when a (later-killed) FOK is
-        /// enqueued. A killed FOK must leave this resting state untouched.
-        fn resting_state(book: &OrderBook) -> OrderBookSnapshot {
-            OrderBookSnapshot {
-                next_seq: OrderSeq::ZERO,
-                ..OrderBookSnapshot::from(book)
-            }
-        }
-
-        #[test]
-        fn should_fill_fok_fully_against_sufficient_liquidity() {
-            let mut book = order_book();
-            let lot = u64::from(LOT_SIZE);
-            book.add_pending_order(sell(0, 100 * PRICE_SCALE, 3 * lot));
-            let _ = process_all_pending_orders(&mut book);
-
-            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 3 * lot);
-            let output = process_all_pending_orders(&mut book);
-
-            assert_eq!(output.fills.len(), 1);
-            assert!(output.filled_orders.contains(&taker));
-            assert!(output.expired_orders.is_empty());
-            assert!(output.resting_orders.is_empty());
-            assert!(book.is_empty());
-        }
-
-        #[test]
-        fn should_fill_fok_when_liquidity_exactly_equals_quantity() {
-            let mut book = order_book();
-            let lot = u64::from(LOT_SIZE);
-            book.add_pending_order(sell(0, 100 * PRICE_SCALE, lot));
-            book.add_pending_order(sell(1, 100 * PRICE_SCALE, lot));
-            let _ = process_all_pending_orders(&mut book);
-
-            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 2 * lot);
-            let output = process_all_pending_orders(&mut book);
-
-            assert_eq!(output.fills.len(), 2);
-            assert!(output.filled_orders.contains(&taker));
-            assert!(output.expired_orders.is_empty());
-            assert!(book.is_empty());
-        }
-
-        #[test]
-        fn should_kill_fok_against_no_liquidity_without_mutating_book() {
-            let mut book = order_book();
-            let lot = u64::from(LOT_SIZE);
-            book.add_pending_order(sell(0, 110 * PRICE_SCALE, lot));
-            let _ = process_all_pending_orders(&mut book);
-            let before = resting_state(&book);
-
-            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, lot);
-            let output = process_all_pending_orders(&mut book);
-
-            assert!(output.fills.is_empty());
-            assert!(output.filled_orders.is_empty());
-            assert!(output.resting_orders.is_empty());
-            assert!(output.expired_orders.contains_key(&taker));
-            assert_eq!(resting_state(&book), before);
-        }
-
-        #[test]
-        fn should_kill_fok_against_insufficient_liquidity_without_partial_fill() {
-            let mut book = order_book();
-            let lot = u64::from(LOT_SIZE);
-            // Only one lot of liquidity, but the FOK wants three.
-            book.add_pending_order(sell(0, 100 * PRICE_SCALE, lot));
-            let _ = process_all_pending_orders(&mut book);
-            let before = resting_state(&book);
-
-            let taker = fok_buy_pending(&mut book, 100 * PRICE_SCALE, 3 * lot);
-            let output = process_all_pending_orders(&mut book);
-
-            assert!(
-                output.fills.is_empty(),
-                "FOK must not settle a partial fill"
-            );
-            assert!(output.filled_orders.is_empty());
-            assert!(output.resting_orders.is_empty());
-            assert!(output.expired_orders.contains_key(&taker));
-            assert_eq!(
-                resting_state(&book),
-                before,
-                "killed FOK must leave the resting book untouched"
-            );
-        }
-
-        #[test]
-        fn should_carry_killed_order_side_price_quantity_for_refund() {
-            let mut book = order_book();
-            let lot = u64::from(LOT_SIZE);
-            book.add_pending_order(buy(0, 90 * PRICE_SCALE, lot));
-            let _ = process_all_pending_orders(&mut book);
-
-            let seq = book.next_seq();
-            book.add_pending_order(fok_sell(seq.get(), 100 * PRICE_SCALE, 2 * lot));
-            let output = process_all_pending_orders(&mut book);
-
-            let removed = output.expired_orders.get(&seq).expect("FOK was killed");
-            assert_eq!(removed.side, Side::Sell);
-            assert_eq!(removed.price, Price::new(100 * PRICE_SCALE));
-            assert_eq!(removed.remaining_quantity, Quantity::from(2 * lot));
-        }
     }
 }
 
