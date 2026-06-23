@@ -496,13 +496,27 @@ mod cancel_limit_order {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        Balance, CancelLimitOrderRequestError, ErrorKind, LimitOrderRequest, OrderRecord,
-        OrderStatus, Side, TimeInForce,
+        AddTradingPairRequest, Balance, CancelLimitOrderRequestError, ErrorKind, LimitOrderRequest,
+        OrderRecord, OrderStatus, Side, TimeInForce,
     };
 
     #[tokio::test]
     async fn should_cancel_partially_filled_buy_and_refund_residual() {
-        let setup = Setup::new().await.with_trading_pair().await;
+        // Non-zero maker/taker fees so the partially filled buy accrues a
+        // non-trivial `filled_fee` and a `filled_quote` consistent with the
+        // realized notional.
+        const MAKER_FEE_BPS: u16 = 10;
+        const TAKER_FEE_BPS: u16 = 23;
+        let setup = Setup::new().await;
+        setup
+            .oisy_trade_client_with_caller(setup.controller())
+            .add_trading_pair(AddTradingPairRequest {
+                maker_fee_bps: MAKER_FEE_BPS,
+                taker_fee_bps: TAKER_FEE_BPS,
+                ..setup.add_trading_pair_request()
+            })
+            .await
+            .unwrap();
         let buyer = Principal::from_slice(&[0x01]);
         let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
@@ -616,7 +630,9 @@ mod cancel_limit_order {
                 last_updated_at: canceled.last_updated_at,
                 time_in_force: TimeInForce::GoodTilCanceled,
                 filled_quote: Nat::from(1_000_000_000u64),
-                filled_fee: Nat::from(0u64),
+                // Buyer rested first, so it is the maker: a base-token fee at the
+                // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
+                filled_fee: Nat::from(1_000u64),
             }
         );
 
@@ -643,7 +659,9 @@ mod cancel_limit_order {
                 .await
                 .unwrap(),
             Balance {
-                free: 1_000_000u64.into(),
+                // 1M base received minus the 1_000 maker fee withheld on the
+                // base side.
+                free: 999_000u64.into(),
                 reserved: 0u64.into(),
             }
         );
