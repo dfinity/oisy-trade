@@ -924,8 +924,8 @@ impl Order {
     }
 }
 
-/// An order resting in the order book. Only carries the ID and remaining
-/// quantity — side and price are implicit from the book's structure.
+/// An order resting in the order book. Carries the ID, remaining quantity, and
+/// time-in-force — side and price are implicit from the book's structure.
 #[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct RestingOrder {
     #[n(0)]
