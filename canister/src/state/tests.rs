@@ -2409,7 +2409,7 @@ mod get_balances {
     #[test]
     fn should_return_empty_for_user_without_balances_and_no_filter() {
         let (state, _, _) = test_fixtures::two_token_state();
-        assert_eq!(state.get_balances(&USER, None), vec![]);
+        assert_eq!(state.get_balances(&USER, None), Ok(vec![]));
     }
 
     /// Read paths resolve identities with `lookup`, never `get_or_register`, so
@@ -2420,11 +2420,11 @@ mod get_balances {
         let registry_before = state.user_registry.clone();
         let stranger = Principal::from_slice(&[0xEE]);
 
-        assert_eq!(state.get_balances(&stranger, None), vec![]);
+        assert_eq!(state.get_balances(&stranger, None), Ok(vec![]));
         let filter = vec![FilterToken::ById(a_id.into())];
         assert_eq!(
             state.get_balances(&stranger, Some(&filter)),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)]),
         );
         assert_eq!(
             state.get_balance(&stranger, &a_id),
@@ -2445,7 +2445,7 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)]),
         );
     }
 
@@ -2461,13 +2461,15 @@ mod get_balances {
         state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
 
         // BTreeMap iteration follows TokenId ordering; assert as a set.
-        let mut got = state.get_balances(&USER, None);
-        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut got = state
+            .get_balances(&USER, None)
+            .expect("no filter cannot fail");
+        got.sort_by_key(|b| b.token.id.ledger_id);
         let mut want = vec![
-            ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-            ok_balance(b_id, test_fixtures::icp_metadata(), 5, 0),
+            balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+            balance(b_id, test_fixtures::icp_metadata(), 5, 0),
         ];
-        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        want.sort_by_key(|b| b.token.id.ledger_id);
         assert_eq!(got, want);
     }
 
@@ -2487,10 +2489,10 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
-            ],
+            Ok(vec![
+                balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ]),
         );
     }
 
@@ -2510,26 +2512,12 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, None),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)]
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)])
         );
     }
 
     #[test]
-    fn should_return_token_not_supported_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
-        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
-
-        assert_eq!(
-            state.get_balances(&USER, Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
-        );
-    }
-
-    #[test]
-    fn should_mix_ok_and_err_entries_in_filter_order() {
+    fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
         let (mut state, a_id, _) = test_fixtures::two_token_state();
         state.deposit(
             USER,
@@ -2545,12 +2533,11 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+            Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::TokenNotSupported(FilterToken::ById(
                     unknown.into()
-                ))),
-            ],
+                ))
+            )),
         );
     }
 
@@ -2563,25 +2550,19 @@ mod get_balances {
             Quantity::from(10u64),
             StableMemoryOptions::Write,
         );
-        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
         let filter = vec![
             FilterToken::ById(a_id.into()),
             FilterToken::ById(a_id.into()),
             FilterToken::ById(b_id.into()),
-            FilterToken::ById(unknown.into()),
             FilterToken::ById(b_id.into()),
-            FilterToken::ById(unknown.into()),
         ];
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                    unknown.into()
-                ))),
-            ],
+            Ok(vec![
+                balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ]),
         );
     }
 
@@ -2595,16 +2576,16 @@ mod get_balances {
             StableMemoryOptions::Write,
         );
 
-        assert_eq!(state.get_balances(&USER, Some(&[])), vec![]);
+        assert_eq!(state.get_balances(&USER, Some(&[])), Ok(vec![]));
     }
 
-    fn ok_balance(
+    fn balance(
         token_id: TokenId,
         metadata: crate::order::TokenMetadata,
         free: u64,
         reserved: u64,
-    ) -> Result<UserTokenBalance, GetBalancesError> {
-        Ok(UserTokenBalance {
+    ) -> UserTokenBalance {
+        UserTokenBalance {
             token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
@@ -2613,7 +2594,7 @@ mod get_balances {
                 free: Nat::from(free),
                 reserved: Nat::from(reserved),
             },
-        })
+        }
     }
 }
 
@@ -2626,7 +2607,7 @@ mod get_fee_balances {
     #[test]
     fn should_return_empty_when_no_fees_accrued_and_no_filter() {
         let (state, _, _) = test_fixtures::two_token_state();
-        assert_eq!(state.get_fee_balances(None), vec![]);
+        assert_eq!(state.get_fee_balances(None), Ok(vec![]));
     }
 
     #[test]
@@ -2636,7 +2617,7 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 0)],
+            Ok(vec![fee_balance(a_id, test_fixtures::ckbtc_metadata(), 0)]),
         );
     }
 
@@ -2646,13 +2627,13 @@ mod get_fee_balances {
         test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
         test_fixtures::accrue_fee(&mut state.balances, b_id, 3);
 
-        let mut got = state.get_fee_balances(None);
-        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut got = state.get_fee_balances(None).expect("no filter cannot fail");
+        got.sort_by_key(|b| b.token.id.ledger_id);
         let mut want = vec![
-            ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
-            ok_fee_balance(b_id, test_fixtures::icp_metadata(), 3),
+            fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+            fee_balance(b_id, test_fixtures::icp_metadata(), 3),
         ];
-        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        want.sort_by_key(|b| b.token.id.ledger_id);
         assert_eq!(got, want);
     }
 
@@ -2667,24 +2648,30 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![
-                ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
-                ok_fee_balance(b_id, test_fixtures::icp_metadata(), 0),
-            ],
+            Ok(vec![
+                fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+                fee_balance(b_id, test_fixtures::icp_metadata(), 0),
+            ]),
         );
     }
 
     #[test]
-    fn should_return_token_not_supported_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
+    fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
+            Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))
+            )),
         );
     }
 
@@ -2699,7 +2686,7 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 5)],
+            Ok(vec![fee_balance(a_id, test_fixtures::ckbtc_metadata(), 5)]),
         );
     }
 
@@ -2708,15 +2695,15 @@ mod get_fee_balances {
         let (mut state, a_id, _) = test_fixtures::two_token_state();
         test_fixtures::accrue_fee(&mut state.balances, a_id, 5);
 
-        assert_eq!(state.get_fee_balances(Some(&[])), vec![]);
+        assert_eq!(state.get_fee_balances(Some(&[])), Ok(vec![]));
     }
 
-    fn ok_fee_balance(
+    fn fee_balance(
         token_id: TokenId,
         metadata: crate::order::TokenMetadata,
         amount: u64,
-    ) -> Result<UserTokenBalance, GetBalancesError> {
-        Ok(UserTokenBalance {
+    ) -> UserTokenBalance {
+        UserTokenBalance {
             token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
@@ -2725,7 +2712,7 @@ mod get_fee_balances {
                 free: Nat::from(amount),
                 reserved: Nat::from(0u64),
             },
-        })
+        }
     }
 }
 

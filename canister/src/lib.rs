@@ -1,11 +1,11 @@
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN,
+    MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel,
+    Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -142,9 +142,11 @@ pub fn get_order_book_ticker(
 ) -> Result<OrderBookTicker, GetOrderBookTickerError> {
     let internal_pair = order::TradingPair::from(pair);
     state::with_state(|s| {
-        let book = s
-            .get_order_book(&internal_pair)
-            .ok_or(GetOrderBookTickerError::UnknownTradingPair)?;
+        let book = s.get_order_book(&internal_pair).ok_or_else(|| {
+            GetOrderBookTickerError::request(
+                oisy_trade_types::GetOrderBookTickerRequestError::UnknownTradingPair,
+            )
+        })?;
         Ok(OrderBookTicker {
             bid: book.bid_levels(1).next().map(to_price_level),
             ask: book.ask_levels(1).next().map(to_price_level),
@@ -159,17 +161,21 @@ pub fn get_order_book_depth(
         None => DEFAULT_DEPTH_LIMIT,
         Some(n) if n <= MAX_DEPTH_LIMIT => n,
         Some(n) => {
-            return Err(GetOrderBookDepthError::LimitTooLarge {
-                requested: n,
-                max: MAX_DEPTH_LIMIT,
-            });
+            return Err(GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::LimitTooLarge {
+                    requested: n,
+                    max: MAX_DEPTH_LIMIT,
+                },
+            ));
         }
     };
     let internal_pair = order::TradingPair::from(request.trading_pair);
     state::with_state(|s| {
-        let book = s
-            .get_order_book(&internal_pair)
-            .ok_or(GetOrderBookDepthError::UnknownTradingPair)?;
+        let book = s.get_order_book(&internal_pair).ok_or_else(|| {
+            GetOrderBookDepthError::request(
+                oisy_trade_types::GetOrderBookDepthRequestError::UnknownTradingPair,
+            )
+        })?;
         let limit = limit as usize;
         Ok(OrderBookDepth {
             bids: book.bid_levels(limit).map(to_price_level).collect(),
@@ -374,18 +380,16 @@ pub async fn withdraw(
 pub fn get_balances(
     filter: Option<Vec<FilterToken>>,
     caller: candid::Principal,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     validate_filter_len(filter.as_deref())?;
-    Ok(state::with_state(|s| {
-        s.get_balances(&caller, filter.as_deref())
-    }))
+    state::with_state(|s| s.get_balances(&caller, filter.as_deref()))
 }
 
 pub fn get_fee_balances(
     filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     validate_filter_len(filter.as_deref())?;
-    Ok(state::with_state(|s| s.get_fee_balances(filter.as_deref())))
+    state::with_state(|s| s.get_fee_balances(filter.as_deref()))
 }
 
 /// Why a [`get_my_orders`] call could not be served.
@@ -609,14 +613,16 @@ fn set_halt(
     Ok(())
 }
 
-fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesRequestError> {
+fn validate_filter_len(filter: Option<&[FilterToken]>) -> Result<(), GetBalancesError> {
     if let Some(f) = filter
         && (f.len() as u32) > MAX_FILTER_LEN
     {
-        return Err(GetBalancesRequestError::FilterTooLarge {
-            len: f.len() as u32,
-            max: MAX_FILTER_LEN,
-        });
+        return Err(GetBalancesError::request(
+            oisy_trade_types::GetBalancesRequestError::FilterTooLarge {
+                len: f.len() as u32,
+                max: MAX_FILTER_LEN,
+            },
+        ));
     }
     Ok(())
 }
