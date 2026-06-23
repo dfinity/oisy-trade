@@ -2327,12 +2327,11 @@ mod settle_fills {
         }
     }
 
-    /// Order-level `filled_quote` / `filled_fee` from the DEFI-2901 worked
-    /// example. The spec writes that example in ICP/ckUSDT (8/6 decimals); this
-    /// test reuses the ICP/ckBTC fixture (both 8 decimals). The stored
-    /// smallest-unit figures depend only on `base_scale = 10^8` and the
-    /// smallest-unit prices/quantities — not on the quote token's decimals — so
-    /// every value below matches the spec's numbers exactly.
+    /// Order-level `filled_quote` / `filled_fee` from the DEFI-2901 ICP/ckUSDT
+    /// worked example: base ICP (8 decimals) / quote ckUSDT (6 decimals),
+    /// `base_scale = 10^8`. The smallest-unit prices and quantities below are
+    /// the spec's, e.g. `PRICE_10 = 10_000_000` is 10 ckUSDT/ICP and the
+    /// resulting `notional 20_000_000` is 20 ckUSDT.
     mod realized_scalars {
         use super::{BUYER, SELLER, TestState};
         use crate::EXECUTOR;
@@ -2341,8 +2340,8 @@ mod settle_fills {
         };
         use crate::test_fixtures::mocks::mock_runtime_for;
         use crate::test_fixtures::{
-            self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
-            icp_ckbtc_trading_pair, icp_metadata,
+            self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckusdt_metadata,
+            icp_ckusdt_trading_pair, icp_metadata,
         };
         use candid::Principal;
 
@@ -2361,9 +2360,9 @@ mod settle_fills {
             let mut state = test_fixtures::state();
             state.record_trading_pair(
                 OrderBookId::ZERO,
-                icp_ckbtc_trading_pair(),
+                icp_ckusdt_trading_pair(),
                 icp_metadata(),
-                ckbtc_metadata(),
+                ckusdt_metadata(),
                 TICK_SIZE,
                 LOT_SIZE,
                 MIN_NOTIONAL,
@@ -2385,13 +2384,13 @@ mod settle_fills {
 
         /// A buy taker sweeps two maker levels (2 ICP @ 10, 3 ICP @ 11) with
         /// taker 10 bps / maker 5 bps. The taker's `filled_quote` is the realized
-        /// notional 53 ckBTC (the 7-ckBTC reservation surplus is excluded), and
+        /// notional 53 ckUSDT (the 7-ckUSDT reservation surplus is excluded), and
         /// its `filled_fee` is the base-denominated 0.005 ICP. Each maker records
         /// its own quote-denominated fee.
         #[test]
         fn buy_taker_sweeping_two_levels_rolls_up_quote_and_fee() {
             let mut state = setup(5, 10);
-            let pair = icp_ckbtc_trading_pair();
+            let pair = icp_ckusdt_trading_pair();
 
             let maker_a =
                 test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
@@ -2402,26 +2401,26 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // Taker buy: gross 5 ICP filled, realized notional 20 + 33 = 53
-            // ckBTC, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
-            // 7-ckBTC reservation surplus is released, not part of filled_quote.
+            // ckUSDT, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
+            // 7-ckUSDT reservation surplus is released, not part of filled_quote.
             let taker = record(&state, BUYER, taker);
             assert_eq!(taker.status, OrderStatus::Filled);
             assert_eq!(taker.filled_quantity, Quantity::from(QTY_5));
             assert_eq!(taker.filled_quote, Quantity::from(53_000_000u128));
             assert_eq!(taker.filled_fee, Quantity::from(500_000u128));
-            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckBTC/ICP.
+            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckUSDT/ICP.
             let base_scale = 100_000_000u128;
             let vwap = taker.filled_quote.as_u128().unwrap() * base_scale
                 / taker.filled_quantity.as_u128().unwrap();
             assert_eq!(vwap, 10_600_000);
 
-            // Maker A (Fill 1): 20 ckBTC notional, 0.01 ckBTC fee (quote).
+            // Maker A (Fill 1): 20 ckUSDT notional, 0.01 ckUSDT fee (quote).
             let maker_a = record(&state, SELLER, maker_a);
             assert_eq!(maker_a.filled_quantity, Quantity::from(QTY_2));
             assert_eq!(maker_a.filled_quote, Quantity::from(20_000_000u128));
             assert_eq!(maker_a.filled_fee, Quantity::from(10_000u128));
 
-            // Maker B (Fill 2): 33 ckBTC notional, 0.0165 ckBTC fee (quote).
+            // Maker B (Fill 2): 33 ckUSDT notional, 0.0165 ckUSDT fee (quote).
             let maker_b = record(&state, MAKER_B, maker_b);
             assert_eq!(maker_b.filled_quantity, Quantity::from(QTY_3));
             assert_eq!(maker_b.filled_quote, Quantity::from(33_000_000u128));
@@ -2435,7 +2434,7 @@ mod settle_fills {
         #[test]
         fn order_filling_both_ways_in_one_batch_writes_once() {
             let mut state = setup(5, 10);
-            let pair = icp_ckbtc_trading_pair();
+            let pair = icp_ckusdt_trading_pair();
 
             // A resting ask the middle order will cross as taker.
             test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
@@ -2447,8 +2446,8 @@ mod settle_fills {
             test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // Taker leg: 2 ICP @ 10 → notional 20 ckBTC. Maker leg: 3 ICP @ 10
-            // → notional 30 ckBTC. filled_quote = 20 + 30 = 50 ckBTC.
+            // Taker leg: 2 ICP @ 10 → notional 20 ckUSDT. Maker leg: 3 ICP @ 10
+            // → notional 30 ckUSDT. filled_quote = 20 + 30 = 50 ckUSDT.
             let pivot = record(&state, BUYER, pivot);
             assert_eq!(pivot.status, OrderStatus::Filled);
             assert_eq!(pivot.filled_quantity, Quantity::from(QTY_5));
