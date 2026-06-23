@@ -275,26 +275,6 @@ rare and safe to retry → `TemporaryError`.
 - `get_my_orders` signature becomes a result; new `GetMyOrdersError`; new bare `InvalidOrderId` leaf on
   `CancelLimitOrderError`.
 
-### Test plan
-
-Unit (`libs/types/src/tests.rs`):
-- For every leaf, assert the internal→public conversion places it under the membership-table arm and
-  sets a non-empty `message` — parameterized. (**R2**, **R3**, **R4**)
-- Forward-compat decode test: encode an error whose inner arm has an *extra* leaf, decode into the
-  shipped type; assert inner `null` while `kind` and `message` decode intact. (**R5**)
-
-Unit (`canister/src/.../tests.rs`):
-- `cancel_limit_order` malformed id ⇒ `RequestError(InvalidOrderId)`, not `OrderNotFound`. (**R7**)
-- `get_my_orders` malformed id ⇒ `Err(RequestError(InvalidOrderId))`, no panic; unknown id ⇒ `Ok([])`. (**R8**)
-
-Integration (`dex_int_tests`): update existing assertions to the `{ kind; message }` shape, asserting the
-arm + inner leaf for at least one case per endpoint; new cancel + `get_my_orders` malformed-id cases over
-the boundary, asserting no trap. (**R1**, **R7**, **R8**)
-
-Interface: `check_candid_interface_compatibility` passes against the updated `oisy_trade.did`. (**R9**)
-
-Commands: `cargo test --workspace`, `cargo fmt --all -- --check`, `just lint`.
-
 ### Delivery / PR sequence
 
 Stacked, bottom-to-top; each compiles and tests independently. PR2 and PR3 each depend only on PR1.
