@@ -2036,12 +2036,13 @@ mod settle_fills {
             use crate::order::{self, PairToken};
             use crate::state::event::BalanceOperation;
 
-            let settlements = super::super::fill_settlements(
-                &output,
-                FeeRates::default(),
-                std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
-            );
-            let ops = super::super::compute_balance_operations(&settlements);
+            let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
+            let mut ops = Vec::new();
+            for fill in &output.fills {
+                let settlement =
+                    super::super::fill_settlement(fill, FeeRates::default(), base_scale);
+                super::super::push_balance_operations(&mut ops, &settlement);
+            }
             let fills_len = output.fills.len();
 
             prop_assert!(
