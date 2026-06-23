@@ -400,6 +400,9 @@ pub enum GetMyOrdersError {
     /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
     /// not a well-formed order id.
     InvalidOrderId(order::OrderIdParseError),
+    /// A well-formed order id (`ById` target or `ByPage.after` cursor) is
+    /// unknown or not owned by the caller.
+    OrderNotFound,
 }
 
 pub fn get_my_orders(
@@ -412,9 +415,9 @@ pub fn get_my_orders(
             let id = id
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
-            state::with_state(|s| s.get_user_order(&caller, id))
-                .into_iter()
-                .collect()
+            let order = state::with_state(|s| s.get_user_order(&caller, id))
+                .ok_or(GetMyOrdersError::OrderNotFound)?;
+            vec![order]
         }
         oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
             let after = page
@@ -424,6 +427,7 @@ pub fn get_my_orders(
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
             state::with_state(|s| s.get_user_orders(&caller, after, length))
+                .map_err(|_| GetMyOrdersError::OrderNotFound)?
         }
     };
     Ok(results

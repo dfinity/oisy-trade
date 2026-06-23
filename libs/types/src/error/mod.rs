@@ -200,6 +200,10 @@ pub enum GetMyOrdersRequestError {
     /// not a well-formed order id.
     #[error("the supplied order id is not a well-formed order id")]
     InvalidOrderId,
+    /// A well-formed order id in the filter (`ById` target or `ByPage.after`
+    /// cursor) is unknown or not owned by the caller.
+    #[error("no order with the given id exists for the caller")]
+    OrderNotFound,
 }
 
 /// Error returned by the deposit endpoint.

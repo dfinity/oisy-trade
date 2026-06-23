@@ -157,8 +157,16 @@ fn get_fee_balances(
 fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Result<Vec<UserOrder>, GetMyOrdersError> {
     use oisy_trade_canister::Runtime;
     oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()).map_err(
-        |oisy_trade_canister::GetMyOrdersError::InvalidOrderId(_)| {
-            GetMyOrdersError::request(GetMyOrdersRequestError::InvalidOrderId)
+        |err| {
+            let leaf = match err {
+                oisy_trade_canister::GetMyOrdersError::InvalidOrderId(_) => {
+                    GetMyOrdersRequestError::InvalidOrderId
+                }
+                oisy_trade_canister::GetMyOrdersError::OrderNotFound => {
+                    GetMyOrdersRequestError::OrderNotFound
+                }
+            };
+            GetMyOrdersError::request(leaf)
         },
     )
 }

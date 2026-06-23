@@ -105,14 +105,17 @@ impl<R: Runtime> OisyTradeClient<R> {
             .unwrap()
     }
 
-    /// Point-lookup the caller's order by id, or `None` if the caller does not
-    /// own an order with that id.
-    pub async fn get_my_order(&self, order_id: OrderId) -> Option<UserOrder> {
+    /// Point-lookup the caller's order by id. Returns `Err(OrderNotFound)` when
+    /// the id is unknown or owned by another principal.
+    pub async fn get_my_order(&self, order_id: OrderId) -> Result<UserOrder, GetMyOrdersError> {
         self.get_my_orders(GetMyOrdersArgs::by_id(order_id))
             .await
-            .unwrap()
-            .into_iter()
-            .next()
+            .map(|orders| {
+                orders
+                    .into_iter()
+                    .next()
+                    .expect("BUG: ById query returned an empty page instead of OrderNotFound")
+            })
     }
 
     /// Query all listed trading pairs on the OISY TRADE canister.

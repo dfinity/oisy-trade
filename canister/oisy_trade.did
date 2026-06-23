@@ -333,6 +333,9 @@ type GetMyOrdersError = record {
             // An order id in the filter (`ById` target or `ByPage.after`
             // cursor) was not a well-formed order id.
             InvalidOrderId;
+            // A well-formed order id in the filter (`ById` target or
+            // `ByPage.after` cursor) is unknown or not owned by the caller.
+            OrderNotFound;
         };
         TemporaryError : opt variant {};
         InternalError : opt variant {};

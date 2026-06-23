@@ -115,8 +115,8 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(
-            client.get_my_order(order_id).await.map(|o| o.order.status),
-            Some(OrderStatus::Open)
+            client.get_my_order(order_id).await.unwrap().order.status,
+            OrderStatus::Open
         );
 
         setup.drop().await;
@@ -202,17 +202,36 @@ mod add_limit_order {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, alice_ids[1]);
 
+        // A valid cursor at the oldest order has no older orders: end of
+        // history is Ok([]), not an error.
+        assert_eq!(
+            alice
+                .get_my_orders(by_page(Some(alice_ids[0].clone()), 10))
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+
         // Point lookup by id: each caller resolves only their own orders.
-        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await;
-        assert_eq!(alice_by_id.map(|o| o.id), Some(alice_ids[0].clone()));
-        // An order owned by another principal is invisible to a foreign caller.
-        assert!(alice.get_my_order(bob_ids[0].clone()).await.is_none());
-        // An unknown (but well-formed) id resolves to nothing.
-        assert!(
+        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await.unwrap();
+        assert_eq!(alice_by_id.id, alice_ids[0]);
+        // An order owned by another principal is not found for a foreign caller.
+        assert_eq!(
+            alice
+                .get_my_order(bob_ids[0].clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
+        );
+        // An unknown (but well-formed) id is likewise not found.
+        assert_eq!(
             alice
                 .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
                 .await
-                .is_none()
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
         );
 
         // A caller that placed nothing sees none.
@@ -277,36 +296,43 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(
-            client.get_my_order(order_id).await.map(|o| o.order.status),
-            Some(OrderStatus::Open)
+            client.get_my_order(order_id).await.unwrap().order.status,
+            OrderStatus::Open
         );
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_return_nothing_for_unknown_order_and_reject_malformed_id() {
+    async fn should_report_unknown_order_as_not_found_and_reject_malformed_id() {
         let setup = Setup::new().await;
         let client = setup.oisy_trade_client();
 
-        // A well-formed but unknown id resolves to nothing — absence from
-        // the result is the sole not-found signal.
+        // A well-formed but unknown id is not found.
         let not_found = client
             .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
-            .await;
-        assert!(not_found.is_none());
-
-        // A well-formed but unknown cursor returns an empty page, not an error.
+            .await
+            .unwrap_err();
         assert_eq!(
-            client
-                .get_my_orders(by_page(
-                    Some("ffffffffffffffffffffffffffffffff".to_string()),
-                    10
-                ))
-                .await
-                .unwrap(),
-            Vec::new()
+            not_found.kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
         );
+        assert!(not_found.message.is_some_and(|m| !m.is_empty()));
+
+        // A well-formed but unknown cursor is likewise not found, rather than
+        // silently yielding an empty page.
+        let bogus_cursor = client
+            .get_my_orders(by_page(
+                Some("ffffffffffffffffffffffffffffffff".to_string()),
+                10,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            bogus_cursor.kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
+        );
+        assert!(bogus_cursor.message.is_some_and(|m| !m.is_empty()));
 
         // A malformed id is rejected cleanly (no trap) with InvalidOrderId.
         assert_eq!(
@@ -378,15 +404,19 @@ mod add_limit_order {
             buyer_client
                 .get_my_order(buy_order_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Filled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled
         );
         assert_eq!(
             seller_client
                 .get_my_order(sell_order_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Filled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled
         );
 
         // Buyer: received 1M base tokens, spent 1000M quote tokens
@@ -632,8 +662,10 @@ mod cancel_limit_order {
             buyer_client
                 .get_my_order(buy_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Canceled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Canceled
         );
         assert_eq!(
             buyer_client
@@ -1456,15 +1488,19 @@ async fn should_complete_for_users_walkthrough() {
         seller_client
             .get_my_order(sell_order_id)
             .await
-            .map(|o| o.order.status),
-        Some(OrderStatus::Filled)
+            .unwrap()
+            .order
+            .status,
+        OrderStatus::Filled
     );
     assert_eq!(
         buyer_client
             .get_my_order(buy_order_id)
             .await
-            .map(|o| o.order.status),
-        Some(OrderStatus::Filled)
+            .unwrap()
+            .order
+            .status,
+        OrderStatus::Filled
     );
     assert_eq!(
         seller_client
