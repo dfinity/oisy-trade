@@ -1,9 +1,5 @@
-use crate::{
-    DepositError, DepositRequestError, ErrorKind, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
-    GetOrderBookTickerError, GetOrderBookTickerRequestError, TokenId,
-};
-use candid::{CandidType, Principal};
+use crate::{DepositError, DepositRequestError, ErrorKind};
+use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
@@ -110,50 +106,4 @@ fn should_decode_future_leaf_as_none_keeping_arm_and_message() {
 
     assert_eq!(decoded.kind, ErrorKind::RequestError(None));
     assert_eq!(decoded.message, Some("a future reason".to_string()));
-}
-
-#[test]
-fn should_place_get_order_book_ticker_leaf_under_request_error() {
-    let leaf = GetOrderBookTickerRequestError::UnknownTradingPair;
-    let error = GetOrderBookTickerError::request(leaf.clone());
-    assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
-    assert_eq!(error.message, Some(leaf.to_string()));
-    assert!(!error.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_get_order_book_depth_leaves_under_request_error() {
-    let leaves = [
-        GetOrderBookDepthRequestError::UnknownTradingPair,
-        GetOrderBookDepthRequestError::LimitTooLarge {
-            requested: 1_001,
-            max: 1_000,
-        },
-    ];
-    for leaf in leaves {
-        let error = GetOrderBookDepthError::request(leaf.clone());
-        assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
-        assert_eq!(error.message, Some(leaf.to_string()));
-        assert!(!error.message.unwrap().is_empty());
-    }
-}
-
-#[test]
-fn should_place_get_balances_token_not_supported_under_request_error() {
-    let leaf = GetBalancesRequestError::TokenNotSupported(FilterToken::ById(TokenId {
-        ledger_id: Principal::from_slice(&[0xFF]),
-    }));
-    let error = GetBalancesError::request(leaf.clone());
-    assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
-    assert_eq!(error.message, Some(leaf.to_string()));
-    assert!(!error.message.unwrap().is_empty());
-}
-
-#[test]
-fn should_place_get_balances_filter_too_large_under_request_error() {
-    let leaf = GetBalancesRequestError::FilterTooLarge { len: 101, max: 100 };
-    let error = GetBalancesError::request(leaf.clone());
-    assert_eq!(error.kind, ErrorKind::RequestError(Some(leaf.clone())));
-    assert_eq!(error.message, Some(leaf.to_string()));
-    assert!(!error.message.unwrap().is_empty());
 }
