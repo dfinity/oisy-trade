@@ -43,10 +43,13 @@ This spec separates two distinct deliverables, which must not be conflated:
 
 - **R1 — Cumulative quote on the order.** `OrderRecord` exposes `filled_quote`: the cumulative
   **realized** quote notional transacted, summed as `Σ (maker_price × fill_quantity)` over the
-  order's fills. It is always **quote-denominated** and is the *realized* notional — for a buy
-  taker that crossed below its limit, the refunded surplus is **excluded** (the maker price is
-  used, not the taker limit; this matches every venue surveyed — see
-  [Cross-exchange comparison](#cross-exchange-comparison)). VWAP is derivable as
+  order's fills. It is always **quote-denominated** and is the *realized* notional: the price
+  the trade actually executed at, `maker_price × quantity`. (A buy taker that crossed below its
+  limit reserved quote at its *limit* price; when it fills cheaper, the difference between that
+  reservation and the executed notional is released back to its balance — a reservation
+  artifact that was never part of the trade value, not a figure deducted from it. Recording a
+  trade at its execution price is universal — see
+  [Cross-exchange comparison](#cross-exchange-comparison).) VWAP is derivable as
   `filled_quote / filled_quantity`.
 - **R2 — Cumulative fee on the order.** `OrderRecord` exposes `filled_fee`: the cumulative
   **realized** fee charged to the order across its fills. It is denominated in the order's
@@ -73,7 +76,8 @@ This spec separates two distinct deliverables, which must not be conflated:
   or an unknown cursor, returns `Ok([])`; otherwise `Ok(<trades>)`.
 - **R6 — Correct values under price improvement, sweeping, and refund.** For a fill, `price`
   equals the maker's execution price (never the taker's limit); `notional` equals
-  `maker_price × quantity` (so a buy taker's refunded surplus is excluded); `fee` equals the
+  `maker_price × quantity` — the executed price, so a buy taker's reservation surplus is not
+  part of it; `fee` equals the
   amount actually withheld for that side; `is_maker` reflects that side's role on that fill. An
   order that fills partly as taker and partly as maker (crosses on entry, then rests and is hit)
   records each fill with its own role and rate — the role is **per fill**, not per order.
