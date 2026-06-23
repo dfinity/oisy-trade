@@ -495,7 +495,7 @@ type GetBalancesError = record {
 };
 
 // Response shape for `get_balances`.
-type GetBalancesResponse = variant {
+type GetBalancesResult = variant {
     Ok : vec UserTokenBalance;
     Err : GetBalancesError;
 };
@@ -786,7 +786,7 @@ service : (OisyTradeArg) -> {
     //
     // The order of entries in the returned `vec UserTokenBalance` is
     // unspecified; callers must identify each result by the `token` field.
-    get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    get_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Query the canister-owned fee pool. Mirrors `get_balances` shape:
     //
@@ -799,7 +799,7 @@ service : (OisyTradeArg) -> {
     //
     // Each returned `Balance` carries the fee amount in `free`;
     // `reserved` is always zero (fees have no reserved concept).
-    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Return the caller's orders, either a single order by id or a page,
     // newest first. The argument is optional: an absent argument is equivalent
