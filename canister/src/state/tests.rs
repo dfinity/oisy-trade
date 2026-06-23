@@ -2327,9 +2327,11 @@ mod settle_fills {
     }
 
     /// Order-level `filled_quote` / `filled_fee` from the DEFI-2901 worked
-    /// example. The pair is ICP (base, 8 decimals) / ckUSDT (quote); the test
-    /// fixture's base scale is `10^8`, so every stored figure below matches the
-    /// spec's smallest-unit numbers exactly.
+    /// example. The spec writes that example in ICP/ckUSDT (8/6 decimals); this
+    /// test reuses the ICP/ckBTC fixture (both 8 decimals). The stored
+    /// smallest-unit figures depend only on `base_scale = 10^8` and the
+    /// smallest-unit prices/quantities — not on the quote token's decimals — so
+    /// every value below matches the spec's numbers exactly.
     mod realized_scalars {
         use super::{BUYER, SELLER, TestState};
         use crate::EXECUTOR;
@@ -2382,7 +2384,7 @@ mod settle_fills {
 
         /// A buy taker sweeps two maker levels (2 ICP @ 10, 3 ICP @ 11) with
         /// taker 10 bps / maker 5 bps. The taker's `filled_quote` is the realized
-        /// notional 53 ckUSDT (the 7-ckUSDT reservation surplus is excluded), and
+        /// notional 53 ckBTC (the 7-ckBTC reservation surplus is excluded), and
         /// its `filled_fee` is the base-denominated 0.005 ICP. Each maker records
         /// its own quote-denominated fee.
         #[test]
@@ -2399,26 +2401,26 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // Taker buy: gross 5 ICP filled, realized notional 20 + 33 = 53
-            // ckUSDT, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
-            // 7-ckUSDT reservation surplus is released, not part of filled_quote.
+            // ckBTC, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
+            // 7-ckBTC reservation surplus is released, not part of filled_quote.
             let taker = record(&state, BUYER, taker);
             assert_eq!(taker.status, OrderStatus::Filled);
             assert_eq!(taker.filled_quantity, Quantity::from(QTY_5));
             assert_eq!(taker.filled_quote, Quantity::from(53_000_000u128));
             assert_eq!(taker.filled_fee, Quantity::from(500_000u128));
-            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckUSDT/ICP.
+            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckBTC/ICP.
             let base_scale = 100_000_000u128;
             let vwap = taker.filled_quote.as_u128().unwrap() * base_scale
                 / taker.filled_quantity.as_u128().unwrap();
             assert_eq!(vwap, 10_600_000);
 
-            // Maker A (Fill 1): 20 ckUSDT notional, 0.01 ckUSDT fee (quote).
+            // Maker A (Fill 1): 20 ckBTC notional, 0.01 ckBTC fee (quote).
             let maker_a = record(&state, SELLER, maker_a);
             assert_eq!(maker_a.filled_quantity, Quantity::from(QTY_2));
             assert_eq!(maker_a.filled_quote, Quantity::from(20_000_000u128));
             assert_eq!(maker_a.filled_fee, Quantity::from(10_000u128));
 
-            // Maker B (Fill 2): 33 ckUSDT notional, 0.0165 ckUSDT fee (quote).
+            // Maker B (Fill 2): 33 ckBTC notional, 0.0165 ckBTC fee (quote).
             let maker_b = record(&state, MAKER_B, maker_b);
             assert_eq!(maker_b.filled_quantity, Quantity::from(QTY_3));
             assert_eq!(maker_b.filled_quote, Quantity::from(33_000_000u128));
@@ -2444,8 +2446,8 @@ mod settle_fills {
             test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // Taker leg: 2 ICP @ 10 → notional 20 ckUSDT. Maker leg: 3 ICP @ 10
-            // → notional 30 ckUSDT. filled_quote = 20 + 30 = 50 ckUSDT.
+            // Taker leg: 2 ICP @ 10 → notional 20 ckBTC. Maker leg: 3 ICP @ 10
+            // → notional 30 ckBTC. filled_quote = 20 + 30 = 50 ckBTC.
             let pivot = record(&state, BUYER, pivot);
             assert_eq!(pivot.status, OrderStatus::Filled);
             assert_eq!(pivot.filled_quantity, Quantity::from(QTY_5));
