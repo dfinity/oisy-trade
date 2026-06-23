@@ -268,7 +268,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     status: OrderStatus::Pending,
                     created_at: timestamp,
                     last_updated_at: None,
-                    time_in_force: Some(order.time_in_force()),
+                    time_in_force: order.time_in_force(),
                 },
             );
         }

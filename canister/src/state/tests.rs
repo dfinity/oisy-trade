@@ -1740,7 +1740,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
-                    time_in_force: Some(TimeInForce::GoodTilCanceled),
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1783,7 +1783,7 @@ mod settle_fills {
                     status: OrderStatus::Filled,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
-                    time_in_force: Some(TimeInForce::GoodTilCanceled),
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1799,7 +1799,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: buy.created_at,
                     last_updated_at: buy.last_updated_at,
-                    time_in_force: Some(TimeInForce::GoodTilCanceled),
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
         }

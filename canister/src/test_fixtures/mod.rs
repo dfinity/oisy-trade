@@ -648,7 +648,7 @@ pub mod arbitrary {
             arb_order_status(),
             arb_timestamp(),             // created_at
             option::of(arb_timestamp()), // last_updated_at
-            option::of(arb_time_in_force()),
+            arb_time_in_force(),
         )
             .prop_flat_map(
                 move |(
@@ -824,7 +824,7 @@ pub mod arbitrary {
             arb_side(),
             arb_price(),
             arb_quantity(),
-            option::of(arb_time_in_force()),
+            arb_time_in_force(),
         )
             .prop_map(|(user, order_id, side, price, quantity, time_in_force)| {
                 AddLimitOrderEvent {

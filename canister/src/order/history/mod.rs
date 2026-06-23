@@ -42,18 +42,14 @@ pub struct OrderRecord {
     /// cancel); `None` until the order is first modified.
     #[n(7)]
     pub last_updated_at: Option<Timestamp>,
-    /// Time-in-force policy the order was placed with. Append-only trailing
-    /// field; records written before it existed decode as `None`, resolved to
-    /// [`TimeInForce::GoodTilCanceled`] by [`OrderRecord::time_in_force`].
+    /// Time-in-force policy the order was placed with.
     #[n(8)]
-    pub time_in_force: Option<TimeInForce>,
+    pub time_in_force: TimeInForce,
 }
 
 impl OrderRecord {
-    /// Resolves the durable optional field, treating absence (pre-existing
-    /// records) as [`TimeInForce::GoodTilCanceled`].
     pub fn time_in_force(&self) -> TimeInForce {
-        self.time_in_force.unwrap_or_default()
+        self.time_in_force
     }
 }
 

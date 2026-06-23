@@ -130,7 +130,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
                 side: *side,
                 price: *price,
                 quantity: *quantity,
-                time_in_force: time_in_force.unwrap_or_default(),
+                time_in_force: *time_in_force,
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);

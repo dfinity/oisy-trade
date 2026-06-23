@@ -202,7 +202,7 @@ fn add_limit_order() -> EventType {
         side: Side::Buy,
         price: Price::new(u128::MAX),
         quantity: max_quantity(),
-        time_in_force: Some(crate::order::TimeInForce::FillOrKill),
+        time_in_force: crate::order::TimeInForce::FillOrKill,
     })
 }
 

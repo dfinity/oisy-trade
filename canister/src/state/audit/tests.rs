@@ -209,7 +209,7 @@ impl Scenario {
                 side,
                 price,
                 quantity,
-                time_in_force: Some(time_in_force),
+                time_in_force,
             }),
         });
         (self, order_id)
