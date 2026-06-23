@@ -824,6 +824,9 @@ service : (OisyTradeArg) -> {
     // Return the caller's orders, either a single order by id or a page,
     // newest first. The argument is optional: an absent argument is equivalent
     // to a page from the newest order with the maximum length.
+    // Returns `InvalidOrderId` if an order id (the `ById` target or the
+    // `ByPage` cursor) is malformed, and `OrderNotFound` if it is well-formed
+    // but unknown or not owned by the caller.
     get_my_orders : (opt GetMyOrdersArgs) -> (variant { Ok : vec UserOrder; Err : GetMyOrdersError }) query;
 
     // List every token registered with the canister. Intended as a primitive
