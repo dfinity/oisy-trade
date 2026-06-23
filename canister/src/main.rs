@@ -2,11 +2,10 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
-    WithdrawTemporaryError,
+    GetBalancesError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -141,7 +140,7 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
 #[ic_cdk::query]
 fn get_balances(
     filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     use oisy_trade_canister::Runtime;
     oisy_trade_canister::get_balances(filter, oisy_trade_canister::IC_RUNTIME.msg_caller())
 }
@@ -149,7 +148,7 @@ fn get_balances(
 #[ic_cdk::query]
 fn get_fee_balances(
     filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     oisy_trade_canister::get_fee_balances(filter)
 }
 

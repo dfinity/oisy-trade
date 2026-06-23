@@ -212,11 +212,18 @@ type OrderBookDepth = record {
     asks : vec PriceLevel;
 };
 
-// Error returned by the `get_order_book_ticker` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookTickerError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
+// Error returned by the `get_order_book_ticker` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookTickerError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBookTickerError };
@@ -232,13 +239,20 @@ type GetOrderBookDepthRequest = record {
     limit : opt nat32;
 };
 
-// Error returned by the `get_order_book_depth` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookDepthError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
-    // The requested depth limit exceeds the maximum supported value (1000).
-    LimitTooLarge : record { requested : nat32; max : nat32 };
+// Error returned by the `get_order_book_depth` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookDepthError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+            // The requested depth limit exceeds the maximum supported value (1000).
+            LimitTooLarge : record { requested : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBookDepthError };
@@ -463,29 +477,27 @@ type UserTokenBalance = record {
     balance : Balance;
 };
 
-// Per-entry error reported in `get_balances` responses.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesError = variant {
-    TokenNotSupported : FilterToken;
-};
-
-// Per-entry result.
-type GetBalanceResult = variant {
-    Ok : UserTokenBalance;
-    Err : GetBalancesError;
-};
-
-// Whole-request error reported when `get_balances` rejects the request
-// before any per-entry lookup runs.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesRequestError = variant {
-    FilterTooLarge : record { len : nat32; max : nat32 };
+// Error reported by `get_balances` / `get_fee_balances`. These are read
+// endpoints, so a failure dooms the whole call (no per-entry partial success).
+// See the disposition contract at the top of this file.
+type GetBalancesError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The filter referenced a token that the canister does not support.
+            TokenNotSupported : FilterToken;
+            // The filter exceeded the maximum number of entries.
+            FilterTooLarge : record { len : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Response shape for `get_balances`.
-type GetBalancesResponse = variant {
-    Ok : vec GetBalanceResult;
-    Err : GetBalancesRequestError;
+type GetBalancesResult = variant {
+    Ok : vec UserTokenBalance;
+    Err : GetBalancesError;
 };
 
 // Request to add a new trading pair to the canister.
@@ -764,27 +776,30 @@ service : (OisyTradeArg) -> {
     //
     // - `null`: returns every token the caller holds with non-zero balance.
     // - `opt vec { ... }`: looks up each entry in the filter (including
-    //   zero balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicate filter entries are collapsed and
-    //   reported only once. An empty filter (`opt vec {}`) returns an
-    //   empty `Ok` vector, and is semantically distinct from `null`.
+    //   zero balances). Duplicate filter entries are collapsed and returned
+    //   only once. An empty filter (`opt vec {}`) returns an empty `Ok`
+    //   vector, and is semantically distinct from `null`.
     //
-    // The order of entries in the returned `vec GetBalanceResult` is
-    // unspecified; callers must identify each result by the `token` field
-    // (or the `FilterToken` echoed by `TokenNotSupported`).
-    get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // a token the canister does not support — reads are cheap to re-issue, so
+    // there is no per-entry partial success.
+    //
+    // The order of entries in the returned `vec UserTokenBalance` is
+    // unspecified; callers must identify each result by the `token` field.
+    get_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Query the canister-owned fee pool. Mirrors `get_balances` shape:
     //
     // - `null`: returns every token with a non-zero fee balance.
-    // - `opt vec { ... }`: looks up each entry (including zero
-    //   balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicates collapsed; empty filter returns
-    //   an empty `Ok` vector.
+    // - `opt vec { ... }`: looks up each entry (including zero balances).
+    //   Duplicates collapsed; empty filter returns an empty `Ok` vector.
+    //
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // an unsupported token.
     //
     // Each returned `Balance` carries the fee amount in `free`;
     // `reserved` is always zero (fees have no reserved concept).
-    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Return the caller's orders, either a single order by id or a page,
     // newest first. The argument is optional: an absent argument is equivalent
