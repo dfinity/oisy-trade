@@ -1,7 +1,7 @@
 use crate::{
     Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, GetOrderBookDepthRequest,
-    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, Token,
-    TokenId, TokenMetadata, TradingPair, TradingPairInfo, TradingStatus,
+    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, TimeInForce,
+    Token, TokenId, TokenMetadata, TradingPair, TradingPairInfo, TradingStatus,
 };
 use candid::{Nat, Principal};
 
@@ -19,6 +19,7 @@ fn should_serialize_limit_order_request() {
         side: Side::Buy,
         price: Nat::from(100u64),
         quantity: Nat::from(1_000_000u64),
+        time_in_force: Some(TimeInForce::FillOrKill),
     };
     let encoded = candid::encode_one(&request).unwrap();
     let decoded: LimitOrderRequest = candid::decode_one(&encoded).unwrap();
@@ -32,10 +33,20 @@ fn should_serialize_order_status() {
         OrderStatus::Open,
         OrderStatus::Filled,
         OrderStatus::Canceled,
+        OrderStatus::Expired,
     ] {
         let encoded = candid::encode_one(&status).unwrap();
         let decoded: OrderStatus = candid::decode_one(&encoded).unwrap();
         assert_eq!(status, decoded);
+    }
+}
+
+#[test]
+fn should_serialize_time_in_force() {
+    for tif in [TimeInForce::GoodTilCanceled, TimeInForce::FillOrKill] {
+        let encoded = candid::encode_one(tif).unwrap();
+        let decoded: TimeInForce = candid::decode_one(&encoded).unwrap();
+        assert_eq!(tif, decoded);
     }
 }
 

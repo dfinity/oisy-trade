@@ -294,6 +294,7 @@ fn get_events(
                         side,
                         price,
                         quantity,
+                        time_in_force,
                     },
                 ) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                     user,
@@ -304,6 +305,7 @@ fn get_events(
                     side: oisy_trade_types::Side::from(side),
                     price: candid::Nat::from(price),
                     quantity: quantity.into(),
+                    time_in_force: time_in_force.into(),
                 }),
                 EventType::CancelLimitOrder(
                     oisy_trade_canister::state::event::CancelLimitOrderEvent { order_id },

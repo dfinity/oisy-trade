@@ -1,6 +1,6 @@
 use crate::order::{
     BasisPoint, FeeRates, LotSize, OrderBookId, PendingOrder, Price, Quantity, Side, TickSize,
-    TokenId, TokenMetadata, TradingPair,
+    TimeInForce, TokenId, TokenMetadata, TradingPair,
 };
 
 use crate::EXECUTOR;
@@ -40,6 +40,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
             side: Side::Sell,
             price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
             quantity: Quantity::from(100_000_000_000_000u64), // 1,000,000 ICP
+            time_in_force: TimeInForce::GoodTilCanceled,
         },
     );
 
@@ -99,6 +100,7 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
                 side: if trade.m { Side::Sell } else { Side::Buy },
                 price: Price::new(parse_decimal_8(&trade.p)),
                 quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }
@@ -243,6 +245,7 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
                 side: if trade.m { Side::Sell } else { Side::Buy },
                 price: Price::new(parse_decimal_8(&trade.p)),
                 quantity: Quantity::from_u128(parse_decimal_8(&trade.q)),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }
@@ -409,6 +412,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
                 side: Side::Buy,
                 price: Price::new(parse_decimal_8(price_str)),
                 quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }
@@ -422,6 +426,7 @@ fn populate_state(state: &mut State<storage::VMem, storage::VMem>, depth: &Depth
                 side: Side::Sell,
                 price: Price::new(parse_decimal_8(price_str)),
                 quantity: Quantity::from_u128(parse_decimal_8(qty_str)),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }
@@ -454,6 +459,7 @@ fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem
                 side: Side::Buy,
                 price: Price::new(200_000_000), // 2.000 USDT
                 quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }
@@ -467,6 +473,7 @@ fn place_1000_non_crossing_orders(state: &mut State<storage::VMem, storage::VMem
                 side: Side::Sell,
                 price: Price::new(300_000_000), // 3.000 USDT
                 quantity: Quantity::from((i + 1) * LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         );
     }

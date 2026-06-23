@@ -1,6 +1,6 @@
 use crate::{InitArg, UpgradeArg};
 use candid::{CandidType, Nat, Principal};
-use oisy_trade_types::{TokenId, TokenMetadata};
+use oisy_trade_types::{TimeInForce, TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -60,6 +60,7 @@ pub struct AddLimitOrderEvent {
     pub side: oisy_trade_types::Side,
     pub price: Nat,
     pub quantity: Nat,
+    pub time_in_force: TimeInForce,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

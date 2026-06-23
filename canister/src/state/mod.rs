@@ -268,6 +268,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     status: OrderStatus::Pending,
                     created_at: timestamp,
                     last_updated_at: None,
+                    time_in_force: order.time_in_force(),
                 },
             );
         }
@@ -330,8 +331,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
         match record.status {
             OrderStatus::Pending | OrderStatus::Open => Ok(()),
-            OrderStatus::Filled => Err(CancelLimitOrderError::OrderAlreadyFilled),
-            OrderStatus::Canceled => Err(CancelLimitOrderError::OrderAlreadyCanceled),
+            OrderStatus::Filled | OrderStatus::Canceled | OrderStatus::Expired => {
+                Err(CancelLimitOrderError::OrderAlreadyTerminal)
+            }
         }
     }
 
@@ -1100,8 +1102,7 @@ pub enum AddLimitOrderError {
 pub enum CancelLimitOrderError {
     OrderNotFound,
     NotOrderOwner,
-    OrderAlreadyFilled,
-    OrderAlreadyCanceled,
+    OrderAlreadyTerminal,
 }
 
 impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
@@ -1110,8 +1111,7 @@ impl From<CancelLimitOrderError> for oisy_trade_types::CancelLimitOrderError {
         let leaf = match err {
             CancelLimitOrderError::OrderNotFound => Leaf::OrderNotFound,
             CancelLimitOrderError::NotOrderOwner => Leaf::NotOrderOwner,
-            CancelLimitOrderError::OrderAlreadyFilled => Leaf::OrderAlreadyFilled,
-            CancelLimitOrderError::OrderAlreadyCanceled => Leaf::OrderAlreadyCanceled,
+            CancelLimitOrderError::OrderAlreadyTerminal => Leaf::OrderAlreadyTerminal,
         };
         oisy_trade_types::CancelLimitOrderError::request(leaf)
     }

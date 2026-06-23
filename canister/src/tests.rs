@@ -597,6 +597,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: candid::Nat::from(price * PRICE_SCALE),
             quantity: candid::Nat::from(quantity),
+            time_in_force: None,
         };
         // Deposit exactly enough for a buy order: price=100, quantity=1_000_000 → 100_000_000
         state::with_state_mut(|s| {
@@ -634,6 +635,7 @@ mod add_limit_order {
             side: Side::Sell,
             price: candid::Nat::from(10 * PRICE_SCALE),
             quantity: candid::Nat::from(quantity),
+            time_in_force: None,
         };
         // Deposit exactly enough for a sell order: price=X, quantity=100_000_000→ 100_000_000
         state::with_state_mut(|s| {
@@ -743,6 +745,7 @@ mod cancel_limit_order {
                 status: oisy_trade_types::OrderStatus::Canceled,
                 created_at: 111,
                 last_updated_at: Some(222),
+                time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             })
         );
 
@@ -750,7 +753,7 @@ mod cancel_limit_order {
 
         assert_eq!(
             result.unwrap_err().kind,
-            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyCanceled))
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyTerminal))
         );
     }
 
@@ -771,7 +774,7 @@ mod cancel_limit_order {
         let result = cancel_limit_order(buy_id, &mock_runtime_for(buyer));
         assert_eq!(
             result.unwrap_err().kind,
-            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyFilled))
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderAlreadyTerminal))
         );
     }
 
@@ -801,6 +804,7 @@ mod cancel_limit_order {
             status: oisy_trade_types::OrderStatus::Canceled,
             created_at: 111,
             last_updated_at: Some(222),
+            time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(
@@ -1807,6 +1811,7 @@ mod get_my_orders {
                         side: Side::Buy,
                         price: Nat::from(100u64),
                         quantity: Nat::from(u64::from(LOT_SIZE)),
+                        time_in_force: None,
                     },
                     &runtime,
                 )

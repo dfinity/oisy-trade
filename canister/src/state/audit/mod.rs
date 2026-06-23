@@ -124,11 +124,13 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             side,
             price,
             quantity,
+            time_in_force,
         }) => {
             let pending = order::PendingOrder {
                 side: *side,
                 price: *price,
                 quantity: *quantity,
+                time_in_force: *time_in_force,
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);

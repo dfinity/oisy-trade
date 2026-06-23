@@ -76,6 +76,7 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
             side: Side::Sell,
             price: candid::Nat::from(price),
             quantity: qty.into(),
+            time_in_force: None,
         })
         .await
         .unwrap();
@@ -86,6 +87,7 @@ pub async fn fill_one_cross_with_fees() -> (FeeFillOutcome, Setup) {
             side: Side::Buy,
             price: candid::Nat::from(price),
             quantity: qty.into(),
+            time_in_force: None,
         })
         .await
         .unwrap();

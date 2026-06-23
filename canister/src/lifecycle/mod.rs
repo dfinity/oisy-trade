@@ -8,6 +8,9 @@ use crate::{MATCHING_INTERVAL, Runtime, state, storage};
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
 
+#[cfg(test)]
+mod tests;
+
 pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
     let init_arg = match arg {
         OisyTradeArg::Init(init_arg) => init_arg,

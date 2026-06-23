@@ -181,12 +181,10 @@ pub enum CancelLimitOrderRequestError {
     /// The caller does not own the order.
     #[error("the caller does not own the order")]
     NotOrderOwner,
-    /// The order has already been fully filled and cannot be canceled.
-    #[error("the order has already been fully filled")]
-    OrderAlreadyFilled,
-    /// The order has already been canceled.
-    #[error("the order has already been canceled")]
-    OrderAlreadyCanceled,
+    /// The order has reached a terminal state (Filled, Canceled, or Expired)
+    /// and can no longer be canceled.
+    #[error("the order has reached a terminal state and can no longer be canceled")]
+    OrderAlreadyTerminal,
 }
 
 /// Error returned by the deposit endpoint.
