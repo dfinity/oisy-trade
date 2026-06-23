@@ -186,6 +186,69 @@ jobs:
             --hidden ./canister/hidden_endpoints.conf \
             --candid ./canister/oisy_trade.did
 
+  candid-backward-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check for candid-breaking-change override'
+        id: check-override
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MG_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          if [[ "$EVENT" == "pull_request" ]]; then
+            pr="$PR_NUMBER"
+          else
+            pr=$(echo "$MG_HEAD_REF" | grep -oP 'pr-\K[0-9]+')
+          fi
+          labels=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
+          title=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json title --jq '.title')
+          has_label=$(echo "$labels" | jq 'map(select(. == "candid-breaking-change")) | length > 0')
+          if [[ "$has_label" == "true" ]] && \
+             [[ "$title" =~ ^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9_,]+\))?!: ]]; then
+            echo "Override active: candid-breaking-change label with breaking-commit title."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: 'Install didc'
+        run: |
+          curl -fsSL https://github.com/dfinity/candid/releases/download/2025-12-18/didc-linux64 \
+            -o /usr/local/bin/didc
+          echo "32693c76d9c6fe0f273f2c1ebf7e48ba3c383e925e5afd17dd264a06aed9fbcc  /usr/local/bin/didc" | sha256sum --check
+          chmod +x /usr/local/bin/didc
+
+      - name: 'Check if Candid interface changed'
+        id: did-changed
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "merge_group" ]]; then
+            base_sha="${{ github.event.merge_group.base_sha }}"
+          else
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          if ! git cat-file -e "$base_sha:canister/oisy_trade.did" 2>/dev/null; then
+            echo "canister/oisy_trade.did is new in this branch; skipping backward-compat check."
+          elif git diff --quiet "$base_sha" HEAD -- canister/oisy_trade.did; then
+            echo "canister/oisy_trade.did unchanged; skipping backward-compat check."
+          else
+            echo "base=$base_sha" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Check Candid backward compatibility'
+        if: steps.did-changed.outputs.base != ''
+        continue-on-error: ${{ steps.check-override.outputs.skip == 'true' }}
+        run: |
+          git show "${{ steps.did-changed.outputs.base }}:canister/oisy_trade.did" > base_oisy_trade.did
+          didc check canister/oisy_trade.did base_oisy_trade.did
+
   benchmark:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -249,6 +312,7 @@ jobs:
       - unit-tests
       - integration-tests
       - check-canister-wasm-endpoints
+      - candid-backward-compat
       - benchmark
       - conventional-pr-title
     runs-on: ubuntu-latest
