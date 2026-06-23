@@ -93,9 +93,9 @@ This spec separates two distinct deliverables, which must not be conflated:
   each delta is applied with `checked_add` guarded by an **always-on** trap on overflow (a
   `BUG:` panic, matching the codebase convention — not a `debug_assert!`, which is compiled out
   of the release canister).
-- **R10 — Bounded pages.** The feed caps `length` at `MAX_FILLS_PER_RESPONSE`; an absent /
-  larger value is clamped. An unknown `after` cursor yields an empty page (malformed cursors are
-  rejected per R5).
+- **R10 — Bounded pages.** `length` is mandatory in the filter; a value above
+  `MAX_FILLS_PER_RESPONSE` is clamped down to it. An unknown `after` cursor yields an empty page
+  (malformed cursors are rejected per R5).
 - **R11 — Fills and balance ops share one computed source.** The per-fill `notional`, `fee`, and
   role are computed **once** and feed both the existing `BalanceOperation`s and the new fill
   records, so the two can never diverge. They are computed in the settlement path (`State`)
