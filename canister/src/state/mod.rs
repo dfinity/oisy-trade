@@ -408,39 +408,37 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
         // Single pass over the fills: compute each fill's realized notional,
         // fees, and roles once (`FillSettlement`), then feed both the balance
-        // operations (always) and the per-order scalar deltas (only when
-        // writing) from that one value, so the two can never diverge (R11). The
-        // per-fill `Quantity` arithmetic is u256-wide, so it is done exactly
-        // once and the intermediate is never materialized into a `Vec`.
-        let write = matches!(persistence, StableMemoryOptions::Write);
+        // operations and the per-order scalar deltas from that one value, so the
+        // two can never diverge. The per-fill `Quantity` arithmetic is u256-wide,
+        // so it is done exactly once and never materialized into a `Vec`.
+        //
+        // `updates` folds the batch into one update per touched order, applied
+        // once each: a single batch can fill one order across many `Fill`s (a
+        // taker sweeping several makers, or a maker hit repeatedly) and an order
+        // can both change status and accrue fills in the same batch. The cheap
+        // delta accumulation runs unconditionally; the writes to stable memory
+        // are gated below, so post-upgrade replay does not double-count.
         let mut balance_operations = Vec::with_capacity(output.fills.len() * 3);
-        // Folds the batch into one update per touched order, written once each:
-        // a single batch can fill one order across many `Fill`s (a taker
-        // sweeping several makers, or a maker hit repeatedly) and an order can
-        // both change status and accrue fills in the same batch. Empty (and
-        // unused) outside the write path.
         let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
         for fill in &output.fills {
             let settlement = fill_settlement(fill, fee_rates, base_scale);
             push_balance_operations(&mut balance_operations, &settlement);
-            if write {
-                accrue_fill(
-                    updates.entry(settlement.taker_order_seq).or_default(),
-                    settlement.quantity,
-                    settlement.notional,
-                    settlement.taker_fee,
-                );
-                accrue_fill(
-                    updates.entry(settlement.maker_order_seq).or_default(),
-                    settlement.quantity,
-                    settlement.notional,
-                    settlement.maker_fee,
-                );
-            }
+            accrue_fill(
+                updates.entry(fill.taker_order_seq).or_default(),
+                fill.quantity,
+                settlement.notional,
+                settlement.taker_fee,
+            );
+            accrue_fill(
+                updates.entry(fill.maker_order_seq).or_default(),
+                fill.quantity,
+                settlement.notional,
+                settlement.maker_fee,
+            );
         }
-        if write {
+        if matches!(persistence, StableMemoryOptions::Write) {
             #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("status");
+            let _p = canbench_rs::bench_scope("apply_order_updates");
             for seq in &output.resting_orders {
                 updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
             }
@@ -932,16 +930,12 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
         .collect()
 }
 
-/// The realized values of a single fill, computed once in settlement (the only
-/// point where both `fee_rates` and `base_scale` are in scope) and reused to
-/// build both the [`event::BalanceOperation`]s and the per-order scalar deltas,
-/// so the two can never diverge (R11).
-struct FillSettlement {
-    taker_order_seq: OrderSeq,
-    maker_order_seq: OrderSeq,
-    taker_side: Side,
-    /// Base quantity exchanged on this fill.
-    quantity: Quantity,
+/// A single [`Fill`] together with the realized values derived from it, computed
+/// once in settlement (the only point where both `fee_rates` and `base_scale`
+/// are in scope) and reused to build both the [`event::BalanceOperation`]s and
+/// the per-order scalar deltas, so the two can never diverge.
+struct FillSettlement<'a> {
+    fill: &'a Fill,
     /// Quote notional `maker_price × quantity / base_scale` (the executed
     /// price; a buy taker's reservation surplus is excluded).
     notional: Quantity,
@@ -956,7 +950,7 @@ struct FillSettlement {
 }
 
 /// Compute the realized values of a single fill once.
-fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> FillSettlement {
+fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> FillSettlement<'_> {
     // Receive-side convention: buyer pays fee in base (the asset they
     // receive), seller in quote. Each side's rate is `taker` if they
     // were the taker, else `maker`.
@@ -985,10 +979,7 @@ fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> 
         None
     };
     FillSettlement {
-        taker_order_seq: fill.taker_order_seq,
-        maker_order_seq: fill.maker_order_seq,
-        taker_side: fill.taker_side,
-        quantity: fill.quantity,
+        fill,
         notional,
         taker_fee,
         maker_fee,
@@ -998,11 +989,12 @@ fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> 
 
 /// Push the (up to three) balance operations a single fill settles into `ops`.
 fn push_balance_operations(ops: &mut Vec<event::BalanceOperation>, settlement: &FillSettlement) {
-    let (buyer_seq, seller_seq) = match settlement.taker_side {
-        Side::Buy => (settlement.taker_order_seq, settlement.maker_order_seq),
-        Side::Sell => (settlement.maker_order_seq, settlement.taker_order_seq),
+    let fill = settlement.fill;
+    let (buyer_seq, seller_seq) = match fill.taker_side {
+        Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
+        Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
     };
-    let (quote_fee, base_fee) = match settlement.taker_side {
+    let (quote_fee, base_fee) = match fill.taker_side {
         Side::Buy => (settlement.maker_fee, settlement.taker_fee),
         Side::Sell => (settlement.taker_fee, settlement.maker_fee),
     };
@@ -1015,7 +1007,7 @@ fn push_balance_operations(ops: &mut Vec<event::BalanceOperation>, settlement: &
     });
     if let Some(surplus) = settlement.surplus {
         ops.push(event::BalanceOperation::Unreserve {
-            order: settlement.taker_order_seq,
+            order: fill.taker_order_seq,
             token: order::PairToken::Quote,
             amount: surplus,
         });
@@ -1024,15 +1016,15 @@ fn push_balance_operations(ops: &mut Vec<event::BalanceOperation>, settlement: &
         from_order: seller_seq,
         to_order: buyer_seq,
         token: order::PairToken::Base,
-        amount: settlement.quantity,
+        amount: fill.quantity,
         fee: nonzero(base_fee),
     });
 }
 
 /// Fold one fill's realized values into an [`OrderUpdate`] entry. `filled_delta`
-/// accumulates the gross base quantity (DEFI-2852), `quote_delta` the realized
-/// notional (R1), and `fee_delta` the realized fee in the order's receive token
-/// (R2). All three are accumulated with always-on overflow traps (R9).
+/// accumulates the gross base quantity, `quote_delta` the realized notional, and
+/// `fee_delta` the realized fee in the order's receive token. All three are
+/// accumulated with always-on overflow traps.
 fn accrue_fill(update: &mut OrderUpdate, quantity: Quantity, notional: Quantity, fee: Quantity) {
     update.filled_delta = update
         .filled_delta
