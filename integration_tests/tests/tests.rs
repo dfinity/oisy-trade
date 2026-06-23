@@ -1814,9 +1814,9 @@ mod order_book {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        ErrorKind, GetOrderBookDepthRequest, GetOrderBookDepthRequestError,
-        GetOrderBookTickerRequestError, LimitOrderRequest, MAX_DEPTH_LIMIT, Never, OrderBookDepth,
-        OrderBookTicker, PriceLevel, Side, TradingPair,
+        GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookDepthRequestError,
+        GetOrderBookTickerError, GetOrderBookTickerRequestError, LimitOrderRequest,
+        MAX_DEPTH_LIMIT, OrderBookDepth, OrderBookTicker, PriceLevel, Side, TradingPair,
     };
 
     #[tokio::test]
@@ -1886,12 +1886,9 @@ mod order_book {
 
         let ticker_error = client.get_order_book_ticker(unknown).await.unwrap_err();
         assert_eq!(
-            ticker_error.kind,
-            ErrorKind::<GetOrderBookTickerRequestError, Never, Never>::RequestError(Some(
-                GetOrderBookTickerRequestError::UnknownTradingPair
-            ))
+            ticker_error,
+            GetOrderBookTickerError::request(GetOrderBookTickerRequestError::UnknownTradingPair),
         );
-        assert!(!ticker_error.message.as_ref().unwrap().is_empty());
 
         let depth_error = client
             .get_order_book_depth(GetOrderBookDepthRequest {
@@ -1901,21 +1898,11 @@ mod order_book {
             .await
             .unwrap_err();
         assert_eq!(
-            depth_error.kind,
-            ErrorKind::<GetOrderBookDepthRequestError, Never, Never>::RequestError(Some(
-                GetOrderBookDepthRequestError::UnknownTradingPair
-            ))
+            depth_error,
+            GetOrderBookDepthError::request(GetOrderBookDepthRequestError::UnknownTradingPair),
         );
-        assert!(!depth_error.message.as_ref().unwrap().is_empty());
 
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_report_limit_too_large_over_the_boundary() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let error = setup
-            .oisy_trade_client()
+        let limit_too_large_error = client
             .get_order_book_depth(GetOrderBookDepthRequest {
                 trading_pair: setup.trading_pair(),
                 limit: Some(MAX_DEPTH_LIMIT + 1),
@@ -1923,15 +1910,12 @@ mod order_book {
             .await
             .unwrap_err();
         assert_eq!(
-            error.kind,
-            ErrorKind::<GetOrderBookDepthRequestError, Never, Never>::RequestError(Some(
-                GetOrderBookDepthRequestError::LimitTooLarge {
-                    requested: MAX_DEPTH_LIMIT + 1,
-                    max: MAX_DEPTH_LIMIT,
-                }
-            ))
+            limit_too_large_error,
+            GetOrderBookDepthError::request(GetOrderBookDepthRequestError::LimitTooLarge {
+                requested: MAX_DEPTH_LIMIT + 1,
+                max: MAX_DEPTH_LIMIT,
+            }),
         );
-        assert!(!error.message.as_ref().unwrap().is_empty());
 
         setup.drop().await;
     }
@@ -2350,7 +2334,7 @@ mod get_balances {
     use oisy_trade_int_tests::Setup;
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_types::{
-        ErrorKind, FilterToken, GetBalancesRequestError, MAX_FILTER_LEN, Never, TokenId,
+        FilterToken, GetBalancesError, GetBalancesRequestError, MAX_FILTER_LEN, TokenId,
     };
 
     #[tokio::test]
@@ -2390,48 +2374,32 @@ mod get_balances {
     #[tokio::test]
     async fn should_fail_whole_call_for_unknown_filter_entry() {
         let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.oisy_trade_client();
+
         let unknown = TokenId {
             ledger_id: Principal::from_slice(&[0xFF]),
         };
-
-        let error = setup
-            .oisy_trade_client()
+        let unknown_entry_error = client
             .get_balances(Some(vec![FilterToken::ById(unknown.clone())]))
             .await
             .unwrap_err();
         assert_eq!(
-            error.kind,
-            ErrorKind::<GetBalancesRequestError, Never, Never>::RequestError(Some(
-                GetBalancesRequestError::TokenNotSupported(FilterToken::ById(unknown))
-            ))
+            unknown_entry_error,
+            GetBalancesError::request(GetBalancesRequestError::TokenNotSupported(
+                FilterToken::ById(unknown)
+            )),
         );
-        assert!(!error.message.as_ref().unwrap().is_empty());
 
-        setup.drop().await;
-    }
-
-    #[tokio::test]
-    async fn should_report_filter_too_large_over_the_boundary() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let token = setup.base_token_id();
         let len = MAX_FILTER_LEN + 1;
-        let filter = vec![FilterToken::ById(token); len as usize];
-
-        let error = setup
-            .oisy_trade_client()
-            .get_balances(Some(filter))
-            .await
-            .unwrap_err();
+        let filter = vec![FilterToken::ById(setup.base_token_id()); len as usize];
+        let filter_too_large_error = client.get_balances(Some(filter)).await.unwrap_err();
         assert_eq!(
-            error.kind,
-            ErrorKind::<GetBalancesRequestError, Never, Never>::RequestError(Some(
-                GetBalancesRequestError::FilterTooLarge {
-                    len,
-                    max: MAX_FILTER_LEN,
-                }
-            ))
+            filter_too_large_error,
+            GetBalancesError::request(GetBalancesRequestError::FilterTooLarge {
+                len,
+                max: MAX_FILTER_LEN,
+            }),
         );
-        assert!(!error.message.as_ref().unwrap().is_empty());
 
         setup.drop().await;
     }
