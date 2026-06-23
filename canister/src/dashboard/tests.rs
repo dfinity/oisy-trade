@@ -1,6 +1,7 @@
 use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
 use crate::order::{
-    BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TradingPair,
+    BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TimeInForce,
+    TradingPair,
 };
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
@@ -249,6 +250,7 @@ fn place(
         side,
         price: Price::new(price * PRICE_SCALE),
         quantity: Quantity::from(quantity),
+        time_in_force: TimeInForce::GoodTilCanceled,
     };
     let (token, required) = match pending.side {
         Side::Buy => (

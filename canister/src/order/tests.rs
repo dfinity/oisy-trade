@@ -57,6 +57,69 @@ mod order_id {
     }
 }
 
+mod time_in_force {
+    use crate::order::{Order, PendingOrder, RestingOrder, TimeInForce};
+    use crate::test_fixtures::arbitrary::arb_order;
+    use proptest::prelude::*;
+
+    fn request(
+        time_in_force: Option<oisy_trade_types::TimeInForce>,
+    ) -> oisy_trade_types::LimitOrderRequest {
+        oisy_trade_types::LimitOrderRequest {
+            pair: crate::test_fixtures::icp_ckbtc_trading_pair().into(),
+            side: oisy_trade_types::Side::Buy,
+            price: candid::Nat::from(100u64),
+            quantity: candid::Nat::from(1_000u64),
+            time_in_force,
+        }
+    }
+
+    #[test]
+    fn absent_time_in_force_defaults_to_good_til_canceled() {
+        let pending = PendingOrder::try_from(request(None)).unwrap();
+        assert_eq!(pending.time_in_force, TimeInForce::GoodTilCanceled);
+    }
+
+    #[test]
+    fn explicit_fill_or_kill_is_preserved() {
+        let pending =
+            PendingOrder::try_from(request(Some(oisy_trade_types::TimeInForce::FillOrKill)))
+                .unwrap();
+        assert_eq!(pending.time_in_force, TimeInForce::FillOrKill);
+    }
+
+    proptest! {
+        #[test]
+        fn order_roundtrips_through_minicbor(order in arb_order()) {
+            let mut bytes = vec![];
+            minicbor::encode(&order, &mut bytes).unwrap();
+            let decoded: Order = minicbor::decode(&bytes).unwrap();
+            prop_assert_eq!(decoded, order);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn resting_order_preserves_time_in_force_through_to_order(order in arb_order()) {
+            let side = order.side();
+            let price = order.price();
+            let resting = RestingOrder::from(order.clone());
+            prop_assert_eq!(resting.time_in_force(), order.time_in_force());
+            let rebuilt = resting.to_order(side, price);
+            prop_assert_eq!(rebuilt.time_in_force(), order.time_in_force());
+        }
+
+        #[test]
+        fn resting_order_roundtrips_through_minicbor(order in arb_order()) {
+            let resting = RestingOrder::from(order);
+            let mut bytes = vec![];
+            minicbor::encode(&resting, &mut bytes).unwrap();
+            let decoded: RestingOrder = minicbor::decode(&bytes).unwrap();
+            prop_assert_eq!(decoded, resting);
+        }
+    }
+}
+
 mod quantity {
     use crate::order::{LotSize, Quantity};
     use candid::Nat;
@@ -912,6 +975,7 @@ mod order_book {
         fn should_saturate_aggregated_quantity_on_overflow() {
             use crate::order::{
                 FeeRates, LotSize, OrderBook, OrderBookId, PendingOrder, Side, TickSize,
+                TimeInForce,
             };
             use crate::test_fixtures::MIN_NOTIONAL;
             use std::num::{NonZeroU64, NonZeroU128};
@@ -931,6 +995,7 @@ mod order_book {
                     side: Side::Buy,
                     price: Price::new(1),
                     quantity: Quantity::MAX,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 }
                 .into_order(OrderSeq::new(seq))
             };
