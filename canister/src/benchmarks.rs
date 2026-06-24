@@ -65,7 +65,8 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
 /// message. The FOK is priced at the worst ask and sized to the total ask
 /// depth, so it fully fills — exercising the plan pass plus an `apply_plan`
 /// replay and one settlement step per level, all atomically. Asserts the FOK
-/// reaches a terminal state and the ask side is emptied (R10).
+/// reaches a terminal state: the ask side is emptied and the bid side gained no
+/// resting remainder.
 #[bench(raw)]
 fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
     let depth = load_depth();
@@ -100,6 +101,7 @@ fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
     assert_eq!(book.asks_len(), depth.asks.len());
+    let bids_len_before = book.bids_len();
 
     state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
@@ -109,6 +111,11 @@ fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
     let book = state.get_order_book(&pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
     assert_eq!(book.asks_len(), 0);
+    assert_eq!(
+        book.bids_len(),
+        bids_len_before,
+        "FOK fully filled, so it must not have rested any remainder on the bid side"
+    );
 
     res
 }
