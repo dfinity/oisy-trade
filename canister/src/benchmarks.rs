@@ -19,159 +19,101 @@ const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100_000).unwrap());
 /// Minimum order quantity for ICP/USDT on Binance: 0.01 ICP with 8 decimal places.
 const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 
-/// Benchmark a single large sell order that sweeps all 697 bid levels from the
-/// Binance depth snapshot, producing one fill per price level.
+/// Benchmark a single large sell order that fully fills all 697 bid levels from
+/// the Binance depth snapshot, producing one fill per price level. Sized to the
+/// exact total bid depth so it consumes every bid and rests nothing — an
+/// apples-to-apples GTC counterpart to the FOK full-fill bench, differing only
+/// in time-in-force.
 #[bench(raw)]
 fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let mut state = new_state();
+    let setup = setup_bid_sweep(TimeInForce::GoodTilCanceled, |total_bid_qty| total_bid_qty);
 
-    populate_state(&mut state, &depth);
-
-    // Place a single sell at the minimum price with quantity exceeding total bid depth
-    // (~924,901 ICP). This crosses every bid level.
-    let pair = trading_pair();
-    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
-    fund_user(&mut state, taker);
-    place_order(
-        &mut state,
-        taker,
-        PendingOrder {
-            side: Side::Sell,
-            price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-            quantity: Quantity::from(100_000_000_000_000u64), // 1,000,000 ICP
-            time_in_force: TimeInForce::GoodTilCanceled,
-        },
-    );
-
-    let book = state.get_order_book(&pair).unwrap();
+    let book = setup.state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
-    assert_eq!(book.bids_len(), depth.bids.len());
+    assert_eq!(book.bids_len(), setup.bids_len);
+    let asks_len_before = book.asks_len();
 
+    let mut state = setup.state;
     state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
         EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
-    let book = state.get_order_book(&pair).unwrap();
+    let book = state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
     assert_eq!(book.bids_len(), 0);
+    assert_eq!(
+        book.asks_len(),
+        asks_len_before,
+        "the sell fully filled the bids, so it must not have rested any remainder on the ask side"
+    );
 
     res
 }
 
-/// Benchmark a worst-case fill-or-kill order that sweeps the entire ask side
-/// (5000 fragmented levels from the Binance depth snapshot) in a single
-/// message. The FOK is priced at the worst ask and sized to the total ask
-/// depth, so it fully fills — exercising the plan pass plus an `apply_plan`
-/// replay and one settlement step per level, all atomically. Asserts the FOK
-/// reaches a terminal state: the ask side is emptied and the bid side gained no
-/// resting remainder.
+/// Benchmark a fill-or-kill order that fully fills all 697 bid levels from the
+/// Binance depth snapshot in a single message. Reuses the GTC bench's exact
+/// setup, sized to the total bid depth so it fully fills — exercising the plan
+/// pass plus an `apply_plan` replay and one settlement step per level, all
+/// atomically. The only difference from the GTC bench is the time-in-force, so
+/// the two are directly comparable and isolate the FOK gate cost. Asserts the
+/// FOK reaches a terminal state: the bid side is emptied and the ask side gained
+/// no resting remainder.
 #[bench(raw)]
-fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let mut state = new_state();
+fn bench_fill_or_kill_fill_full_bid_side() -> canbench_rs::BenchResult {
+    let setup = setup_bid_sweep(TimeInForce::FillOrKill, |total_bid_qty| total_bid_qty);
 
-    populate_state(&mut state, &depth);
-
-    let pair = trading_pair();
-    let (worst_ask_price, total_ask_qty) = depth.asks.iter().fold(
-        (0u128, 0u128),
-        |(max_price, total_qty), (price_str, qty_str)| {
-            (
-                max_price.max(parse_decimal_8(price_str)),
-                total_qty + parse_decimal_8(qty_str),
-            )
-        },
-    );
-
-    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
-    fund_user(&mut state, taker);
-    place_order(
-        &mut state,
-        taker,
-        PendingOrder {
-            side: Side::Buy,
-            price: Price::new(worst_ask_price),
-            quantity: Quantity::from_u128(total_ask_qty),
-            time_in_force: TimeInForce::FillOrKill,
-        },
-    );
-
-    let book = state.get_order_book(&pair).unwrap();
+    let book = setup.state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
-    assert_eq!(book.asks_len(), depth.asks.len());
-    let bids_len_before = book.bids_len();
+    assert_eq!(book.bids_len(), setup.bids_len);
+    let asks_len_before = book.asks_len();
 
+    let mut state = setup.state;
     state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
         EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
-    let book = state.get_order_book(&pair).unwrap();
+    let book = state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
-    assert_eq!(book.asks_len(), 0);
+    assert_eq!(book.bids_len(), 0);
     assert_eq!(
-        book.bids_len(),
-        bids_len_before,
-        "FOK fully filled, so it must not have rested any remainder on the bid side"
+        book.asks_len(),
+        asks_len_before,
+        "FOK fully filled, so it must not have rested any remainder on the ask side"
     );
 
     res
 }
 
-/// Benchmark the worst-case fill-or-kill order that is *killed*: identical
-/// setup to [`bench_fill_or_kill_sweep_full_ask_side`], but the FOK is sized
-/// one base unit past the total ask depth, so the plan pass walks every ask
-/// level yet cannot fully fill — the plan is discarded before any mutation.
-/// This measures the plan-then-discard cost: the read-only walk of all 5000
-/// ask levels without the `apply_plan` replay or settlement. Asserts the book
-/// is byte-identical (the kill mutated nothing).
+/// Benchmark a fill-or-kill order that is *killed*: identical setup to
+/// [`bench_fill_or_kill_fill_full_bid_side`], but the FOK is sized one lot past
+/// the total bid depth, so the plan pass walks every bid level yet cannot fully
+/// fill — the plan is discarded before any mutation. This measures the
+/// plan-then-discard cost: the read-only walk of all 697 bid levels without the
+/// `apply_plan` replay or settlement. Asserts the book is byte-identical (the
+/// kill mutated nothing).
 #[bench(raw)]
-fn bench_fill_or_kill_killed_full_ask_side() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let mut state = new_state();
+fn bench_fill_or_kill_killed_full_bid_side() -> canbench_rs::BenchResult {
+    // One lot past the whole bid depth: crosses every level yet cannot fully
+    // fill, so the FOK is killed. The depth is lot-aligned, so a single extra
+    // lot keeps the quantity valid.
+    let setup = setup_bid_sweep(TimeInForce::FillOrKill, |total_bid_qty| {
+        total_bid_qty + u128::from(LOT_SIZE.get())
+    });
 
-    populate_state(&mut state, &depth);
-
-    let pair = trading_pair();
-    let (worst_ask_price, total_ask_qty) = depth.asks.iter().fold(
-        (0u128, 0u128),
-        |(max_price, total_qty), (price_str, qty_str)| {
-            (
-                max_price.max(parse_decimal_8(price_str)),
-                total_qty + parse_decimal_8(qty_str),
-            )
-        },
-    );
-
-    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
-    fund_user(&mut state, taker);
-    place_order(
-        &mut state,
-        taker,
-        PendingOrder {
-            side: Side::Buy,
-            price: Price::new(worst_ask_price),
-            // One lot past the whole ask depth: crosses every level yet cannot
-            // fully fill, so the FOK is killed. The depth is lot-aligned, so a
-            // single extra lot keeps the quantity valid.
-            quantity: Quantity::from_u128(total_ask_qty + u128::from(LOT_SIZE.get())),
-            time_in_force: TimeInForce::FillOrKill,
-        },
-    );
-
-    let book = state.get_order_book(&pair).unwrap();
+    let book = setup.state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
     let asks = crate::order::OrderBookSnapshot::from(book).asks;
     let bids = crate::order::OrderBookSnapshot::from(book).bids;
 
+    let mut state = setup.state;
     state.set_execution_policy(ExecutionPolicy::MAX);
     let res = canbench_rs::bench_fn(|| {
         EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
     });
 
-    let book = state.get_order_book(&pair).unwrap();
+    let book = state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
     let snapshot = crate::order::OrderBookSnapshot::from(book);
     assert_eq!(
@@ -184,6 +126,54 @@ fn bench_fill_or_kill_killed_full_ask_side() -> canbench_rs::BenchResult {
     );
 
     res
+}
+
+struct BidSweepSetup {
+    state: State<storage::VMem, storage::VMem>,
+    pair: TradingPair,
+    bids_len: usize,
+}
+
+/// Build the shared bid-sweep setup: a fully-populated Binance ICP/USDT book
+/// with a single large sell resting in the pending queue, priced at the minimum
+/// tick so it crosses every bid level. The taker quantity is derived from the
+/// total bid depth via `quantity_for`, letting callers size the order to fully
+/// fill (`total_bid_qty`) or to fall one lot short of the depth (kill).
+fn setup_bid_sweep(
+    time_in_force: TimeInForce,
+    quantity_for: impl FnOnce(u128) -> u128,
+) -> BidSweepSetup {
+    let depth = load_depth();
+    let mut state = new_state();
+
+    populate_state(&mut state, &depth);
+
+    let total_bid_qty = depth
+        .bids
+        .iter()
+        .fold(0u128, |total_qty, (_price_str, qty_str)| {
+            total_qty + parse_decimal_8(qty_str)
+        });
+
+    let pair = trading_pair();
+    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, taker);
+    place_order(
+        &mut state,
+        taker,
+        PendingOrder {
+            side: Side::Sell,
+            price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
+            quantity: Quantity::from_u128(quantity_for(total_bid_qty)),
+            time_in_force,
+        },
+    );
+
+    BidSweepSetup {
+        state,
+        pair,
+        bids_len: depth.bids.len(),
+    }
 }
 
 /// Benchmark processing 1000 incoming orders against a fully populated order book
