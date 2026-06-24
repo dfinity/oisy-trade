@@ -862,4 +862,6 @@ service : (OisyTradeArg) -> {
     // Returns events from the event log starting at the given index.
     // The response contains at most 2000 events.
     get_events : (GetEventsArgs) -> (GetEventsResult) query;
+
+    // ===== End of endpoints =====
 }
