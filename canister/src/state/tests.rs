@@ -2046,12 +2046,12 @@ mod settle_fills {
     // been retired — settlement is now a flat `Vec<BalanceOperation>` in
     // `SettlingEvent`. Commutativity isn't claimed for arbitrary op sequences
     // (two Transfers from the same debtor can fail depending on order), only
-    // for op sequences produced by `compute_balance_operations` from a valid
-    // `MatchingOutput`.
+    // for op sequences produced by `fill_settlement` + `push_balance_operations`
+    // from a valid `MatchingOutput`.
 
     proptest! {
-        /// `compute_balance_operations` preserves structural invariants over
-        /// any `MatchingOutput` the arbitrary strategy can produce:
+        /// `fill_settlement` + `push_balance_operations` preserve structural invariants
+        /// over any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
         /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
@@ -2059,7 +2059,7 @@ mod settle_fills {
         /// This covers the fuzz shape the retired `settle_fill_ordering`
         /// proptest exercised, moved one layer up to the pure compute fn.
         #[test]
-        fn compute_balance_operations_matches_fill_shape(
+        fn settlement_balance_ops_match_fill_shape(
             output in crate::test_fixtures::arbitrary::arb_matching_output()
         ) {
             use crate::order::{self, PairToken};
