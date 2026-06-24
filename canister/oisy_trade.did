@@ -298,9 +298,9 @@ type OrderRecord = record {
     /// Time-in-force policy the order was placed with.
     time_in_force : TimeInForce;
     /// Cumulative realized quote notional transacted across the order's fills,
-    /// in quote-token smallest units. With `filled_quantity` (base smallest
-    /// units), this yields the volume-weighted average price (VWAP) the order
-    /// traded at.
+    /// in quote-token smallest units. The average execution price is
+    /// `filled_quote / filled_quantity` (VWAP), a ratio of the two tokens'
+    /// smallest units.
     filled_quote : nat;
     /// Cumulative realized fee charged across the order's fills, in the order's
     /// receive token — base for a buy, quote for a sell.
