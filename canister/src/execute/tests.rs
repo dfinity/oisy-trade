@@ -48,10 +48,10 @@ fn should_complete_in_one_run_when_budget_covers_all() {
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    let buy_id = test_fixtures::place_order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
-        .place(&mut state);
-    let sell_id = test_fixtures::place_order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
-        .place(&mut state);
+    let buy_id =
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    let sell_id =
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
     let status = EXECUTOR.run_once(&mut state, &runtime);
 
@@ -70,7 +70,7 @@ fn should_signal_more_work_until_all_orders_are_drained() {
         .map(|i| {
             let side = if i % 2 == 0 { Side::Buy } else { Side::Sell };
             let user = if i % 2 == 0 { BUYER } else { SELLER };
-            test_fixtures::place_order(user, &pair, side, 100 * PRICE_SCALE, lot).place(&mut state)
+            test_fixtures::order(user, &pair, side, 100 * PRICE_SCALE, lot).place(&mut state)
         })
         .collect();
 
@@ -104,8 +104,8 @@ fn should_be_a_no_op_when_globally_halted() {
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    let buy_id = test_fixtures::place_order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
-    let sell_id = test_fixtures::place_order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
+    let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
+    let sell_id = test_fixtures::order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
 
     state.permissions_mut().halt_trading_globally();
 
@@ -137,8 +137,8 @@ fn should_drain_leftover_settling_events_under_global_halt() {
 
     // Stage a settling event without draining it by recording the matching
     // event directly — that's the producer side of the settling queue.
-    test_fixtures::place_order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
-    test_fixtures::place_order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
+    test_fixtures::order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
     let pending: Vec<_> = state
         .order_book(&OrderBookId::ZERO)
         .unwrap()
@@ -180,12 +180,10 @@ fn should_skip_halted_book_while_matching_others() {
     let lot = u64::from(LOT_SIZE);
 
     // A crossable pair on each book.
-    let buy_a = test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 100, lot).place(&mut state);
-    let sell_a =
-        test_fixtures::place_order(SELLER, &pair_a, Side::Sell, 100, lot).place(&mut state);
-    let buy_b = test_fixtures::place_order(BUYER, &pair_b, Side::Buy, 100, lot).place(&mut state);
-    let sell_b =
-        test_fixtures::place_order(SELLER, &pair_b, Side::Sell, 100, lot).place(&mut state);
+    let buy_a = test_fixtures::order(BUYER, &pair_a, Side::Buy, 100, lot).place(&mut state);
+    let sell_a = test_fixtures::order(SELLER, &pair_a, Side::Sell, 100, lot).place(&mut state);
+    let buy_b = test_fixtures::order(BUYER, &pair_b, Side::Buy, 100, lot).place(&mut state);
+    let sell_b = test_fixtures::order(SELLER, &pair_b, Side::Sell, 100, lot).place(&mut state);
 
     // Halt book A only.
     state.permissions_mut().halt_trading(OrderBookId::ZERO);
@@ -225,8 +223,8 @@ fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
 
-    let buy = test_fixtures::place_order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
-    let sell = test_fixtures::place_order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
+    let buy = test_fixtures::order(BUYER, &pair, Side::Buy, 100, lot).place(&mut state);
+    let sell = test_fixtures::order(SELLER, &pair, Side::Sell, 100, lot).place(&mut state);
 
     // Halt the only book before any matching runs.
     state.permissions_mut().halt_trading(OrderBookId::ZERO);
@@ -289,10 +287,10 @@ fn should_process_book_with_more_pending_first_under_tight_chunk_budget() {
     let lot = u64::from(LOT_SIZE);
 
     // Book A has 3 pending orders; book B has 1.
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 120 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(BUYER, &pair_b, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 120 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_b, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
     set_chunk_policy(&mut state, 2);
 
@@ -327,8 +325,8 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
     let lot = u64::from(LOT_SIZE);
 
     // Book 0: 2 pending.
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
     // Book 1: 5 pending.
     for price in [
         100 * PRICE_SCALE,
@@ -337,7 +335,7 @@ fn should_rank_higher_id_book_with_more_pending_ahead_of_lower_id_book() {
         130 * PRICE_SCALE,
         140 * PRICE_SCALE,
     ] {
-        test_fixtures::place_order(BUYER, &pair_b, Side::Buy, price, lot).place(&mut state);
+        test_fixtures::order(BUYER, &pair_b, Side::Buy, price, lot).place(&mut state);
     }
 
     set_chunk_policy(&mut state, 5);
@@ -375,8 +373,8 @@ fn should_drain_leftover_settling_events_before_running_matching() {
     // Stage a settling event without draining it by calling
     // record_matching_event directly — that's the producer side of the
     // pending_settling_events queue.
-    test_fixtures::place_order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
     let pending: Vec<_> = state
         .order_book(&OrderBookId::ZERO)
         .unwrap()
@@ -412,12 +410,10 @@ fn should_settle_each_book_before_advancing_to_the_next() {
     let lot = u64::from(LOT_SIZE);
 
     // Both books have a crossing pair that will produce a SettlingEvent.
-    test_fixtures::place_order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(SELLER, &pair_a, Side::Sell, 100 * PRICE_SCALE, lot)
-        .place(&mut state);
-    test_fixtures::place_order(BUYER, &pair_b, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-    test_fixtures::place_order(SELLER, &pair_b, Side::Sell, 100 * PRICE_SCALE, lot)
-        .place(&mut state);
+    test_fixtures::order(BUYER, &pair_a, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(SELLER, &pair_a, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair_b, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(SELLER, &pair_b, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
     set_unlimited_policy(&mut state);
     let status = EXECUTOR.run_once(&mut state, &runtime());
@@ -435,7 +431,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     let mut state = setup_one_book();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    test_fixtures::place_order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+    test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
     // Minimum budget; mock returns a counter already past it.
     state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
@@ -515,9 +511,9 @@ fn setup_two_books() -> TestState {
 
 fn place_workload(state: &mut TestState, pair: &TradingPair, lot: u64) {
     // A mix that exercises partial fills, full fills, and resting orders.
-    test_fixtures::place_order(BUYER, pair, Side::Buy, 100 * PRICE_SCALE, lot).place(state);
-    test_fixtures::place_order(BUYER, pair, Side::Buy, 110 * PRICE_SCALE, lot).place(state);
-    test_fixtures::place_order(SELLER, pair, Side::Sell, 100 * PRICE_SCALE, lot).place(state);
-    test_fixtures::place_order(SELLER, pair, Side::Sell, 110 * PRICE_SCALE, lot * 2).place(state);
-    test_fixtures::place_order(BUYER, pair, Side::Buy, 110 * PRICE_SCALE, lot).place(state);
+    test_fixtures::order(BUYER, pair, Side::Buy, 100 * PRICE_SCALE, lot).place(state);
+    test_fixtures::order(BUYER, pair, Side::Buy, 110 * PRICE_SCALE, lot).place(state);
+    test_fixtures::order(SELLER, pair, Side::Sell, 100 * PRICE_SCALE, lot).place(state);
+    test_fixtures::order(SELLER, pair, Side::Sell, 110 * PRICE_SCALE, lot * 2).place(state);
+    test_fixtures::order(BUYER, pair, Side::Buy, 110 * PRICE_SCALE, lot).place(state);
 }
