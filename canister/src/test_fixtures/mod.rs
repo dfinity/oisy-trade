@@ -336,99 +336,90 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-/// Deposit just enough of the appropriate token to cover `side`'s reservation,
-/// validate the resulting limit order, and record it. Returns the assigned
-/// `OrderId`. Each call funds the user from zero, so distinct users get
-/// distinct, isolated balances.
-pub fn place_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
+/// Builder for placing a limit order in tests. Construct with [`place_order`],
+/// tune the time-in-force if needed (defaults to GTC), then call
+/// [`PlaceOrder::place`] to deposit the reservation, validate, and record it.
+pub struct PlaceOrder<'a> {
     user: Principal,
-    pair: &TradingPair,
+    pair: &'a TradingPair,
     side: Side,
     price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::GoodTilCanceled,
-    )
-}
-
-/// Like [`place_order`] but for a fill-or-kill order.
-pub fn place_fok_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::FillOrKill,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn place_order_with_tif<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
+    quantity: Quantity,
     time_in_force: TimeInForce,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    let pending = PendingOrder {
-        side,
-        price: Price::new(price),
-        quantity: quantity.into(),
-        time_in_force,
-    };
-    let (token, amount) = match side {
-        Side::Buy => (
-            pair.quote,
-            pending
-                .price
-                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
-                .expect("place_order: price × quantity overflow"),
-        ),
-        Side::Sell => (pair.base, pending.quantity),
-    };
-    state.deposit(user, token, amount, StableMemoryOptions::Write);
-    let (order_id, order) = state
-        .validate_limit_order(user, pair.clone(), pending)
-        .expect("place_order: validate_limit_order failed");
-    state.record_limit_order(
+}
+
+/// Start building a limit order placement. Defaults to good-til-canceled; call
+/// [`PlaceOrder::fill_or_kill`] or [`PlaceOrder::time_in_force`] to change it.
+pub fn place_order(
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u128,
+    quantity: impl Into<Quantity>,
+) -> PlaceOrder<'_> {
+    PlaceOrder {
         user,
-        order_id.book_id(),
-        order,
-        Timestamp::EPOCH,
-        StableMemoryOptions::Write,
-    );
-    order_id
+        pair,
+        side,
+        price,
+        quantity: quantity.into(),
+        time_in_force: TimeInForce::GoodTilCanceled,
+    }
+}
+
+impl<'a> PlaceOrder<'a> {
+    /// Make this a fill-or-kill order.
+    pub fn fill_or_kill(self) -> Self {
+        self.time_in_force(TimeInForce::FillOrKill)
+    }
+
+    /// Set the time-in-force for this order.
+    pub fn time_in_force(mut self, time_in_force: TimeInForce) -> Self {
+        self.time_in_force = time_in_force;
+        self
+    }
+
+    /// Deposit just enough of the appropriate token to cover the order's
+    /// reservation, validate the resulting limit order, and record it. Returns
+    /// the assigned `OrderId`. Each call funds the user from zero, so distinct
+    /// users get distinct, isolated balances.
+    pub fn place<MH, MB>(self, state: &mut state::State<MH, MB>) -> order::OrderId
+    where
+        MH: ic_stable_structures::Memory,
+        MB: ic_stable_structures::Memory,
+    {
+        let pending = PendingOrder {
+            side: self.side,
+            price: Price::new(self.price),
+            quantity: self.quantity,
+            time_in_force: self.time_in_force,
+        };
+        let (token, amount) = match self.side {
+            Side::Buy => (
+                self.pair.quote,
+                pending
+                    .price
+                    .checked_mul_quantity_scaled(
+                        &pending.quantity,
+                        state.base_scale(&self.pair.base),
+                    )
+                    .expect("place_order: price × quantity overflow"),
+            ),
+            Side::Sell => (self.pair.base, pending.quantity),
+        };
+        state.deposit(self.user, token, amount, StableMemoryOptions::Write);
+        let (order_id, order) = state
+            .validate_limit_order(self.user, self.pair.clone(), pending)
+            .expect("place_order: validate_limit_order failed");
+        state.record_limit_order(
+            self.user,
+            order_id.book_id(),
+            order,
+            Timestamp::EPOCH,
+            StableMemoryOptions::Write,
+        );
+        order_id
+    }
 }
 
 #[cfg(test)]
