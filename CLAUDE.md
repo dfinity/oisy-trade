@@ -37,10 +37,11 @@ When I give you a specification to build:
    `repos/{owner}/{repo}/pulls/<n>/reviews`; review-thread resolution state via the
    GraphQL `reviewThreads` field (not exposed by `gh pr view --json`).
    After ANY push to the PR — an `implementer` fix, a `main`-merge, a rebase — re-run
-   *all three* of: the CI check (`gh pr checks`), this unresolved-comment check, and the
-   PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`) before going
-   idle; never poll one without the others (a push that re-triggers CI also re-triggers
-   bot review). Mergeability must ALSO be polled on every idle tick even with no push,
+   *all three* of these before going idle, never one without the others (a push that
+   re-triggers CI also re-triggers bot review):
+     - the CI check (`gh pr checks`);
+     - this unresolved-comment check;
+     - the PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`). Mergeability must ALSO be polled on every idle tick even with no push,
    because `main` advancing independently can turn the PR `CONFLICTING` while CI stays
    green and no new comment appears — CI runs against the PR's last pushed merge ref, so
    it will not catch a conflict introduced by a later `main` commit. When the PR is
