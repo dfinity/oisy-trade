@@ -44,7 +44,10 @@ When I give you a specification to build:
      - the PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`): the
        conflict signal is the `mergeable` field equal to `CONFLICTING` (equivalently, the
        `mergeStateStatus` field equal to `DIRTY`) — these are two fields with distinct
-       value sets, so always compare each value against its own field.
+       value sets, so always compare each value against its own field. `mergeable:
+       UNKNOWN` (GitHub recomputes mergeability asynchronously, common right after a push
+       or a `main` advance) is NOT a verdict — treat it as a re-poll state: wait briefly
+       and query again until it settles to `MERGEABLE` or `CONFLICTING` before concluding.
    Mergeability must ALSO be polled on every idle tick even with no push, because `main`
    advancing independently can turn the PR `mergeable: CONFLICTING` while CI stays green
    and no new comment appears — CI runs against the PR's last pushed merge ref, so it will
