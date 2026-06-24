@@ -428,20 +428,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 self.order_history.apply_update(&order_id, update, now);
             }
         }
-        let mut balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
-        for (seq, killed) in &output.expired_orders {
-            let (refund_token, refund_amount) = refund_for(
-                killed.side,
-                killed.price,
-                killed.remaining_quantity,
-                base_scale,
-            );
-            balance_operations.push(event::BalanceOperation::Unreserve {
-                order: *seq,
-                token: refund_token,
-                amount: refund_amount,
-            });
-        }
+        let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
         if !balance_operations.is_empty() {
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
@@ -977,6 +964,21 @@ fn compute_balance_operations(
             token: order::PairToken::Base,
             amount: fill.quantity,
             fee: nonzero(base_fee),
+        });
+    }
+    // A killed fill-or-kill order never touched the book, so its full placement
+    // reservation must be released.
+    for (seq, killed) in &output.expired_orders {
+        let (refund_token, refund_amount) = refund_for(
+            killed.side,
+            killed.price,
+            killed.remaining_quantity,
+            base_scale,
+        );
+        ops.push(event::BalanceOperation::Unreserve {
+            order: *seq,
+            token: refund_token,
+            amount: refund_amount,
         });
     }
     ops
