@@ -515,8 +515,8 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
-        TickSize, TimeInForce, TokenId, TokenMetadata,
+        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
+        Side, TickSize, TimeInForce, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -526,7 +526,7 @@ pub mod arbitrary {
     use candid::Principal;
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
-    use proptest::collection::{SizeRange, btree_set, vec};
+    use proptest::collection::{SizeRange, btree_map, btree_set, vec};
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};
     use proptest::prop_oneof;
@@ -909,6 +909,16 @@ pub mod arbitrary {
         arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
     }
 
+    pub fn arb_removed_order() -> impl Strategy<Value = RemovedOrder> {
+        (arb_side(), arb_price(), arb_quantity()).prop_map(|(side, price, remaining_quantity)| {
+            RemovedOrder {
+                side,
+                price,
+                remaining_quantity,
+            }
+        })
+    }
+
     pub fn arb_matching_output() -> impl Strategy<Value = MatchingOutput> {
         // `arb_fill` multiplies its index by 2; cap to u32 range so 2 * index
         // fits in a u64.
@@ -917,12 +927,15 @@ pub mod arbitrary {
             vec(arb_any_fill, 0..5),
             btree_set(arb_order_seq(), 0..5),
             btree_set(arb_order_seq(), 0..5),
+            btree_map(arb_order_seq(), arb_removed_order(), 0..5),
         )
-            .prop_map(|(fills, resting_orders, filled_orders)| MatchingOutput {
-                fills,
-                resting_orders,
-                filled_orders,
-                expired_orders: std::collections::BTreeMap::new(),
+            .prop_map(|(fills, resting_orders, filled_orders, expired_orders)| {
+                MatchingOutput {
+                    fills,
+                    resting_orders,
+                    filled_orders,
+                    expired_orders,
+                }
             })
     }
 
