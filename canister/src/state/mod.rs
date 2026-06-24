@@ -921,7 +921,7 @@ fn compute_balance_operations(
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
 ) -> Vec<event::BalanceOperation> {
-    let mut ops = Vec::with_capacity(output.fills.len() * 3);
+    let mut ops = Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
     for fill in &output.fills {
         let (buyer_seq, seller_seq) = match fill.taker_side {
             Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
