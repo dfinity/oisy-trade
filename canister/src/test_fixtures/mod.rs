@@ -910,11 +910,16 @@ pub mod arbitrary {
     }
 
     pub fn arb_removed_order() -> impl Strategy<Value = RemovedOrder> {
-        (arb_side(), arb_price(), arb_quantity()).prop_map(|(side, price, remaining_quantity)| {
+        // Tick-aligned price and lot-aligned quantity so a Buy refund's
+        // `price × quantity` settles exactly under the pair invariant, the same
+        // alignment `arb_fill` upholds.
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (arb_side(), 1..100u64, 1..10u64).prop_map(move |(side, price_ticks, qty_lots)| {
             RemovedOrder {
                 side,
-                price,
-                remaining_quantity,
+                price: Price::new(price_ticks as u128 * tick),
+                remaining_quantity: Quantity::from(qty_lots * lot),
             }
         })
     }

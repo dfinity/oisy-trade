@@ -2280,8 +2280,9 @@ mod settle_fills {
         /// any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
-        /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
-        ///   the buy-taker price-improvement `Unreserve`)
+        /// - total op count is in `[2 * fills + expired, 3 * fills + expired]`
+        ///   (the extra per-fill op is the buy-taker price-improvement
+        ///   `Unreserve`; each killed order adds one refund `Unreserve`)
         /// This covers the fuzz shape the retired `settle_fill_ordering`
         /// proptest exercised, moved one layer up to the pure compute fn.
         #[test]
@@ -2297,11 +2298,17 @@ mod settle_fills {
                 std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
             );
             let fills_len = output.fills.len();
+            let expired_len = output.expired_orders.len();
 
             prop_assert!(
-                ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
-                "ops.len() {} outside [{}, {}] for {} fills",
-                ops.len(), 2 * fills_len, 3 * fills_len, fills_len,
+                ops.len() >= 2 * fills_len + expired_len
+                    && ops.len() <= 3 * fills_len + expired_len,
+                "ops.len() {} outside [{}, {}] for {} fills and {} expired",
+                ops.len(),
+                2 * fills_len + expired_len,
+                3 * fills_len + expired_len,
+                fills_len,
+                expired_len,
             );
 
             let quote_transfers = ops.iter().filter(|o| matches!(
@@ -2315,11 +2322,11 @@ mod settle_fills {
             prop_assert_eq!(quote_transfers, fills_len);
             prop_assert_eq!(base_transfers, fills_len);
 
-            // Unreserves only fire for buy-taker fills with strictly positive
-            // price improvement.
+            // Unreserves fire for buy-taker fills with strictly positive price
+            // improvement, plus one refund per killed (expired) order.
             let expected_unreserves = output.fills.iter().filter(|f| {
                 f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
-            }).count();
+            }).count() + expired_len;
             let unreserves = ops.iter().filter(|o| matches!(
                 o,
                 BalanceOperation::Unreserve { .. }
