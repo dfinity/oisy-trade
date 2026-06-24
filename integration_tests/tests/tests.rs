@@ -53,15 +53,13 @@ async fn assert_balances<R: Runtime>(
 }
 
 mod add_limit_order {
-    use assert_matches::assert_matches;
-    use candid::{Encode, Nat, Principal};
+    use candid::{Nat, Principal};
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup};
     use oisy_trade_types::{
         AddLimitOrderRequestError, AddTradingPairRequest, Balance, ErrorKind, GetMyOrdersArgs,
-        LimitOrderRequest, OrderId, OrderStatus, Side,
+        GetMyOrdersRequestError, LimitOrderRequest, OrderId, OrderStatus, Side,
     };
-    use pocket_ic::{RejectCode, RejectResponse};
 
     /// A `ByPage` filter, matching the previous flat `after`/`length` args.
     fn by_page(after: Option<OrderId>, length: u32) -> GetMyOrdersArgs {
@@ -117,8 +115,8 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(
-            client.get_my_order(order_id).await.map(|o| o.order.status),
-            Some(OrderStatus::Open)
+            client.get_my_order(order_id).await.unwrap().order.status,
+            OrderStatus::Open
         );
 
         setup.drop().await;
@@ -165,7 +163,7 @@ mod add_limit_order {
 
         // Alice sees only her own orders, newest first — bob's interleaved
         // orders don't leak in.
-        let orders = alice.get_my_orders(by_page(None, 10)).await;
+        let orders = alice.get_my_orders(by_page(None, 10)).await.unwrap();
         assert_eq!(
             orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![
@@ -189,7 +187,7 @@ mod add_limit_order {
         }
 
         // Bob likewise sees only his own.
-        let bob_orders = bob.get_my_orders(by_page(None, 10)).await;
+        let bob_orders = bob.get_my_orders(by_page(None, 10)).await.unwrap();
         assert_eq!(
             bob_orders.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
             vec![bob_ids[2].clone(), bob_ids[1].clone(), bob_ids[0].clone()]
@@ -199,26 +197,52 @@ mod add_limit_order {
         // Cursor pagination: resume after the newest, take one → the next order.
         let page = alice
             .get_my_orders(by_page(Some(alice_ids[2].clone()), 1))
-            .await;
+            .await
+            .unwrap();
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, alice_ids[1]);
 
+        // A valid cursor at the oldest order has no older orders: end of
+        // history is Ok([]), not an error.
+        assert_eq!(
+            alice
+                .get_my_orders(by_page(Some(alice_ids[0].clone()), 10))
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+
         // Point lookup by id: each caller resolves only their own orders.
-        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await;
-        assert_eq!(alice_by_id.map(|o| o.id), Some(alice_ids[0].clone()));
-        // An order owned by another principal is invisible to a foreign caller.
-        assert!(alice.get_my_order(bob_ids[0].clone()).await.is_none());
-        // An unknown (but well-formed) id resolves to nothing.
-        assert!(
+        let alice_by_id = alice.get_my_order(alice_ids[0].clone()).await.unwrap();
+        assert_eq!(alice_by_id.id, alice_ids[0]);
+        // An order owned by another principal is not found for a foreign caller.
+        assert_eq!(
+            alice
+                .get_my_order(bob_ids[0].clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
+        );
+        // An unknown (but well-formed) id is likewise not found.
+        assert_eq!(
             alice
                 .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
                 .await
-                .is_none()
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
         );
 
         // A caller that placed nothing sees none.
         let stranger = setup.oisy_trade_client_with_caller(Principal::from_slice(&[0xAB]));
-        assert!(stranger.get_my_orders(by_page(None, 10)).await.is_empty());
+        assert!(
+            stranger
+                .get_my_orders(by_page(None, 10))
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         setup.drop().await;
     }
@@ -272,40 +296,52 @@ mod add_limit_order {
         // The matching timer fires eagerly after placement; with no counterparty
         // the order rests in the book as Open.
         assert_eq!(
-            client.get_my_order(order_id).await.map(|o| o.order.status),
-            Some(OrderStatus::Open)
+            client.get_my_order(order_id).await.unwrap().order.status,
+            OrderStatus::Open
         );
 
         setup.drop().await;
     }
 
     #[tokio::test]
-    async fn should_return_nothing_for_unknown_order_and_trap_on_malformed_id() {
+    async fn should_report_unknown_order_as_not_found_and_reject_malformed_id() {
         let setup = Setup::new().await;
+        let client = setup.oisy_trade_client();
 
-        // A well-formed but unknown id resolves to nothing — absence from
-        // the result is the sole not-found signal.
-        let not_found = setup
-            .oisy_trade_client()
+        // A well-formed but unknown id is not found.
+        let not_found = client
             .get_my_order("ffffffffffffffffffffffffffffffff".to_string())
-            .await;
-        assert!(not_found.is_none());
+            .await
+            .unwrap_err();
+        assert_eq!(
+            not_found.kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
+        );
+        assert!(not_found.message.is_some_and(|m| !m.is_empty()));
 
-        // A malformed id traps, consistent with the existing id/cursor parsing.
-        let result = setup
-            .env()
-            .query_call(
-                setup.oisy_trade_id(),
-                Principal::anonymous(),
-                "get_my_orders",
-                Encode!(&Some(by_page(Some("not-a-valid-id".to_string()), 10))).unwrap(),
-            )
-            .await;
+        // A well-formed but unknown cursor is likewise not found, rather than
+        // silently yielding an empty page.
+        let bogus_cursor = client
+            .get_my_orders(by_page(
+                Some("ffffffffffffffffffffffffffffffff".to_string()),
+                10,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            bogus_cursor.kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::OrderNotFound))
+        );
+        assert!(bogus_cursor.message.is_some_and(|m| !m.is_empty()));
 
-        assert_matches!(
-            result,
-            Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
-            if reject_message.contains("invalid order id")
+        // A malformed id is rejected cleanly (no trap) with InvalidOrderId.
+        assert_eq!(
+            client
+                .get_my_orders(by_page(Some("not-a-valid-id".to_string()), 10))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyOrdersRequestError::InvalidOrderId))
         );
 
         setup.drop().await;
@@ -368,15 +404,19 @@ mod add_limit_order {
             buyer_client
                 .get_my_order(buy_order_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Filled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled
         );
         assert_eq!(
             seller_client
                 .get_my_order(sell_order_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Filled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Filled
         );
 
         // Buyer: received 1M base tokens, spent 1000M quote tokens
@@ -795,8 +835,10 @@ mod cancel_limit_order {
             buyer_client
                 .get_my_order(buy_id)
                 .await
-                .map(|o| o.order.status),
-            Some(OrderStatus::Canceled)
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Canceled
         );
         assert_eq!(
             buyer_client
@@ -836,15 +878,13 @@ mod cancel_limit_order {
                 .kind,
             ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
         );
-        // Malformed id is also rejected cleanly; it is currently mapped to
-        // OrderNotFound (a distinct InvalidOrderId leaf may be introduced later).
         assert_eq!(
             client
                 .cancel_limit_order("not-a-valid-id".to_string())
                 .await
                 .unwrap_err()
                 .kind,
-            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::InvalidOrderId))
         );
 
         setup.drop().await;
@@ -1621,15 +1661,19 @@ async fn should_complete_for_users_walkthrough() {
         seller_client
             .get_my_order(sell_order_id)
             .await
-            .map(|o| o.order.status),
-        Some(OrderStatus::Filled)
+            .unwrap()
+            .order
+            .status,
+        OrderStatus::Filled
     );
     assert_eq!(
         buyer_client
             .get_my_order(buy_order_id)
             .await
-            .map(|o| o.order.status),
-        Some(OrderStatus::Filled)
+            .unwrap()
+            .order
+            .status,
+        OrderStatus::Filled
     );
     assert_eq!(
         seller_client
@@ -1987,8 +2031,9 @@ mod order_book {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, PriceLevel,
-        Side,
+        GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookDepthRequestError,
+        GetOrderBookTickerError, GetOrderBookTickerRequestError, LimitOrderRequest,
+        MAX_DEPTH_LIMIT, OrderBookDepth, OrderBookTicker, PriceLevel, Side, TradingPair,
     };
 
     #[tokio::test]
@@ -2042,6 +2087,51 @@ mod order_book {
                     level(120_000 * PRICE_SCALE, 4_000_000),
                 ],
             })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_report_unknown_trading_pair_over_the_boundary() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let unknown = TradingPair {
+            base: Principal::from_slice(&[0xaa]),
+            quote: Principal::from_slice(&[0xbb]),
+        };
+        let client = setup.oisy_trade_client();
+
+        let ticker_error = client.get_order_book_ticker(unknown).await.unwrap_err();
+        assert_eq!(
+            ticker_error,
+            GetOrderBookTickerError::request(GetOrderBookTickerRequestError::UnknownTradingPair),
+        );
+
+        let depth_error = client
+            .get_order_book_depth(GetOrderBookDepthRequest {
+                trading_pair: unknown,
+                limit: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            depth_error,
+            GetOrderBookDepthError::request(GetOrderBookDepthRequestError::UnknownTradingPair),
+        );
+
+        let limit_too_large_error = client
+            .get_order_book_depth(GetOrderBookDepthRequest {
+                trading_pair: setup.trading_pair(),
+                limit: Some(MAX_DEPTH_LIMIT + 1),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            limit_too_large_error,
+            GetOrderBookDepthError::request(GetOrderBookDepthRequestError::LimitTooLarge {
+                requested: MAX_DEPTH_LIMIT + 1,
+                max: MAX_DEPTH_LIMIT,
+            }),
         );
 
         setup.drop().await;
@@ -2410,20 +2500,20 @@ mod get_fee_balances {
         assert_eq!(
             with_filter,
             vec![
-                Ok(UserTokenBalance {
+                UserTokenBalance {
                     token: fills.base.clone(),
                     balance: Balance {
                         free: Nat::from(fills.base_fee_raw),
                         reserved: Nat::from(0u64),
                     },
-                }),
-                Ok(UserTokenBalance {
+                },
+                UserTokenBalance {
                     token: fills.quote.clone(),
                     balance: Balance {
                         free: Nat::from(fills.quote_fee_raw),
                         reserved: Nat::from(0u64),
                     },
-                }),
+                },
             ],
         );
 
@@ -2460,7 +2550,9 @@ mod get_balances {
     use candid::{Nat, Principal};
     use oisy_trade_int_tests::Setup;
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
-    use oisy_trade_types::{FilterToken, GetBalancesError, TokenId};
+    use oisy_trade_types::{
+        FilterToken, GetBalancesError, GetBalancesRequestError, MAX_FILTER_LEN, TokenId,
+    };
 
     #[tokio::test]
     async fn should_return_empty_without_filter_for_fresh_user() {
@@ -2489,7 +2581,7 @@ mod get_balances {
             .await
             .unwrap();
         assert_eq!(result.len(), 1);
-        let entry = result[0].as_ref().unwrap();
+        let entry = &result[0];
         assert_eq!(entry.token.id, token);
         assert_eq!(entry.balance.free, Nat::from(deposit));
 
@@ -2497,23 +2589,33 @@ mod get_balances {
     }
 
     #[tokio::test]
-    async fn should_return_token_not_supported_for_unknown_filter_entry() {
+    async fn should_fail_whole_call_for_unknown_filter_entry() {
         let setup = Setup::new().await.with_trading_pair().await;
+        let client = setup.oisy_trade_client();
+
         let unknown = TokenId {
             ledger_id: Principal::from_slice(&[0xFF]),
         };
-
-        let result = setup
-            .oisy_trade_client()
+        let unknown_entry_error = client
             .get_balances(Some(vec![FilterToken::ById(unknown.clone())]))
             .await
-            .unwrap();
-        assert_eq!(result.len(), 1);
+            .unwrap_err();
         assert_eq!(
-            result[0],
-            Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown
-            )))
+            unknown_entry_error,
+            GetBalancesError::request(GetBalancesRequestError::TokenNotSupported(
+                FilterToken::ById(unknown)
+            )),
+        );
+
+        let len = MAX_FILTER_LEN + 1;
+        let filter = vec![FilterToken::ById(setup.base_token_id()); len as usize];
+        let filter_too_large_error = client.get_balances(Some(filter)).await.unwrap_err();
+        assert_eq!(
+            filter_too_large_error,
+            GetBalancesError::request(GetBalancesRequestError::FilterTooLarge {
+                len,
+                max: MAX_FILTER_LEN,
+            }),
         );
 
         setup.drop().await;

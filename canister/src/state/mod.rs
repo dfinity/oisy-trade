@@ -18,9 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PairToken,
-    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    self, CursorNotFound, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order,
+    OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
+    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -511,19 +512,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns up to `length` of `owner`'s orders, newest first, resuming
     /// strictly after the `after` order (a cursor from a prior page) — each
-    /// paired with its trading pair and full record. An `after` that names a
-    /// non-existent order yields an empty page.
+    /// paired with its trading pair and full record. An `after` that names an
+    /// order the caller does not own (unknown or another principal's) yields
+    /// [`CursorNotFound`]; a valid cursor with no older orders is `Ok(vec![])`.
     pub fn get_user_orders(
         &self,
         owner: &Principal,
         after: Option<OrderId>,
         length: usize,
-    ) -> Vec<(OrderId, TradingPair, OrderRecord)> {
+    ) -> Result<Vec<(OrderId, TradingPair, OrderRecord)>, CursorNotFound> {
         let Some(user_id) = self.user_registry.lookup(*owner) else {
-            return Vec::new();
+            return match after {
+                Some(_) => Err(CursorNotFound),
+                None => Ok(Vec::new()),
+            };
         };
-        self.order_history
-            .orders_after(user_id, after, length)
+        Ok(self
+            .order_history
+            .orders_after(user_id, after, length)?
             .into_iter()
             .map(|id| {
                 let record = self
@@ -537,7 +543,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     .clone();
                 (id, pair, record)
             })
-            .collect()
+            .collect())
     }
 
     /// Returns the single order `id` paired with its trading pair and full
@@ -695,18 +701,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns the canister-owned fee pool, shaped like [`get_balances`].
     /// - `None`: every token with a non-zero fee pool entry.
-    /// - `Some(filter)`: each filter entry resolved per-entry; unsupported
-    ///   tokens are reported as [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
-    ///   Registered tokens with no accrual return `Balance::ZERO`.
+    /// - `Some(filter)`: one entry per requested token. The whole call fails
+    ///   with a [`oisy_trade_types::GetBalancesError`] envelope carrying
+    ///   [`oisy_trade_types::GetBalancesRequestError::TokenNotSupported`] under
+    ///   `kind = RequestError` if any entry references an unsupported token;
+    ///   registered tokens with no accrual return `Balance::ZERO`.
     pub fn get_fee_balances(
         &self,
         filter: Option<&[oisy_trade_types::FilterToken]>,
-    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
+    ) -> Result<Vec<oisy_trade_types::UserTokenBalance>, oisy_trade_types::GetBalancesError> {
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
                 fee_only_balance(self.balances.fee_balance(t).unwrap_or_default())
             }),
-            None => self
+            None => Ok(self
                 .balances
                 .iter_fee_balances()
                 .filter(|(_, amount)| !amount.is_zero())
@@ -716,28 +724,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                         .get(&token)
                         .expect("BUG: fee pool entry for unregistered token")
                         .clone();
-                    Ok(oisy_trade_types::UserTokenBalance {
+                    oisy_trade_types::UserTokenBalance {
                         token: oisy_trade_types::Token {
                             id: token.into(),
                             metadata: metadata.into(),
                         },
                         balance: fee_only_balance(amount),
-                    })
+                    }
                 })
-                .collect(),
+                .collect()),
         }
     }
 
     /// Shared body for the `Some(filter)` branch of both [`Self::get_balances`]
     /// and [`Self::get_fee_balances`]: dedupe filter entries, look up the
     /// token in `self.tokens`, and resolve each entry's balance via the
-    /// caller-supplied `balance_lookup`. Unknown tokens are reported as
-    /// [`oisy_trade_types::GetBalancesError::TokenNotSupported`].
+    /// caller-supplied `balance_lookup`. Unknown tokens are reported as a
+    /// [`oisy_trade_types::GetBalancesError`] envelope with
+    /// `kind = RequestError(Some(TokenNotSupported(..)))`.
     fn apply_filter<F>(
         &self,
         filter: &[oisy_trade_types::FilterToken],
         balance_lookup: F,
-    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>>
+    ) -> Result<Vec<oisy_trade_types::UserTokenBalance>, oisy_trade_types::GetBalancesError>
     where
         F: Fn(&TokenId) -> oisy_trade_types::Balance,
     {
@@ -750,8 +759,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     oisy_trade_types::FilterToken::ById(t) => TokenId::from(t.clone()),
                 };
                 match self.tokens.get(&internal_token) {
-                    None => Err(oisy_trade_types::GetBalancesError::TokenNotSupported(
-                        ft.clone(),
+                    None => Err(oisy_trade_types::GetBalancesError::request(
+                        oisy_trade_types::GetBalancesRequestError::TokenNotSupported(ft.clone()),
                     )),
                     Some(metadata) => Ok(oisy_trade_types::UserTokenBalance {
                         token: oisy_trade_types::Token {
@@ -801,7 +810,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self,
         user: &Principal,
         filter: Option<&[oisy_trade_types::FilterToken]>,
-    ) -> Vec<Result<oisy_trade_types::UserTokenBalance, oisy_trade_types::GetBalancesError>> {
+    ) -> Result<Vec<oisy_trade_types::UserTokenBalance>, oisy_trade_types::GetBalancesError> {
         // `lookup` (not `intern`) so mere queriers don't pollute the registry.
         // `None` ⇒ the user has never held a balance, so every balance is zero.
         let user_id = self.user_registry.lookup(*user);
@@ -814,25 +823,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }),
             None => {
                 let Some(user_id) = user_id else {
-                    return Vec::new();
+                    return Ok(Vec::new());
                 };
-                self.tokens
+                Ok(self
+                    .tokens
                     .iter()
                     .filter_map(|(t, metadata)| {
                         self.balances
                             .get_balance(user_id, t)
                             .filter(|b| !b.is_zero())
-                            .map(|b| {
-                                Ok(oisy_trade_types::UserTokenBalance {
-                                    token: oisy_trade_types::Token {
-                                        id: (*t).into(),
-                                        metadata: metadata.clone().into(),
-                                    },
-                                    balance: b.into(),
-                                })
+                            .map(|b| oisy_trade_types::UserTokenBalance {
+                                token: oisy_trade_types::Token {
+                                    id: (*t).into(),
+                                    metadata: metadata.clone().into(),
+                                },
+                                balance: b.into(),
                             })
                     })
-                    .collect()
+                    .collect())
             }
         }
     }

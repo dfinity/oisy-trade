@@ -165,6 +165,11 @@ impl Storable for SeqOrderRecord {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+/// The `after` cursor passed to [`OrderHistory::orders_after`] names an order
+/// that is unknown or does not belong to the querying user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorNotFound;
+
 /// Record of every order from submission through terminal state.
 ///
 /// Two stable maps kept together here rather than split across the caller:
@@ -250,23 +255,23 @@ impl<M: Memory> OrderHistory<M> {
     /// a cursor — the last order of the previous page — and the page continues
     /// with the next-older order (the one right after the cursor in that
     /// newest-first walk, not a newer one). An `after` that names an unknown
-    /// order — or one that does not belong to `user` — yields an empty page.
-    /// Each page is an `O(length)` range scan from the cursor (no offset to
-    /// re-walk), so retrieving a whole history is linear in its size.
+    /// order — or one that does not belong to `user` — yields
+    /// [`CursorNotFound`]; a valid cursor with no older orders is `Ok(vec![])`
+    /// (end of history). Each page is an `O(length)` range scan from the cursor
+    /// (no offset to re-walk), so retrieving a whole history is linear in its
+    /// size.
     pub fn orders_after(
         &self,
         user: UserId,
         after: Option<OrderId>,
         length: usize,
-    ) -> Vec<OrderId> {
+    ) -> Result<Vec<OrderId>, CursorNotFound> {
         bench_scopes!("order_history", "order_history::orders_after");
         use std::ops::Bound;
         let upper = match after {
             None => Bound::Included(UserOrderKey::last(user)),
             Some(cursor) => {
-                let Some(entry) = self.orders.get(&cursor) else {
-                    return Vec::new();
-                };
+                let entry = self.orders.get(&cursor).ok_or(CursorNotFound)?;
                 let key = UserOrderKey::from_seq(user, entry.seq);
                 // The cursor must be one of `user`'s own orders: its key must
                 // map back to it in the index. A cursor from another user (or a
@@ -274,17 +279,18 @@ impl<M: Memory> OrderHistory<M> {
                 // the index — reject it rather than scan from a bogus position,
                 // which would silently skip part of the user's own history.
                 if self.by_user.get(&key) != Some(cursor) {
-                    return Vec::new();
+                    return Err(CursorNotFound);
                 }
                 Bound::Excluded(key)
             }
         };
-        self.by_user
+        Ok(self
+            .by_user
             .range((Bound::Included(UserOrderKey::first(user)), upper))
             .rev()
             .take(length)
             .map(|entry| entry.value())
-            .collect()
+            .collect())
     }
 
     #[cfg(test)]
