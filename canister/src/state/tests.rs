@@ -586,13 +586,13 @@ mod record_limit_order {
         let owner_id = state.user_registry.lookup(OWNER).unwrap();
         assert_eq!(
             state.order_history.orders_after(owner_id, None, 10),
-            vec![second, first]
+            Ok(vec![second, first])
         );
     }
 }
 
 mod get_user_orders {
-    use crate::order::{FeeRates, OrderBookId, Side};
+    use crate::order::{CursorNotFound, FeeRates, OrderBookId, Side};
     use crate::state::State;
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
@@ -629,7 +629,7 @@ mod get_user_orders {
         let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
         let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
 
-        let orders = state.get_user_orders(&OWNER, None, 10);
+        let orders = state.get_user_orders(&OWNER, None, 10).unwrap();
         let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
         assert_eq!(ids, vec![second, first], "newest first");
         for (_, joined_pair, record) in &orders {
@@ -641,14 +641,38 @@ mod get_user_orders {
         assert_eq!(
             state
                 .get_user_orders(&OWNER, Some(second), 10)
+                .unwrap()
                 .into_iter()
                 .map(|(id, _, _)| id)
                 .collect::<Vec<_>>(),
             vec![first]
         );
-        // Caller isolation, and an unknown cursor yields nothing.
-        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
-        assert!(state.get_user_orders(&OWNER, Some(first), 10).is_empty());
+        // A caller with no orders and no cursor sees an empty page.
+        assert!(
+            state
+                .get_user_orders(&stranger, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        // A cursor that names an order the caller does not own is not found —
+        // whether the caller has no orders at all...
+        assert_eq!(
+            state.get_user_orders(&stranger, Some(first), 10),
+            Err(CursorNotFound)
+        );
+        // ...or the cursor is simply foreign to the (registered) caller.
+        let owned_by_stranger = place_order(&mut state, stranger, &pair, Side::Buy, 100, lot);
+        assert_eq!(
+            state.get_user_orders(&OWNER, Some(owned_by_stranger), 10),
+            Err(CursorNotFound)
+        );
+        // The oldest order is a valid cursor with no older orders: Ok([]).
+        assert!(
+            state
+                .get_user_orders(&OWNER, Some(first), 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 
@@ -2587,7 +2611,12 @@ mod get_balances {
             state.get_balance(&stranger, &a_id),
             crate::balance::Balance::zero()
         );
-        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
+        assert!(
+            state
+                .get_user_orders(&stranger, None, 10)
+                .unwrap()
+                .is_empty()
+        );
 
         assert_eq!(
             state.user_registry, registry_before,

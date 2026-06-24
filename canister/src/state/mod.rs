@@ -18,9 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, FeeRates, Fill, LotSize, MatchOrderError, NotionalError, Order, OrderBook, OrderBookId,
-    OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PairToken,
-    PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata, TradingPair,
+    self, CursorNotFound, FeeRates, Fill, LotSize, MatchOrderError, NotionalError, Order,
+    OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
+    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -520,19 +521,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns up to `length` of `owner`'s orders, newest first, resuming
     /// strictly after the `after` order (a cursor from a prior page) — each
-    /// paired with its trading pair and full record. An `after` that names a
-    /// non-existent order yields an empty page.
+    /// paired with its trading pair and full record. An `after` that names an
+    /// order the caller does not own (unknown or another principal's) yields
+    /// [`CursorNotFound`]; a valid cursor with no older orders is `Ok(vec![])`.
     pub fn get_user_orders(
         &self,
         owner: &Principal,
         after: Option<OrderId>,
         length: usize,
-    ) -> Vec<(OrderId, TradingPair, OrderRecord)> {
+    ) -> Result<Vec<(OrderId, TradingPair, OrderRecord)>, CursorNotFound> {
         let Some(user_id) = self.user_registry.lookup(*owner) else {
-            return Vec::new();
+            return match after {
+                Some(_) => Err(CursorNotFound),
+                None => Ok(Vec::new()),
+            };
         };
-        self.order_history
-            .orders_after(user_id, after, length)
+        Ok(self
+            .order_history
+            .orders_after(user_id, after, length)?
             .into_iter()
             .map(|id| {
                 let record = self
@@ -546,7 +552,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     .clone();
                 (id, pair, record)
             })
-            .collect()
+            .collect())
     }
 
     /// Returns the single order `id` paired with its trading pair and full

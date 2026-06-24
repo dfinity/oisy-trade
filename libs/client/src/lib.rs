@@ -10,9 +10,9 @@ use ic_cdk::call::{Call, CallFailed, RejectCode};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError, GetMyOrdersArgs,
-    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TokenId, TradingPair,
-    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    GetMyOrdersError, GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError,
+    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TokenId,
+    TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
     WithdrawRequest, WithdrawResponse,
 };
 use serde::de::DeserializeOwned;
@@ -95,20 +95,27 @@ impl<R: Runtime> OisyTradeClient<R> {
 
     /// Query the caller's orders: a page (newest first) or a single order by id,
     /// depending on the `GetMyOrdersArgs` filter.
-    pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
+    pub async fn get_my_orders(
+        &self,
+        args: GetMyOrdersArgs,
+    ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_my_orders", (Some(args),), 0)
             .await
             .unwrap()
     }
 
-    /// Point-lookup the caller's order by id, or `None` if the caller does not
-    /// own an order with that id.
-    pub async fn get_my_order(&self, order_id: OrderId) -> Option<UserOrder> {
+    /// Point-lookup the caller's order by id. Returns `Err(OrderNotFound)` when
+    /// the id is unknown or owned by another principal.
+    pub async fn get_my_order(&self, order_id: OrderId) -> Result<UserOrder, GetMyOrdersError> {
         self.get_my_orders(GetMyOrdersArgs::by_id(order_id))
             .await
-            .into_iter()
-            .next()
+            .map(|orders| {
+                orders
+                    .into_iter()
+                    .next()
+                    .expect("BUG: ById query returned an empty page instead of OrderNotFound")
+            })
     }
 
     /// Query all listed trading pairs on the OISY TRADE canister.

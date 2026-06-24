@@ -694,13 +694,23 @@ mod cancel_limit_order {
         init_state_with_order_book();
         let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
 
-        for unknown_order_id in [OrderId::ZERO.to_string(), "not-a-valid-id".to_string()] {
-            let result = cancel_limit_order(unknown_order_id, &runtime);
-            assert_eq!(
-                result.unwrap_err().kind,
-                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
-            );
-        }
+        let result = cancel_limit_order(OrderId::ZERO.to_string(), &runtime);
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::OrderNotFound))
+        );
+    }
+
+    #[test]
+    fn should_reject_cancel_of_malformed_order_id() {
+        init_state_with_order_book();
+        let runtime = mock_runtime_for(Principal::from_slice(&[0x01]));
+
+        let result = cancel_limit_order("not-a-valid-id".to_string(), &runtime);
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::InvalidOrderId))
+        );
     }
 
     #[test]
@@ -824,13 +834,13 @@ mod cancel_limit_order {
 mod order_status_via_get_my_orders {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
-    use crate::{add_limit_order, get_my_orders};
+    use crate::{GetMyOrdersError, add_limit_order, get_my_orders};
     use candid::Principal;
     use oisy_trade_types::{GetMyOrdersArgs, OrderStatus};
 
-    fn status_of(owner: Principal, order_id: oisy_trade_types::OrderId) -> Option<OrderStatus> {
+    fn status_of(owner: Principal, order_id: oisy_trade_types::OrderId) -> OrderStatus {
         let orders = get_my_orders(Some(GetMyOrdersArgs::by_id(order_id)), owner).unwrap();
-        orders.into_iter().next().map(|o| o.order.status)
+        orders.into_iter().next().unwrap().order.status
     }
 
     #[test]
@@ -841,7 +851,7 @@ mod order_status_via_get_my_orders {
         let order_id = add_limit_order(limit_order_request(), &runtime).unwrap();
         assert_eq!(
             status_of(Principal::anonymous(), order_id),
-            Some(OrderStatus::Pending)
+            OrderStatus::Pending
         );
     }
 
@@ -860,21 +870,21 @@ mod order_status_via_get_my_orders {
 
         crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
 
-        assert_eq!(status_of(buyer, buy_id), Some(OrderStatus::Filled));
-        assert_eq!(status_of(seller, sell_id), Some(OrderStatus::Filled));
+        assert_eq!(status_of(buyer, buy_id), OrderStatus::Filled);
+        assert_eq!(status_of(seller, sell_id), OrderStatus::Filled);
     }
 
     #[test]
-    fn should_return_empty_for_nonexistent_order() {
+    fn should_report_not_found_for_nonexistent_order() {
         init_state_with_order_book();
         // Valid hex format but refers to a non-existent book/seq.
-        assert_eq!(
-            status_of(
-                Principal::anonymous(),
-                "ffffffffffffffffffffffffffffffff".to_string()
-            ),
-            None
+        let result = get_my_orders(
+            Some(GetMyOrdersArgs::by_id(
+                "ffffffffffffffffffffffffffffffff".to_string(),
+            )),
+            Principal::anonymous(),
         );
+        assert_eq!(result, Err(GetMyOrdersError::OrderNotFound));
     }
 
     #[test]
@@ -1834,6 +1844,43 @@ mod get_my_orders {
             Principal::from_slice(&[0x01]),
         );
         assert!(matches!(result, Err(GetMyOrdersError::InvalidOrderId(_))));
+    }
+
+    #[test]
+    fn unknown_cursor_is_not_found() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        place_resting_buys(user, 1);
+
+        let result = get_my_orders(
+            by_page(Some("ffffffffffffffffffffffffffffffff".to_string()), 10),
+            user,
+        );
+        assert_eq!(result, Err(GetMyOrdersError::OrderNotFound));
+    }
+
+    #[test]
+    fn foreign_cursor_is_not_found() {
+        init_state_with_order_book();
+        let owner = Principal::from_slice(&[0x01]);
+        let stranger = Principal::from_slice(&[0x02]);
+        let ids = place_resting_buys(owner, 1);
+
+        // A real, known order id that the caller does not own.
+        let result = get_my_orders(by_page(Some(ids[0].clone()), 10), stranger);
+        assert_eq!(result, Err(GetMyOrdersError::OrderNotFound));
+    }
+
+    #[test]
+    fn valid_cursor_at_end_of_history_returns_empty_page() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        let ids = place_resting_buys(user, 1);
+
+        // The oldest (and only) order is a valid cursor with no older orders:
+        // end of history is Ok([]), not OrderNotFound.
+        let orders = get_my_orders(by_page(Some(ids[0].clone()), 10), user).unwrap();
+        assert!(orders.is_empty());
     }
 
     #[test]
