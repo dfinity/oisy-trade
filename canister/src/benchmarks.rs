@@ -120,6 +120,72 @@ fn bench_fill_or_kill_sweep_full_ask_side() -> canbench_rs::BenchResult {
     res
 }
 
+/// Benchmark the worst-case fill-or-kill order that is *killed*: identical
+/// setup to [`bench_fill_or_kill_sweep_full_ask_side`], but the FOK is sized
+/// one base unit past the total ask depth, so the plan pass walks every ask
+/// level yet cannot fully fill — the plan is discarded before any mutation.
+/// This measures the plan-then-discard cost: the read-only walk of all 5000
+/// ask levels without the `apply_plan` replay or settlement. Asserts the book
+/// is byte-identical (the kill mutated nothing).
+#[bench(raw)]
+fn bench_fill_or_kill_killed_full_ask_side() -> canbench_rs::BenchResult {
+    let depth = load_depth();
+    let mut state = new_state();
+
+    populate_state(&mut state, &depth);
+
+    let pair = trading_pair();
+    let (worst_ask_price, total_ask_qty) = depth.asks.iter().fold(
+        (0u128, 0u128),
+        |(max_price, total_qty), (price_str, qty_str)| {
+            (
+                max_price.max(parse_decimal_8(price_str)),
+                total_qty + parse_decimal_8(qty_str),
+            )
+        },
+    );
+
+    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
+    fund_user(&mut state, taker);
+    place_order(
+        &mut state,
+        taker,
+        PendingOrder {
+            side: Side::Buy,
+            price: Price::new(worst_ask_price),
+            // One lot past the whole ask depth: crosses every level yet cannot
+            // fully fill, so the FOK is killed. The depth is lot-aligned, so a
+            // single extra lot keeps the quantity valid.
+            quantity: Quantity::from_u128(total_ask_qty + u128::from(LOT_SIZE.get())),
+            time_in_force: TimeInForce::FillOrKill,
+        },
+    );
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 1);
+    let asks = crate::order::OrderBookSnapshot::from(book).asks;
+    let bids = crate::order::OrderBookSnapshot::from(book).bids;
+
+    state.set_execution_policy(ExecutionPolicy::MAX);
+    let res = canbench_rs::bench_fn(|| {
+        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
+    });
+
+    let book = state.get_order_book(&pair).unwrap();
+    assert_eq!(book.pending_orders_len(), 0);
+    let snapshot = crate::order::OrderBookSnapshot::from(book);
+    assert_eq!(
+        snapshot.asks, asks,
+        "killed FOK must not touch the ask side"
+    );
+    assert_eq!(
+        snapshot.bids, bids,
+        "killed FOK must not touch the bid side"
+    );
+
+    res
+}
+
 /// Benchmark processing 1000 incoming orders against a fully populated order book
 /// using real Binance ICP/USDT data (697 bid levels + 5000 ask levels).
 /// Each order is placed by a different user (worst case for balance lookups).
