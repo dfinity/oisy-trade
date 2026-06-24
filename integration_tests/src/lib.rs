@@ -18,7 +18,8 @@ pub use ic_metrics_assert::{AsyncCanisterHttpQuery, MetricsAssert};
 use icrc_ledger_types::icrc1::account::Account;
 use oisy_trade_client::{OisyTradeClient, Runtime};
 use oisy_trade_types::{
-    AddTradingPairRequest, Token, TokenId, TokenMetadata, TradingPair, TradingStatus,
+    AddTradingPairRequest, LimitOrderRequest, OrderId, Side, Token, TokenId, TokenMetadata,
+    TradingPair, TradingStatus,
 };
 use oisy_trade_types_internal::{InitArg, Mode, OisyTradeArg, UpgradeArg, log::Priority};
 use pocket_ic::{
@@ -207,6 +208,35 @@ impl Setup {
             })
             .expect("trading pair must be listed")
             .status
+    }
+
+    /// Rest a GTC sell of `quantity` base units at `price`, providing liquidity
+    /// a taker can cross against. Returns the resting order's id.
+    pub async fn rest_sell_maker(
+        &self,
+        seller: Principal,
+        quantity: u64,
+        price: impl Into<Nat>,
+    ) -> OrderId {
+        let client = self.oisy_trade_client_with_caller(seller);
+        self.deposit_flow(seller, self.base_token_id())
+            .mint(quantity + 2 * icrc_ledger::BASE_LEDGER_FEE)
+            .approve(quantity + icrc_ledger::BASE_LEDGER_FEE)
+            .deposit(quantity)
+            .execute()
+            .await;
+        let order_id = client
+            .add_limit_order(LimitOrderRequest {
+                pair: self.trading_pair(),
+                side: Side::Sell,
+                price: price.into(),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        self.env().tick().await;
+        order_id
     }
 
     /// Register a second, distinct trading pair reusing the two ledgers with

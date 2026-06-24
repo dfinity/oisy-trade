@@ -533,41 +533,17 @@ mod add_limit_order {
 
 mod fill_or_kill {
     use candid::{Nat, Principal};
-    use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
+    use oisy_trade_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{Balance, LimitOrderRequest, OrderStatus, Side, TimeInForce};
 
     const PRICE: u64 = 10_000 * PRICE_SCALE;
 
-    /// Rest a GTC sell of `quantity` base units, providing liquidity the FOK
-    /// can cross against.
-    async fn rest_sell_maker(setup: &Setup, seller: Principal, quantity: u64) {
-        let client = setup.oisy_trade_client_with_caller(seller);
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(quantity + 2 * BASE_LEDGER_FEE)
-            .approve(quantity + BASE_LEDGER_FEE)
-            .deposit(quantity)
-            .execute()
-            .await;
-        client
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Sell,
-                price: Nat::from(PRICE),
-                quantity: quantity.into(),
-                time_in_force: None,
-            })
-            .await
-            .unwrap();
-        setup.env().tick().await;
-    }
-
     #[tokio::test]
     async fn should_fill_fok_against_sufficient_liquidity() {
         let setup = Setup::new().await.with_trading_pair().await;
         let seller = Principal::from_slice(&[0x02]);
-        rest_sell_maker(&setup, seller, 1_000_000).await;
+        setup.rest_sell_maker(seller, 1_000_000, PRICE).await;
 
         let buyer = Principal::from_slice(&[0x01]);
         let buyer_client = setup.oisy_trade_client_with_caller(buyer);
@@ -656,7 +632,7 @@ mod fill_or_kill {
         let setup = Setup::new().await.with_trading_pair().await;
         let seller = Principal::from_slice(&[0x02]);
         // Only one lot of the two lots the FOK wants rests in the book.
-        rest_sell_maker(&setup, seller, 1_000_000).await;
+        let sell_id = setup.rest_sell_maker(seller, 1_000_000, PRICE).await;
 
         let buyer = Principal::from_slice(&[0x01]);
         let buyer_client = setup.oisy_trade_client_with_caller(buyer);
