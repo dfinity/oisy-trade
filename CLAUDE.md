@@ -41,12 +41,16 @@ When I give you a specification to build:
    re-triggers CI also re-triggers bot review):
      - the CI check (`gh pr checks`);
      - this unresolved-comment check;
-     - the PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`). Mergeability must ALSO be polled on every idle tick even with no push,
-   because `main` advancing independently can turn the PR `CONFLICTING` while CI stays
-   green and no new comment appears — CI runs against the PR's last pushed merge ref, so
-   it will not catch a conflict introduced by a later `main` commit. When the PR is
-   `CONFLICTING` / `DIRTY`, merge `origin/main` into it (`git merge`, never rebase),
-   resolve conflicts keeping the PR's own changes, re-run checks, and continue the loop.
+     - the PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`): the
+       conflict signal is the `mergeable` field equal to `CONFLICTING` (equivalently, the
+       `mergeStateStatus` field equal to `DIRTY`) — these are two fields with distinct
+       value sets, so always compare each value against its own field.
+   Mergeability must ALSO be polled on every idle tick even with no push, because `main`
+   advancing independently can turn the PR `mergeable: CONFLICTING` while CI stays green
+   and no new comment appears — CI runs against the PR's last pushed merge ref, so it will
+   not catch a conflict introduced by a later `main` commit. When `mergeable` is
+   `CONFLICTING`, merge `origin/main` into the PR (`git merge`, never rebase), resolve
+   conflicts keeping the PR's own changes, re-run checks, and continue the loop.
 4. The automated loop is DONE only when the reviewer returns VERDICT: READY AND the PR
    has no unresolved comments. Then: do NOT mark the PR ready for review — leave it as a
    draft and post a comment saying the PR is ready for my review, then summarize the
