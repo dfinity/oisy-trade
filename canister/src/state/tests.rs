@@ -1773,6 +1773,203 @@ mod settle_fills {
             Ok(())
         }
 
+        /// Sell-side FOK end-to-end: a FOK Sell crosses a resting GTC Buy maker
+        /// and fully fills. Exercises the bids-side `plan_fills` walk through
+        /// real FOK matching, which the Buy-only FOK cases never reach.
+        #[test]
+        fn should_fill_fok_sell_fully_against_resting_buy() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // A resting GTC buy maker provides the bid liquidity the FOK sells into.
+            let buy_id = test_fixtures::place_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let sell_id = test_fixtures::place_fok_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let sell = record_of(&state, SELLER, sell_id);
+            assert_eq!(sell.status, OrderStatus::Filled);
+            assert_eq!(sell.filled_quantity, sell.quantity);
+            assert_eq!(sell.time_in_force, TimeInForce::FillOrKill);
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
+
+            // The seller delivered the base and was paid in quote; the buyer
+            // received the lot of base and spent the whole quote reservation.
+            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, 0u64));
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(100 * lot, 0u64)
+            );
+            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(lot, 0u64));
+            assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(0u64, 0u64));
+        }
+
+        /// Sell-side FOK kill: a FOK Sell priced above the only resting bid
+        /// never crosses, so it is killed (`Expired`) and the BASE reservation
+        /// is refunded in full. Exercises `refund_for`'s Sell branch end-to-end.
+        #[test]
+        fn should_expire_fok_sell_and_refund_base() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // A resting GTC buy at 100; the FOK sells at 200 and cannot cross.
+            let buy_id = test_fixtures::place_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            let levels_before = resting_levels(&state, &pair);
+
+            let sell_id = test_fixtures::place_fok_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                200 * PRICE_SCALE,
+                lot,
+            );
+            // A Sell reserves base, not quote.
+            let reserved = state.get_balance(&SELLER, &pair.base);
+            assert_eq!(*reserved.free(), Quantity::ZERO);
+            assert_eq!(*reserved.reserved(), Quantity::from(lot));
+
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let sell = record_of(&state, SELLER, sell_id);
+            assert_eq!(sell.status, OrderStatus::Expired);
+            assert_eq!(sell.filled_quantity, Quantity::ZERO);
+            // The resting bid is untouched and the seller's base reservation is
+            // released back to free.
+            assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Open));
+            assert_eq!(resting_levels(&state, &pair), levels_before);
+            let refunded = state.get_balance(&SELLER, &pair.base);
+            assert_eq!(*refunded.free(), Quantity::from(lot));
+            assert_eq!(*refunded.reserved(), Quantity::ZERO);
+        }
+
+        /// Price-improvement FOK fill: a FOK Buy priced above the resting ask
+        /// fills at the maker's (lower) price, and the buy-taker is refunded the
+        /// price-improvement surplus via `Unreserve` on the fill.
+        #[test]
+        fn should_refund_buy_taker_price_improvement_on_fok_fill() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            let maker_price = 100u128;
+            let taker_price = 110u128;
+            // Resting GTC ask at 100; the FOK buys at 110, so it clears at 100
+            // and the 10 × lot quote surplus refunds.
+            let sell_id = test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                maker_price * PRICE_SCALE,
+                lot,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buy_id = test_fixtures::place_fok_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                taker_price * PRICE_SCALE,
+                lot,
+            );
+            // The placement reserved at the taker price.
+            let reserved = state.get_balance(&BUYER, &pair.quote);
+            assert_eq!(*reserved.reserved(), Quantity::from(taker_price * lot));
+
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buy = record_of(&state, BUYER, buy_id);
+            assert_eq!(buy.status, OrderStatus::Filled);
+            assert_eq!(buy.filled_quantity, buy.quantity);
+            assert_eq!(
+                status_of(&state, SELLER, sell_id),
+                Some(OrderStatus::Filled)
+            );
+
+            // Buyer received the lot of base and the (taker − maker) × lot quote
+            // surplus was unreserved back to free; seller was paid at maker price.
+            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(lot, 0u64));
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.quote),
+                balance((taker_price - maker_price) * lot, 0u64)
+            );
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(maker_price * lot, 0u64)
+            );
+        }
+
+        /// A single `process_pending_orders` round carrying both a killed FOK
+        /// and a GTC order: the GTC behaves normally (rests Open) and the FOK
+        /// kill does not disturb it.
+        #[test]
+        fn should_process_killed_fok_and_gtc_in_same_round() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // FOK Buy against an empty book — it will be killed. A GTC Sell that
+            // does not cross it (priced above the FOK) — it will rest Open. Both
+            // are pending when the single round runs.
+            let fok_id = test_fixtures::place_fok_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            let gtc_id = test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                200 * PRICE_SCALE,
+                lot,
+            );
+            assert_eq!(state.get_order_book(&pair).unwrap().pending_orders_len(), 2);
+
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // The FOK was killed; its quote reservation is released.
+            let fok = record_of(&state, BUYER, fok_id);
+            assert_eq!(fok.status, OrderStatus::Expired);
+            assert_eq!(fok.filled_quantity, Quantity::ZERO);
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.quote),
+                balance(100 * lot, 0u64)
+            );
+
+            // The GTC rested Open, fully reserved, untouched by the FOK kill.
+            let gtc = record_of(&state, SELLER, gtc_id);
+            assert_eq!(gtc.status, OrderStatus::Open);
+            assert_eq!(gtc.filled_quantity, Quantity::ZERO);
+            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, lot));
+        }
+
         #[test]
         fn should_return_open_for_partially_filled_maker() {
             let mut state = setup();
@@ -2183,6 +2380,79 @@ mod settle_fills {
             assert_eq!(
                 state.balances.fee_balance(&pair.quote),
                 Some(Quantity::from(quote_fee)),
+            );
+        }
+
+        /// A FOK that fully fills across several resting makers at distinct
+        /// price levels: every fill bills the FOK side the taker rate and each
+        /// resting maker the maker rate, and the FOK's `filled_quantity` equals
+        /// its full quantity (not merely "the book emptied").
+        #[test]
+        fn fok_full_fill_across_multiple_levels_bills_role_fees() {
+            let maker_bps = 10; // 0.1 %
+            let taker_bps = 25; // 0.25 %
+            let mut state = setup_with_fees(maker_bps, taker_bps);
+            let pair = icp_ckbtc_trading_pair();
+            let lot = u128::from(LOT_SIZE.get());
+            // qty per maker chosen so fees are exact (no ceiling rounding).
+            let qty = lot * 1_000_000;
+            let maker_3 = Principal::from_slice(&[0x04]);
+
+            // Three GTC sell makers at three ascending price levels.
+            let levels = [(SELLER, 100u128), (MAKER_2, 101u128), (maker_3, 102u128)];
+            for (maker, price) in levels {
+                test_fixtures::place_order(
+                    &mut state,
+                    maker,
+                    &pair,
+                    Side::Sell,
+                    price * PRICE_SCALE,
+                    qty,
+                );
+            }
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // A FOK Buy priced at the top level sweeps all three, fully filling.
+            let total_qty = 3 * qty;
+            let buy_id = test_fixtures::place_fok_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                102 * PRICE_SCALE,
+                total_qty,
+            );
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buy = state
+                .get_user_order(&BUYER, buy_id)
+                .map(|(_, _, record)| record)
+                .expect("FOK record present");
+            assert_eq!(buy.status, crate::order::OrderStatus::Filled);
+            assert_eq!(buy.filled_quantity, Quantity::from(total_qty));
+
+            // Buyer (FOK taker) is billed the taker rate in base across the full
+            // swept quantity; each maker is billed the maker rate in quote at its
+            // own clearing price.
+            let base_fee = total_qty * taker_bps as u128 / 10_000;
+            assert!(base_fee > 0);
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.base),
+                balance(total_qty - base_fee, 0u64),
+            );
+            for (maker, price) in levels {
+                let notional = price * qty;
+                let quote_fee = notional * maker_bps as u128 / 10_000;
+                assert!(quote_fee > 0);
+                assert_eq!(
+                    state.get_balance(&maker, &pair.quote),
+                    balance(notional - quote_fee, 0u64),
+                    "maker {maker} quote balance",
+                );
+            }
+            assert_eq!(
+                state.balances.fee_balance(&pair.base),
+                Some(Quantity::from(base_fee)),
             );
         }
 

@@ -185,24 +185,6 @@ pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order 
     gtc_order(id, Side::Sell, price, quantity)
 }
 
-fn fok_order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    PendingOrder {
-        side,
-        price: Price::new(price.into()),
-        quantity: Quantity::from(quantity.into()),
-        time_in_force: TimeInForce::FillOrKill,
-    }
-    .into_order(OrderSeq::new(id))
-}
-
-pub fn fok_buy(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    fok_order(id, Side::Buy, price, quantity)
-}
-
-pub fn fok_sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    fok_order(id, Side::Sell, price, quantity)
-}
-
 /// Construct a [`Fill`] for use in test assertions.
 ///
 /// `taker` provides the taker context (seq, side, price).
