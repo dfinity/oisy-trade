@@ -745,6 +745,8 @@ type GetEventsResult = record {
 };
 
 service : (OisyTradeArg) -> {
+    // ===== Public / user endpoints =====
+
     // Submit a new limit order. The order is queued for *asynchronous*
     // processing by the matching engine; an `OrderId` is returned
     // immediately. An `Ok` response means the order was accepted into the
@@ -834,6 +836,8 @@ service : (OisyTradeArg) -> {
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
 
+    // ===== Admin endpoints (controller-only) =====
+
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
 
@@ -851,6 +855,8 @@ service : (OisyTradeArg) -> {
     // listed pair is not registered, or if the list contains more than 100
     // trading pairs.
     resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
+
+    // ===== Debug endpoints (no backwards-compatibility guarantee) =====
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.
