@@ -1,8 +1,7 @@
-use super::plan::FillPlan;
+use super::plan::{FillPlan, FillPlanBuilder, PlanOutcome};
 use super::queue::{OrderQueue, OrderQueueIter};
 use super::{
     FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
-    TimeInForce,
 };
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
@@ -155,28 +154,40 @@ impl OrderBook {
     /// Match an incoming order against the book.
     ///
     /// Validates the order, then plans the fills it would make against the
-    /// crossing side (read-only) and hands the plan to [`OrderBook::apply_plan`],
-    /// which decides whether the plan may be executed for this order. For a
-    /// fill-or-kill order that cannot fully fill, the plan is rejected **before**
-    /// any mutation, so the book is provably untouched, and the order is reported
-    /// as [`MatchResult::Killed`]. Otherwise the plan is applied and the order is
-    /// either fully filled ([`MatchResult::Filled`]) or rests the remainder
+    /// crossing side (read-only) and validates that plan against the order's
+    /// time-in-force via [`FillPlanBuilder::build`] — a step with no access to
+    /// the book. A fill-or-kill order that cannot fully fill is reported as
+    /// [`MatchResult::Killed`] **without** ever reaching the mutating
+    /// [`OrderBook::apply_plan`], so the book is provably untouched. Otherwise
+    /// the validated plan is applied and the order is either fully filled
+    /// ([`MatchResult::Filled`]) or rests the remainder
     /// ([`MatchResult::PartiallyFilled`] / [`MatchResult::Resting`]).
     pub(crate) fn match_order(&mut self, order: Order) -> Result<MatchResult, MatchOrderError> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
-        let plan = self.plan_fills(&order);
-        self.apply_plan(plan, order)
+        match self.plan_fills(&order).build() {
+            PlanOutcome::Kill => Ok(MatchResult::Killed {
+                killed_order_seq: order.id(),
+                killed: RemovedOrder {
+                    side: order.side(),
+                    price: order.price(),
+                    remaining_quantity: *order.remaining_quantity(),
+                },
+            }),
+            PlanOutcome::Execute(plan) => Ok(self.apply_plan(plan, order)),
+        }
     }
 
-    /// Read-only walk of the crossing makers, building a [`FillPlan`] of the
-    /// fills the incoming `order` would make.
-    pub(crate) fn plan_fills(&self, order: &Order) -> FillPlan {
+    /// Read-only walk of the crossing makers, accumulating into a
+    /// [`FillPlanBuilder`] the fills the incoming `order` would make. The
+    /// returned builder must be validated via [`FillPlanBuilder::build`]
+    /// before any fill is applied to the book.
+    pub(crate) fn plan_fills<'a>(&self, order: &'a Order) -> FillPlanBuilder<'a> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::plan_fills");
         let taker_price = order.price();
-        let mut plan = FillPlan::new(order);
+        let mut plan = FillPlan::builder(order);
 
         match order.side() {
             Side::Buy => {
@@ -200,25 +211,18 @@ impl OrderBook {
         plan
     }
 
-    /// Decide whether `plan` may be executed for `order` and, if so, replay it
-    /// against the book and report the outcome.
+    /// Replay an already-validated `plan` against the book and report the
+    /// outcome.
     ///
-    /// A fill-or-kill order must fill in full: when `plan` leaves any taker
-    /// quantity unfilled, the order is rejected and [`MatchResult::Killed`] is
-    /// returned **before** any mutation, so the book is provably untouched. The
-    /// carried [`RemovedOrder`] holds the side, price, and full quantity the
-    /// caller needs to release the placement reservation.
-    ///
-    /// Otherwise the plan is applied: each maker listed in `plan.filled_makers()`
-    /// is fully consumed from the front of its level, then the maker named in
-    /// `plan.last_partial()` (if any) is partially filled. The taker is then
-    /// either fully filled ([`MatchResult::Filled`]) or rests its remainder
-    /// ([`MatchResult::PartiallyFilled`] / [`MatchResult::Resting`]).
-    fn apply_plan(
-        &mut self,
-        plan: FillPlan,
-        mut order: Order,
-    ) -> Result<MatchResult, MatchOrderError> {
+    /// The plan has passed [`FillPlanBuilder::build`], so it is known to be
+    /// executable for `order` (in particular a fill-or-kill order has been
+    /// confirmed to fully fill); this method only mutates. Each maker listed
+    /// in `plan.filled_makers()` is fully consumed from the front of its level,
+    /// then the maker named in `plan.last_partial()` (if any) is partially
+    /// filled. The taker is then either fully filled ([`MatchResult::Filled`])
+    /// or rests its remainder ([`MatchResult::PartiallyFilled`] /
+    /// [`MatchResult::Resting`]).
+    fn apply_plan(&mut self, plan: FillPlan, mut order: Order) -> MatchResult {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::apply_plan");
         assert_eq!(
@@ -226,18 +230,6 @@ impl OrderBook {
             plan.taker_order(),
             "BUG: plan/apply divergence — taker order mismatch"
         );
-
-        let require_full = matches!(order.time_in_force(), TimeInForce::FillOrKill);
-        if require_full && !plan.taker_remaining().is_zero() {
-            return Ok(MatchResult::Killed {
-                killed_order_seq: order.id(),
-                killed: RemovedOrder {
-                    side: order.side(),
-                    price: order.price(),
-                    remaining_quantity: *order.remaining_quantity(),
-                },
-            });
-        }
 
         let side = order.side();
         let taker_price = order.price();
@@ -303,17 +295,17 @@ impl OrderBook {
 
         if order.remaining_quantity().is_zero() {
             self.filled_orders.insert(order.id());
-            Ok(MatchResult::Filled { fills })
+            MatchResult::Filled { fills }
         } else {
             let resting_order_seq = order.id();
             self.insert_order(order);
             if fills.is_empty() {
-                Ok(MatchResult::Resting { resting_order_seq })
+                MatchResult::Resting { resting_order_seq }
             } else {
-                Ok(MatchResult::PartiallyFilled {
+                MatchResult::PartiallyFilled {
                     fills,
                     resting_order_seq,
-                })
+                }
             }
         }
     }
