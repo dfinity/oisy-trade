@@ -37,16 +37,23 @@ When I give you a specification to build:
    `repos/{owner}/{repo}/pulls/<n>/reviews`; review-thread resolution state via the
    GraphQL `reviewThreads` field (not exposed by `gh pr view --json`).
    After ANY push to the PR — an `implementer` fix, a `main`-merge, a rebase — re-run
-   *both* the CI check (`gh pr checks`) and this unresolved-comment check before going
-   idle; never poll one without the other (a push that re-triggers CI also re-triggers
-   bot review).
+   *all three* of: the CI check (`gh pr checks`), this unresolved-comment check, and the
+   PR's mergeability (`gh pr view <n> --json mergeable,mergeStateStatus`) before going
+   idle; never poll one without the others (a push that re-triggers CI also re-triggers
+   bot review). Mergeability must ALSO be polled on every idle tick even with no push,
+   because `main` advancing independently can turn the PR `CONFLICTING` while CI stays
+   green and no new comment appears — CI runs against the PR's last pushed merge ref, so
+   it will not catch a conflict introduced by a later `main` commit. When the PR is
+   `CONFLICTING` / `DIRTY`, merge `origin/main` into it (`git merge`, never rebase),
+   resolve conflicts keeping the PR's own changes, re-run checks, and continue the loop.
 4. The automated loop is DONE only when the reviewer returns VERDICT: READY AND the PR
    has no unresolved comments. Then: do NOT mark the PR ready for review — leave it as a
    draft and post a comment saying the PR is ready for my review, then summarize the
    state and STOP.
    This STOP is a pause, not the end: while the PR stays open it keeps accruing activity
-   (my review, a bot re-review, a `main`-merge), so any new commit or unresolved comment
-   on it re-enters the loop at step 3 — do not treat an open PR as finished.
+   (my review, a bot re-review, `main` advancing), so any new commit, unresolved comment,
+   or the PR turning unmergeable (`mergeable: CONFLICTING`) re-enters the loop at step 3 —
+   do not treat an open PR as finished.
    Do NOT approve and do NOT merge — marking ready, final approval, and merge are mine
    to do manually.
 
