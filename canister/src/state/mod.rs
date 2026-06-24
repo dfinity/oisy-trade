@@ -421,18 +421,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // are gated below, so post-upgrade replay does not double-count.
         let mut balance_operations = Vec::with_capacity(output.fills.len() * 3);
         let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
-        for fill in &output.fills {
+        for fill in output.fills {
             let settlement = fill_settlement(fill, fee_rates, base_scale);
             push_balance_operations(&mut balance_operations, &settlement);
             accrue_fill(
-                updates.entry(fill.taker_order_seq).or_default(),
-                fill.quantity,
+                updates.entry(settlement.fill.taker_order_seq).or_default(),
+                settlement.fill.quantity,
                 settlement.notional,
                 settlement.taker_fee,
             );
             accrue_fill(
-                updates.entry(fill.maker_order_seq).or_default(),
-                fill.quantity,
+                updates.entry(settlement.fill.maker_order_seq).or_default(),
+                settlement.fill.quantity,
                 settlement.notional,
                 settlement.maker_fee,
             );
@@ -942,8 +942,8 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
 /// once in settlement (the only point where both `fee_rates` and `base_scale`
 /// are in scope) and reused to build both the [`event::BalanceOperation`]s and
 /// the per-order scalar deltas, so the two can never diverge.
-struct FillSettlement<'a> {
-    fill: &'a Fill,
+struct FillSettlement {
+    fill: Fill,
     /// Quote notional `maker_price × quantity / base_scale` (the executed
     /// price; a buy taker's reservation surplus is excluded).
     notional: Quantity,
@@ -958,7 +958,7 @@ struct FillSettlement<'a> {
 }
 
 /// Compute the realized values of a single fill once.
-fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> FillSettlement<'_> {
+fn fill_settlement(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> FillSettlement {
     // Receive-side convention: buyer pays fee in base (the asset they
     // receive), seller in quote. Each side's rate is `taker` if they
     // were the taker, else `maker`.
@@ -997,7 +997,7 @@ fn fill_settlement(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> 
 
 /// Push the (up to three) balance operations a single fill settles into `ops`.
 fn push_balance_operations(ops: &mut Vec<event::BalanceOperation>, settlement: &FillSettlement) {
-    let fill = settlement.fill;
+    let fill = &settlement.fill;
     let (buyer_seq, seller_seq) = match fill.taker_side {
         Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
         Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),

@@ -2066,13 +2066,18 @@ mod settle_fills {
             use crate::state::event::BalanceOperation;
 
             let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
+            let fills_len = output.fills.len();
+            // Unreserves only fire for buy-taker fills with strictly positive
+            // price improvement.
+            let expected_unreserves = output.fills.iter().filter(|f| {
+                f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
+            }).count();
             let mut ops = Vec::new();
-            for fill in &output.fills {
+            for fill in output.fills {
                 let settlement =
                     super::super::fill_settlement(fill, FeeRates::default(), base_scale);
                 super::super::push_balance_operations(&mut ops, &settlement);
             }
-            let fills_len = output.fills.len();
 
             prop_assert!(
                 ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
@@ -2091,11 +2096,6 @@ mod settle_fills {
             prop_assert_eq!(quote_transfers, fills_len);
             prop_assert_eq!(base_transfers, fills_len);
 
-            // Unreserves only fire for buy-taker fills with strictly positive
-            // price improvement.
-            let expected_unreserves = output.fills.iter().filter(|f| {
-                f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
-            }).count();
             let unreserves = ops.iter().filter(|o| matches!(
                 o,
                 BalanceOperation::Unreserve { .. }
