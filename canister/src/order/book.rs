@@ -152,44 +152,32 @@ impl OrderBook {
             .map(|(&price, resting)| resting.to_order(Side::Sell, price))
     }
 
-    /// Match an incoming GTC order against the book.
-    ///
-    /// Validates tick size, lot size, and rejects zero price/quantity, then attempts
-    /// to fill the order against the opposite side. Returns:
-    /// - [`MatchResult::Filled`] if the order is fully filled.
-    /// - [`MatchResult::PartiallyFilled`] if partially filled with the remainder resting.
-    /// - [`MatchResult::Resting`] if no match was found and the order rests as-is.
-    #[cfg(test)]
-    pub(crate) fn match_order(&mut self, order: Order) -> Result<MatchResult, MatchOrderError> {
-        self.execute(order, false)
-    }
-
-    /// Plan-then-apply matching for an incoming order, gated by `require_full`.
+    /// Match an incoming order against the book.
     ///
     /// Validates the order, then plans the fills it would make against the
-    /// crossing side (read-only). When `require_full` is set (FOK) and the plan
-    /// does not fully fill the order, returns [`MatchResult::Killed`] **before**
-    /// any mutation, so the book is provably untouched. Otherwise applies the
-    /// plan and either reports [`MatchResult::Filled`] or rests the remainder
+    /// crossing side (read-only) and hands the plan to [`OrderBook::apply_plan`],
+    /// which decides whether the plan may be executed for this order. For a
+    /// fill-or-kill order that cannot fully fill, the plan is rejected **before**
+    /// any mutation, so the book is provably untouched, and the order is reported
+    /// as [`MatchResult::Killed`]. Otherwise the plan is applied and the order is
+    /// either fully filled ([`MatchResult::Filled`]) or rests the remainder
     /// ([`MatchResult::PartiallyFilled`] / [`MatchResult::Resting`]).
-    pub(crate) fn execute(
-        &mut self,
-        mut order: Order,
-        require_full: bool,
-    ) -> Result<MatchResult, MatchOrderError> {
+    pub(crate) fn execute(&mut self, mut order: Order) -> Result<MatchResult, MatchOrderError> {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::match_order");
         self.validate_order(order.price(), order.remaining_quantity())?;
 
         let plan = self.plan_fills(&order);
 
-        if require_full && !plan.taker_remaining().is_zero() {
-            return Ok(MatchResult::Killed {
-                killed_order_seq: order.id(),
-            });
-        }
-
-        let fills = self.apply_plan(plan, &mut order);
+        let fills = match self.apply_plan(plan, &mut order) {
+            ApplyOutcome::Killed(killed) => {
+                return Ok(MatchResult::Killed {
+                    killed_order_seq: order.id(),
+                    killed,
+                });
+            }
+            ApplyOutcome::Filled(fills) => fills,
+        };
 
         if order.remaining_quantity().is_zero() {
             self.filled_orders.insert(order.id());
@@ -238,13 +226,21 @@ impl OrderBook {
         plan
     }
 
-    /// Replay a [`FillPlan`] against the book, performing the mutations.
+    /// Decide whether `plan` may be executed for `taker_order` and, if so,
+    /// replay it against the book.
     ///
-    /// Fully consumes each maker listed in `plan.filled_makers()` from the
-    /// front of its level, then partially fills the maker named in
-    /// `plan.last_partial()` (if any). Asserts the taker's remaining quantity
-    /// matches `plan.taker_remaining()` at the end.
-    fn apply_plan(&mut self, plan: FillPlan, taker_order: &mut Order) -> Vec<Fill> {
+    /// A fill-or-kill order must fill in full: when `plan` leaves any taker
+    /// quantity unfilled, the order is rejected and [`ApplyOutcome::Killed`] is
+    /// returned **before** any mutation, so the book is provably untouched. The
+    /// returned [`RemovedOrder`] carries the side, price, and full quantity the
+    /// caller needs to release the placement reservation.
+    ///
+    /// Otherwise the plan is applied: each maker listed in `plan.filled_makers()`
+    /// is fully consumed from the front of its level, then the maker named in
+    /// `plan.last_partial()` (if any) is partially filled. Asserts the taker's
+    /// remaining quantity matches `plan.taker_remaining()` at the end and returns
+    /// the resulting fills as [`ApplyOutcome::Filled`].
+    fn apply_plan(&mut self, plan: FillPlan, taker_order: &mut Order) -> ApplyOutcome {
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("book::apply_plan");
         assert_eq!(
@@ -252,6 +248,17 @@ impl OrderBook {
             plan.taker_order(),
             "BUG: plan/apply divergence — taker order mismatch"
         );
+
+        if matches!(taker_order.time_in_force(), TimeInForce::FillOrKill)
+            && !plan.taker_remaining().is_zero()
+        {
+            return ApplyOutcome::Killed(RemovedOrder {
+                side: taker_order.side(),
+                price: taker_order.price(),
+                remaining_quantity: *taker_order.remaining_quantity(),
+            });
+        }
+
         let side = taker_order.side();
         let taker_price = taker_order.price();
         let mut fills = Vec::new();
@@ -313,7 +320,7 @@ impl OrderBook {
             plan.taker_remaining(),
             "BUG: plan/apply divergence — taker remaining mismatch"
         );
-        fills
+        ApplyOutcome::Filled(fills)
     }
 
     pub fn validate_order(&self, price: Price, quantity: &Quantity) -> Result<(), MatchOrderError> {
@@ -373,18 +380,12 @@ impl OrderBook {
                 *expected_seq,
                 "BUG: pending order seq mismatch at the head of the queue"
             );
-            let require_full = matches!(order.time_in_force(), TimeInForce::FillOrKill);
-            let killed = require_full.then(|| RemovedOrder {
-                side: order.side(),
-                price: order.price(),
-                remaining_quantity: *order.remaining_quantity(),
-            });
-            match self.execute(order, require_full) {
-                Ok(MatchResult::Killed { killed_order_seq }) => {
-                    expired_orders.insert(
-                        killed_order_seq,
-                        killed.expect("BUG: Killed outcome only when require_full"),
-                    );
+            match self.execute(order) {
+                Ok(MatchResult::Killed {
+                    killed_order_seq,
+                    killed,
+                }) => {
+                    expired_orders.insert(killed_order_seq, killed);
                 }
                 Ok(result) => {
                     if let Some(resting_order_seq) = result.resting_order_seq() {
@@ -544,6 +545,17 @@ pub struct MatchingOutput {
     pub expired_orders: BTreeMap<OrderSeq, RemovedOrder>,
 }
 
+/// The outcome of [`OrderBook::apply_plan`]: either the order's plan was
+/// rejected without touching the book ([`ApplyOutcome::Killed`]), or it was
+/// applied and produced the given fills ([`ApplyOutcome::Filled`]).
+enum ApplyOutcome {
+    /// The plan was not executed; the book is untouched. The [`RemovedOrder`]
+    /// carries what the caller needs to release the placement reservation.
+    Killed(RemovedOrder),
+    /// The plan was applied, producing these fills (possibly empty).
+    Filled(Vec<Fill>),
+}
+
 /// The result of matching an incoming order against the book.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MatchResult {
@@ -557,8 +569,12 @@ pub enum MatchResult {
     /// No match was found; the order is resting in the book.
     Resting { resting_order_seq: OrderSeq },
     /// A fill-or-kill order that could not fully fill. It was not applied to the
-    /// book and produced no fill (R4, R5).
-    Killed { killed_order_seq: OrderSeq },
+    /// book and produced no fill. The [`RemovedOrder`] carries the side, price,
+    /// and full quantity needed to release the placement reservation.
+    Killed {
+        killed_order_seq: OrderSeq,
+        killed: RemovedOrder,
+    },
 }
 
 impl MatchResult {
