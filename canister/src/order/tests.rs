@@ -458,7 +458,7 @@ mod order_book {
                 let mut book = order_book();
                 let expected_book = book.clone();
                 for order in all_order_types(price, quantity) {
-                    assert_eq!(book.execute(order), Err(expected_err.clone()));
+                    assert_eq!(book.match_order(order), Err(expected_err.clone()));
                     assert_eq!(
                         book, expected_book,
                         "Rejected order should not modify the order book"
@@ -471,7 +471,7 @@ mod order_book {
         fn should_accept_valid_order() {
             let mut book = order_book();
             for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
-                let result = book.execute(order);
+                let result = book.match_order(order);
                 assert!(result.is_ok());
             }
         }
@@ -486,7 +486,7 @@ mod order_book {
             for order in all_order_types(TICK_SIZE.get(), LOT_SIZE) {
                 let mut book = order_book();
                 let order_id = order.id();
-                let result = book.execute(order).unwrap();
+                let result = book.match_order(order).unwrap();
                 assert_eq!(
                     result,
                     MatchResult::Resting {
@@ -510,10 +510,10 @@ mod order_book {
             ];
             for (first_order, resting_order) in orders {
                 let mut book = order_book();
-                book.execute(first_order).unwrap();
+                book.match_order(first_order).unwrap();
                 let resting_order_seq = resting_order.id();
 
-                let result = book.execute(resting_order).unwrap();
+                let result = book.match_order(resting_order).unwrap();
                 assert_eq!(result, MatchResult::Resting { resting_order_seq });
             }
         }
@@ -549,10 +549,10 @@ mod order_book {
             for (makers, taker, expected_prices) in cases {
                 let mut book = order_book();
                 for maker in makers {
-                    book.execute(maker).unwrap();
+                    book.match_order(maker).unwrap();
                 }
 
-                let result = book.execute(taker).unwrap();
+                let result = book.match_order(taker).unwrap();
 
                 let prices: Vec<u128> =
                     result.fills().iter().map(|f| f.maker_price.get()).collect();
@@ -587,10 +587,10 @@ mod order_book {
                 let mut book = order_book();
                 let first_maker_id = makers[0].id();
                 for maker in makers {
-                    book.execute(maker).unwrap();
+                    book.match_order(maker).unwrap();
                 }
 
-                let result = book.execute(taker).unwrap();
+                let result = book.match_order(taker).unwrap();
 
                 assert_eq!(result.fills()[0].maker_order_seq, first_maker_id);
             }
@@ -611,9 +611,9 @@ mod order_book {
             for (maker, taker) in cases {
                 let mut book = order_book();
                 let maker_order_seq = maker.id();
-                book.execute(maker).unwrap();
+                book.match_order(maker).unwrap();
 
-                let result = book.execute(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
@@ -649,9 +649,9 @@ mod order_book {
             for (maker, taker, expected_price) in cases {
                 let mut book = order_book();
                 let maker_order_seq = maker.id();
-                book.execute(maker).unwrap();
+                book.match_order(maker).unwrap();
 
-                let result = book.execute(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
@@ -671,11 +671,11 @@ mod order_book {
         #[test]
         fn should_partially_fill_and_rest_remainder() {
             let mut book = order_book();
-            book.execute(sell(1u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(1u64, 100 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
 
             let taker = buy(2u64, 100 * PRICE_SCALE, 3 * u64::from(LOT_SIZE));
-            let result = book.execute(taker.clone()).unwrap();
+            let result = book.match_order(taker.clone()).unwrap();
 
             assert_eq!(
                 result,
@@ -721,10 +721,10 @@ mod order_book {
                 let mut book = order_book();
                 let maker1_id = maker1.id();
                 let maker2_id = maker2.id();
-                book.execute(maker1).unwrap();
-                book.execute(maker2).unwrap();
+                book.match_order(maker1).unwrap();
+                book.match_order(maker2).unwrap();
 
-                let result = book.execute(taker.clone()).unwrap();
+                let result = book.match_order(taker.clone()).unwrap();
 
                 assert_eq!(
                     result,
@@ -742,10 +742,10 @@ mod order_book {
         #[test]
         fn should_partially_fill_resting_order() {
             let mut book = order_book();
-            book.execute(sell(1u64, 100 * PRICE_SCALE, 3 * u64::from(LOT_SIZE)))
+            book.match_order(sell(1u64, 100 * PRICE_SCALE, 3 * u64::from(LOT_SIZE)))
                 .unwrap();
             let taker1 = buy(2u64, 100 * PRICE_SCALE, LOT_SIZE);
-            let result = book.execute(taker1.clone()).unwrap();
+            let result = book.match_order(taker1.clone()).unwrap();
             assert_eq!(
                 result,
                 MatchResult::Filled {
@@ -759,7 +759,7 @@ mod order_book {
             );
             // The remaining 2 lots should still be matchable
             let taker2 = buy(3u64, 100 * PRICE_SCALE, 2 * u64::from(LOT_SIZE));
-            let result = book.execute(taker2.clone()).unwrap();
+            let result = book.match_order(taker2.clone()).unwrap();
             assert_eq!(
                 result,
                 MatchResult::Filled {
@@ -788,10 +788,12 @@ mod order_book {
         #[test]
         fn should_return_highest_bid() {
             let mut book = order_book();
-            book.execute(buy(1u64, 80 * PRICE_SCALE, LOT_SIZE)).unwrap();
-            book.execute(buy(2u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(buy(1u64, 80 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
-            book.execute(buy(3u64, 90 * PRICE_SCALE, LOT_SIZE)).unwrap();
+            book.match_order(buy(2u64, 100 * PRICE_SCALE, LOT_SIZE))
+                .unwrap();
+            book.match_order(buy(3u64, 90 * PRICE_SCALE, LOT_SIZE))
+                .unwrap();
             let best = book.best_bid().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
             assert_eq!(best.price(), Price::new(100 * PRICE_SCALE));
@@ -800,11 +802,11 @@ mod order_book {
         #[test]
         fn should_return_lowest_ask() {
             let mut book = order_book();
-            book.execute(sell(1u64, 120 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(1u64, 120 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
-            book.execute(sell(2u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(2u64, 100 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
-            book.execute(sell(3u64, 110 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(3u64, 110 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
@@ -814,9 +816,9 @@ mod order_book {
         #[test]
         fn should_return_fifo_first_at_best_price() {
             let mut book = order_book();
-            book.execute(buy(1u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(buy(1u64, 100 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
-            book.execute(buy(2u64, 100 * PRICE_SCALE, 2 * u64::from(LOT_SIZE)))
+            book.match_order(buy(2u64, 100 * PRICE_SCALE, 2 * u64::from(LOT_SIZE)))
                 .unwrap();
             let best = book.best_bid().unwrap();
             assert_eq!(best.id(), OrderSeq::ONE);
@@ -825,9 +827,9 @@ mod order_book {
         #[test]
         fn should_update_after_full_fill() {
             let mut book = order_book();
-            book.execute(sell(1u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(1u64, 100 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
-            book.execute(sell(2u64, 110 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(sell(2u64, 110 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
 
             let best = book.best_ask().unwrap();
@@ -835,7 +837,7 @@ mod order_book {
             assert_eq!(best.price(), Price::new(100 * PRICE_SCALE));
 
             // Fill the best ask
-            book.execute(buy(3u64, 100 * PRICE_SCALE, LOT_SIZE))
+            book.match_order(buy(3u64, 100 * PRICE_SCALE, LOT_SIZE))
                 .unwrap();
             let best = book.best_ask().unwrap();
             assert_eq!(best.id(), OrderSeq::new(2));
@@ -860,10 +862,14 @@ mod order_book {
         #[test]
         fn should_aggregate_single_order_per_level() {
             let mut book = order_book();
-            book.execute(buy(1u64, 100 * PRICE_SCALE, lot(1))).unwrap();
-            book.execute(buy(2u64, 90 * PRICE_SCALE, lot(2))).unwrap();
-            book.execute(sell(3u64, 110 * PRICE_SCALE, lot(3))).unwrap();
-            book.execute(sell(4u64, 120 * PRICE_SCALE, lot(4))).unwrap();
+            book.match_order(buy(1u64, 100 * PRICE_SCALE, lot(1)))
+                .unwrap();
+            book.match_order(buy(2u64, 90 * PRICE_SCALE, lot(2)))
+                .unwrap();
+            book.match_order(sell(3u64, 110 * PRICE_SCALE, lot(3)))
+                .unwrap();
+            book.match_order(sell(4u64, 120 * PRICE_SCALE, lot(4)))
+                .unwrap();
 
             let bids: Vec<_> = book.bid_levels(10).collect();
             assert_eq!(
@@ -886,10 +892,14 @@ mod order_book {
         #[test]
         fn should_sum_quantities_across_orders_at_the_same_price() {
             let mut book = order_book();
-            book.execute(buy(1u64, 100 * PRICE_SCALE, lot(1))).unwrap();
-            book.execute(buy(2u64, 100 * PRICE_SCALE, lot(3))).unwrap();
-            book.execute(sell(3u64, 110 * PRICE_SCALE, lot(2))).unwrap();
-            book.execute(sell(4u64, 110 * PRICE_SCALE, lot(5))).unwrap();
+            book.match_order(buy(1u64, 100 * PRICE_SCALE, lot(1)))
+                .unwrap();
+            book.match_order(buy(2u64, 100 * PRICE_SCALE, lot(3)))
+                .unwrap();
+            book.match_order(sell(3u64, 110 * PRICE_SCALE, lot(2)))
+                .unwrap();
+            book.match_order(sell(4u64, 110 * PRICE_SCALE, lot(5)))
+                .unwrap();
 
             let bids: Vec<_> = book.bid_levels(10).collect();
             assert_eq!(
@@ -911,14 +921,14 @@ mod order_book {
                 (2u64, 90 * PRICE_SCALE),
                 (3u64, 80 * PRICE_SCALE),
             ] {
-                book.execute(buy(seq, price, lot(1))).unwrap();
+                book.match_order(buy(seq, price, lot(1))).unwrap();
             }
             for (seq, price) in [
                 (4u64, 110 * PRICE_SCALE),
                 (5u64, 120 * PRICE_SCALE),
                 (6u64, 130 * PRICE_SCALE),
             ] {
-                book.execute(sell(seq, price, lot(1))).unwrap();
+                book.match_order(sell(seq, price, lot(1))).unwrap();
             }
 
             let bid_prices: Vec<_> = book.bid_levels(2).map(|(p, _)| p.get()).collect();
@@ -930,8 +940,10 @@ mod order_book {
         #[test]
         fn should_return_all_levels_when_limit_exceeds_depth() {
             let mut book = order_book();
-            book.execute(buy(1u64, 100 * PRICE_SCALE, lot(1))).unwrap();
-            book.execute(sell(2u64, 110 * PRICE_SCALE, lot(1))).unwrap();
+            book.match_order(buy(1u64, 100 * PRICE_SCALE, lot(1)))
+                .unwrap();
+            book.match_order(sell(2u64, 110 * PRICE_SCALE, lot(1)))
+                .unwrap();
 
             assert_eq!(book.bid_levels(usize::MAX).count(), 1);
             assert_eq!(book.ask_levels(usize::MAX).count(), 1);
@@ -940,8 +952,10 @@ mod order_book {
         #[test]
         fn should_return_empty_iterators_when_limit_is_zero() {
             let mut book = order_book();
-            book.execute(buy(1u64, 100 * PRICE_SCALE, lot(1))).unwrap();
-            book.execute(sell(2u64, 110 * PRICE_SCALE, lot(1))).unwrap();
+            book.match_order(buy(1u64, 100 * PRICE_SCALE, lot(1)))
+                .unwrap();
+            book.match_order(sell(2u64, 110 * PRICE_SCALE, lot(1)))
+                .unwrap();
 
             assert_eq!(book.bid_levels(0).count(), 0);
             assert_eq!(book.ask_levels(0).count(), 0);
@@ -985,8 +999,8 @@ mod order_book {
                 }
                 .into_order(OrderSeq::new(seq))
             };
-            book.execute(max_buy(0)).unwrap();
-            book.execute(max_buy(1)).unwrap();
+            book.match_order(max_buy(0)).unwrap();
+            book.match_order(max_buy(1)).unwrap();
 
             let (_, quantity) = book.bid_levels(1).next().unwrap();
             assert_eq!(quantity, Quantity::MAX);
@@ -1006,8 +1020,8 @@ mod order_book {
 
         fn rest(book: &mut OrderBook, side: Side, seq: u64, price: u128, quantity: u64) {
             match side {
-                Side::Buy => book.execute(buy(seq, price, quantity)).unwrap(),
-                Side::Sell => book.execute(sell(seq, price, quantity)).unwrap(),
+                Side::Buy => book.match_order(buy(seq, price, quantity)).unwrap(),
+                Side::Sell => book.match_order(sell(seq, price, quantity)).unwrap(),
             };
         }
 
@@ -1195,7 +1209,7 @@ mod remove_order {
 
             let mut book = order_book();
             for (i, p) in orders.into_iter().enumerate() {
-                book.execute(p.into_order(OrderSeq::new(i as u64))).unwrap();
+                book.match_order(p.into_order(OrderSeq::new(i as u64))).unwrap();
             }
             let before = OrderBookSnapshot::from(&book);
 
@@ -1227,11 +1241,13 @@ mod remove_order {
     fn should_delete_empty_price_level_when_last_resting_removed() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.execute(sell(0u64, 100 * PRICE_SCALE, lot)).unwrap();
-        book.execute(sell(1u64, 110 * PRICE_SCALE, 2 * lot))
+        book.match_order(sell(0u64, 100 * PRICE_SCALE, lot))
             .unwrap();
-        book.execute(buy(2u64, 90 * PRICE_SCALE, lot)).unwrap();
-        book.execute(buy(3u64, 80 * PRICE_SCALE, 3 * lot)).unwrap();
+        book.match_order(sell(1u64, 110 * PRICE_SCALE, 2 * lot))
+            .unwrap();
+        book.match_order(buy(2u64, 90 * PRICE_SCALE, lot)).unwrap();
+        book.match_order(buy(3u64, 80 * PRICE_SCALE, 3 * lot))
+            .unwrap();
 
         assert_eq!(
             book.remove_order(OrderSeq::ZERO).unwrap(),
@@ -1277,9 +1293,9 @@ mod remove_order {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
         // Rest a 3-lot sell; cross with a 1-lot buy to partially fill.
-        book.execute(sell(0u64, 100 * PRICE_SCALE, 3 * lot))
+        book.match_order(sell(0u64, 100 * PRICE_SCALE, 3 * lot))
             .unwrap();
-        book.execute(buy(1u64, 100 * PRICE_SCALE, lot)).unwrap();
+        book.match_order(buy(1u64, 100 * PRICE_SCALE, lot)).unwrap();
 
         let removed = book.remove_order(OrderSeq::ZERO).unwrap();
 
@@ -1299,8 +1315,9 @@ mod remove_order {
     fn should_return_none_for_fully_filled_order() {
         let mut book = order_book();
         let lot = u64::from(LOT_SIZE);
-        book.execute(sell(0u64, 100 * PRICE_SCALE, lot)).unwrap();
-        book.execute(buy(1u64, 100 * PRICE_SCALE, lot)).unwrap();
+        book.match_order(sell(0u64, 100 * PRICE_SCALE, lot))
+            .unwrap();
+        book.match_order(buy(1u64, 100 * PRICE_SCALE, lot)).unwrap();
 
         // Both orders are fully filled; removing either must be a no-op.
         assert_eq!(book.remove_order(OrderSeq::ZERO), None);
@@ -1377,7 +1394,7 @@ mod levels_consistency {
                 FeeRates::default(),
             );
             for (i, pending) in orders.into_iter().enumerate() {
-                book.execute(pending.into_order(OrderSeq::new(i as u64))).unwrap();
+                book.match_order(pending.into_order(OrderSeq::new(i as u64))).unwrap();
             }
             let ticker_bid = book.bid_levels(1).next();
             let ticker_ask = book.ask_levels(1).next();
