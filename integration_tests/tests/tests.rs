@@ -663,8 +663,12 @@ mod fill_or_kill {
             Nat::from(0u64),
             "FOK must not settle a partial fill"
         );
-        // The resting maker was not touched: its base is still reserved.
+        // The resting maker was not touched: it stays Open with its base still
+        // reserved and nothing filled.
         let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let maker = seller_client.get_my_order(sell_id).await.unwrap().order;
+        assert_eq!(maker.status, OrderStatus::Open);
+        assert_eq!(maker.filled_quantity, Nat::from(0u64));
         assert_eq!(
             seller_client
                 .get_balance(setup.base_token_id())
