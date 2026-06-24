@@ -1792,6 +1792,16 @@ mod settle_fills {
                 status_of(&state, SELLER, sell_id),
                 Some(OrderStatus::Filled)
             );
+
+            // The buyer received the lot of base and spent the whole quote
+            // reservation; the seller delivered the base and was paid in quote.
+            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(lot, 0u64));
+            assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(0u64, 0u64));
+            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, 0u64));
+            assert_eq!(
+                state.get_balance(&SELLER, &pair.quote),
+                balance(100 * lot, 0u64)
+            );
         }
 
         #[test]
