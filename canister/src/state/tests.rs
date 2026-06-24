@@ -1782,24 +1782,13 @@ mod settle_fills {
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // A resting GTC buy maker provides the bid liquidity the FOK sells into.
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let sell_id = test_fixtures::place_fok_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let sell_id = test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .fill_or_kill()
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let sell = record_of(&state, SELLER, sell_id);
@@ -1828,25 +1817,14 @@ mod settle_fills {
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // A resting GTC buy at 100; the FOK sells at 200 and cannot cross.
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             let levels_before = resting_levels(&state, &pair);
 
-            let sell_id = test_fixtures::place_fok_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                200 * PRICE_SCALE,
-                lot,
-            );
+            let sell_id = test_fixtures::order(SELLER, &pair, Side::Sell, 200 * PRICE_SCALE, lot)
+                .fill_or_kill()
+                .place(&mut state);
             // A Sell reserves base, not quote.
             let reserved = state.get_balance(&SELLER, &pair.base);
             assert_eq!(*reserved.free(), Quantity::ZERO);
@@ -1878,24 +1856,15 @@ mod settle_fills {
             let taker_price = 110u128;
             // Resting GTC ask at 100; the FOK buys at 110, so it clears at 100
             // and the 10 × lot quote surplus refunds.
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                maker_price * PRICE_SCALE,
-                lot,
-            );
+            let sell_id =
+                test_fixtures::order(SELLER, &pair, Side::Sell, maker_price * PRICE_SCALE, lot)
+                    .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let buy_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                taker_price * PRICE_SCALE,
-                lot,
-            );
+            let buy_id =
+                test_fixtures::order(BUYER, &pair, Side::Buy, taker_price * PRICE_SCALE, lot)
+                    .fill_or_kill()
+                    .place(&mut state);
             // The placement reserved at the taker price.
             let reserved = state.get_balance(&BUYER, &pair.quote);
             assert_eq!(*reserved.reserved(), Quantity::from(taker_price * lot));
@@ -1934,22 +1903,11 @@ mod settle_fills {
             // FOK Buy against an empty book — it will be killed. A GTC Sell that
             // does not cross it (priced above the FOK) — it will rest Open. Both
             // are pending when the single round runs.
-            let fok_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            let gtc_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                200 * PRICE_SCALE,
-                lot,
-            );
+            let fok_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .fill_or_kill()
+                .place(&mut state);
+            let gtc_id = test_fixtures::order(SELLER, &pair, Side::Sell, 200 * PRICE_SCALE, lot)
+                .place(&mut state);
             assert_eq!(state.get_order_book(&pair).unwrap().pending_orders_len(), 2);
 
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -2401,27 +2359,17 @@ mod settle_fills {
             // Three GTC sell makers at three ascending price levels.
             let levels = [(SELLER, 100u128), (MAKER_2, 101u128), (maker_3, 102u128)];
             for (maker, price) in levels {
-                test_fixtures::place_order(
-                    &mut state,
-                    maker,
-                    &pair,
-                    Side::Sell,
-                    price * PRICE_SCALE,
-                    qty,
-                );
+                test_fixtures::order(maker, &pair, Side::Sell, price * PRICE_SCALE, qty)
+                    .place(&mut state);
             }
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // A FOK Buy priced at the top level sweeps all three, fully filling.
             let total_qty = 3 * qty;
-            let buy_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                102 * PRICE_SCALE,
-                total_qty,
-            );
+            let buy_id =
+                test_fixtures::order(BUYER, &pair, Side::Buy, 102 * PRICE_SCALE, total_qty)
+                    .fill_or_kill()
+                    .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let buy = state
