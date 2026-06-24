@@ -1861,9 +1861,7 @@ mod settle_fills {
             ///   2. a FOK priced at the makers but sized past their liquidity
             ///      (whole lots + a delta).
             /// Each FOK is killed; the makers are untouched and the buyer's
-            /// quote reservation is fully unreserved. This subsumes the former
-            /// `should_expire_fok_against_insufficient_liquidity_without_partial_fill`
-            /// example, keeping its maker-untouched property.
+            /// quote reservation is fully unreserved.
             #[test]
             fn should_kill_fok_without_touching_book_and_release_reservation(
                 maker_lots in 1u128..4,

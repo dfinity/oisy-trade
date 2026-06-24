@@ -138,7 +138,7 @@ struct BidSweepSetup {
 /// with a single large sell resting in the pending queue, priced at the minimum
 /// tick so it crosses every bid level. The taker quantity is derived from the
 /// total bid depth via `quantity_for`, letting callers size the order to fully
-/// fill (`total_bid_qty`) or to fall one lot short of the depth (kill).
+/// fill (`total_bid_qty`) or one lot past it (kill).
 fn setup_bid_sweep(
     time_in_force: TimeInForce,
     quantity_for: impl FnOnce(u128) -> u128,
