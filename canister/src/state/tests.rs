@@ -2301,7 +2301,7 @@ mod settle_fills {
 
         /// A FOK fill bills the FOK side the taker rate and the resting
         /// counterparty the maker rate — the FOK always crosses, so no
-        /// FOK-specific fee logic is needed (R6).
+        /// FOK-specific fee logic is needed.
         #[test]
         fn fok_fill_bills_fok_taker_and_resting_counterparty_maker() {
             let maker_bps = 10; // 0.1 %
