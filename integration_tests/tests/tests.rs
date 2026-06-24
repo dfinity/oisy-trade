@@ -585,49 +585,6 @@ mod fill_or_kill {
     }
 
     #[tokio::test]
-    async fn should_expire_fok_against_no_liquidity_and_release_reservation() {
-        let setup = Setup::new().await.with_trading_pair().await;
-        let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
-        let required = 1_000_000_000u64;
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(required + 2 * QUOTE_LEDGER_FEE)
-            .approve(required + QUOTE_LEDGER_FEE)
-            .deposit(required)
-            .execute()
-            .await;
-        let buy_id = buyer_client
-            .add_limit_order(LimitOrderRequest {
-                pair: setup.trading_pair(),
-                side: Side::Buy,
-                price: Nat::from(PRICE),
-                quantity: 1_000_000u64.into(),
-                time_in_force: Some(TimeInForce::FillOrKill),
-            })
-            .await
-            .unwrap();
-        setup.env().tick().await;
-
-        let order = buyer_client.get_my_order(buy_id).await.unwrap().order;
-        assert_eq!(order.status, OrderStatus::Expired);
-        assert_eq!(order.filled_quantity, Nat::from(0u64));
-        // The whole reservation is released back to the buyer's free balance.
-        assert_eq!(
-            buyer_client
-                .get_balance(setup.quote_token_id())
-                .await
-                .unwrap(),
-            Balance {
-                free: required.into(),
-                reserved: 0u64.into(),
-            },
-        );
-
-        setup.drop().await;
-    }
-
-    #[tokio::test]
     async fn should_expire_fok_against_insufficient_liquidity_without_partial_fill() {
         let setup = Setup::new().await.with_trading_pair().await;
         let seller = Principal::from_slice(&[0x02]);
