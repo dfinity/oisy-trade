@@ -139,6 +139,8 @@ type AddLimitOrderError = record {
 type CancelLimitOrderError = record {
     kind : variant {
         RequestError : opt variant {
+            // The supplied order id was not a well-formed order id.
+            InvalidOrderId;
             // No order with the given ID exists.
             OrderNotFound;
             // The caller does not own the order.
@@ -321,6 +323,24 @@ type UserOrder = record {
     pair : TradingPair;
     /// The full order record.
     order : OrderRecord;
+};
+
+// Error returned by the `get_my_orders` query. See the disposition contract at
+// the top of this file.
+type GetMyOrdersError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // An order id in the filter (`ById` target or `ByPage.after`
+            // cursor) was not a well-formed order id.
+            InvalidOrderId;
+            // A well-formed order id in the filter (`ById` target or
+            // `ByPage.after` cursor) is unknown or not owned by the caller.
+            OrderNotFound;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // A token identified by its ledger canister ID.
@@ -804,7 +824,10 @@ service : (OisyTradeArg) -> {
     // Return the caller's orders, either a single order by id or a page,
     // newest first. The argument is optional: an absent argument is equivalent
     // to a page from the newest order with the maximum length.
-    get_my_orders : (opt GetMyOrdersArgs) -> (vec UserOrder) query;
+    // Returns `InvalidOrderId` if an order id (the `ById` target or the
+    // `ByPage` cursor) is malformed, and `OrderNotFound` if it is well-formed
+    // but unknown or not owned by the caller.
+    get_my_orders : (opt GetMyOrdersArgs) -> (variant { Ok : vec UserOrder; Err : GetMyOrdersError }) query;
 
     // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

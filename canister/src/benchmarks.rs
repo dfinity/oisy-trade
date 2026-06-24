@@ -250,7 +250,10 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
         );
     }
     assert_eq!(
-        state.get_user_orders(&trader, None, trades.len() * 2).len(),
+        state
+            .get_user_orders(&trader, None, trades.len() * 2)
+            .unwrap()
+            .len(),
         trades.len()
     );
 

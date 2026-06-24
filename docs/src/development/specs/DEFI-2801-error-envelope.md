@@ -86,9 +86,11 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
 - **R7**: `cancel_limit_order` with a malformed `order_id` returns `RequestError(InvalidOrderId)`,
   distinct from `RequestError(OrderNotFound)`.
 - **R8**: `get_my_orders` never traps. Its signature changes from `-> (vec UserOrder)` to a result
-  `-> (variant { Ok : vec UserOrder; Err : GetMyOrdersError })`. A malformed `order_id` returns
-  `Err(RequestError(InvalidOrderId))`; a well-formed but unknown id
-  returns `Ok([])`; otherwise `Ok(<orders>)`. (This is a breaking signature change to a query.)
+  `-> (variant { Ok : vec UserOrder; Err : GetMyOrdersError })`. Applied uniformly to both the `ById`
+  target and the `ByPage.after` cursor: a malformed `order_id` returns `Err(RequestError(InvalidOrderId))`;
+  a well-formed but unknown — or not caller-owned — id returns `Err(RequestError(OrderNotFound))`; a valid
+  cursor with no older orders (end of history) returns `Ok([])`; otherwise `Ok(<orders>)`. (This is a
+  breaking signature change to a query.)
 - **R9**: The hand-written `canister/oisy_trade.did` matches the generated interface
   (`check_candid_interface_compatibility` passes) and documents the R2 disposition contract and the R3
   `message` rule.
@@ -142,7 +144,10 @@ maps a *malformed* `order_id` to `OrderNotFound` (conflating bad input with a mi
   the ledger disagrees) ⇒ `InternalError` — a genuine invariant violation.
 - **D6 — Malformed `order_id` ⇒ a bare `InvalidOrderId` leaf under `RequestError`**, on
   `cancel_limit_order` and `get_my_orders` (`get_order_status` was removed in #133). `get_my_orders`
-  becomes non-trapping by returning a result (R8).
+  becomes non-trapping by returning a result (R8). On `get_my_orders`, a well-formed but unknown or
+  not-caller-owned `order_id` — `ById` target or `ByPage.after` cursor — is a bare `OrderNotFound` leaf
+  under `RequestError` (distinct from `InvalidOrderId`); a valid cursor at the end of history stays
+  `Ok([])` rather than an error.
 - **D7 — Enforce the shape with a generic `Error<Request, Temporary, Internal>`.** Every public error is
   an instantiation of one generic struct (`{ kind: ErrorKind<…>, message }`), so the three-arm shape is
   structurally identical across the whole surface and can't drift. The `impl` bounds each leaf on
@@ -246,7 +251,7 @@ future leaves without breaking clients. (`variant {}` is valid Candid; the canis
 | **WithdrawError** | `AmountExceedsMaximum`, `AmountTooSmall`, `UnsupportedToken`, `InsufficientBalance` | `OperationInProgress`, `LedgerTemporarilyUnavailable`, `CallFailed`, `LedgerFeeChanged`<sup>4</sup> | `LedgerError`, `LedgerInsufficientFunds`<sup>1</sup>, `CandidDecodeFailed`<sup>3</sup> |
 | **AddLimitOrderError** | `AmountExceedsMaximum`, `UnknownTradingPair`, `InvalidPrice`, `InvalidQuantity`, `InsufficientBalance`, `InvalidNotional` | `TradingHalted`<sup>2</sup> | (none) |
 | **CancelLimitOrderError** | `InvalidOrderId`, `OrderNotFound`, `NotOrderOwner`, `OrderAlreadyFilled`, `OrderAlreadyCanceled` | (none) | (none) |
-| **GetMyOrdersError** (new public) | `InvalidOrderId` | (none) | (none) |
+| **GetMyOrdersError** (new public) | `InvalidOrderId`, `OrderNotFound` | (none) | (none) |
 | **GetOrderBookTickerError** | `UnknownTradingPair` | (none) | (none) |
 | **GetOrderBookDepthError** | `UnknownTradingPair`, `LimitTooLarge` | (none) | (none) |
 | **GetBalancesError** | `TokenNotSupported`, `FilterTooLarge` | (none) | (none) |
@@ -265,7 +270,9 @@ rare and safe to retry → `TemporaryError`.
 
 - `cancel_limit_order`: map `OrderId` parse failure to a bare `RequestError(InvalidOrderId)` (was `OrderNotFound`).
 - `get_my_orders`: return `Result<Vec<UserOrder>, GetMyOrdersError>` (public); the `main.rs` entry point
-  returns `Err(RequestError(InvalidOrderId))` instead of `panic!`; well-formed unknown id ⇒ `Ok(vec![])`.
+  returns `Err(RequestError(InvalidOrderId))` instead of `panic!`; a well-formed but unknown or
+  not-caller-owned id (`ById` target or `ByPage.after` cursor) ⇒ `Err(RequestError(OrderNotFound))`; a
+  valid cursor at the end of history ⇒ `Ok(vec![])`.
 
 ### Candid (`canister/oisy_trade.did`)
 
