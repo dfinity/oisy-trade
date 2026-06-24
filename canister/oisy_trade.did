@@ -836,6 +836,8 @@ service : (OisyTradeArg) -> {
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
 
+    // ===== END of Public / user endpoints =====
+
     // ===== Admin endpoints (controller-only) =====
 
     // Add a new trading pair to the canister. Only callable by a controller.
@@ -856,6 +858,8 @@ service : (OisyTradeArg) -> {
     // trading pairs.
     resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
+    // ===== END of Admin endpoints (controller-only) =====
+
     // ===== Debug endpoints (no backwards-compatibility guarantee) =====
 
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
@@ -863,5 +867,5 @@ service : (OisyTradeArg) -> {
     // The response contains at most 2000 events.
     get_events : (GetEventsArgs) -> (GetEventsResult) query;
 
-    // ===== End of endpoints =====
+    // ===== END of Debug endpoints (no backwards-compatibility guarantee) =====
 }
