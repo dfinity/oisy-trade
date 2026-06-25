@@ -2435,7 +2435,7 @@ mod settle_fills {
     mod fill_or_kill {
         use super::*;
         use crate::order::{
-            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus, TimeInForce,
+            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus,
         };
         use crate::test_fixtures::tokens::SupportedTokens;
         use std::collections::BTreeSet;
@@ -2448,6 +2448,127 @@ mod settle_fills {
         const ONE_ICP: u64 = SupportedTokens::ICP.one();
 
         #[test]
+        fn should_fill() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy fully crosses a single resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::zero(),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "sell fully crosses a single resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(3_990_u64)),
+                    expected_balances_maker: (
+                        Balance::new_free(ONE_ICP - 100_000),
+                        Balance::zero(),
+                    ),
+                    expected_fee_balances: (
+                        Some(Quantity::from(100_000_u64)),
+                        Some(Quantity::from(10_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy above resting ask fills at maker price and refunds surplus"
+                        .to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(5_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::new_free(1_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy sweeps several ascending ask levels".to_string(),
+                    bids: vec![],
+                    asks: vec![
+                        (Price::from(4_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(5_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(6_000), vec![Quantity::from(ONE_ICP)]),
+                    ],
+                    fok: (Side::Buy, Price::from(6_000), Quantity::from(3 * ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(3 * ONE_ICP - 750_000),
+                        Balance::new_free(3_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(14_985_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(750_000_u64)),
+                        Some(Quantity::from(15_u64)),
+                    ),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
+                case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Filled,
+                    "BUG ({}): a crossing FOK should end Filled",
+                    case.desc
+                );
+                assert_eq!(
+                    fok_order.filled_quantity, fok_order.quantity,
+                    "BUG ({}): a filled FOK should be fully filled",
+                    case.desc
+                );
+
+                let (resting_bids, resting_asks) = resting_levels(&state, &pair);
+                assert!(
+                    resting_bids.is_empty() && resting_asks.is_empty(),
+                    "BUG ({}): the FOK is sized to consume every resting maker, so the book should end empty",
+                    case.desc
+                );
+
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after fill",
+                    case.desc
+                );
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
+                assert_eq!(
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after fill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
+                    "BUG ({}): fee balances differ from expected after fill",
+                    case.desc
+                );
+            }
+        }
+
+        #[test]
         fn should_expire() {
             let tests_cases = vec![
                 TestCase {
@@ -2456,6 +2577,8 @@ mod settle_fills {
                     asks: vec![],
                     fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
                     expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
                 },
                 TestCase {
                     desc: "sell against empty book".to_string(),
@@ -2463,6 +2586,8 @@ mod settle_fills {
                     asks: vec![],
                     fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
                     expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
                 },
                 TestCase {
                     desc: "buy below resting ask (no cross)".to_string(),
@@ -2470,6 +2595,8 @@ mod settle_fills {
                     asks: vec![(Price::from(5_000), vec![Quantity::from(ONE_ICP)])],
                     fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
                     expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
                 },
                 TestCase {
                     desc: "sell above resting bid (no cross)".to_string(),
@@ -2477,18 +2604,18 @@ mod settle_fills {
                     asks: vec![],
                     fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
                     expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(3_000_u64)),
+                    expected_fee_balances: (None, None),
                 },
             ];
             for case in tests_cases {
                 let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
                 let book_before = case.populate_book(&mut state);
-                let fee_balances_before = state.get_fee_balances(None).unwrap();
 
                 let fok_id = case.execute_fok(&mut state);
 
-                let mut book_after = OrderBookSnapshot::from(
-                    state.get_order_book(&icp_ckbtc_trading_pair()).unwrap(),
-                );
+                let mut book_after = OrderBookSnapshot::from(state.get_order_book(&pair).unwrap());
                 assert_eq!(
                     book_after.next_seq,
                     OrderSeq::new(book_before.next_seq.get() + 1),
@@ -2510,17 +2637,25 @@ mod settle_fills {
                     case.desc
                 );
 
-                let balances_taker =
-                    test_fixtures::balances_pair(&state, &TAKER, &icp_ckbtc_trading_pair());
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
                 assert_eq!(
                     balances_taker, case.expected_balances_taker,
                     "BUG ({}): taker balances differ from expected after kill",
                     case.desc
                 );
-
-                let fee_balances_after = state.get_fee_balances(None).unwrap();
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
                 assert_eq!(
-                    fee_balances_before, fee_balances_after,
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after kill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
                     "BUG ({}): a killed FOK order should not change fee balances",
                     case.desc
                 );
@@ -2533,6 +2668,8 @@ mod settle_fills {
             asks: Vec<(Price, Vec<Quantity>)>,
             fok: (Side, Price, Quantity),
             expected_balances_taker: (Balance, Balance),
+            expected_balances_maker: (Balance, Balance),
+            expected_fee_balances: (Option<Quantity>, Option<Quantity>),
         }
 
         impl TestCase {
@@ -2627,33 +2764,6 @@ mod settle_fills {
             state
         }
 
-        /// A FOK that crosses a single resting GTC maker fully fills, ending
-        /// `Filled` with its whole reservation spent, while the maker is fully
-        /// consumed. Parameterized over the FOK side: only the side, the maker
-        /// who provides the opposite-side liquidity, and the FOK's reserved
-        /// token (Buy → quote, Sell → base) differ between the two cases.
-        ///
-        /// The Buy case runs with fees configured, so it also pins the fee
-        /// roles: the FOK side (the crossing taker) is billed the taker rate and
-        /// the resting counterparty the maker rate — the FOK always crosses, so
-        /// no FOK-specific fee logic is needed.
-        #[test]
-        fn should_fill_fok_buy_fully_against_resting_sell() {
-            run_fok_full_fill_case(Side::Buy, FeeRates::default());
-            run_fok_full_fill_case(
-                Side::Buy,
-                FeeRates {
-                    maker: BasisPoint::new(MAKER_BPS).unwrap(),
-                    taker: BasisPoint::new(TAKER_BPS).unwrap(),
-                },
-            );
-        }
-
-        #[test]
-        fn should_fill_fok_sell_fully_against_resting_buy() {
-            run_fok_full_fill_case(Side::Sell, FeeRates::default());
-        }
-
         proptest! {
             /// Both FOK kill paths leave the resting book byte-identical (modulo
             /// the drained `pending_orders`) and release the FOK's whole
@@ -2692,63 +2802,6 @@ mod settle_fills {
                     (total_maker_lots + fok_delta_lots) * lot,
                 )?;
             }
-        }
-
-        /// Price-improvement FOK fill: a FOK Buy priced above the resting ask
-        /// fills at the maker's (lower) price, and the buy-taker is refunded the
-        /// price-improvement surplus via `Unreserve` on the fill.
-        #[test]
-        fn should_refund_buy_taker_price_improvement_on_fok_fill() {
-            let mut state = setup();
-            let lot = u128::from(LOT_SIZE.get());
-            let pair = icp_ckbtc_trading_pair();
-            let maker_price = 100u128;
-            let taker_price = 110u128;
-            // Resting GTC ask at 100; the FOK buys at 110, so it clears at 100
-            // and the 10 × lot quote surplus refunds.
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                maker_price * PRICE_SCALE,
-                lot,
-            );
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let buy_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                taker_price * PRICE_SCALE,
-                lot,
-            );
-            // The placement reserved at the taker price.
-            let reserved = state.get_balance(&BUYER, &pair.quote);
-            assert_eq!(*reserved.reserved(), Quantity::from(taker_price * lot));
-
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let buy = record_of(&state, BUYER, buy_id);
-            assert_eq!(buy.status, OrderStatus::Filled);
-            assert_eq!(buy.filled_quantity, buy.quantity);
-            assert_eq!(
-                status_of(&state, SELLER, sell_id),
-                Some(OrderStatus::Filled)
-            );
-
-            // Buyer received the lot of base and the (taker − maker) × lot quote
-            // surplus was unreserved back to free; seller was paid at maker price.
-            assert_eq!(state.get_balance(&BUYER, &pair.base), balance(lot, 0u64));
-            assert_eq!(
-                state.get_balance(&BUYER, &pair.quote),
-                balance((taker_price - maker_price) * lot, 0u64)
-            );
-            assert_eq!(
-                state.get_balance(&SELLER, &pair.quote),
-                balance(maker_price * lot, 0u64)
-            );
         }
 
         /// A single `process_pending_orders` round carrying both a killed FOK
@@ -2798,79 +2851,6 @@ mod settle_fills {
             assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, lot));
         }
 
-        /// A FOK that fully fills across several resting makers at distinct
-        /// price levels: every fill bills the FOK side the taker rate and each
-        /// resting maker the maker rate, and the FOK's `filled_quantity` equals
-        /// its full quantity (not merely "the book emptied").
-        #[test]
-        fn fok_full_fill_across_multiple_levels_bills_role_fees() {
-            let maker_bps = 10; // 0.1 %
-            let taker_bps = 25; // 0.25 %
-            let mut state = setup_with_fees(maker_bps, taker_bps);
-            let pair = icp_ckbtc_trading_pair();
-            let lot = u128::from(LOT_SIZE.get());
-            // qty per maker chosen so fees are exact (no ceiling rounding).
-            let qty = lot * 1_000_000;
-            let maker_3 = Principal::from_slice(&[0x04]);
-
-            // Three GTC sell makers at three ascending price levels.
-            let levels = [(SELLER, 100u128), (MAKER_2, 101u128), (maker_3, 102u128)];
-            for (maker, price) in levels {
-                test_fixtures::place_order(
-                    &mut state,
-                    maker,
-                    &pair,
-                    Side::Sell,
-                    price * PRICE_SCALE,
-                    qty,
-                );
-            }
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            // A FOK Buy priced at the top level sweeps all three, fully filling.
-            let total_qty = 3 * qty;
-            let buy_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                102 * PRICE_SCALE,
-                total_qty,
-            );
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let buy = state
-                .get_user_order(&BUYER, buy_id)
-                .map(|(_, _, record)| record)
-                .expect("FOK record present");
-            assert_eq!(buy.status, crate::order::OrderStatus::Filled);
-            assert_eq!(buy.filled_quantity, Quantity::from(total_qty));
-
-            // Buyer (FOK taker) is billed the taker rate in base across the full
-            // swept quantity; each maker is billed the maker rate in quote at its
-            // own clearing price.
-            let base_fee = total_qty * taker_bps as u128 / 10_000;
-            assert!(base_fee > 0);
-            assert_eq!(
-                state.get_balance(&BUYER, &pair.base),
-                balance(total_qty - base_fee, 0u64),
-            );
-            for (maker, price) in levels {
-                let notional = price * qty;
-                let quote_fee = notional * maker_bps as u128 / 10_000;
-                assert!(quote_fee > 0);
-                assert_eq!(
-                    state.get_balance(&maker, &pair.quote),
-                    balance(notional - quote_fee, 0u64),
-                    "maker {maker} quote balance",
-                );
-            }
-            assert_eq!(
-                state.balances.fee_balance(&pair.base),
-                Some(Quantity::from(base_fee)),
-            );
-        }
-
         /// The persisted record for `order_id` as `owner` sees it via
         /// `get_user_order`.
         fn record_of(
@@ -2884,16 +2864,6 @@ mod settle_fills {
                 .expect("order record present")
         }
 
-        fn status_of(
-            state: &State<VectorMemory, VectorMemory>,
-            owner: Principal,
-            order_id: crate::order::OrderId,
-        ) -> Option<OrderStatus> {
-            state
-                .get_user_order(&owner, order_id)
-                .map(|(_, _, record)| record.status)
-        }
-
         /// The resting orders of `pair`'s book — its bid and ask levels — with
         /// the next-sequence counter and (drained) pending queue excluded, so
         /// two snapshots compare equal iff the resting book is byte-identical.
@@ -2904,108 +2874,6 @@ mod settle_fills {
             let snapshot =
                 crate::order::OrderBookSnapshot::from(state.get_order_book(pair).unwrap());
             (snapshot.bids, snapshot.asks)
-        }
-
-        /// The side-specific facts a FOK case needs: the opposite (maker) side,
-        /// the FOK owner and its maker counterparty.
-        struct FokSides {
-            fok_side: Side,
-            maker_side: Side,
-            fok_owner: Principal,
-            maker_owner: Principal,
-        }
-
-        impl FokSides {
-            fn for_side(fok_side: Side) -> Self {
-                match fok_side {
-                    Side::Buy => FokSides {
-                        fok_side: Side::Buy,
-                        maker_side: Side::Sell,
-                        fok_owner: BUYER,
-                        maker_owner: SELLER,
-                    },
-                    Side::Sell => FokSides {
-                        fok_side: Side::Sell,
-                        maker_side: Side::Buy,
-                        fok_owner: SELLER,
-                        maker_owner: BUYER,
-                    },
-                }
-            }
-        }
-
-        fn run_fok_full_fill_case(fok_side: Side, fee_rates: FeeRates) {
-            let sides = FokSides::for_side(fok_side);
-            let mut state = setup_with_fee_rates(fee_rates);
-            let lot = u128::from(LOT_SIZE.get());
-            let price = 100u128;
-            let pair = icp_ckbtc_trading_pair();
-            // A resting GTC maker at 100 provides the opposite-side liquidity
-            // the FOK consumes; the FOK crosses at the same price.
-            let maker_id = test_fixtures::place_order(
-                &mut state,
-                sides.maker_owner,
-                &pair,
-                sides.maker_side,
-                price * PRICE_SCALE,
-                lot,
-            );
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let fok_id = test_fixtures::place_fok_order(
-                &mut state,
-                sides.fok_owner,
-                &pair,
-                sides.fok_side,
-                price * PRICE_SCALE,
-                lot,
-            );
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let fok = record_of(&state, sides.fok_owner, fok_id);
-            assert_eq!(fok.status, OrderStatus::Filled);
-            assert_eq!(fok.filled_quantity, fok.quantity);
-            assert_eq!(fok.time_in_force, TimeInForce::FillOrKill);
-            assert_eq!(
-                status_of(&state, sides.maker_owner, maker_id),
-                Some(OrderStatus::Filled)
-            );
-
-            // The FOK is the taker (it crosses); the resting order is the maker.
-            // The buyer is billed in base, the seller in quote, each at its own
-            // role rate. With `FeeRates::default()` both fees are zero.
-            let notional = price * lot;
-            let (buyer_bps, seller_bps) = match fok_side {
-                Side::Buy => (fee_rates.taker.get(), fee_rates.maker.get()),
-                Side::Sell => (fee_rates.maker.get(), fee_rates.taker.get()),
-            };
-            let base_fee = lot * buyer_bps as u128 / 10_000;
-            let quote_fee = notional * seller_bps as u128 / 10_000;
-
-            // Both sides settle the lot net of their fee: the buyer ends with the
-            // lot of base (minus its base fee) and a spent quote reservation, the
-            // seller with the quote proceeds (minus its quote fee) and a delivered
-            // base; only their roles (buy/sell) differ.
-            assert_eq!(
-                state.get_balance(&BUYER, &pair.base),
-                balance(lot - base_fee, 0u64)
-            );
-            assert_eq!(state.get_balance(&BUYER, &pair.quote), balance(0u64, 0u64));
-            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, 0u64));
-            assert_eq!(
-                state.get_balance(&SELLER, &pair.quote),
-                balance(notional - quote_fee, 0u64)
-            );
-
-            // The fee pool gains exactly each side's fee (or nothing when zero).
-            assert_eq!(
-                state.balances.fee_balance(&pair.base),
-                (base_fee > 0).then(|| Quantity::from(base_fee)),
-            );
-            assert_eq!(
-                state.balances.fee_balance(&pair.quote),
-                (quote_fee > 0).then(|| Quantity::from(quote_fee)),
-            );
         }
 
         /// Rest two GTC sell makers, place a FOK Buy that must be killed, and
@@ -3080,13 +2948,6 @@ mod settle_fills {
             );
             prop_assert_eq!(*refunded.reserved(), Quantity::ZERO);
             Ok(())
-        }
-
-        fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
-            setup_with_fee_rates(FeeRates {
-                maker: BasisPoint::new(maker_bps).unwrap(),
-                taker: BasisPoint::new(taker_bps).unwrap(),
-            })
         }
     }
 }

@@ -46,6 +46,10 @@ impl Balance {
         Self::new(free, Quantity::ZERO)
     }
 
+    pub fn new_reserved(reserved: impl Into<Quantity>) -> Self {
+        Self::new(Quantity::ZERO, reserved)
+    }
+
     pub fn free(&self) -> &Quantity {
         &self.free
     }
