@@ -64,17 +64,17 @@ section.pair { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid #eee
 <section class="pair">
 <h3>{{ pair.base_symbol }}/{{ pair.quote_symbol }} <span class="muted">(book #{{ pair.book_id }})</span></h3>
 <dl>
-<dt>Tick size</dt><dd>{{ pair.tick_size }}</dd>
-<dt>Lot size</dt><dd>{{ pair.lot_size }}</dd>
+<dt>Tick size</dt><dd>{{ pair.tick_size.value }} {{ pair.quote_symbol }}/{{ pair.base_symbol }} <span class="muted">raw {{ pair.tick_size.raw }}</span></dd>
+<dt>Lot size</dt><dd>{{ pair.lot_size.value }} {{ pair.base_symbol }} <span class="muted">raw {{ pair.lot_size.raw }}</span></dd>
 <dt>Maker fee</dt><dd>{{ pair.maker_fee_bps }} bps</dd>
 <dt>Taker fee</dt><dd>{{ pair.taker_fee_bps }} bps</dd>
 <dt>Bid price levels</dt><dd>{{ pair.bids_len }}</dd>
 <dt>Ask price levels</dt><dd>{{ pair.asks_len }}</dd>
 <dt>Pending orders</dt><dd>{{ pair.pending_orders_len }}</dd>
 <dt>Resting orders</dt><dd>{{ pair.resting_orders_len }}</dd>
-<dt>Best bid</dt><dd>{% match pair.best_bid %}{% when Some with (level) %}{{ level.price }} ({{ level.quantity }}){% when None %}—{% endmatch %}</dd>
-<dt>Best ask</dt><dd>{% match pair.best_ask %}{% when Some with (level) %}{{ level.price }} ({{ level.quantity }}){% when None %}—{% endmatch %}</dd>
-<dt>Spread</dt><dd>{% match pair.spread %}{% when Some with (s) %}{{ s }}{% when None %}—{% endmatch %}</dd>
+<dt>Best bid</dt><dd>{% match pair.best_bid %}{% when Some with (level) %}{{ level.price.value }} {{ pair.quote_symbol }}/{{ pair.base_symbol }} ({{ level.quantity.value }} {{ pair.base_symbol }}) <span class="muted">raw {{ level.price.raw }} / {{ level.quantity.raw }}</span>{% when None %}—{% endmatch %}</dd>
+<dt>Best ask</dt><dd>{% match pair.best_ask %}{% when Some with (level) %}{{ level.price.value }} {{ pair.quote_symbol }}/{{ pair.base_symbol }} ({{ level.quantity.value }} {{ pair.base_symbol }}) <span class="muted">raw {{ level.price.raw }} / {{ level.quantity.raw }}</span>{% when None %}—{% endmatch %}</dd>
+<dt>Spread</dt><dd>{% match pair.spread %}{% when Some with (s) %}{{ s.value }} {{ pair.quote_symbol }}/{{ pair.base_symbol }} <span class="muted">raw {{ s.raw }}</span>{% when None %}—{% endmatch %}</dd>
 </dl>
 
 {% if pair.depth.is_empty() %}
@@ -82,24 +82,24 @@ section.pair { margin-top: 1.5em; padding-top: 0.5em; border-top: 1px solid #eee
 {% else %}
 <div class="depth">
 <table class="depth-side depth-bids">
-<thead><tr><th>Bid price</th><th>Quantity</th><th>Bar</th></tr></thead>
+<thead><tr><th>Bid price ({{ pair.quote_symbol }}/{{ pair.base_symbol }})</th><th>Quantity ({{ pair.base_symbol }})</th><th>Bar</th></tr></thead>
 <tbody>
 {% for lvl in pair.depth.bids %}
 <tr>
-<td class="price">{{ lvl.price }}</td>
-<td>{{ lvl.quantity }}</td>
+<td class="price">{{ lvl.price.value }} <span class="muted">{{ lvl.price.raw }}</span></td>
+<td>{{ lvl.quantity.value }} <span class="muted">{{ lvl.quantity.raw }}</span></td>
 <td class="bar"><div style="width: {{ lvl.bar_width_percent }}%"></div></td>
 </tr>
 {% endfor %}
 </tbody>
 </table>
 <table class="depth-side depth-asks">
-<thead><tr><th>Ask price</th><th>Quantity</th><th>Bar</th></tr></thead>
+<thead><tr><th>Ask price ({{ pair.quote_symbol }}/{{ pair.base_symbol }})</th><th>Quantity ({{ pair.base_symbol }})</th><th>Bar</th></tr></thead>
 <tbody>
 {% for lvl in pair.depth.asks %}
 <tr>
-<td class="price">{{ lvl.price }}</td>
-<td>{{ lvl.quantity }}</td>
+<td class="price">{{ lvl.price.value }} <span class="muted">{{ lvl.price.raw }}</span></td>
+<td>{{ lvl.quantity.value }} <span class="muted">{{ lvl.quantity.raw }}</span></td>
 <td class="bar"><div style="width: {{ lvl.bar_width_percent }}%"></div></td>
 </tr>
 {% endfor %}

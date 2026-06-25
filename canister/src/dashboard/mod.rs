@@ -30,8 +30,8 @@ pub struct DashboardPair {
     pub book_id: u64,
     pub base_symbol: String,
     pub quote_symbol: String,
-    pub tick_size: u128,
-    pub lot_size: u64,
+    pub tick_size: Amount,
+    pub lot_size: Amount,
     pub maker_fee_bps: u16,
     pub taker_fee_bps: u16,
     pub bids_len: usize,
@@ -40,13 +40,27 @@ pub struct DashboardPair {
     pub resting_orders_len: usize,
     pub best_bid: Option<DashboardLevel>,
     pub best_ask: Option<DashboardLevel>,
-    pub spread: Option<u128>,
+    pub spread: Option<Amount>,
     pub depth: DashboardDepth,
 }
 
+pub struct Amount {
+    pub value: String,
+    pub raw: String,
+}
+
+impl Amount {
+    fn new(raw: String, decimals: u8) -> Self {
+        Self {
+            value: format_scaled(&raw, decimals),
+            raw,
+        }
+    }
+}
+
 pub struct DashboardLevel {
-    pub price: u128,
-    pub quantity: String,
+    pub price: Amount,
+    pub quantity: Amount,
 }
 
 pub struct DashboardDepth {
@@ -61,8 +75,8 @@ impl DashboardDepth {
 }
 
 pub struct DashboardDepthLevel {
-    pub price: u128,
-    pub quantity: String,
+    pub price: Amount,
+    pub quantity: Amount,
     pub bar_width_percent: u8,
 }
 
@@ -88,17 +102,24 @@ impl DashboardTemplate {
                 let book = state
                     .order_book(book_id)
                     .expect("BUG: trading pair registered but order book missing");
-                let base_symbol = state
+                let base_metadata = state
                     .token_metadata(&pair.base)
-                    .expect("BUG: base token metadata missing")
-                    .symbol
-                    .clone();
-                let quote_symbol = state
+                    .expect("BUG: base token metadata missing");
+                let base_symbol = base_metadata.symbol.clone();
+                let base_decimals = base_metadata.decimals;
+                let quote_metadata = state
                     .token_metadata(&pair.quote)
-                    .expect("BUG: quote token metadata missing")
-                    .symbol
-                    .clone();
-                build_pair(book.id().get(), base_symbol, quote_symbol, book)
+                    .expect("BUG: quote token metadata missing");
+                let quote_symbol = quote_metadata.symbol.clone();
+                let quote_decimals = quote_metadata.decimals;
+                build_pair(
+                    book.id().get(),
+                    base_symbol,
+                    quote_symbol,
+                    base_decimals,
+                    quote_decimals,
+                    book,
+                )
             })
             .collect();
         Self {
@@ -115,24 +136,28 @@ fn build_pair(
     book_id: u64,
     base_symbol: String,
     quote_symbol: String,
+    base_decimals: u8,
+    quote_decimals: u8,
     book: &OrderBook,
 ) -> DashboardPair {
     let bids: Vec<(Price, Quantity)> = book.bid_levels(DEPTH_LEVELS).collect();
     let asks: Vec<(Price, Quantity)> = book.ask_levels(DEPTH_LEVELS).collect();
     let best_bid_level = bids.first().copied();
     let best_ask_level = asks.first().copied();
-    let best_bid = best_bid_level.map(level);
-    let best_ask = best_ask_level.map(level);
+    let best_bid = best_bid_level.map(|l| level(l, base_decimals, quote_decimals));
+    let best_ask = best_ask_level.map(|l| level(l, base_decimals, quote_decimals));
     let spread = match (best_bid_level, best_ask_level) {
-        (Some((bid, _)), Some((ask, _))) => ask.checked_sub(bid).map(Price::get),
+        (Some((bid, _)), Some((ask, _))) => ask
+            .checked_sub(bid)
+            .map(|s| Amount::new(s.get().to_string(), quote_decimals)),
         _ => None,
     };
     DashboardPair {
         book_id,
         base_symbol,
         quote_symbol,
-        tick_size: book.tick_size().get(),
-        lot_size: book.lot_size().get(),
+        tick_size: Amount::new(book.tick_size().get().to_string(), quote_decimals),
+        lot_size: Amount::new(book.lot_size().get().to_string(), base_decimals),
         maker_fee_bps: book.fee_rates().maker.get(),
         taker_fee_bps: book.fee_rates().taker.get(),
         bids_len: book.bids_len(),
@@ -142,11 +167,16 @@ fn build_pair(
         best_bid,
         best_ask,
         spread,
-        depth: build_depth(&bids, &asks),
+        depth: build_depth(&bids, &asks, base_decimals, quote_decimals),
     }
 }
 
-fn build_depth(bids: &[(Price, Quantity)], asks: &[(Price, Quantity)]) -> DashboardDepth {
+fn build_depth(
+    bids: &[(Price, Quantity)],
+    asks: &[(Price, Quantity)],
+    base_decimals: u8,
+    quote_decimals: u8,
+) -> DashboardDepth {
     let max = bids
         .iter()
         .chain(asks.iter())
@@ -154,17 +184,22 @@ fn build_depth(bids: &[(Price, Quantity)], asks: &[(Price, Quantity)]) -> Dashbo
         .max()
         .unwrap_or(0);
     DashboardDepth {
-        bids: depth_levels(bids, max),
-        asks: depth_levels(asks, max),
+        bids: depth_levels(bids, max, base_decimals, quote_decimals),
+        asks: depth_levels(asks, max, base_decimals, quote_decimals),
     }
 }
 
-fn depth_levels(levels: &[(Price, Quantity)], max: u128) -> Vec<DashboardDepthLevel> {
+fn depth_levels(
+    levels: &[(Price, Quantity)],
+    max: u128,
+    base_decimals: u8,
+    quote_decimals: u8,
+) -> Vec<DashboardDepthLevel> {
     levels
         .iter()
         .map(|(price, qty)| DashboardDepthLevel {
-            price: price.get(),
-            quantity: qty.to_nat().to_string(),
+            price: Amount::new(price.get().to_string(), quote_decimals),
+            quantity: Amount::new(quantity_digits(qty), base_decimals),
             bar_width_percent: bar_width_percent(saturating_to_u128(qty), max),
         })
         .collect()
@@ -181,10 +216,34 @@ fn bar_width_percent(qty: u128, max: u128) -> u8 {
     percent.min(100) as u8
 }
 
-fn level((price, quantity): (Price, Quantity)) -> DashboardLevel {
+fn level(
+    (price, quantity): (Price, Quantity),
+    base_decimals: u8,
+    quote_decimals: u8,
+) -> DashboardLevel {
     DashboardLevel {
-        price: price.get(),
-        quantity: quantity.to_nat().to_string(),
+        price: Amount::new(price.get().to_string(), quote_decimals),
+        quantity: Amount::new(quantity_digits(&quantity), base_decimals),
+    }
+}
+
+fn quantity_digits(quantity: &Quantity) -> String {
+    quantity.to_nat().to_string().replace('_', "")
+}
+
+fn format_scaled(raw: &str, decimals: u8) -> String {
+    let digits = raw.trim_start_matches('+').replace('_', "");
+    let decimals = decimals as usize;
+    if decimals == 0 {
+        return digits;
+    }
+    let padded = format!("{:0>width$}", digits, width = decimals + 1);
+    let split = padded.len() - decimals;
+    let frac = padded[split..].trim_end_matches('0');
+    if frac.is_empty() {
+        padded[..split].to_string()
+    } else {
+        format!("{}.{}", &padded[..split], frac)
     }
 }
 

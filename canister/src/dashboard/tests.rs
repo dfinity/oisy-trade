@@ -1,4 +1,4 @@
-use super::{DashboardTemplate, bar_width_percent, saturating_to_u128};
+use super::{DashboardTemplate, bar_width_percent, format_scaled, saturating_to_u128};
 use crate::order::{
     BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TimeInForce,
     TradingPair,
@@ -103,20 +103,13 @@ fn should_render_per_pair_metadata() {
 
     let dom = render(&state, 0);
     let dl_text = text(&dom, "section.pair dl");
-    let best_bid = 100 * PRICE_SCALE;
-    let best_ask = 110 * PRICE_SCALE;
-    assert!(dl_text.contains(&format!("{}", TICK_SIZE.get())));
-    assert!(dl_text.contains(&format!("{}", LOT_SIZE.get())));
-    // Pair each <dt> label with its <dd> value so the assertion checks the
-    // value wiring (and maker/taker are not swapped) without depending on
-    // whitespace between the tags.
     let dts = column(&dom, "section.pair dl dt");
     let dds = column(&dom, "section.pair dl dd");
     let value_for = |label: &str| {
         dts.iter()
             .zip(&dds)
             .find(|(dt, _)| dt.trim() == label)
-            .map(|(_, dd)| dd.trim().to_string())
+            .map(|(_, dd)| dd.split_whitespace().collect::<Vec<_>>().join(" "))
     };
     let expected_maker = format!("{MAKER_FEE_BPS} bps");
     let expected_taker = format!("{TAKER_FEE_BPS} bps");
@@ -128,18 +121,29 @@ fn should_render_per_pair_metadata() {
         value_for("Taker fee").as_deref(),
         Some(expected_taker.as_str())
     );
-    assert!(
-        dl_text.contains(&best_bid.to_string()),
-        "best bid {best_bid} in: {dl_text}"
+    assert_eq!(
+        value_for("Tick size").as_deref(),
+        Some("0.000001 ckBTC/ICP raw 100")
+    );
+    assert_eq!(
+        value_for("Lot size").as_deref(),
+        Some("0.01 ICP raw 1000000")
+    );
+    assert_eq!(
+        value_for("Best bid").as_deref(),
+        Some("100 ckBTC/ICP (0.01 ICP) raw 10000000000 / 1000000")
+    );
+    assert_eq!(
+        value_for("Best ask").as_deref(),
+        Some("110 ckBTC/ICP (0.01 ICP) raw 11000000000 / 1000000")
+    );
+    assert_eq!(
+        value_for("Spread").as_deref(),
+        Some("10 ckBTC/ICP raw 1000000000")
     );
     assert!(
-        dl_text.contains(&best_ask.to_string()),
-        "best ask {best_ask} in: {dl_text}"
-    );
-    assert!(
-        dl_text.contains(&(best_ask - best_bid).to_string()),
-        "spread {} in: {dl_text}",
-        best_ask - best_bid
+        dl_text.contains("0.000001"),
+        "formatted tick size in: {dl_text}"
     );
 }
 
@@ -153,12 +157,12 @@ fn should_render_depth_chart_for_resting_orders() {
 
     let dom = render(&state, 0);
 
-    let bid_prices = column(&dom, "table.depth-bids td.price");
-    assert_eq!(bid_prices, vec![(100 * PRICE_SCALE).to_string()]);
-    let ask_prices = column(&dom, "table.depth-asks td.price");
-    assert_eq!(ask_prices, vec![(110 * PRICE_SCALE).to_string()]);
-    let bid_qtys = column(&dom, "table.depth-bids tbody tr td:nth-child(2)");
-    assert_eq!(bid_qtys, vec![candid::Nat::from(lot(1)).to_string()]);
+    let bid_prices = cells(&dom, "table.depth-bids td.price");
+    assert_eq!(bid_prices, vec!["100 10000000000"]);
+    let ask_prices = cells(&dom, "table.depth-asks td.price");
+    assert_eq!(ask_prices, vec!["110 11000000000"]);
+    let bid_qtys = cells(&dom, "table.depth-bids tbody tr td:nth-child(2)");
+    assert_eq!(bid_qtys, vec!["0.01 1000000"]);
 
     assert_eq!(bar_widths(&dom), vec!["width: 100%", "width: 100%"]);
 }
@@ -208,6 +212,44 @@ fn should_saturate_quantity_to_u128() {
     );
     assert_eq!(saturating_to_u128(&Quantity::new(1, 0)), u128::MAX);
     assert_eq!(saturating_to_u128(&Quantity::MAX), u128::MAX);
+}
+
+#[test]
+fn should_format_scaled_with_zero_decimals_as_passthrough() {
+    assert_eq!(format_scaled("12345", 0), "12345");
+}
+
+#[test]
+fn should_format_scaled_sub_one_with_leading_zero() {
+    assert_eq!(format_scaled("1000000", 9), "0.001");
+}
+
+#[test]
+fn should_format_scaled_trimming_trailing_zeros() {
+    assert_eq!(format_scaled("1000000000000000000", 18), "1");
+}
+
+#[test]
+fn should_format_scaled_exact_mid_value() {
+    assert_eq!(format_scaled("50000000000000000", 18), "0.05");
+}
+
+#[test]
+fn should_format_scaled_u256_quantity_without_precision_loss() {
+    let raw = Quantity::new(1, 0).to_nat().to_string().replace('_', "");
+    assert_eq!(
+        raw, "340282366920938463463374607431768211456",
+        "Quantity::new(1, 0) is 2^128"
+    );
+    assert_eq!(
+        format_scaled(&raw, 18),
+        "340282366920938463463.374607431768211456"
+    );
+}
+
+#[test]
+fn should_format_scaled_stripping_underscores() {
+    assert_eq!(format_scaled("1_000_000", 6), "1");
 }
 
 fn fresh_state() -> State<VectorMemory, VectorMemory> {
@@ -300,6 +342,18 @@ fn text(dom: &Html, selector: &str) -> String {
 fn column(dom: &Html, selector: &str) -> Vec<String> {
     dom.select(&sel(selector))
         .map(|e| e.text().collect::<String>())
+        .collect()
+}
+
+fn cells(dom: &Html, selector: &str) -> Vec<String> {
+    dom.select(&sel(selector))
+        .map(|e| {
+            e.text()
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .collect()
 }
 
