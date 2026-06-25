@@ -74,7 +74,9 @@ You implement code against a specification.
   echoed into every assertion message. Do NOT write a separate `#[test]` per case, nor a
   shared helper called once per `#[test]`. Buy/Sell, fill/kill, Ok/Err, etc. are ROWS in
   the table. Canonical example: `state::tests::fill_or_kill::should_fill` (introduced in
-  #169; if renamed/moved, `git log -L` or blame this line to find it). Use a plain
+  #169 — exact line:
+  https://github.com/dfinity/oisy-trade/blob/dd12f17ea7c7ac410b03781d6fe554421a80611e/canister/src/state/tests.rs#L2447;
+  if renamed/moved, `git log -L` or blame this line to find it). Use a plain
   loop or proptest only when cases vary by control flow or span a fuzzed input space,
   where a static table doesn't fit.
 - Order content by importance, most important first. For example, put `#[test]`

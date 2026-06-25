@@ -75,7 +75,9 @@ branches, or PR state beyond posting your review.
     form is a single `#[test]` driving a `Vec<TestCase>` table (each row a `desc` +
     inputs + expected outputs, looped with `desc` echoed into every assertion) — Buy/Sell,
     fill/kill, etc. are ROWS, not functions; see
-    `state::tests::fill_or_kill::should_fill` as the canonical example. A shared helper
+    `state::tests::fill_or_kill::should_fill` as the canonical example (exact line:
+    https://github.com/dfinity/oisy-trade/blob/dd12f17ea7c7ac410b03781d6fe554421a80611e/canister/src/state/tests.rs#L2447).
+    A shared helper
     called by N separate `#[test]` functions does NOT go far enough — flag it. Reserve
     plain loops / proptests for cases that vary by control flow or span a fuzzed input
     space, where a static table doesn't fit.
