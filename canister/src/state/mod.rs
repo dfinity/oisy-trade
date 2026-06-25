@@ -355,21 +355,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let removed = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let mut balance_operations = Vec::with_capacity(1);
-        RemovedOrderSettlement::new(seq, &removed, base_scale)
-            .push_balance_operations(&mut balance_operations);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
+            let mut balance_operations = Vec::with_capacity(1);
+            RemovedOrderSettlement::new(seq, &removed, base_scale)
+                .push_balance_operations(&mut balance_operations);
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id,
+                    balance_operations,
+                });
         }
-        self.pending_settling_events
-            .push_back(event::SettlingEvent {
-                book_id,
-                balance_operations,
-            });
     }
 
     /// Drive engine matching for the given book; when `persistence` is
