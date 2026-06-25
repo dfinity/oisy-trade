@@ -42,6 +42,10 @@ impl Balance {
         }
     }
 
+    pub fn new_free(free: impl Into<Quantity>) -> Self {
+        Self::new(free, Quantity::ZERO)
+    }
+
     pub fn free(&self) -> &Quantity {
         &self.free
     }

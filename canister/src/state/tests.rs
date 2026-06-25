@@ -2434,10 +2434,177 @@ mod settle_fills {
 
     mod fill_or_kill {
         use super::*;
-        use crate::order::{BasisPoint, OrderRecord, OrderStatus, PairToken, TimeInForce};
+        use crate::order::{
+            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
+            TimeInForce,
+        };
+        use crate::test_fixtures::tokens::SupportedTokens;
+        use std::collections::BTreeSet;
+
+        const MAKER: Principal = Principal::from_slice(&[42_u8]);
+        const TAKER: Principal = Principal::from_slice(&[43_u8]);
 
         const MAKER_BPS: u16 = 10; // 0.1 %
         const TAKER_BPS: u16 = 25; // 0.25 %
+        const ONE_ICP: u64 = SupportedTokens::ICP.one();
+
+        #[test]
+        fn should_expire() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                },
+                TestCase {
+                    desc: "sell against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let book_before = case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let mut book_after = OrderBookSnapshot::from(
+                    state.get_order_book(&icp_ckbtc_trading_pair()).unwrap(),
+                );
+                assert_eq!(
+                    book_after.next_seq,
+                    OrderSeq::new(book_before.next_seq.get() + 1),
+                    "BUG ({}): should add only one order between book snapshots",
+                    case.desc
+                );
+                book_after.next_seq = book_before.next_seq;
+                assert_eq!(
+                    book_before, book_after,
+                    "BUG ({}): book should be the same as before when a FOK order is killed (excepted for the next_seq increment).",
+                    case.desc
+                );
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Expired,
+                    "BUG ({}): killed FOK should end Expired",
+                    case.desc
+                );
+
+                let balances_taker =
+                    test_fixtures::balances_pair(&state, &TAKER, &icp_ckbtc_trading_pair());
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after kill",
+                    case.desc
+                );
+            }
+        }
+
+        struct TestCase {
+            desc: String,
+            bids: Vec<(Price, Vec<Quantity>)>,
+            asks: Vec<(Price, Vec<Quantity>)>,
+            fok: (Side, Price, Quantity),
+            expected_balances_taker: (Balance, Balance),
+        }
+
+        impl TestCase {
+            fn populate_book(&self, state: &mut TestState) -> OrderBookSnapshot {
+                let pair = icp_ckbtc_trading_pair();
+                let mut maker_orders = BTreeSet::default();
+
+                for (price, quantities) in &self.bids {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Buy,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                for (price, quantities) in &self.asks {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Sell,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+
+                for maker_order in maker_orders {
+                    let (_, _, order) = state.get_user_order(&MAKER, maker_order).unwrap();
+                    assert_eq!(
+                        order.status,
+                        OrderStatus::Open,
+                        "BUG (test setup, {}): maker order is not resting in the book",
+                        self.desc
+                    );
+                }
+
+                OrderBookSnapshot::from(state.get_order_book(&pair).unwrap())
+            }
+
+            fn execute_fok(&self, state: &mut TestState) -> OrderId {
+                let (fok_side, fok_price, fok_quantity) = self.fok;
+
+                let fok_id = test_fixtures::place_fok_order(
+                    state,
+                    TAKER,
+                    &icp_ckbtc_trading_pair(),
+                    fok_side,
+                    fok_price.get(),
+                    fok_quantity,
+                );
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+                fok_id
+            }
+        }
+
+        fn state() -> TestState {
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair,
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                FeeRates {
+                    maker: BasisPoint::new(MAKER_BPS).unwrap(),
+                    taker: BasisPoint::new(TAKER_BPS).unwrap(),
+                },
+            );
+            state
+        }
 
         /// A FOK that crosses a single resting GTC maker fully fills, ending
         /// `Filled` with its whole reservation spent, while the maker is fully
