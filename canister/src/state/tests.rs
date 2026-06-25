@@ -2046,11 +2046,11 @@ mod settle_fills {
     // been retired — settlement is now a flat `Vec<BalanceOperation>` in
     // `SettlingEvent`. Commutativity isn't claimed for arbitrary op sequences
     // (two Transfers from the same debtor can fail depending on order), only
-    // for op sequences produced by `fill_settlement` + `push_balance_operations`
-    // from a valid `MatchingOutput`.
+    // for op sequences produced by `FillSettlement::new` +
+    // `FillSettlement::push_balance_operations` from a valid `MatchingOutput`.
 
     proptest! {
-        /// `fill_settlement` + `push_balance_operations` preserve structural invariants
+        /// `FillSettlement::new` + `push_balance_operations` preserve structural invariants
         /// over any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
@@ -2062,7 +2062,7 @@ mod settle_fills {
         fn settlement_balance_ops_match_fill_shape(
             output in crate::test_fixtures::arbitrary::arb_matching_output()
         ) {
-            use crate::order::{self, PairToken};
+            use crate::order::{self, FillSettlement, PairToken};
             use crate::state::event::BalanceOperation;
 
             let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
@@ -2074,9 +2074,8 @@ mod settle_fills {
             }).count();
             let mut ops = Vec::new();
             for fill in output.fills {
-                let settlement =
-                    super::super::fill_settlement(fill, FeeRates::default(), base_scale);
-                super::super::push_balance_operations(&mut ops, &settlement);
+                let settlement = FillSettlement::new(fill, FeeRates::default(), base_scale);
+                settlement.push_balance_operations(&mut ops);
             }
 
             prop_assert!(
