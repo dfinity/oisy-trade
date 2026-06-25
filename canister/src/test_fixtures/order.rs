@@ -3,9 +3,6 @@ use crate::order::{self, PendingOrder, Price, Quantity, Side, TimeInForce, Tradi
 use crate::state::{self, StableMemoryOptions};
 use candid::Principal;
 
-/// Builder for placing a limit order in tests. Construct with [`order`], tune
-/// the time-in-force if needed (defaults to GTC), then call
-/// [`PlaceOrder::place`] to deposit the reservation, validate, and record it.
 pub struct PlaceOrder<'a> {
     user: Principal,
     pair: &'a TradingPair,
@@ -15,8 +12,6 @@ pub struct PlaceOrder<'a> {
     time_in_force: TimeInForce,
 }
 
-/// Start building a limit order placement. Defaults to good-til-canceled; call
-/// [`PlaceOrder::fill_or_kill`] or [`PlaceOrder::time_in_force`] to change it.
 pub fn order(
     user: Principal,
     pair: &TradingPair,
@@ -35,12 +30,10 @@ pub fn order(
 }
 
 impl<'a> PlaceOrder<'a> {
-    /// Make this a fill-or-kill order.
     pub fn fill_or_kill(self) -> Self {
         self.time_in_force(TimeInForce::FillOrKill)
     }
 
-    /// Set the time-in-force for this order.
     pub fn time_in_force(mut self, time_in_force: TimeInForce) -> Self {
         self.time_in_force = time_in_force;
         self
@@ -48,8 +41,7 @@ impl<'a> PlaceOrder<'a> {
 
     /// Deposit just enough of the appropriate token to cover the order's
     /// reservation, validate the resulting limit order, and record it. Returns
-    /// the assigned `OrderId`. Credits the user's free balance with the
-    /// reservation amount before placing the order.
+    /// the assigned `OrderId`.
     pub fn place<MH, MB>(self, state: &mut state::State<MH, MB>) -> order::OrderId
     where
         MH: ic_stable_structures::Memory,
