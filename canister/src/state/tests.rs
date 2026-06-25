@@ -2091,7 +2091,7 @@ mod settle_fills {
         fn settlement_balance_ops_match_fill_shape(
             output in crate::test_fixtures::arbitrary::arb_matching_output()
         ) {
-            use crate::order::{self, FillSettlement, PairToken};
+            use crate::order::{self, FillSettlement, PairToken, RemovedOrderSettlement};
             use crate::state::event::BalanceOperation;
 
             let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
@@ -2103,17 +2103,8 @@ mod settle_fills {
                 settlement.push_balance_operations(&mut ops);
             }
             for (seq, killed) in &output.expired_orders {
-                let (refund_token, refund_amount) = crate::state::refund_for(
-                    killed.side,
-                    killed.price,
-                    killed.remaining_quantity,
-                    base_scale,
-                );
-                ops.push(BalanceOperation::Unreserve {
-                    order: *seq,
-                    token: refund_token,
-                    amount: refund_amount,
-                });
+                RemovedOrderSettlement::new(*seq, killed, base_scale)
+                    .push_balance_operations(&mut ops);
             }
 
             prop_assert!(

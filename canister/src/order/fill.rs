@@ -1,4 +1,4 @@
-use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, Side};
+use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side};
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
@@ -152,6 +152,45 @@ impl FillSettlement {
                 .checked_add(fee)
                 .expect("BUG: fee_delta overflow");
         }
+    }
+}
+
+/// The settlement of a removed order (canceled or killed): the placement
+/// reservation released back to its owner, computed where `base_scale` is in
+/// scope so the matcher stays scale-agnostic.
+pub struct RemovedOrderSettlement {
+    order_seq: OrderSeq,
+    token: PairToken,
+    amount: Quantity,
+}
+
+impl RemovedOrderSettlement {
+    /// Compute the reservation released by removing an order.
+    pub fn new(order_seq: OrderSeq, removed: &RemovedOrder, base_scale: NonZeroU64) -> Self {
+        let (token, amount) = match removed.side {
+            Side::Buy => (
+                PairToken::Quote,
+                removed
+                    .price
+                    .checked_mul_quantity_scaled(&removed.remaining_quantity, base_scale)
+                    .expect("BUG: price * remaining overflow — validated at placement"),
+            ),
+            Side::Sell => (PairToken::Base, removed.remaining_quantity),
+        };
+        Self {
+            order_seq,
+            token,
+            amount,
+        }
+    }
+
+    /// Push the single unreserve operation that releases the reservation.
+    pub fn push_balance_operations(&self, ops: &mut Vec<event::BalanceOperation>) {
+        ops.push(event::BalanceOperation::Unreserve {
+            order: self.order_seq,
+            token: self.token,
+            amount: self.amount,
+        });
     }
 }
 
