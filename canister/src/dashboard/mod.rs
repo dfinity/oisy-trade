@@ -225,12 +225,11 @@ fn quantity_digits(quantity: &Quantity) -> String {
 }
 
 fn format_scaled(raw: &str, decimals: u8) -> String {
-    let digits = raw.trim_start_matches('+').replace('_', "");
     let decimals = decimals as usize;
     if decimals == 0 {
-        return digits;
+        return raw.to_string();
     }
-    let padded = format!("{:0>width$}", digits, width = decimals + 1);
+    let padded = format!("{:0>width$}", raw, width = decimals + 1);
     let split = padded.len() - decimals;
     let frac = padded[split..].trim_end_matches('0');
     if frac.is_empty() {

@@ -1,4 +1,6 @@
-use super::{DashboardTemplate, bar_width_percent, format_scaled, saturating_to_u128};
+use super::{
+    DashboardTemplate, bar_width_percent, format_scaled, quantity_digits, saturating_to_u128,
+};
 use crate::order::{
     BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TimeInForce,
     TradingPair,
@@ -236,7 +238,7 @@ fn should_format_scaled_exact_mid_value() {
 
 #[test]
 fn should_format_scaled_u256_quantity_without_precision_loss() {
-    let raw = Quantity::new(1, 0).to_nat().to_string().replace('_', "");
+    let raw = quantity_digits(&Quantity::new(1, 0));
     assert_eq!(
         raw, "340282366920938463463374607431768211456",
         "Quantity::new(1, 0) is 2^128"
@@ -248,8 +250,12 @@ fn should_format_scaled_u256_quantity_without_precision_loss() {
 }
 
 #[test]
-fn should_format_scaled_stripping_underscores() {
-    assert_eq!(format_scaled("1_000_000", 6), "1");
+fn should_strip_underscores_from_quantity_digits() {
+    assert_eq!(
+        quantity_digits(&Quantity::new(1, 0)),
+        "340282366920938463463374607431768211456",
+        "candid::Nat::to_string groups digits with '_'; quantity_digits strips them"
+    );
 }
 
 fn fresh_state() -> State<VectorMemory, VectorMemory> {
