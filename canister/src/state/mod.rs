@@ -394,38 +394,39 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let fee_rates = book.fee_rates();
         let output = book.process_pending_orders(&event.orders);
 
-        let write = matches!(persistence, StableMemoryOptions::Write);
-        let MatchingOutput {
-            fills,
-            resting_orders,
-            filled_orders,
-            expired_orders,
-        } = output;
-        let (balance_operations, mut updates) =
-            settle(fills, &expired_orders, fee_rates, base_scale, write);
-        if write {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("apply_order_updates");
-            for seq in &resting_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+        if matches!(persistence, StableMemoryOptions::Write) {
+            let MatchingOutput {
+                fills,
+                resting_orders,
+                filled_orders,
+                expired_orders,
+            } = output;
+            let (balance_operations, mut updates) =
+                settle(fills, &expired_orders, fee_rates, base_scale);
+            {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("apply_order_updates");
+                for seq in &resting_orders {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+                }
+                for seq in &filled_orders {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+                }
+                for seq in expired_orders.keys() {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
+                }
+                for (seq, update) in updates {
+                    let order_id = OrderId::new(event.book_id, seq);
+                    self.order_history.apply_update(&order_id, update, now);
+                }
             }
-            for seq in &filled_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+            if !balance_operations.is_empty() {
+                self.pending_settling_events
+                    .push_back(event::SettlingEvent {
+                        book_id: event.book_id,
+                        balance_operations,
+                    });
             }
-            for seq in expired_orders.keys() {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
-            }
-            for (seq, update) in updates {
-                let order_id = OrderId::new(event.book_id, seq);
-                self.order_history.apply_update(&order_id, update, now);
-            }
-        }
-        if !balance_operations.is_empty() {
-            self.pending_settling_events
-                .push_back(event::SettlingEvent {
-                    book_id: event.book_id,
-                    balance_operations,
-                });
         }
     }
 
@@ -912,7 +913,6 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
-    write: bool,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
@@ -922,9 +922,7 @@ fn settle(
     for fill in fills {
         let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
-        if write {
-            settlement.accrue_fill(&mut updates);
-        }
+        settlement.accrue_fill(&mut updates);
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
