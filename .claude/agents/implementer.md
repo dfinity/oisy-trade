@@ -73,7 +73,8 @@ You implement code against a specification.
   on it), a `vec![TestCase { .. }, ..]`, and a `for case in cases` loop with `case.desc`
   echoed into every assertion message. Do NOT write a separate `#[test]` per case, nor a
   shared helper called once per `#[test]`. Buy/Sell, fill/kill, Ok/Err, etc. are ROWS in
-  the table. Canonical example: `state::tests::fill_or_kill::should_fill`. Use a plain
+  the table. Canonical example: `state::tests::fill_or_kill::should_fill` (introduced in
+  #169; if renamed/moved, `git log -L` or blame this line to find it). Use a plain
   loop or proptest only when cases vary by control flow or span a fuzzed input space,
   where a static table doesn't fit.
 - Order content by importance, most important first. For example, put `#[test]`

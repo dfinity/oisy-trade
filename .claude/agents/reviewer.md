@@ -73,7 +73,7 @@ branches, or PR state beyond posting your review.
     copy-pasted bodies even when each case earns its place. When the cases differ only
     in DATA (inputs → expected outputs) under a uniform assertion shape, the PREFERRED
     form is a single `#[test]` driving a `Vec<TestCase>` table (each row a `desc` +
-    inputs + expecteds, looped with `desc` echoed into every assertion) — Buy/Sell,
+    inputs + expected outputs, looped with `desc` echoed into every assertion) — Buy/Sell,
     fill/kill, etc. are ROWS, not functions; see
     `state::tests::fill_or_kill::should_fill` as the canonical example. A shared helper
     called by N separate `#[test]` functions does NOT go far enough — flag it. Reserve
@@ -96,7 +96,7 @@ branches, or PR state beyond posting your review.
     the replay (`Skip`) path.
 - Generated data must be genuinely arbitrary AND respect domain invariants: a
   hard-coded empty/constant field is not arbitrary (it is a coverage hole — see the
-  `arb_*` rule above), and mutually-exclusive sets must be generated disjoint (e.g. an
+  `arb_*` rule above), and mutually-exclusive sets must be generated disjointly (e.g. an
   order cannot be simultaneously resting, filled, and expired); tick/lot-aligned
   quantities stay aligned; etc.
 
@@ -131,9 +131,9 @@ branches, or PR state beyond posting your review.
   counter (Prometheus treats `NaN` as no-sample, so emitting it from a metric
   encoder is invisible). Defaults are fine for EXPECTED missing inputs; never for an
   invariant breach.
-- Flag test-only code living in a production module — a `#[cfg(test)]` helper, shim,
-  or constructor compiled into the production crate (as opposed to `mod tests` /
-  `test_fixtures`). Tests must exercise the productive API, not a parallel test-only
+- Flag test-only code living in a production source module — a `#[cfg(test)]` helper,
+  shim, or constructor in a production `.rs` file rather than in `mod tests` /
+  `test_fixtures`. Tests must exercise the productive API, not a parallel test-only
   entry point that production never runs.
 - Flag a redundant / derivable parameter — one whose value is already determined by
   another argument (e.g. a `require_full: bool` derivable from an `Order`'s
