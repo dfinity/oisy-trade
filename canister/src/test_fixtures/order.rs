@@ -48,8 +48,8 @@ impl<'a> PlaceOrder<'a> {
 
     /// Deposit just enough of the appropriate token to cover the order's
     /// reservation, validate the resulting limit order, and record it. Returns
-    /// the assigned `OrderId`. Each call funds the user from zero, so distinct
-    /// users get distinct, isolated balances.
+    /// the assigned `OrderId`. Credits the user's free balance with the
+    /// reservation amount before placing the order.
     pub fn place<MH, MB>(self, state: &mut state::State<MH, MB>) -> order::OrderId
     where
         MH: ic_stable_structures::Memory,
