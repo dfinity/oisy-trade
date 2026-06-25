@@ -2407,7 +2407,8 @@ mod settle_fills {
         // smallest-unit figures match the DEFI-2901 spec's example literally:
         // `PRICE_10 = 10_000_000` is 10 ckUSDT/ICP and `notional 20_000_000`
         // is 20 ckUSDT.
-        use crate::test_fixtures::{ckusdt_metadata, icp_ckusdt_trading_pair};
+        use crate::test_fixtures::icp_ckusdt_trading_pair;
+        use crate::test_fixtures::tokens::SupportedTokens;
 
         // Maker B and the two distinct maker levels need a third principal.
         const MAKER_B: Principal = Principal::from_slice(&[0x03]);
@@ -2424,7 +2425,7 @@ mod settle_fills {
                 OrderBookId::ZERO,
                 icp_ckusdt_trading_pair(),
                 icp_metadata(),
-                ckusdt_metadata(),
+                SupportedTokens::CKUSDT.token_metadata().into(),
                 TICK_SIZE,
                 LOT_SIZE,
                 MIN_NOTIONAL,

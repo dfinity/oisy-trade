@@ -57,13 +57,6 @@ pub fn ckbtc_metadata() -> TokenMetadata {
     }
 }
 
-pub fn ckusdt_metadata() -> TokenMetadata {
-    TokenMetadata {
-        symbol: "ckUSDT".to_string(),
-        decimals: 6,
-    }
-}
-
 pub fn base_metadata() -> TokenMetadata {
     TokenMetadata {
         symbol: "BASE".to_string(),
