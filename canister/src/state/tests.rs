@@ -2402,7 +2402,7 @@ mod settle_fills {
             state
         }
 
-        // The two worked-example tests below register ICP/ckUSDT (base ICP
+        // The worked-example test below registers ICP/ckUSDT (base ICP
         // 8 decimals / quote ckUSDT 6 decimals, `base_scale = 10^8`) so the
         // smallest-unit figures match the DEFI-2901 spec's example literally:
         // `PRICE_10 = 10_000_000` is 10 ckUSDT/ICP and `notional 20_000_000`
@@ -2438,81 +2438,141 @@ mod settle_fills {
             state
         }
 
-        /// A buy taker sweeps two maker levels (2 ICP @ 10, 3 ICP @ 11) with
-        /// taker 10 bps / maker 5 bps. The taker's `filled_quote` is the realized
-        /// notional 53 ckUSDT (the 7-ckUSDT reservation surplus is excluded), and
-        /// its `filled_fee` is the base-denominated 0.005 ICP. Each maker records
-        /// its own quote-denominated fee. No other test exercises a taker
-        /// sweeping multiple maker levels with fees and surplus exclusion.
         #[test]
-        fn buy_taker_sweeping_two_levels_rolls_up_quote_and_fee() {
-            let mut state = setup_ckusdt_with_fees(5, 10);
-            let pair = icp_ckusdt_trading_pair();
+        fn rolls_up_realized_quote_and_fee() {
+            let test_cases = vec![
+                TestCase {
+                    desc: "buy taker sweeps two maker levels, surplus excluded".to_string(),
+                    orders: vec![
+                        PlacedOrder::new(SELLER, Side::Sell, PRICE_10, QTY_2).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_2,
+                            filled_quote: 20_000_000,
+                            filled_fee: 10_000,
+                            vwap: None,
+                        }),
+                        PlacedOrder::new(MAKER_B, Side::Sell, PRICE_11, QTY_3).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_3,
+                            filled_quote: 33_000_000,
+                            filled_fee: 16_500,
+                            vwap: None,
+                        }),
+                        PlacedOrder::new(BUYER, Side::Buy, PRICE_12, QTY_5).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_5,
+                            filled_quote: 53_000_000,
+                            filled_fee: 500_000,
+                            vwap: Some(10_600_000),
+                        }),
+                    ],
+                },
+                TestCase {
+                    desc: "order is taker on entry then maker within one batch".to_string(),
+                    orders: vec![
+                        PlacedOrder::new(SELLER, Side::Sell, PRICE_10, QTY_2),
+                        PlacedOrder::new(BUYER, Side::Buy, PRICE_10, QTY_5).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_5,
+                            filled_quote: 50_000_000,
+                            filled_fee: 350_000,
+                            vwap: None,
+                        }),
+                        PlacedOrder::new(MAKER_B, Side::Sell, PRICE_10, QTY_3),
+                    ],
+                },
+            ];
 
-            let maker_a =
-                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
-            let maker_b =
-                test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_11, QTY_3);
-            let taker =
-                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_12, QTY_5);
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            for case in test_cases {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let pair = icp_ckusdt_trading_pair();
+                let placed: Vec<_> = case
+                    .orders
+                    .iter()
+                    .map(|order| {
+                        let id = test_fixtures::place_order(
+                            &mut state,
+                            order.owner,
+                            &pair,
+                            order.side,
+                            order.price,
+                            order.quantity,
+                        );
+                        (order, id)
+                    })
+                    .collect();
+                EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // Taker buy: gross 5 ICP filled, realized notional 20 + 33 = 53
-            // ckUSDT, fee 0.002 + 0.003 = 0.005 ICP (base-denominated). The
-            // 7-ckUSDT reservation surplus is released, not part of filled_quote.
-            let taker = record_of(&state, BUYER, taker);
-            assert_eq!(taker.status, OrderStatus::Filled);
-            assert_eq!(taker.filled_quantity, Quantity::from(QTY_5));
-            assert_eq!(taker.filled_quote, Quantity::from(53_000_000u128));
-            assert_eq!(taker.filled_fee, Quantity::from(500_000u128));
-            // VWAP = filled_quote × base_scale / filled_quantity = 10.6 ckUSDT/ICP.
-            let base_scale = 100_000_000u128;
-            let vwap = taker.filled_quote.as_u128().unwrap() * base_scale
-                / taker.filled_quantity.as_u128().unwrap();
-            assert_eq!(vwap, 10_600_000);
-
-            // Maker A (Fill 1): 20 ckUSDT notional, 0.01 ckUSDT fee (quote).
-            let maker_a = record_of(&state, SELLER, maker_a);
-            assert_eq!(maker_a.filled_quantity, Quantity::from(QTY_2));
-            assert_eq!(maker_a.filled_quote, Quantity::from(20_000_000u128));
-            assert_eq!(maker_a.filled_fee, Quantity::from(10_000u128));
-
-            // Maker B (Fill 2): 33 ckUSDT notional, 0.0165 ckUSDT fee (quote).
-            let maker_b = record_of(&state, MAKER_B, maker_b);
-            assert_eq!(maker_b.filled_quantity, Quantity::from(QTY_3));
-            assert_eq!(maker_b.filled_quote, Quantity::from(33_000_000u128));
-            assert_eq!(maker_b.filled_fee, Quantity::from(16_500u128));
+                let base_scale = 100_000_000u128;
+                for (order, id) in placed {
+                    let Some(expect) = &order.expect else {
+                        continue;
+                    };
+                    let record = record_of(&state, order.owner, id);
+                    assert_eq!(record.status, expect.status, "BUG ({}): status", case.desc);
+                    assert_eq!(
+                        record.filled_quantity,
+                        Quantity::from(expect.filled_quantity),
+                        "BUG ({}): filled_quantity",
+                        case.desc
+                    );
+                    assert_eq!(
+                        record.filled_quote,
+                        Quantity::from(expect.filled_quote),
+                        "BUG ({}): filled_quote",
+                        case.desc
+                    );
+                    assert_eq!(
+                        record.filled_fee,
+                        Quantity::from(expect.filled_fee),
+                        "BUG ({}): filled_fee",
+                        case.desc
+                    );
+                    if let Some(vwap) = expect.vwap {
+                        let actual = record.filled_quote.as_u128().unwrap() * base_scale
+                            / record.filled_quantity.as_u128().unwrap();
+                        assert_eq!(actual, vwap, "BUG ({}): vwap", case.desc);
+                    }
+                }
+            }
         }
 
-        /// A single order that crosses on entry (taker leg) and then rests and is
-        /// hit (maker leg) within the same batch accrues both fills' realized
-        /// quote and fee, written exactly once. The taker leg is charged the
-        /// taker rate, the maker leg the maker rate.
-        #[test]
-        fn order_filling_both_ways_in_one_batch_rolls_up_both_legs() {
-            let mut state = setup_ckusdt_with_fees(5, 10);
-            let pair = icp_ckusdt_trading_pair();
+        struct TestCase {
+            desc: String,
+            orders: Vec<PlacedOrder>,
+        }
 
-            // A resting ask the middle order will cross as taker.
-            test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
-            // The order under test: a buy for 5 ICP @ 10 — crosses the 2-ICP ask
-            // (taker), then rests with 3 ICP open.
-            let pivot =
-                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_5);
-            // A sell that hits the pivot's resting 3 ICP (pivot is now maker).
-            test_fixtures::place_order(&mut state, MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3);
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+        struct PlacedOrder {
+            owner: Principal,
+            side: Side,
+            price: u128,
+            quantity: u128,
+            expect: Option<Expect>,
+        }
 
-            // Taker leg: 2 ICP @ 10 → notional 20 ckUSDT. Maker leg: 3 ICP @ 10
-            // → notional 30 ckUSDT. filled_quote = 20 + 30 = 50 ckUSDT.
-            let pivot = record_of(&state, BUYER, pivot);
-            assert_eq!(pivot.status, OrderStatus::Filled);
-            assert_eq!(pivot.filled_quantity, Quantity::from(QTY_5));
-            assert_eq!(pivot.filled_quote, Quantity::from(50_000_000u128));
-            // Buyer pays base fee on both legs: taker leg 10 bps × 2 ICP =
-            // 0.002 ICP (200_000); maker leg 5 bps × 3 ICP = 0.0015 ICP
-            // (150_000). Total 0.0035 ICP (350_000), all base-denominated.
-            assert_eq!(pivot.filled_fee, Quantity::from(350_000u128));
+        impl PlacedOrder {
+            fn new(owner: Principal, side: Side, price: u128, quantity: u128) -> Self {
+                Self {
+                    owner,
+                    side,
+                    price,
+                    quantity,
+                    expect: None,
+                }
+            }
+
+            fn expect(mut self, expect: Expect) -> Self {
+                self.expect = Some(expect);
+                self
+            }
+        }
+
+        struct Expect {
+            status: OrderStatus,
+            filled_quantity: u128,
+            filled_quote: u128,
+            filled_fee: u128,
+            vwap: Option<u128>,
         }
     }
 
