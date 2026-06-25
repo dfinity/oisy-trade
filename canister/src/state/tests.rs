@@ -445,9 +445,6 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        // A FOK sits Pending in the queue until matching runs; cancel it before
-        // the engine processes it. It must end Canceled (a user cancel), not
-        // Expired (the engine kill), with the placement reservation refunded.
         let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Pending));
 
