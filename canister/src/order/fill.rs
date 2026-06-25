@@ -57,8 +57,8 @@ pub struct FillSettlement {
     /// Fee charged to the maker order, in its receive token.
     maker_fee: Quantity,
     /// Quote surplus released back to a buy taker that crossed below its limit;
-    /// `None` for a sell taker or an exact-price fill.
-    surplus: Option<Quantity>,
+    /// Zero for a sell taker or an exact-price fill.
+    surplus: Quantity,
 }
 
 impl FillSettlement {
@@ -84,14 +84,10 @@ impl FillSettlement {
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !diff.is_zero()
         {
-            Some(
-                diff.checked_mul_quantity_scaled(&fill.quantity, base_scale)
-                    .expect(
-                        "BUG: price_diff * quantity overflow — validated in validate_limit_order",
-                    ),
-            )
+            diff.checked_mul_quantity_scaled(&fill.quantity, base_scale)
+                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order")
         } else {
-            None
+            Quantity::ZERO
         };
         Self {
             fill,
@@ -120,11 +116,11 @@ impl FillSettlement {
             amount: self.notional,
             fee: nonzero(quote_fee),
         });
-        if let Some(surplus) = self.surplus {
+        if !self.surplus.is_zero() {
             ops.push(event::BalanceOperation::Unreserve {
                 order: fill.taker_order_seq,
                 token: PairToken::Quote,
-                amount: surplus,
+                amount: self.surplus,
             });
         }
         ops.push(event::BalanceOperation::Transfer {
