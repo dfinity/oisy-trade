@@ -405,8 +405,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let mut balance_operations =
             Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
         let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
-        for fill in &output.fills {
-            let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
+        for fill in output.fills {
+            let settlement = FillSettlement::new(fill, fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(&mut updates);
         }
