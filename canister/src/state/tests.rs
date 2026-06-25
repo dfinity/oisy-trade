@@ -2470,15 +2470,27 @@ mod settle_fills {
                 TestCase {
                     desc: "order is taker on entry then maker within one batch".to_string(),
                     orders: vec![
-                        PlacedOrder::new(SELLER, Side::Sell, PRICE_10, QTY_2),
+                        PlacedOrder::new(SELLER, Side::Sell, PRICE_10, QTY_2).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_2,
+                            filled_quote: 20_000_000,
+                            filled_fee: 10_000,
+                            vwap: None,
+                        }),
                         PlacedOrder::new(BUYER, Side::Buy, PRICE_10, QTY_5).expect(Expect {
                             status: OrderStatus::Filled,
                             filled_quantity: QTY_5,
                             filled_quote: 50_000_000,
-                            filled_fee: 350_000,
+                            filled_fee: 200_000 + 150_000,
                             vwap: None,
                         }),
-                        PlacedOrder::new(MAKER_B, Side::Sell, PRICE_10, QTY_3),
+                        PlacedOrder::new(MAKER_B, Side::Sell, PRICE_10, QTY_3).expect(Expect {
+                            status: OrderStatus::Filled,
+                            filled_quantity: QTY_3,
+                            filled_quote: 30_000_000,
+                            filled_fee: 30_000,
+                            vwap: None,
+                        }),
                     ],
                 },
             ];
