@@ -79,7 +79,14 @@ You implement code against a specification.
   where a static table doesn't fit.
 - Order content by importance, most important first. For example, put `#[test]`
   functions before the helpers they use.
-- Don't write comments unless explicitly requested. In particular, don't write
-  comments noting which specification requirement a piece of code covers.
+- Don't write inline comments. No `//` explanatory comments inside function
+  bodies, and never comments noting which specification requirement a piece of
+  code covers (no `R3`/`R11`-style tags). When porting a spec's `.did` or type
+  sketch into code, strip the comments the spec used to explain itself.
+  `///` doc-comments on public items (types, fields, functions) ARE allowed —
+  but only to match a pattern an immediate sibling module already establishes
+  (e.g. mirroring `order/history`'s doc style in `order/fills`); do not introduce
+  doc-comments where the surrounding module has none, and keep them to a terse
+  one-liner of what the item is, never why or how the code works.
 - Use explicit imports. Example: avoid `use proptest::prelude::*;`; use instead
   `use proptest::prelude::{Strategy, any};`
