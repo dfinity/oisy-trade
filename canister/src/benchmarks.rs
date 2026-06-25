@@ -71,7 +71,9 @@ fn bench_fok_killed_full_bid_side() -> canbench_rs::BenchResult {
         |total_bid_qty| PendingOrder {
             side: Side::Sell,
             price: Price::new(TICK_SIZE.get()), // 0.001 USDT — crosses all bids
-            quantity: total_bid_qty.checked_add(Quantity::from(LOT_SIZE.get())).unwrap(),
+            quantity: total_bid_qty
+                .checked_add(Quantity::from(LOT_SIZE.get()))
+                .unwrap(),
             time_in_force: TimeInForce::FillOrKill,
         },
         OrderStatus::Expired,
