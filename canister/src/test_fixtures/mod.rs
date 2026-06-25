@@ -419,10 +419,11 @@ pub mod arbitrary {
     use candid::Principal;
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
-    use proptest::collection::{SizeRange, btree_map, btree_set, vec};
+    use proptest::collection::{SizeRange, btree_set, vec};
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};
     use proptest::prop_oneof;
+    use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
 
     use super::event::MAX_HALT_BOOKS;
@@ -821,20 +822,45 @@ pub mod arbitrary {
         // `arb_fill` multiplies its index by 2; cap to u32 range so 2 * index
         // fits in a u64.
         let arb_any_fill = any::<u32>().prop_flat_map(|i| arb_fill(i as u64));
-        (
-            vec(arb_any_fill, 0..5),
-            btree_set(arb_order_seq(), 0..5),
-            btree_set(arb_order_seq(), 0..5),
-            btree_map(arb_order_seq(), arb_removed_order(), 0..5),
-        )
-            .prop_map(|(fills, resting_orders, filled_orders, expired_orders)| {
-                MatchingOutput {
-                    fills,
-                    resting_orders,
-                    filled_orders,
-                    expired_orders,
-                }
+        // A single order cannot be resting, filled, and expired at once, so the
+        // three seq buckets must be pairwise disjoint. Draw one pool of unique
+        // seqs, then deal a random prefix-split across the three buckets.
+        let arb_disjoint_seqs = btree_set(any::<u64>(), 0..15).prop_flat_map(|seqs| {
+            let seqs: Vec<u64> = seqs.into_iter().collect();
+            let len = seqs.len();
+            (Just(seqs), 0..=len, 0..=len).prop_map(|(seqs, a, b)| {
+                let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                let resting: BTreeSet<OrderSeq> =
+                    seqs[..lo].iter().copied().map(OrderSeq::new).collect();
+                let filled: BTreeSet<OrderSeq> =
+                    seqs[lo..hi].iter().copied().map(OrderSeq::new).collect();
+                let expired: Vec<OrderSeq> =
+                    seqs[hi..].iter().copied().map(OrderSeq::new).collect();
+                (resting, filled, expired)
             })
+        });
+        (vec(arb_any_fill, 0..5), arb_disjoint_seqs)
+            .prop_flat_map(|(fills, (resting_orders, filled_orders, expired_seqs))| {
+                let expired_len = expired_seqs.len();
+                (
+                    Just(fills),
+                    Just(resting_orders),
+                    Just(filled_orders),
+                    Just(expired_seqs),
+                    vec(arb_removed_order(), expired_len..=expired_len),
+                )
+            })
+            .prop_map(
+                |(fills, resting_orders, filled_orders, expired_seqs, removed)| {
+                    let expired_orders = expired_seqs.into_iter().zip(removed).collect();
+                    MatchingOutput {
+                        fills,
+                        resting_orders,
+                        filled_orders,
+                        expired_orders,
+                    }
+                },
+            )
     }
 
     pub fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
@@ -967,6 +993,13 @@ pub mod mocks {
 
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
         mock_runtime_at(caller, Timestamp::EPOCH)
+    }
+
+    pub fn mock_runtime_for_timer() -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_instruction_counter().return_const(0u64);
+        mock.expect_time().return_const(Timestamp::EPOCH);
+        mock
     }
 
     /// Like [`mock_runtime_for`] but with `time()` pinned to `now`, so a test

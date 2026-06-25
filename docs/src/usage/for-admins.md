@@ -349,6 +349,39 @@ icp canister call oisy_trade get_trading_pairs '()' --environment staging --quer
 
 The new pair should appear in the output.
 
+### Another pair: TESTICP/ckSepoliaUSDC (staging)
+
+A concrete listing for staging, derived end-to-end with the rules above. TESTICP
+is priced in a USD-pegged 6-decimal quote, so it mirrors the ICP/ckUSDT row of the
+[launch basket](#launch-basket); Binance `ICPUSDC` reports the same tick/lot/min
+notional as `ICPUSDT` (`0.001` / `0.01` / `$5`).
+
+The ledgers report `symbol`/`decimals` of `TESTICP` / `8` and `ckSepoliaUSDC` / `6`
+(confirm with the [Fetch ledger metadata](#fetch-ledger-metadata) calls). Conversions:
+
+- `tick_size = 0.001 × 10^6 = 1_000` (quote base units per whole TESTICP)
+- `lot_size  = 0.01  × 10^8 = 1_000_000` (TESTICP base units)
+- `min_notional = $5 = 5 × 10^6 = 5_000_000` (quote base units)
+- check: `tick_size × lot_size = 10^9`, a multiple of `10^base_decimals = 10^8` ✓
+
+```bash
+export BASE_LEDGER=xafvr-biaaa-aaaai-aql5q-cai   # TESTICP
+export QUOTE_LEDGER=yfumr-cyaaa-aaaar-qaela-cai  # ckSepoliaUSDC
+export BASE_SYMBOL=TESTICP
+export BASE_DECIMALS=8
+export QUOTE_SYMBOL=ckSepoliaUSDC
+export QUOTE_DECIMALS=6
+export TICK_SIZE=1_000          # 0.001 USDC × 10^6
+export LOT_SIZE=1_000_000       # 0.01 TESTICP × 10^8
+export MAKER_FEE_BPS=0
+export TAKER_FEE_BPS=20
+export MIN_NOTIONAL=5_000_000   # $5 × 10^6
+export MAX_NOTIONAL='null'      # no ceiling
+```
+
+With these exported, run the [Call `add_trading_pair`](#call-add_trading_pair) and
+[Verify the listing](#verify-the-listing) blocks above unchanged.
+
 ## Halt and resume trading
 
 The canister exposes a controller-gated **global trading halt**: a soft circuit
