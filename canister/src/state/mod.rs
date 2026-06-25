@@ -399,14 +399,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: trading pair registered but order book missing");
         let fee_rates = book.fee_rates();
         let output = book.process_pending_orders(&event.orders);
-        // Single pass over the fills: compute each fill's realized notional,
-        // fees, and roles once (`FillSettlement`), then feed both the balance
-        // operations and the per-order scalar deltas from that one value, so the
-        // two can never diverge. The per-fill `Quantity` arithmetic is u256-wide,
-        // so it is done exactly once and never materialized into a `Vec`.
-        //
-        // `updates` folds the batch into at most one write per `Order` to
-        // minimize instruction costs in dealing with stable structures.
+
+        // Single pass over the fills: memoize updates to stable structures
+        // to write an entry only once to minimize instruction costs.
         let mut balance_operations =
             Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
         let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
