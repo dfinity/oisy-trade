@@ -1664,6 +1664,23 @@ mod settle_fills {
         state
     }
 
+    fn setup_with_fee_rates(fee_rates: FeeRates) -> TestState {
+        let mut state = test_fixtures::state();
+        let pair = icp_ckbtc_trading_pair();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            pair,
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
+            fee_rates,
+        );
+        state
+    }
+
     mod order_status {
         use super::*;
         use crate::order::{BasisPoint, OrderRecord, OrderStatus, PairToken, TimeInForce};
@@ -1923,23 +1940,6 @@ mod settle_fills {
                 state.balances.fee_balance(&pair.quote),
                 (quote_fee > 0).then(|| Quantity::from(quote_fee)),
             );
-        }
-
-        fn setup_with_fee_rates(fee_rates: FeeRates) -> State<VectorMemory, VectorMemory> {
-            let mut state = test_fixtures::state();
-            let pair = icp_ckbtc_trading_pair();
-            state.record_trading_pair(
-                OrderBookId::ZERO,
-                pair,
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-                MIN_NOTIONAL,
-                Some(MAX_NOTIONAL),
-                fee_rates,
-            );
-            state
         }
 
         fn run_fok_expire_case(fok_side: Side) {
@@ -2892,23 +2892,10 @@ mod settle_fills {
         }
 
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
-            let mut state = test_fixtures::state();
-            let pair = icp_ckbtc_trading_pair();
-            state.record_trading_pair(
-                OrderBookId::ZERO,
-                pair,
-                icp_metadata(),
-                ckbtc_metadata(),
-                TICK_SIZE,
-                LOT_SIZE,
-                MIN_NOTIONAL,
-                Some(MAX_NOTIONAL),
-                FeeRates {
-                    maker: BasisPoint::new(maker_bps).unwrap(),
-                    taker: BasisPoint::new(taker_bps).unwrap(),
-                },
-            );
-            state
+            setup_with_fee_rates(FeeRates {
+                maker: BasisPoint::new(maker_bps).unwrap(),
+                taker: BasisPoint::new(taker_bps).unwrap(),
+            })
         }
     }
 
