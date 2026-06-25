@@ -106,20 +106,15 @@ impl DashboardTemplate {
                     .token_metadata(&pair.base)
                     .expect("BUG: base token metadata missing");
                 let base_symbol = base_metadata.symbol.clone();
-                let base_decimals = base_metadata.decimals;
                 let quote_metadata = state
                     .token_metadata(&pair.quote)
                     .expect("BUG: quote token metadata missing");
                 let quote_symbol = quote_metadata.symbol.clone();
-                let quote_decimals = quote_metadata.decimals;
-                build_pair(
-                    book.id().get(),
-                    base_symbol,
-                    quote_symbol,
-                    base_decimals,
-                    quote_decimals,
-                    book,
-                )
+                let decimals = PairDecimals {
+                    base: base_metadata.decimals,
+                    quote: quote_metadata.decimals,
+                };
+                build_pair(book.id().get(), base_symbol, quote_symbol, decimals, book)
             })
             .collect();
         Self {
@@ -132,32 +127,36 @@ impl DashboardTemplate {
     }
 }
 
+struct PairDecimals {
+    base: u8,
+    quote: u8,
+}
+
 fn build_pair(
     book_id: u64,
     base_symbol: String,
     quote_symbol: String,
-    base_decimals: u8,
-    quote_decimals: u8,
+    decimals: PairDecimals,
     book: &OrderBook,
 ) -> DashboardPair {
     let bids: Vec<(Price, Quantity)> = book.bid_levels(DEPTH_LEVELS).collect();
     let asks: Vec<(Price, Quantity)> = book.ask_levels(DEPTH_LEVELS).collect();
     let best_bid_level = bids.first().copied();
     let best_ask_level = asks.first().copied();
-    let best_bid = best_bid_level.map(|l| level(l, base_decimals, quote_decimals));
-    let best_ask = best_ask_level.map(|l| level(l, base_decimals, quote_decimals));
+    let best_bid = best_bid_level.map(|l| level(l, &decimals));
+    let best_ask = best_ask_level.map(|l| level(l, &decimals));
     let spread = match (best_bid_level, best_ask_level) {
         (Some((bid, _)), Some((ask, _))) => ask
             .checked_sub(bid)
-            .map(|s| Amount::new(s.get().to_string(), quote_decimals)),
+            .map(|s| Amount::new(s.get().to_string(), decimals.quote)),
         _ => None,
     };
     DashboardPair {
         book_id,
         base_symbol,
         quote_symbol,
-        tick_size: Amount::new(book.tick_size().get().to_string(), quote_decimals),
-        lot_size: Amount::new(book.lot_size().get().to_string(), base_decimals),
+        tick_size: Amount::new(book.tick_size().get().to_string(), decimals.quote),
+        lot_size: Amount::new(book.lot_size().get().to_string(), decimals.base),
         maker_fee_bps: book.fee_rates().maker.get(),
         taker_fee_bps: book.fee_rates().taker.get(),
         bids_len: book.bids_len(),
@@ -167,15 +166,14 @@ fn build_pair(
         best_bid,
         best_ask,
         spread,
-        depth: build_depth(&bids, &asks, base_decimals, quote_decimals),
+        depth: build_depth(&bids, &asks, &decimals),
     }
 }
 
 fn build_depth(
     bids: &[(Price, Quantity)],
     asks: &[(Price, Quantity)],
-    base_decimals: u8,
-    quote_decimals: u8,
+    decimals: &PairDecimals,
 ) -> DashboardDepth {
     let max = bids
         .iter()
@@ -184,22 +182,21 @@ fn build_depth(
         .max()
         .unwrap_or(0);
     DashboardDepth {
-        bids: depth_levels(bids, max, base_decimals, quote_decimals),
-        asks: depth_levels(asks, max, base_decimals, quote_decimals),
+        bids: depth_levels(bids, max, decimals),
+        asks: depth_levels(asks, max, decimals),
     }
 }
 
 fn depth_levels(
     levels: &[(Price, Quantity)],
     max: u128,
-    base_decimals: u8,
-    quote_decimals: u8,
+    decimals: &PairDecimals,
 ) -> Vec<DashboardDepthLevel> {
     levels
         .iter()
         .map(|(price, qty)| DashboardDepthLevel {
-            price: Amount::new(price.get().to_string(), quote_decimals),
-            quantity: Amount::new(quantity_digits(qty), base_decimals),
+            price: Amount::new(price.get().to_string(), decimals.quote),
+            quantity: Amount::new(quantity_digits(qty), decimals.base),
             bar_width_percent: bar_width_percent(saturating_to_u128(qty), max),
         })
         .collect()
@@ -216,14 +213,10 @@ fn bar_width_percent(qty: u128, max: u128) -> u8 {
     percent.min(100) as u8
 }
 
-fn level(
-    (price, quantity): (Price, Quantity),
-    base_decimals: u8,
-    quote_decimals: u8,
-) -> DashboardLevel {
+fn level((price, quantity): (Price, Quantity), decimals: &PairDecimals) -> DashboardLevel {
     DashboardLevel {
-        price: Amount::new(price.get().to_string(), quote_decimals),
-        quantity: Amount::new(quantity_digits(&quantity), base_decimals),
+        price: Amount::new(price.get().to_string(), decimals.quote),
+        quantity: Amount::new(quantity_digits(&quantity), decimals.base),
     }
 }
 
