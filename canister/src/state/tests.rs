@@ -1730,7 +1730,7 @@ mod settle_fills {
             let mut state = setup();
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
-            // place_order stamps created_at at Timestamp::EPOCH (0).
+            // order(...).place() stamps created_at at Timestamp::EPOCH (0).
             let sell_id =
                 test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 3 * lot)
                     .place(&mut state);
