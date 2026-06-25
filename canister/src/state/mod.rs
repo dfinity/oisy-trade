@@ -413,14 +413,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         for fill in &output.fills {
             let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
-            settlement.accrue_fill(
-                updates.entry(settlement.taker_order_seq()).or_default(),
-                settlement.taker_fee(),
-            );
-            settlement.accrue_fill(
-                updates.entry(settlement.maker_order_seq()).or_default(),
-                settlement.maker_fee(),
-            );
+            settlement.accrue_fill(&mut updates);
         }
         // A killed fill-or-kill order never touched the book, so its full
         // placement reservation must be released.

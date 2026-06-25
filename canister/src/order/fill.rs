@@ -1,6 +1,7 @@
 use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, Side};
 use crate::state::event;
 use minicbor::{Decode, Encode};
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
 /// A single fill produced when an incoming order matches a resting order.
@@ -155,24 +156,26 @@ impl FillSettlement {
         self.fill.maker_order_seq
     }
 
-    /// Fold this fill's realized values into one order's [`OrderUpdate`] entry,
-    /// charging `fee` in that order's receive token. `filled_delta` accumulates
-    /// the gross base quantity, `quote_delta` the realized notional, and
-    /// `fee_delta` the realized fee. All three are accumulated with always-on
-    /// overflow traps.
-    pub fn accrue_fill(&self, update: &mut OrderUpdate, fee: Quantity) {
-        update.filled_delta = update
-            .filled_delta
-            .checked_add(self.fill.quantity)
-            .expect("BUG: filled_delta overflow");
-        update.quote_delta = update
-            .quote_delta
-            .checked_add(self.notional)
-            .expect("BUG: quote_delta overflow");
-        update.fee_delta = update
-            .fee_delta
-            .checked_add(fee)
-            .expect("BUG: fee_delta overflow");
+    /// Update maker and taker orders based on this fill.
+    pub fn accrue_fill(&self, updates: &mut BTreeMap<OrderSeq, OrderUpdate>) {
+        for (order_seq, fee) in [
+            (self.maker_order_seq(), self.maker_fee),
+            (self.taker_order_seq(), self.taker_fee),
+        ] {
+            let update = updates.entry(order_seq).or_default();
+            update.filled_delta = update
+                .filled_delta
+                .checked_add(self.fill.quantity)
+                .expect("BUG: filled_delta overflow");
+            update.quote_delta = update
+                .quote_delta
+                .checked_add(self.notional)
+                .expect("BUG: quote_delta overflow");
+            update.fee_delta = update
+                .fee_delta
+                .checked_add(fee)
+                .expect("BUG: fee_delta overflow");
+        }
     }
 }
 
