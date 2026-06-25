@@ -9,11 +9,11 @@ use candid::{CandidType, Principal};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError,
-    GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, Token, TokenId, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError, GetMyOrdersArgs,
+    GetMyOrdersError, GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError,
+    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TokenId,
+    TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use serde::de::DeserializeOwned;
 
@@ -95,20 +95,27 @@ impl<R: Runtime> OisyTradeClient<R> {
 
     /// Query the caller's orders: a page (newest first) or a single order by id,
     /// depending on the `GetMyOrdersArgs` filter.
-    pub async fn get_my_orders(&self, args: GetMyOrdersArgs) -> Vec<UserOrder> {
+    pub async fn get_my_orders(
+        &self,
+        args: GetMyOrdersArgs,
+    ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_my_orders", (Some(args),), 0)
             .await
             .unwrap()
     }
 
-    /// Point-lookup the caller's order by id, or `None` if the caller does not
-    /// own an order with that id.
-    pub async fn get_my_order(&self, order_id: OrderId) -> Option<UserOrder> {
+    /// Point-lookup the caller's order by id. Returns `Err(OrderNotFound)` when
+    /// the id is unknown or owned by another principal.
+    pub async fn get_my_order(&self, order_id: OrderId) -> Result<UserOrder, GetMyOrdersError> {
         self.get_my_orders(GetMyOrdersArgs::by_id(order_id))
             .await
-            .into_iter()
-            .next()
+            .map(|orders| {
+                orders
+                    .into_iter()
+                    .next()
+                    .expect("BUG: ById query returned an empty page instead of OrderNotFound")
+            })
     }
 
     /// Query all listed trading pairs on the OISY TRADE canister.
@@ -172,12 +179,12 @@ impl<R: Runtime> OisyTradeClient<R> {
 
     /// Query the caller's balances. With no filter, returns every token
     /// the caller holds with non-zero balance. With a filter, returns
-    /// one entry per requested token (zeros included; unsupported
-    /// tokens reported per-entry as `TokenNotSupported`).
+    /// one entry per requested token (zeros included). The whole call fails
+    /// with `TokenNotSupported` if the filter references an unsupported token.
     pub async fn get_balances(
         &self,
         filter: Option<Vec<FilterToken>>,
-    ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    ) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_balances", (filter,), 0)
             .await
@@ -190,7 +197,7 @@ impl<R: Runtime> OisyTradeClient<R> {
     pub async fn get_fee_balances(
         &self,
         filter: Option<Vec<FilterToken>>,
-    ) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+    ) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_fee_balances", (filter,), 0)
             .await
@@ -203,9 +210,8 @@ impl<R: Runtime> OisyTradeClient<R> {
     pub async fn get_balance(&self, token_id: TokenId) -> Result<Balance, GetBalancesError> {
         let mut result = self
             .get_balances(Some(vec![FilterToken::ById(token_id)]))
-            .await
-            .expect("single-element filter is always within MAX_FILTER_LEN");
-        result.remove(0).map(|entry| entry.balance)
+            .await?;
+        Ok(result.remove(0).balance)
     }
 
     /// List every token registered with the OISY TRADE.

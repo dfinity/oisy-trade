@@ -11,7 +11,7 @@ pub use book::{
     OrderBookSnapshot, PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use history::{OrderHistory, OrderUpdate};
+pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
