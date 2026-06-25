@@ -28,10 +28,6 @@ pub const EXECUTOR: Executor = Executor;
 pub enum ExecutionStatus {
     Complete,
     MoreWork,
-    /// The caller couldn't acquire the matching guard because another task
-    /// is already running. The holder is responsible for rescheduling if it
-    /// leaves work unfinished.
-    AlreadyRunning,
 }
 
 impl ExecutionStatus {

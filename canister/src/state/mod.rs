@@ -14,7 +14,6 @@ pub use snapshot::StateSnapshot;
 mod tests;
 
 use crate::Runtime;
-use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
@@ -90,7 +89,7 @@ pub struct State<MH: Memory, MB: Memory> {
     /// for cancels) and drained by the paired `SettlingEvent` dispatch in
     /// [`Self::record_settling_event`].
     pending_settling_events: VecDeque<event::SettlingEvent>,
-    active_tasks: BTreeSet<Task>,
+    matching_timer_scheduled: bool,
     /// Per-`(caller, token)` guard set for in-flight deposit/withdraw
     /// operations. Entries live only for the duration of a single async
     /// request and are reset on upgrade.
@@ -117,7 +116,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
-            active_tasks: BTreeSet::default(),
+            matching_timer_scheduled: false,
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
             in_flight_user_ops: BTreeSet::default(),
@@ -827,13 +826,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Set of currently active tasks to avoid parallel execution.
-    pub fn active_tasks_mut(&mut self) -> &mut BTreeSet<Task> {
-        &mut self.active_tasks
+    /// Marks that a zero-delay matching timer is scheduled, returning `true`
+    /// only when none was already pending. A burst of callers therefore yields
+    /// a single scheduled timer; the rest observe `false` and skip scheduling.
+    pub fn try_mark_matching_timer_scheduled(&mut self) -> bool {
+        if self.matching_timer_scheduled {
+            false
+        } else {
+            self.matching_timer_scheduled = true;
+            true
+        }
     }
 
-    pub fn active_tasks(&self) -> &BTreeSet<Task> {
-        &self.active_tasks
+    /// Clears the matching-timer-scheduled flag once the timer has fired.
+    pub fn clear_matching_timer_scheduled(&mut self) {
+        self.matching_timer_scheduled = false;
     }
 
     pub fn in_flight_user_ops_mut(&mut self) -> &mut BTreeSet<(Principal, TokenId)> {
@@ -995,7 +1002,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_books,
             user_registry,
             balances,
-            active_tasks,
+            matching_timer_scheduled,
             ledger_fee_cache,
             order_history,
             pending_settling_events,
@@ -1011,7 +1018,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             order_books: order_books.clone(),
             user_registry: user_registry.clone(),
             balances: balances.clone(),
-            active_tasks: active_tasks.clone(),
+            matching_timer_scheduled: *matching_timer_scheduled,
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
@@ -1033,7 +1040,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_books,
             user_registry,
             balances,
-            active_tasks,
+            matching_timer_scheduled,
             ledger_fee_cache,
             order_history,
             pending_settling_events,
@@ -1049,7 +1056,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             order_books: other_order_books,
             user_registry: other_user_registry,
             balances: other_balances,
-            active_tasks: other_active_tasks,
+            matching_timer_scheduled: other_matching_timer_scheduled,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
             pending_settling_events: other_pending_settling_events,
@@ -1064,7 +1071,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && order_books == other_order_books
             && user_registry == other_user_registry
             && balances == other_balances
-            && active_tasks == other_active_tasks
+            && matching_timer_scheduled == other_matching_timer_scheduled
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
             && pending_settling_events == other_pending_settling_events

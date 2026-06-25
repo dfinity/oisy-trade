@@ -366,17 +366,15 @@ fn should_roundtrip_notional_bounds_through_snapshot() {
     assert_eq!(book.max_notional(), max_notional);
 }
 
-/// Transient guard sets (`active_tasks`, `in_flight_user_ops`) are
-/// intentionally excluded from the snapshot and reset to empty on restore.
+/// Transient runtime state (`matching_timer_scheduled`, `in_flight_user_ops`)
+/// is intentionally excluded from the snapshot and reset on restore.
 #[test]
 fn should_drop_transient_guard_sets_on_roundtrip() {
     let mut state = fresh_state();
     let user = Principal::from_slice(&[0x01]);
     let token = crate::order::TokenId::new(Principal::from_slice(&[0xAA]));
 
-    state
-        .active_tasks_mut()
-        .insert(crate::Task::ProcessPendingOrders);
+    assert!(state.try_mark_matching_timer_scheduled());
     state.in_flight_user_ops_mut().insert((user, token));
 
     let snapshot = StateSnapshot::from_state(&state);
@@ -390,8 +388,8 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     );
 
     assert!(
-        restored.active_tasks().is_empty(),
-        "active_tasks must be empty after restore"
+        !restored.matching_timer_scheduled,
+        "matching_timer_scheduled must be reset after restore"
     );
     assert!(
         restored.in_flight_user_ops().is_empty(),
@@ -401,11 +399,11 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     assert_eq!(
         state,
         State {
-            active_tasks: state.active_tasks().clone(),
+            matching_timer_scheduled: state.matching_timer_scheduled,
             in_flight_user_ops: state.in_flight_user_ops().clone(),
             ..restored
         },
-        "Except for transient guard sets, restored state must be equal to original"
+        "Except for transient runtime state, restored state must be equal to original"
     );
 }
 
