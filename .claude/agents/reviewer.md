@@ -65,6 +65,33 @@ branches, or PR state beyond posting your review.
 - When a new field is added to a type with an `arb_*` strategy, the strategy must
   fuzz the new field, not hard-code a sentinel — a hard-coded constant is a
   coverage hole the type's own roundtrip proptest can't see.
+- Audit the new/changed tests, helpers, fixtures, and benches AS A GROUP — enumerate
+  them and cross-compare their bodies, don't just read each against the diff. The
+  per-test "earns its place" check misses duplication BETWEEN tests:
+  - Near-duplicate bodies differing only along ONE axis (Buy/Sell, fill/kill, Ok/Err)
+    must be parameterized over that axis (a table, a loop, a shared helper, or a
+    proptest) so a reader sees exactly what differs — flag copy-pasted bodies even
+    when each case earns its place.
+  - A FAMILY of helpers/fixtures differing only by a constant (e.g.
+    `place_gtc_order` / `place_fok_order`) collapses to one builder or parameterized
+    helper. Benches differing only by a parameter share a body — keep the distinct
+    `#[bench]` entry points (canbench reports one result per function), factor out the
+    common run+assert.
+  - A test that overlaps an existing one folds into it rather than standing alone.
+- Coverage completeness — flag asymmetric or partial coverage:
+  - A behaviour with a symmetric axis (Buy/Sell, both error branches, fill vs kill)
+    must be exercised on BOTH sides end-to-end — not waved off as "the components are
+    covered elsewhere."
+  - A state mutation must assert ALL its observable effects (e.g. status AND balances
+    AND resting-book state), not just one.
+  - An event-sourced / persisted transition must be tested through snapshot+upgrade
+    AND event replay — including that a release/settlement is not double-applied on
+    the replay (`Skip`) path.
+- Generated data must be genuinely arbitrary AND respect domain invariants: a
+  hard-coded empty/constant field is not arbitrary (it is a coverage hole — see the
+  `arb_*` rule above), and mutually-exclusive sets must be generated disjoint (e.g. an
+  order cannot be simultaneously resting, filled, and expired); tick/lot-aligned
+  quantities stay aligned; etc.
 
 ### Maintainability
 - Flag code duplication; point to easy refactorings that reduce it. Substantial
@@ -97,9 +124,30 @@ branches, or PR state beyond posting your review.
   counter (Prometheus treats `NaN` as no-sample, so emitting it from a metric
   encoder is invisible). Defaults are fine for EXPECTED missing inputs; never for an
   invariant breach.
+- Flag test-only code living in a production module — a `#[cfg(test)]` helper, shim,
+  or constructor compiled into the production crate (as opposed to `mod tests` /
+  `test_fixtures`). Tests must exercise the productive API, not a parallel test-only
+  entry point that production never runs.
+- Flag a redundant / derivable parameter — one whose value is already determined by
+  another argument (e.g. a `require_full: bool` derivable from an `Order`'s
+  `time_in_force`). Derive it inside rather than threading it through the signature.
+- Flag a decision the caller makes that the callee should own — especially when it
+  forces every call site to repeat the same derivation or reconstruction. Push the
+  decision into the function and have it return a result callers consume directly;
+  this removes the duplicated derivation across sites.
 
 ### Docs
 - Public API is well-documented (purpose, corner cases, requirements, examples).
+- Docs, design docs, and the spec must match the implementation. Flag: a reference to
+  something that does not exist (an endpoint, field, or variant); implementation
+  detail leaking into a behaviour-level design doc (e.g. naming the wire format /
+  Candid where the doc is about semantics); and spec-vs-code drift — a documented
+  guarantee the code does not implement (e.g. "the field defaults to X on decode" when
+  the field is non-optional with no default). Reconcile the wording with the code, or
+  the code with the wording.
+- Comment minimalism — flag redundant or obvious comments, and requirement-ID tags
+  (`R3`, `R9`, …) embedded in code: requirements live in the spec and PR description,
+  not inline.
 - No JIRA ticket or internal info in docs. JIRA tickets are acceptable in comments
   pointing to a TODO.
 
