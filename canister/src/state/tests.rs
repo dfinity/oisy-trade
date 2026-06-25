@@ -1935,11 +1935,23 @@ mod settle_fills {
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let buy = record_of(&state, BUYER, buy_id);
-            assert_eq!(buy.status, OrderStatus::Filled);
-            assert_eq!(buy.filled_quantity, Quantity::from(2 * lot));
-            assert_eq!(buy.filled_quote, Quantity::from(100 * lot + 101 * lot));
-            assert_eq!(buy.filled_fee, Quantity::ZERO);
+            let buy = test_fixtures::record_of(&state, BUYER, buy_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &buy,
+                &OrderRecord {
+                    owner: BUYER,
+                    side: Side::Buy,
+                    price: Price::new(101 * PRICE_SCALE),
+                    quantity: Quantity::from(2 * lot),
+                    filled_quantity: Quantity::from(2 * lot),
+                    status: OrderStatus::Filled,
+                    created_at: buy.created_at,
+                    last_updated_at: buy.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(100 * lot + 101 * lot),
+                    filled_fee: Quantity::ZERO,
+                },
+            );
         }
 
         /// `created_at` is stamped once at placement and never moves, while
@@ -2041,11 +2053,23 @@ mod settle_fills {
                 StableMemoryOptions::Skip,
             );
 
-            let buy = record_of(&state, BUYER, buy_id);
-            assert_eq!(buy.status, OrderStatus::Pending);
-            assert_eq!(buy.filled_quantity, Quantity::ZERO);
-            assert_eq!(buy.filled_quote, Quantity::ZERO);
-            assert_eq!(buy.filled_fee, Quantity::ZERO);
+            let buy = test_fixtures::record_of(&state, BUYER, buy_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &buy,
+                &OrderRecord {
+                    owner: BUYER,
+                    side: Side::Buy,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: Quantity::from(lot),
+                    filled_quantity: Quantity::ZERO,
+                    status: OrderStatus::Pending,
+                    created_at: buy.created_at,
+                    last_updated_at: buy.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::ZERO,
+                    filled_fee: Quantity::ZERO,
+                },
+            );
             assert_eq!(buy.last_updated_at, None);
         }
     }
@@ -2117,7 +2141,7 @@ mod settle_fills {
 
     mod fees {
         use super::*;
-        use crate::order::{BasisPoint, OrderStatus};
+        use crate::order::{BasisPoint, OrderRecord, OrderStatus, TimeInForce};
 
         /// Fill deducts fees on both sides at the role-specific rates.
         /// Parameterized over which side crosses (taker):
@@ -2213,12 +2237,40 @@ mod settle_fills {
                 Side::Buy => (second_id, first_id),
                 Side::Sell => (first_id, second_id),
             };
-            let buy = record_of(&state, BUYER, buyer_id);
-            assert_eq!(buy.filled_quote, Quantity::from(notional));
-            assert_eq!(buy.filled_fee, Quantity::from(base_fee));
-            let sell = record_of(&state, SELLER, seller_id);
-            assert_eq!(sell.filled_quote, Quantity::from(notional));
-            assert_eq!(sell.filled_fee, Quantity::from(quote_fee));
+            let buy = test_fixtures::record_of(&state, BUYER, buyer_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &buy,
+                &OrderRecord {
+                    owner: BUYER,
+                    side: Side::Buy,
+                    price: Price::new(price * PRICE_SCALE),
+                    quantity: Quantity::from(qty),
+                    filled_quantity: Quantity::from(qty),
+                    status: OrderStatus::Filled,
+                    created_at: buy.created_at,
+                    last_updated_at: buy.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(notional),
+                    filled_fee: Quantity::from(base_fee),
+                },
+            );
+            let sell = test_fixtures::record_of(&state, SELLER, seller_id);
+            test_fixtures::assert_eq_ignoring_timestamp(
+                &sell,
+                &OrderRecord {
+                    owner: SELLER,
+                    side: Side::Sell,
+                    price: Price::new(price * PRICE_SCALE),
+                    quantity: Quantity::from(qty),
+                    filled_quantity: Quantity::from(qty),
+                    status: OrderStatus::Filled,
+                    created_at: sell.created_at,
+                    last_updated_at: sell.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                    filled_quote: Quantity::from(notional),
+                    filled_fee: Quantity::from(quote_fee),
+                },
+            );
         }
 
         /// Zero rates is a regression guard: the fill path with
