@@ -132,31 +132,11 @@ impl FillSettlement {
         });
     }
 
-    /// Fee charged to the taker order, in its receive token.
-    pub fn taker_fee(&self) -> Quantity {
-        self.taker_fee
-    }
-
-    /// Fee charged to the maker order, in its receive token.
-    pub fn maker_fee(&self) -> Quantity {
-        self.maker_fee
-    }
-
-    /// Sequence of the taker order this fill belongs to.
-    pub fn taker_order_seq(&self) -> OrderSeq {
-        self.fill.taker_order_seq
-    }
-
-    /// Sequence of the maker order this fill belongs to.
-    pub fn maker_order_seq(&self) -> OrderSeq {
-        self.fill.maker_order_seq
-    }
-
     /// Update maker and taker orders based on this fill.
     pub fn accrue_fill(&self, updates: &mut BTreeMap<OrderSeq, OrderUpdate>) {
         for (order_seq, fee) in [
-            (self.maker_order_seq(), self.maker_fee),
-            (self.taker_order_seq(), self.taker_fee),
+            (self.fill.maker_order_seq, self.maker_fee),
+            (self.fill.taker_order_seq, self.taker_fee),
         ] {
             let update = updates.entry(order_seq).or_default();
             update.filled_delta = update
