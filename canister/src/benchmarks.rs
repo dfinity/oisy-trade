@@ -26,29 +26,7 @@ const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
 /// in time-in-force.
 #[bench(raw)]
 fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
-    let setup = setup_bid_sweep(TimeInForce::GoodTilCanceled, |total_bid_qty| total_bid_qty);
-
-    let book = setup.state.get_order_book(&setup.pair).unwrap();
-    assert_eq!(book.pending_orders_len(), 1);
-    assert_eq!(book.bids_len(), setup.bids_len);
-    let asks_len_before = book.asks_len();
-
-    let mut state = setup.state;
-    state.set_execution_policy(ExecutionPolicy::MAX);
-    let res = canbench_rs::bench_fn(|| {
-        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
-    });
-
-    let book = state.get_order_book(&setup.pair).unwrap();
-    assert_eq!(book.pending_orders_len(), 0);
-    assert_eq!(book.bids_len(), 0);
-    assert_eq!(
-        book.asks_len(),
-        asks_len_before,
-        "the sell fully filled the bids, so it must not have rested any remainder on the ask side"
-    );
-
-    res
+    run_full_bid_sweep_bench(TimeInForce::GoodTilCanceled, false)
 }
 
 /// Benchmark a fill-or-kill order that fully fills all 697 bid levels from the
@@ -61,29 +39,7 @@ fn bench_process_pending_orders_1_large() -> canbench_rs::BenchResult {
 /// no resting remainder.
 #[bench(raw)]
 fn bench_fill_or_kill_fill_full_bid_side() -> canbench_rs::BenchResult {
-    let setup = setup_bid_sweep(TimeInForce::FillOrKill, |total_bid_qty| total_bid_qty);
-
-    let book = setup.state.get_order_book(&setup.pair).unwrap();
-    assert_eq!(book.pending_orders_len(), 1);
-    assert_eq!(book.bids_len(), setup.bids_len);
-    let asks_len_before = book.asks_len();
-
-    let mut state = setup.state;
-    state.set_execution_policy(ExecutionPolicy::MAX);
-    let res = canbench_rs::bench_fn(|| {
-        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
-    });
-
-    let book = state.get_order_book(&setup.pair).unwrap();
-    assert_eq!(book.pending_orders_len(), 0);
-    assert_eq!(book.bids_len(), 0);
-    assert_eq!(
-        book.asks_len(),
-        asks_len_before,
-        "FOK fully filled, so it must not have rested any remainder on the ask side"
-    );
-
-    res
+    run_full_bid_sweep_bench(TimeInForce::FillOrKill, false)
 }
 
 /// Benchmark a fill-or-kill order that is *killed*: identical setup to
@@ -95,17 +51,33 @@ fn bench_fill_or_kill_fill_full_bid_side() -> canbench_rs::BenchResult {
 /// kill mutated nothing).
 #[bench(raw)]
 fn bench_fill_or_kill_killed_full_bid_side() -> canbench_rs::BenchResult {
-    // One lot past the whole bid depth: crosses every level yet cannot fully
-    // fill, so the FOK is killed. The depth is lot-aligned, so a single extra
-    // lot keeps the quantity valid.
-    let setup = setup_bid_sweep(TimeInForce::FillOrKill, |total_bid_qty| {
-        total_bid_qty + u128::from(LOT_SIZE.get())
+    run_full_bid_sweep_bench(TimeInForce::FillOrKill, true)
+}
+
+/// Run a full bid-sweep bench: build the shared `setup_bid_sweep`, run one
+/// `EXECUTOR.run_once` under `bench_fn`, and assert the appropriate terminal
+/// book state. The three `#[bench]` entry points stay distinct (canbench
+/// reports one result per function) and differ only by these two parameters:
+///   - `time_in_force` selects GTC vs FOK;
+///   - `killed` sizes the taker one lot past the total bid depth so the FOK is
+///     killed (the plan is discarded and the book stays byte-identical),
+///     versus sized to the exact depth for a full fill (the bids empty and the
+///     ask side gains no resting remainder).
+fn run_full_bid_sweep_bench(time_in_force: TimeInForce, killed: bool) -> canbench_rs::BenchResult {
+    // The depth is lot-aligned, so a single extra lot past the whole bid depth
+    // keeps the quantity valid while making the FOK unable to fully fill.
+    let setup = setup_bid_sweep(time_in_force, |total_bid_qty| {
+        if killed {
+            total_bid_qty + u128::from(LOT_SIZE.get())
+        } else {
+            total_bid_qty
+        }
     });
 
     let book = setup.state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 1);
-    let asks = crate::order::OrderBookSnapshot::from(book).asks;
-    let bids = crate::order::OrderBookSnapshot::from(book).bids;
+    assert_eq!(book.bids_len(), setup.bids_len);
+    let snapshot_before = crate::order::OrderBookSnapshot::from(book);
 
     let mut state = setup.state;
     state.set_execution_policy(ExecutionPolicy::MAX);
@@ -115,15 +87,26 @@ fn bench_fill_or_kill_killed_full_bid_side() -> canbench_rs::BenchResult {
 
     let book = state.get_order_book(&setup.pair).unwrap();
     assert_eq!(book.pending_orders_len(), 0);
-    let snapshot = crate::order::OrderBookSnapshot::from(book);
-    assert_eq!(
-        snapshot.asks, asks,
-        "killed FOK must not touch the ask side"
-    );
-    assert_eq!(
-        snapshot.bids, bids,
-        "killed FOK must not touch the bid side"
-    );
+    let snapshot_after = crate::order::OrderBookSnapshot::from(book);
+    if killed {
+        assert_eq!(
+            snapshot_after.bids, snapshot_before.bids,
+            "killed FOK must not touch the bid side"
+        );
+        assert_eq!(
+            snapshot_after.asks, snapshot_before.asks,
+            "killed FOK must not touch the ask side"
+        );
+    } else {
+        assert!(
+            snapshot_after.bids.is_empty(),
+            "the taker fully filled the bids, so the bid side must be empty"
+        );
+        assert_eq!(
+            snapshot_after.asks, snapshot_before.asks,
+            "the taker fully filled the bids, so it must not have rested any remainder on the ask side"
+        );
+    }
 
     res
 }
