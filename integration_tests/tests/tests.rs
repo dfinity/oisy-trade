@@ -620,6 +620,17 @@ mod fill_or_kill {
             Nat::from(0u64),
             "FOK must not settle a partial fill"
         );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required.into(),
+                reserved: 0_u64.into(),
+            },
+        );
+
         // The resting maker was not touched: it stays Open with its base still
         // reserved and nothing filled.
         let seller_client = setup.oisy_trade_client_with_caller(seller);
