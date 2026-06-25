@@ -1664,23 +1664,6 @@ mod settle_fills {
         state
     }
 
-    fn setup_with_fee_rates(fee_rates: FeeRates) -> TestState {
-        let mut state = test_fixtures::state();
-        let pair = icp_ckbtc_trading_pair();
-        state.record_trading_pair(
-            OrderBookId::ZERO,
-            pair,
-            icp_metadata(),
-            ckbtc_metadata(),
-            TICK_SIZE,
-            LOT_SIZE,
-            MIN_NOTIONAL,
-            Some(MAX_NOTIONAL),
-            fee_rates,
-        );
-        state
-    }
-
     mod order_status {
         use super::*;
         use crate::order::{OrderRecord, OrderStatus, TimeInForce};
@@ -2371,10 +2354,24 @@ mod settle_fills {
         }
 
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
-            setup_with_fee_rates(FeeRates {
+            let fee_rates = FeeRates {
                 maker: BasisPoint::new(maker_bps).unwrap(),
                 taker: BasisPoint::new(taker_bps).unwrap(),
-            })
+            };
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair,
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                fee_rates,
+            );
+            state
         }
     }
 
