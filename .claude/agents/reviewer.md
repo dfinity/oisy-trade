@@ -69,9 +69,16 @@ branches, or PR state beyond posting your review.
   them and cross-compare their bodies, don't just read each against the diff. The
   per-test "earns its place" check misses duplication BETWEEN tests:
   - Near-duplicate bodies differing only along ONE axis (Buy/Sell, fill/kill, Ok/Err)
-    must be parameterized over that axis (a table, a loop, a shared helper, or a
-    proptest) so a reader sees exactly what differs — flag copy-pasted bodies even
-    when each case earns its place.
+    must be parameterized over that axis so a reader sees exactly what differs — flag
+    copy-pasted bodies even when each case earns its place. When the cases differ only
+    in DATA (inputs → expected outputs) under a uniform assertion shape, the PREFERRED
+    form is a single `#[test]` driving a `Vec<TestCase>` table (each row a `desc` +
+    inputs + expecteds, looped with `desc` echoed into every assertion) — Buy/Sell,
+    fill/kill, etc. are ROWS, not functions; see
+    `state::tests::fill_or_kill::should_fill` as the canonical example. A shared helper
+    called by N separate `#[test]` functions does NOT go far enough — flag it. Reserve
+    plain loops / proptests for cases that vary by control flow or span a fuzzed input
+    space, where a static table doesn't fit.
   - A FAMILY of helpers/fixtures differing only by a constant (e.g.
     `place_gtc_order` / `place_fok_order`) collapses to one builder or parameterized
     helper. Benches differing only by a parameter share a body — keep the distinct

@@ -67,6 +67,15 @@ You implement code against a specification.
   no `test_helper` method in `my_module/mod.rs`.
 - Gather common test helpers in a top-level `test_fixtures` module (e.g.
   `canister/src/test_fixtures/`).
+- When test cases differ only in DATA (inputs → expected outputs) under a uniform
+  assertion shape, write ONE `#[test]` driving a `Vec<TestCase>` table — a `TestCase`
+  struct (a `desc` plus inputs and expected outputs, with any per-case setup as methods
+  on it), a `vec![TestCase { .. }, ..]`, and a `for case in cases` loop with `case.desc`
+  echoed into every assertion message. Do NOT write a separate `#[test]` per case, nor a
+  shared helper called once per `#[test]`. Buy/Sell, fill/kill, Ok/Err, etc. are ROWS in
+  the table. Canonical example: `state::tests::fill_or_kill::should_fill`. Use a plain
+  loop or proptest only when cases vary by control flow or span a fuzzed input space,
+  where a static table doesn't fit.
 - Order content by importance, most important first. For example, put `#[test]`
   functions before the helpers they use.
 - Don't write comments unless explicitly requested. In particular, don't write
