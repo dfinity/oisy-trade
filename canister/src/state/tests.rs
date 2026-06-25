@@ -2607,6 +2607,24 @@ mod settle_fills {
                     expected_balances_maker: (Balance::zero(), Balance::new_reserved(3_000_u64)),
                     expected_fee_balances: (None, None),
                 },
+                TestCase {
+                    desc: "buy crosses but exceeds total resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(8_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell crosses but exceeds total resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(2 * ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(4_000_u64)),
+                    expected_fee_balances: (None, None),
+                },
             ];
             for case in tests_cases {
                 let mut state = state();
