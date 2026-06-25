@@ -2435,8 +2435,7 @@ mod settle_fills {
     mod fill_or_kill {
         use super::*;
         use crate::order::{
-            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken,
-            TimeInForce,
+            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus, TimeInForce,
         };
         use crate::test_fixtures::tokens::SupportedTokens;
         use std::collections::BTreeSet;
@@ -2465,10 +2464,25 @@ mod settle_fills {
                     fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
                     expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
                 },
+                TestCase {
+                    desc: "buy below resting ask (no cross)".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(5_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                },
+                TestCase {
+                    desc: "sell above resting bid (no cross)".to_string(),
+                    bids: vec![(Price::from(3_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                },
             ];
             for case in tests_cases {
                 let mut state = state();
                 let book_before = case.populate_book(&mut state);
+                let fee_balances_before = state.get_fee_balances(None).unwrap();
 
                 let fok_id = case.execute_fok(&mut state);
 
@@ -2501,6 +2515,13 @@ mod settle_fills {
                 assert_eq!(
                     balances_taker, case.expected_balances_taker,
                     "BUG ({}): taker balances differ from expected after kill",
+                    case.desc
+                );
+
+                let fee_balances_after = state.get_fee_balances(None).unwrap();
+                assert_eq!(
+                    fee_balances_before, fee_balances_after,
+                    "BUG ({}): a killed FOK order should not change fee balances",
                     case.desc
                 );
             }
@@ -2631,20 +2652,6 @@ mod settle_fills {
         #[test]
         fn should_fill_fok_sell_fully_against_resting_buy() {
             run_fok_full_fill_case(Side::Sell, FeeRates::default());
-        }
-
-        /// A FOK priced so it cannot cross the single resting GTC maker is
-        /// killed, ending `Expired` with `filled_quantity == 0`, its whole
-        /// reservation released and the resting book left byte-identical.
-        /// Parameterized over the FOK side exactly like the full-fill case.
-        #[test]
-        fn should_expire_fok_buy_and_refund_quote() {
-            run_fok_expire_case(Side::Buy);
-        }
-
-        #[test]
-        fn should_expire_fok_sell_and_refund_base() {
-            run_fok_expire_case(Side::Sell);
         }
 
         proptest! {
@@ -2900,14 +2907,12 @@ mod settle_fills {
         }
 
         /// The side-specific facts a FOK case needs: the opposite (maker) side,
-        /// the FOK owner and its maker counterparty, and the token the FOK
-        /// reserves (Buy reserves quote, Sell reserves base).
+        /// the FOK owner and its maker counterparty.
         struct FokSides {
             fok_side: Side,
             maker_side: Side,
             fok_owner: Principal,
             maker_owner: Principal,
-            reserved_token: PairToken,
         }
 
         impl FokSides {
@@ -2918,22 +2923,13 @@ mod settle_fills {
                         maker_side: Side::Sell,
                         fok_owner: BUYER,
                         maker_owner: SELLER,
-                        reserved_token: PairToken::Quote,
                     },
                     Side::Sell => FokSides {
                         fok_side: Side::Sell,
                         maker_side: Side::Buy,
                         fok_owner: SELLER,
                         maker_owner: BUYER,
-                        reserved_token: PairToken::Base,
                     },
-                }
-            }
-
-            fn reserved(&self, pair: &crate::order::TradingPair) -> crate::order::TokenId {
-                match self.reserved_token {
-                    PairToken::Quote => pair.quote,
-                    PairToken::Base => pair.base,
                 }
             }
         }
@@ -3010,67 +3006,6 @@ mod settle_fills {
                 state.balances.fee_balance(&pair.quote),
                 (quote_fee > 0).then(|| Quantity::from(quote_fee)),
             );
-        }
-
-        fn run_fok_expire_case(fok_side: Side) {
-            let sides = FokSides::for_side(fok_side);
-            let mut state = setup();
-            let lot = u128::from(LOT_SIZE.get());
-            let pair = icp_ckbtc_trading_pair();
-            // A resting GTC maker the FOK cannot cross: against a Buy maker at
-            // 100 the FOK Sell asks 200; against a Sell maker at 200 the FOK Buy
-            // bids 100. Either way nothing crosses, so the FOK must expire.
-            let (maker_price, fok_price) = match fok_side {
-                Side::Buy => (200, 100),
-                Side::Sell => (100, 200),
-            };
-            let maker_id = test_fixtures::place_order(
-                &mut state,
-                sides.maker_owner,
-                &pair,
-                sides.maker_side,
-                maker_price * PRICE_SCALE,
-                lot,
-            );
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            let levels_before = resting_levels(&state, &pair);
-
-            let fok_id = test_fixtures::place_fok_order(
-                &mut state,
-                sides.fok_owner,
-                &pair,
-                sides.fok_side,
-                fok_price * PRICE_SCALE,
-                lot,
-            );
-            // The FOK reserves its side's token (Buy → quote, Sell → base): a
-            // Buy reserves `fok_price × lot` quote, a Sell reserves `lot` base.
-            let expected_reserved = match fok_side {
-                Side::Buy => fok_price * lot,
-                Side::Sell => lot,
-            };
-            let reserved = state.get_balance(&sides.fok_owner, &sides.reserved(&pair));
-            assert_eq!(*reserved.free(), Quantity::ZERO);
-            assert_eq!(*reserved.reserved(), Quantity::from(expected_reserved));
-
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            let fok = record_of(&state, sides.fok_owner, fok_id);
-            assert_eq!(fok.status, OrderStatus::Expired);
-            assert_eq!(fok.filled_quantity, Quantity::ZERO);
-            // The resting maker is untouched and the resting book is unchanged
-            // (only the FOK's drained `pending_orders` moved).
-            assert_eq!(
-                status_of(&state, sides.maker_owner, maker_id),
-                Some(OrderStatus::Open)
-            );
-            let book = state.get_order_book(&pair).unwrap();
-            assert_eq!(book.pending_orders_len(), 0);
-            assert_eq!(resting_levels(&state, &pair), levels_before);
-            // The FOK's whole reservation was released back to free.
-            let refunded = state.get_balance(&sides.fok_owner, &sides.reserved(&pair));
-            assert_eq!(*refunded.free(), Quantity::from(expected_reserved));
-            assert_eq!(*refunded.reserved(), Quantity::ZERO);
         }
 
         /// Rest two GTC sell makers, place a FOK Buy that must be killed, and
