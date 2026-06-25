@@ -113,7 +113,7 @@ Pair **ICP / ckUSDT** — base **ICP** (8 decimals), quote **ckUSDT** (6 decimal
 **taker 10 bps (0.10%)**, **maker 5 bps (0.05%)**.
 
 The engine stores everything in **smallest units**; the human-readable value and the stored
-value (Rust `_` digit grouping) are given side by side throughout, as `human (`stored`)`:
+value (Rust `_` digit grouping) are given side by side throughout, as human (`stored`):
 
 - `Price` is quote-smallest-units per **whole** base: `10 ckUSDT/ICP` → `10 × 10⁶ = 10_000_000`.
 - `quantity` is base-smallest-units: `2 ICP` → `2 × 10⁸ = 200_000_000`.
@@ -130,7 +130,7 @@ fills, each writing a taker-leg and a maker-leg record (counterparty never named
 | **Fill 1**<br>2 ICP @ 10 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 10 (`10_000_000`)<br>• `quantity`: 2 ICP (`200_000_000`)<br>• `notional`: 20 ckUSDT (`20_000_000`)<br>• `fee`: 0.002 ICP (`200_000`) *(10 bps × qty)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 10 (`10_000_000`)<br>• `quantity`: 2 ICP (`200_000_000`)<br>• `notional`: 20 ckUSDT (`20_000_000`)<br>• `fee`: 0.01 ckUSDT (`10_000`) *(5 bps × notional)*<br>• `fee_token`: ckUSDT (Quote) |
 | **Fill 2**<br>3 ICP @ 11 | • `side`: Buy<br>• `is_maker`: false<br>• `price`: 11 (`11_000_000`)<br>• `quantity`: 3 ICP (`300_000_000`)<br>• `notional`: 33 ckUSDT (`33_000_000`)<br>• `fee`: 0.003 ICP (`300_000`) *(10 bps × qty)*<br>• `fee_token`: ICP (Base) | • `side`: Sell<br>• `is_maker`: true<br>• `price`: 11 (`11_000_000`)<br>• `quantity`: 3 ICP (`300_000_000`)<br>• `notional`: 33 ckUSDT (`33_000_000`)<br>• `fee`: 0.0165 ckUSDT (`16_500`) *(5 bps × notional)*<br>• `fee_token`: ckUSDT (Quote) |
 
-Order-level rollups (`OrderRecord` scalars), `human (`stored`)`:
+Order-level rollups (`OrderRecord` scalars), human (`stored`):
 
 - **Taker buy order** (both fills): `filled_quantity` = 5 ICP (`500_000_000`), `filled_quote` =
   20 + 33 = 53 ckUSDT (`53_000_000`), `filled_fee` = 0.002 + 0.003 = 0.005 ICP (`500_000`,
@@ -285,7 +285,12 @@ range scan. The fill store mirrors this exactly. `MemoryId`s 0–6 are in use
 
 `OrderRecord` gains two trailing fields (additive; extra fields in a returned record are a
 backward-compatible Candid evolution, as `filled_quantity` was in DEFI-2852 — the repo's candid
-equality / backward-compat check must pass):
+equality / backward-compat check must pass). The fields are also appended to the minicbor
+stable-memory layout at the next free indices (`#[n(9)]` / `#[n(10)]`); they are non-optional and
+carry no `#[cbor(default)]`, so they would break decoding of records written by a prior version —
+acceptable only because the system is pre-launch with no persisted records (see the *Backfilling
+pre-existing orders* non-goal and the `OrderRecord` schema docstring). Post-launch, the same
+addition would require an `Option<T>` / `#[cbor(default)]` fallback.
 
 ```candid
 type OrderRecord = record {
