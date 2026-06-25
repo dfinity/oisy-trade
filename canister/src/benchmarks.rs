@@ -59,7 +59,7 @@ fn bench_fok_fill_full_bid_side() -> canbench_rs::BenchResult {
 }
 
 /// Benchmark a fill-or-kill order that is *killed*: identical setup to
-/// [`bench_fill_or_kill_fill_full_bid_side`], but the FOK is sized one lot past
+/// [`bench_fok_fill_full_bid_side`], but the FOK is sized one lot past
 /// the total bid depth, so the plan pass walks every bid level yet cannot fully
 /// fill — the plan is discarded before any mutation. This measures the
 /// plan-then-discard cost: the read-only walk of all 697 bid levels without the

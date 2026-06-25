@@ -2651,7 +2651,7 @@ mod settle_fills {
                 book_after.next_seq = book_before.next_seq;
                 assert_eq!(
                     book_before, book_after,
-                    "BUG ({}): book should be the same as before when a FOK order is killed (excepted for the next_seq increment).",
+                    "BUG ({}): book should be the same as before when a FOK order is killed (except for the next_seq increment).",
                     case.desc
                 );
 
