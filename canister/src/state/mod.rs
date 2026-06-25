@@ -20,7 +20,7 @@ use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     CursorNotFound, FeeRates, FillSettlement, LotSize, MatchOrderError, NotionalError, Order,
     OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
-    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
+    PairToken, PendingOrder, Price, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
     TradingPair,
 };
 use crate::storage::VMem;
@@ -359,15 +359,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         } = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let (refund_token, refund_amount) = match side {
-            Side::Buy => (
-                PairToken::Quote,
-                price
-                    .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
-                    .expect("BUG: price * remaining overflow — validated at placement"),
-            ),
-            Side::Sell => (PairToken::Base, remaining_quantity),
-        };
+        let (refund_token, refund_amount) = refund_for(side, price, remaining_quantity, base_scale);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
@@ -415,10 +407,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         //
         // `updates` folds the batch into at most one write per `Order` to
         // minimize instruction costs in dealing with stable structures.
-        let mut balance_operations = Vec::with_capacity(output.fills.len() * 3);
+        let mut balance_operations =
+            Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
         let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
-        for fill in output.fills {
-            let settlement = FillSettlement::new(fill, fee_rates, base_scale);
+        for fill in &output.fills {
+            let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(
                 updates.entry(settlement.taker_order_seq()).or_default(),
@@ -429,6 +422,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 settlement.maker_fee(),
             );
         }
+        // A killed fill-or-kill order never touched the book, so its full
+        // placement reservation must be released.
+        for (seq, killed) in &output.expired_orders {
+            let (refund_token, refund_amount) = refund_for(
+                killed.side,
+                killed.price,
+                killed.remaining_quantity,
+                base_scale,
+            );
+            balance_operations.push(event::BalanceOperation::Unreserve {
+                order: *seq,
+                token: refund_token,
+                amount: refund_amount,
+            });
+        }
         if matches!(persistence, StableMemoryOptions::Write) {
             #[cfg(feature = "canbench-rs")]
             let _p = canbench_rs::bench_scope("apply_order_updates");
@@ -437,6 +445,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }
             for seq in &output.filled_orders {
                 updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+            }
+            for seq in output.expired_orders.keys() {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
             }
             for (seq, update) in updates {
                 let order_id = OrderId::new(event.book_id, seq);
@@ -928,6 +939,23 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
             (seq, user)
         })
         .collect()
+}
+
+fn refund_for(
+    side: Side,
+    price: Price,
+    remaining_quantity: Quantity,
+    base_scale: NonZeroU64,
+) -> (PairToken, Quantity) {
+    match side {
+        Side::Buy => (
+            PairToken::Quote,
+            price
+                .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
+                .expect("BUG: price * remaining overflow — validated at placement"),
+        ),
+        Side::Sell => (PairToken::Base, remaining_quantity),
+    }
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

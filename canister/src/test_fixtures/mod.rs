@@ -355,11 +355,60 @@ where
     MH: ic_stable_structures::Memory,
     MB: ic_stable_structures::Memory,
 {
+    place_order_with_tif(
+        state,
+        user,
+        pair,
+        side,
+        price,
+        quantity,
+        TimeInForce::GoodTilCanceled,
+    )
+}
+
+/// Like [`place_order`] but for a fill-or-kill order.
+pub fn place_fok_order<MH, MB>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u128,
+    quantity: impl Into<Quantity>,
+) -> order::OrderId
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    place_order_with_tif(
+        state,
+        user,
+        pair,
+        side,
+        price,
+        quantity,
+        TimeInForce::FillOrKill,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_order_with_tif<MH, MB>(
+    state: &mut state::State<MH, MB>,
+    user: Principal,
+    pair: &TradingPair,
+    side: Side,
+    price: u128,
+    quantity: impl Into<Quantity>,
+    time_in_force: TimeInForce,
+) -> order::OrderId
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
     let pending = PendingOrder {
         side,
         price: Price::new(price),
         quantity: quantity.into(),
-        time_in_force: TimeInForce::GoodTilCanceled,
+        time_in_force,
     };
     let (token, amount) = match side {
         Side::Buy => (
@@ -469,8 +518,8 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
-        TickSize, TimeInForce, TokenId, TokenMetadata,
+        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
+        Side, TickSize, TimeInForce, TokenId, TokenMetadata,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -484,6 +533,7 @@ pub mod arbitrary {
     use proptest::option;
     use proptest::prelude::{Just, Strategy, any};
     use proptest::prop_oneof;
+    use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
 
     use super::event::MAX_HALT_BOOKS;
@@ -879,20 +929,64 @@ pub mod arbitrary {
         arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
     }
 
+    pub fn arb_removed_order() -> impl Strategy<Value = RemovedOrder> {
+        // Tick-aligned price and lot-aligned quantity so a Buy refund's
+        // `price × quantity` settles exactly under the pair invariant, the same
+        // alignment `arb_fill` upholds.
+        let tick = TICK_SIZE.get();
+        let lot = u64::from(LOT_SIZE);
+        (arb_side(), 1..100u64, 1..10u64).prop_map(move |(side, price_ticks, qty_lots)| {
+            RemovedOrder {
+                side,
+                price: Price::new(price_ticks as u128 * tick),
+                remaining_quantity: Quantity::from(qty_lots * lot),
+            }
+        })
+    }
+
     pub fn arb_matching_output() -> impl Strategy<Value = MatchingOutput> {
         // `arb_fill` multiplies its index by 2; cap to u32 range so 2 * index
         // fits in a u64.
         let arb_any_fill = any::<u32>().prop_flat_map(|i| arb_fill(i as u64));
-        (
-            vec(arb_any_fill, 0..5),
-            btree_set(arb_order_seq(), 0..5),
-            btree_set(arb_order_seq(), 0..5),
-        )
-            .prop_map(|(fills, resting_orders, filled_orders)| MatchingOutput {
-                fills,
-                resting_orders,
-                filled_orders,
+        // A single order cannot be resting, filled, and expired at once, so the
+        // three seq buckets must be pairwise disjoint. Draw one pool of unique
+        // seqs, then deal a random prefix-split across the three buckets.
+        let arb_disjoint_seqs = btree_set(any::<u64>(), 0..15).prop_flat_map(|seqs| {
+            let seqs: Vec<u64> = seqs.into_iter().collect();
+            let len = seqs.len();
+            (Just(seqs), 0..=len, 0..=len).prop_map(|(seqs, a, b)| {
+                let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                let resting: BTreeSet<OrderSeq> =
+                    seqs[..lo].iter().copied().map(OrderSeq::new).collect();
+                let filled: BTreeSet<OrderSeq> =
+                    seqs[lo..hi].iter().copied().map(OrderSeq::new).collect();
+                let expired: Vec<OrderSeq> =
+                    seqs[hi..].iter().copied().map(OrderSeq::new).collect();
+                (resting, filled, expired)
             })
+        });
+        (vec(arb_any_fill, 0..5), arb_disjoint_seqs)
+            .prop_flat_map(|(fills, (resting_orders, filled_orders, expired_seqs))| {
+                let expired_len = expired_seqs.len();
+                (
+                    Just(fills),
+                    Just(resting_orders),
+                    Just(filled_orders),
+                    Just(expired_seqs),
+                    vec(arb_removed_order(), expired_len..=expired_len),
+                )
+            })
+            .prop_map(
+                |(fills, resting_orders, filled_orders, expired_seqs, removed)| {
+                    let expired_orders = expired_seqs.into_iter().zip(removed).collect();
+                    MatchingOutput {
+                        fills,
+                        resting_orders,
+                        filled_orders,
+                        expired_orders,
+                    }
+                },
+            )
     }
 
     pub fn arb_matching_event() -> impl Strategy<Value = MatchingEvent> {
@@ -1025,6 +1119,13 @@ pub mod mocks {
 
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
         mock_runtime_at(caller, Timestamp::EPOCH)
+    }
+
+    pub fn mock_runtime_for_timer() -> MockRuntime {
+        let mut mock = MockRuntime::new();
+        mock.expect_instruction_counter().return_const(0u64);
+        mock.expect_time().return_const(Timestamp::EPOCH);
+        mock
     }
 
     /// Like [`mock_runtime_for`] but with `time()` pinned to `now`, so a test

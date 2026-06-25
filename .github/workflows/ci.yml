@@ -259,7 +259,12 @@ jobs:
       - name: 'Checkout baseline branch'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          # Compare against the PR's base branch, not a hard-coded `main`, so a
+          # stacked PR's benchmark diff reflects only its own delta rather than
+          # its (unmerged) base's accumulated changes. Equals `main` for PRs
+          # targeting main. This only shapes the informational comparison
+          # comment; the pass/fail "results up to date" check is independent.
+          ref: ${{ github.event.pull_request.base.ref }}
           path: _canbench_baseline_branch
 
       - name: Setup mise
