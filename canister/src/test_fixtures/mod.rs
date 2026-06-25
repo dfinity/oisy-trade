@@ -463,6 +463,23 @@ pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &orde
     assert_eq!(&normalized, expected);
 }
 
+/// The persisted record for `order_id` as `owner` sees it via
+/// `get_user_order`.
+pub fn record_of<MH, MB>(
+    state: &state::State<MH, MB>,
+    owner: Principal,
+    order_id: order::OrderId,
+) -> order::OrderRecord
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    state
+        .get_user_order(&owner, order_id)
+        .map(|(_, _, record)| record)
+        .expect("order record present")
+}
+
 pub fn balances() -> TokenBalance<VectorMemory> {
     TokenBalance::new(VectorMemory::default())
 }

@@ -1667,19 +1667,6 @@ mod settle_fills {
         use super::*;
         use crate::order::{OrderRecord, OrderStatus, TimeInForce};
 
-        /// The persisted record for `order_id` as `owner` sees it via
-        /// `get_user_order`.
-        fn record_of(
-            state: &State<VectorMemory, VectorMemory>,
-            owner: Principal,
-            order_id: crate::order::OrderId,
-        ) -> OrderRecord {
-            state
-                .get_user_order(&owner, order_id)
-                .map(|(_, _, record)| record)
-                .expect("order record present")
-        }
-
         fn status_of(
             state: &State<VectorMemory, VectorMemory>,
             owner: Principal,
@@ -1780,7 +1767,7 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // The maker rests `Open` with `0 < filled_quantity < quantity`.
-            let sell = record_of(&state, SELLER, sell_id);
+            let sell = test_fixtures::record_of(&state, SELLER, sell_id);
             test_fixtures::assert_eq_ignoring_timestamp(
                 &sell,
                 &OrderRecord {
@@ -1825,7 +1812,7 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // The fully consumed maker reports `filled_quantity == quantity`.
-            let sell = record_of(&state, SELLER, sell_id);
+            let sell = test_fixtures::record_of(&state, SELLER, sell_id);
             test_fixtures::assert_eq_ignoring_timestamp(
                 &sell,
                 &OrderRecord {
@@ -1843,7 +1830,7 @@ mod settle_fills {
                 },
             );
             // The taker rests `Open` with one of three lots filled.
-            let buy = record_of(&state, BUYER, buy_id);
+            let buy = test_fixtures::record_of(&state, BUYER, buy_id);
             test_fixtures::assert_eq_ignoring_timestamp(
                 &buy,
                 &OrderRecord {
@@ -1890,7 +1877,7 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             // Across two batches the maker accrued both fills, one write
             // per batch, and now sits at one of two lots filled, still `Open`.
-            let sell = record_of(&state, SELLER, sell_id);
+            let sell = test_fixtures::record_of(&state, SELLER, sell_id);
             assert_eq!(sell.status, OrderStatus::Open);
             assert_eq!(sell.filled_quantity, Quantity::from(lot));
             assert_eq!(status_of(&state, BUYER, buy1_id), Some(OrderStatus::Filled));
@@ -1904,7 +1891,7 @@ mod settle_fills {
                 lot,
             );
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            let sell = record_of(&state, SELLER, sell_id);
+            let sell = test_fixtures::record_of(&state, SELLER, sell_id);
             assert_eq!(sell.status, OrderStatus::Filled);
             assert_eq!(sell.filled_quantity, sell.quantity);
             assert_eq!(status_of(&state, BUYER, buy2_id), Some(OrderStatus::Filled));
@@ -1973,7 +1960,7 @@ mod settle_fills {
                 100 * PRICE_SCALE,
                 3 * lot,
             );
-            let placed = record_of(&state, SELLER, sell_id);
+            let placed = test_fixtures::record_of(&state, SELLER, sell_id);
             assert_eq!(placed.created_at, Timestamp::EPOCH);
             assert_eq!(placed.last_updated_at, None);
 
@@ -1983,7 +1970,7 @@ mod settle_fills {
                 &mut state,
                 &mocks::mock_runtime_at(BUYER, Timestamp::new(100)),
             );
-            let after_first = record_of(&state, SELLER, sell_id);
+            let after_first = test_fixtures::record_of(&state, SELLER, sell_id);
             assert_eq!(after_first.created_at, Timestamp::EPOCH);
             assert_eq!(after_first.last_updated_at, Some(Timestamp::new(100)));
             assert_eq!(after_first.filled_quantity, Quantity::from(lot));
@@ -2001,7 +1988,7 @@ mod settle_fills {
                 &mut state,
                 &mocks::mock_runtime_at(BUYER, Timestamp::new(200)),
             );
-            let after_second = record_of(&state, SELLER, sell_id);
+            let after_second = test_fixtures::record_of(&state, SELLER, sell_id);
             assert_eq!(after_second.created_at, Timestamp::EPOCH);
             assert_eq!(after_second.last_updated_at, Some(Timestamp::new(200)));
             assert_eq!(after_second.status, OrderStatus::Filled);
@@ -2370,17 +2357,6 @@ mod settle_fills {
             assert_eq!(state.balances.fee_balance(&pair.quote), None);
         }
 
-        fn record_of(
-            state: &TestState,
-            owner: Principal,
-            order_id: crate::order::OrderId,
-        ) -> crate::order::OrderRecord {
-            state
-                .get_user_order(&owner, order_id)
-                .map(|(_, _, record)| record)
-                .expect("order record present")
-        }
-
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
             let fee_rates = FeeRates {
                 maker: BasisPoint::new(maker_bps).unwrap(),
@@ -2644,9 +2620,7 @@ mod settle_fills {
 
     mod fill_or_kill {
         use super::*;
-        use crate::order::{
-            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus,
-        };
+        use crate::order::{BasisPoint, OrderBookSnapshot, OrderId, OrderSeq, OrderStatus};
         use crate::test_fixtures::tokens::SupportedTokens;
         use std::collections::BTreeSet;
 
@@ -3036,7 +3010,7 @@ mod settle_fills {
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // The FOK was killed; its quote reservation is released.
-            let fok = record_of(&state, BUYER, fok_id);
+            let fok = test_fixtures::record_of(&state, BUYER, fok_id);
             assert_eq!(fok.status, OrderStatus::Expired);
             assert_eq!(fok.filled_quantity, Quantity::ZERO);
             assert_eq!(
@@ -3045,23 +3019,10 @@ mod settle_fills {
             );
 
             // The GTC rested Open, fully reserved, untouched by the FOK kill.
-            let gtc = record_of(&state, SELLER, gtc_id);
+            let gtc = test_fixtures::record_of(&state, SELLER, gtc_id);
             assert_eq!(gtc.status, OrderStatus::Open);
             assert_eq!(gtc.filled_quantity, Quantity::ZERO);
             assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, lot));
-        }
-
-        /// The persisted record for `order_id` as `owner` sees it via
-        /// `get_user_order`.
-        fn record_of(
-            state: &State<VectorMemory, VectorMemory>,
-            owner: Principal,
-            order_id: crate::order::OrderId,
-        ) -> OrderRecord {
-            state
-                .get_user_order(&owner, order_id)
-                .map(|(_, _, record)| record)
-                .expect("order record present")
         }
 
         /// The resting orders of `pair`'s book — its bid and ask levels — with
