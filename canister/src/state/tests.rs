@@ -2541,14 +2541,14 @@ mod settle_fills {
                         (order, id)
                     })
                     .collect();
-                EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+                EXECUTOR.run_once(&mut state, &mocks::mock_runtime_for_timer());
 
                 let base_scale = 100_000_000u128;
                 for (order, id) in placed {
                     let Some(expect) = &order.expect else {
                         continue;
                     };
-                    let record = record_of(&state, order.owner, id);
+                    let record = test_fixtures::record_of(&state, order.owner, id);
                     assert_eq!(record.status, expect.status, "BUG ({}): status", case.desc);
                     assert_eq!(
                         record.filled_quantity,
