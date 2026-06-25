@@ -311,6 +311,7 @@ in `oisy_trade.did` (reused, not redefined):
 // One side-projected fill. The counterparty is intentionally omitted.
 // `fee_token` reuses the existing PairToken type { Base; Quote }.
 type Trade = record {
+    cursor : FillCursor;    // this fill's own pagination cursor; pass the last one back as `after`
     order_id : OrderId;     // the owning (caller's) order
     side : Side;            // this order's side
     price : nat;            // execution (maker) price
@@ -339,6 +340,9 @@ get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesEr
 
 `FillCursor` is the opaque pagination cursor — an opaque `text` token (like `OrderId`) encoding the
 global fill sequence (see below); callers pass back the last value they received and never parse it.
+Each `Trade` carries its own `cursor`, so a client paginates by passing the last entry's `cursor`
+as the next `after` — mirroring `get_my_orders { ByPage }`, where each `UserOrder` exposes the
+`OrderId` that doubles as the page cursor.
 `GetMyTradesError` is an instantiation of the DEFI-2801 generic error envelope.
 `MAX_FILLS_PER_RESPONSE` mirrors `MAX_ORDERS_PER_RESPONSE`.
 
