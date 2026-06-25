@@ -1951,9 +1951,6 @@ mod settle_fills {
             let buy = record_of(&state, BUYER, buy_id);
             assert_eq!(buy.status, OrderStatus::Filled);
             assert_eq!(buy.filled_quantity, Quantity::from(2 * lot));
-            // The two fills executed at distinct maker prices (100 and 101), so
-            // `filled_quote` is their summed notional — distinct from
-            // `filled_quantity` and proving each fill's price is rolled up.
             assert_eq!(buy.filled_quote, Quantity::from(100 * lot + 101 * lot));
             assert_eq!(buy.filled_fee, Quantity::ZERO);
         }
@@ -2060,22 +2057,11 @@ mod settle_fills {
             let buy = record_of(&state, BUYER, buy_id);
             assert_eq!(buy.status, OrderStatus::Pending);
             assert_eq!(buy.filled_quantity, Quantity::ZERO);
-            // The realized-value scalars are written under the same `Write`
-            // gate as `filled_quantity`, so replay under `Skip` leaves them at
-            // zero too — no double-counting of quote or fee.
             assert_eq!(buy.filled_quote, Quantity::ZERO);
             assert_eq!(buy.filled_fee, Quantity::ZERO);
             assert_eq!(buy.last_updated_at, None);
         }
     }
-
-    // The old `settle_fill_ordering` proptest lived here, testing that two
-    // `settle_fill` calls on independent fills commuted. `settle_fill` has
-    // been retired — settlement is now a flat `Vec<BalanceOperation>` in
-    // `SettlingEvent`. Commutativity isn't claimed for arbitrary op sequences
-    // (two Transfers from the same debtor can fail depending on order), only
-    // for op sequences produced by `FillSettlement::new` +
-    // `FillSettlement::push_balance_operations` from a valid `MatchingOutput`.
 
     proptest! {
         /// `FillSettlement::new` + `push_balance_operations` preserve structural invariants
@@ -2236,11 +2222,6 @@ mod settle_fills {
                 Some(Quantity::from(quote_fee)),
             );
 
-            // The order-level scalars roll up the same realized values. Both
-            // sides traded the full `qty`, so each records `filled_quote ==
-            // notional` (≠ `filled_quantity`, which would be `qty`). The buyer's
-            // `filled_fee` is the base fee, the seller's is the quote fee — never
-            // swapped.
             let (buyer_id, seller_id) = match taker_side {
                 Side::Buy => (second_id, first_id),
                 Side::Sell => (first_id, second_id),
