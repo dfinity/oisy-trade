@@ -466,6 +466,53 @@ fn should_replay_fill_or_kill_order_preserving_time_in_force() {
         .assert_replay_matches();
 }
 
+/// A FOK killed against an empty book transitions to `Expired` and releases its
+/// whole placement reservation through a single `Unreserve`. Replaying the
+/// matching round under `Skip` (the post-upgrade path) must reconstruct the
+/// `Expired` status from history without re-applying the release — the
+/// reservation must not be double-refunded.
+#[test]
+fn should_replay_killed_fill_or_kill_order_preserving_expired_state() {
+    let price = 100u128;
+    let quantity = 1_000_000u128;
+    let reserved = price * quantity;
+    let book_id = OrderBookId::ZERO;
+
+    // FOK Buy against an empty book: nothing crosses, so matching kills it.
+    let (scenario, fok_id) = Scenario::new()
+        .with_trading_pair()
+        .with_deposit(user_1(), TokenId::new(quote()), Quantity::from(reserved))
+        .with_limit_order_tif(
+            user_1(),
+            Side::Buy,
+            Price::new(price * PRICE_SCALE),
+            Quantity::from(quantity),
+            TimeInForce::FillOrKill,
+        );
+
+    scenario
+        .with_matching_round(
+            MatchingEvent {
+                book_id,
+                orders: vec![fok_id.seq()],
+            },
+            SettlingEvent {
+                book_id,
+                balance_operations: vec![BalanceOperation::Unreserve {
+                    order: fok_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(reserved),
+                }],
+            },
+        )
+        // The kill released the whole reservation back to free exactly once.
+        .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
+        .assert_order_status(fok_id, OrderStatus::Expired)
+        .assert_filled_quantity(fok_id, 0u64)
+        .assert_time_in_force(fok_id, TimeInForce::FillOrKill)
+        .assert_replay_matches();
+}
+
 #[test]
 fn should_replay_matching() {
     let buyer = user_1();

@@ -174,10 +174,13 @@ beyond confirming the path is shared (R-coverage in the test plan).
   `State::record_matching_event` **only under `StableMemoryOptions::Write`** (replay runs
   `Skip`). Any new persistence (the TIF field, the `Expired` transition) must flow through this
   chain and respect the `Write` gate so replay does not double-apply. In particular,
-  **`AddLimitOrderEvent` itself must carry `time_in_force`** (append-only minicbor field,
-  defaulting to `GoodTilCanceled` for pre-existing events): a FOK logged as `Pending` and
-  replayed before `process_pending_orders` runs must reconstruct as a FOK, not default to GTC and
-  rest (R9).
+  **`AddLimitOrderEvent` itself must carry `time_in_force`** (a plain, non-`Option` minicbor
+  field with no decode-time default): a FOK logged as `Pending` and replayed before
+  `process_pending_orders` runs must reconstruct as a FOK, not rest as a GTC (R9). The field is
+  not optional and has no `GoodTilCanceled` decode fallback because the launch is a breaking
+  release with a fresh reinstall — no pre-FOK, field-less event bytes exist to decode. The
+  `GoodTilCanceled` default applies only to the `opt time_in_force` request input when a client
+  omits it (R1).
 - Matching/settlement are synchronous and free of inter-canister calls, but bounded by the
   per-message instruction limit; the timer-driven model chunks GTC matching to stay within it. A
   single FOK is atomic and cannot be chunked (R10).
@@ -200,7 +203,9 @@ beyond confirming the path is shared (R-coverage in the test plan).
   reads the optional field, defaulting to `GoodTilCanceled`.
 - Internal `OrderStatus` (`order/mod.rs`) gains `Expired` (next minicbor index).
 - Internal `OrderRecord` (`order/history`) gains `time_in_force` as a new trailing minicbor
-  field (append-only index; never reuse) so it round-trips through history and snapshot (R9).
+  field (a plain, non-`Option` field with no decode-time default) so it round-trips through
+  history and snapshot (R9). It needs no `GoodTilCanceled` decode fallback: the launch is a
+  breaking release with a fresh reinstall, so no pre-FOK, field-less records exist to decode.
 
 ### Plan/execute matching — `canister/src/order/book.rs`
 

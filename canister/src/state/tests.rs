@@ -264,7 +264,7 @@ mod cancel_limit_order {
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
-        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_order,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_fok_order, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -434,6 +434,34 @@ mod cancel_limit_order {
             crate::state::StableMemoryOptions::Write,
         );
         assert!(state.has_pending_settling_events());
+
+        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_cancel_pending_fok_into_canceled_and_refund() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Pending));
+
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn should_reject_canceling_expired_fok() {
+        use crate::state::CancelLimitOrderError;
+
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        // FOK against an empty book: matching kills it, ending Expired.
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
         let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
 
@@ -2038,8 +2066,9 @@ mod settle_fills {
         /// any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
-        /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
-        ///   the buy-taker price-improvement `Unreserve`)
+        /// - total op count is in `[2 * fills + expired, 3 * fills + expired]`
+        ///   (the extra per-fill op is the buy-taker price-improvement
+        ///   `Unreserve`; each killed order adds one refund `Unreserve`)
         /// This covers the fuzz shape the retired `settle_fill_ordering`
         /// proptest exercised, moved one layer up to the pure compute fn.
         #[test]
@@ -2055,11 +2084,17 @@ mod settle_fills {
                 std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
             );
             let fills_len = output.fills.len();
+            let expired_len = output.expired_orders.len();
 
             prop_assert!(
-                ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
-                "ops.len() {} outside [{}, {}] for {} fills",
-                ops.len(), 2 * fills_len, 3 * fills_len, fills_len,
+                ops.len() >= 2 * fills_len + expired_len
+                    && ops.len() <= 3 * fills_len + expired_len,
+                "ops.len() {} outside [{}, {}] for {} fills and {} expired",
+                ops.len(),
+                2 * fills_len + expired_len,
+                3 * fills_len + expired_len,
+                fills_len,
+                expired_len,
             );
 
             let quote_transfers = ops.iter().filter(|o| matches!(
@@ -2073,11 +2108,11 @@ mod settle_fills {
             prop_assert_eq!(quote_transfers, fills_len);
             prop_assert_eq!(base_transfers, fills_len);
 
-            // Unreserves only fire for buy-taker fills with strictly positive
-            // price improvement.
+            // Unreserves fire for buy-taker fills with strictly positive price
+            // improvement, plus one refund per killed (expired) order.
             let expected_unreserves = output.fills.iter().filter(|f| {
                 f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
-            }).count();
+            }).count() + expired_len;
             let unreserves = ops.iter().filter(|o| matches!(
                 o,
                 BalanceOperation::Unreserve { .. }
@@ -2318,6 +2353,10 @@ mod settle_fills {
         }
 
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
+            let fee_rates = FeeRates {
+                maker: BasisPoint::new(maker_bps).unwrap(),
+                taker: BasisPoint::new(taker_bps).unwrap(),
+            };
             let mut state = test_fixtures::state();
             let pair = icp_ckbtc_trading_pair();
             state.record_trading_pair(
@@ -2329,10 +2368,7 @@ mod settle_fills {
                 LOT_SIZE,
                 MIN_NOTIONAL,
                 Some(MAX_NOTIONAL),
-                FeeRates {
-                    maker: BasisPoint::new(maker_bps).unwrap(),
-                    taker: BasisPoint::new(taker_bps).unwrap(),
-                },
+                fee_rates,
             );
             state
         }
@@ -2390,6 +2426,441 @@ mod settle_fills {
         let (base_after, quote_after) = sum(&after);
         assert_eq!(base_before, base_after, "base token total changed");
         assert_eq!(quote_before, quote_after, "quote token total changed");
+    }
+
+    mod fill_or_kill {
+        use super::*;
+        use crate::order::{
+            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus,
+        };
+        use crate::test_fixtures::tokens::SupportedTokens;
+        use std::collections::BTreeSet;
+
+        const MAKER: Principal = Principal::from_slice(&[42_u8]);
+        const TAKER: Principal = Principal::from_slice(&[43_u8]);
+
+        const MAKER_BPS: u16 = 10; // 0.1 %
+        const TAKER_BPS: u16 = 25; // 0.25 %
+        const ONE_ICP: u64 = SupportedTokens::ICP.one();
+
+        #[test]
+        fn should_fill() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy fully crosses a single resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::zero(),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "sell fully crosses a single resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(3_990_u64)),
+                    expected_balances_maker: (
+                        Balance::new_free(ONE_ICP - 100_000),
+                        Balance::zero(),
+                    ),
+                    expected_fee_balances: (
+                        Some(Quantity::from(100_000_u64)),
+                        Some(Quantity::from(10_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy above resting ask fills at maker price and refunds surplus"
+                        .to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(5_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::new_free(1_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy sweeps several ascending ask levels".to_string(),
+                    bids: vec![],
+                    asks: vec![
+                        (Price::from(4_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(5_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(6_000), vec![Quantity::from(ONE_ICP)]),
+                    ],
+                    fok: (Side::Buy, Price::from(6_000), Quantity::from(3 * ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(3 * ONE_ICP - 750_000),
+                        Balance::new_free(3_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(14_985_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(750_000_u64)),
+                        Some(Quantity::from(15_u64)),
+                    ),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
+                case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Filled,
+                    "BUG ({}): a crossing FOK should end Filled",
+                    case.desc
+                );
+                assert_eq!(
+                    fok_order.filled_quantity, fok_order.quantity,
+                    "BUG ({}): a filled FOK should be fully filled",
+                    case.desc
+                );
+
+                let (resting_bids, resting_asks) = resting_levels(&state, &pair);
+                assert!(
+                    resting_bids.is_empty() && resting_asks.is_empty(),
+                    "BUG ({}): the FOK is sized to consume every resting maker, so the book should end empty",
+                    case.desc
+                );
+
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after fill",
+                    case.desc
+                );
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
+                assert_eq!(
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after fill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
+                    "BUG ({}): fee balances differ from expected after fill",
+                    case.desc
+                );
+            }
+        }
+
+        #[test]
+        fn should_expire() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy below resting ask (no cross)".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(5_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell above resting bid (no cross)".to_string(),
+                    bids: vec![(Price::from(3_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(3_000_u64)),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy crosses but exceeds total resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(8_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell crosses but exceeds total resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(2 * ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(4_000_u64)),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy crosses several resting orders but exceeds their total".to_string(),
+                    bids: vec![],
+                    asks: vec![(
+                        Price::from(4_000),
+                        vec![Quantity::from(ONE_ICP), Quantity::from(ONE_ICP)],
+                    )],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(3 * ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(12_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(2 * ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
+                let book_before = case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let mut book_after = OrderBookSnapshot::from(state.get_order_book(&pair).unwrap());
+                assert_eq!(
+                    book_after.next_seq,
+                    OrderSeq::new(book_before.next_seq.get() + 1),
+                    "BUG ({}): should add only one order between book snapshots",
+                    case.desc
+                );
+                book_after.next_seq = book_before.next_seq;
+                assert_eq!(
+                    book_before, book_after,
+                    "BUG ({}): book should be the same as before when a FOK order is killed (except for the next_seq increment).",
+                    case.desc
+                );
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Expired,
+                    "BUG ({}): killed FOK should end Expired",
+                    case.desc
+                );
+
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after kill",
+                    case.desc
+                );
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
+                assert_eq!(
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after kill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
+                    "BUG ({}): a killed FOK order should not change fee balances",
+                    case.desc
+                );
+            }
+        }
+
+        struct TestCase {
+            desc: String,
+            bids: Vec<(Price, Vec<Quantity>)>,
+            asks: Vec<(Price, Vec<Quantity>)>,
+            fok: (Side, Price, Quantity),
+            expected_balances_taker: (Balance, Balance),
+            expected_balances_maker: (Balance, Balance),
+            expected_fee_balances: (Option<Quantity>, Option<Quantity>),
+        }
+
+        impl TestCase {
+            fn populate_book(&self, state: &mut TestState) -> OrderBookSnapshot {
+                let pair = icp_ckbtc_trading_pair();
+                let mut maker_orders = BTreeSet::default();
+
+                for (price, quantities) in &self.bids {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Buy,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                for (price, quantities) in &self.asks {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Sell,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+
+                for maker_order in maker_orders {
+                    let (_, _, order) = state.get_user_order(&MAKER, maker_order).unwrap();
+                    assert_eq!(
+                        order.status,
+                        OrderStatus::Open,
+                        "BUG (test setup, {}): maker order is not resting in the book",
+                        self.desc
+                    );
+                }
+
+                OrderBookSnapshot::from(state.get_order_book(&pair).unwrap())
+            }
+
+            fn execute_fok(&self, state: &mut TestState) -> OrderId {
+                let (fok_side, fok_price, fok_quantity) = self.fok;
+
+                let fok_id = test_fixtures::place_fok_order(
+                    state,
+                    TAKER,
+                    &icp_ckbtc_trading_pair(),
+                    fok_side,
+                    fok_price.get(),
+                    fok_quantity,
+                );
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+                fok_id
+            }
+        }
+
+        fn state() -> TestState {
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair,
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                FeeRates {
+                    maker: BasisPoint::new(MAKER_BPS).unwrap(),
+                    taker: BasisPoint::new(TAKER_BPS).unwrap(),
+                },
+            );
+            state
+        }
+
+        /// A single `process_pending_orders` round carrying both a killed FOK
+        /// and a GTC order: the GTC behaves normally (rests Open) and the FOK
+        /// kill does not disturb it.
+        #[test]
+        fn should_process_killed_fok_and_gtc_in_same_round() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // FOK Buy against an empty book — it will be killed. A GTC Sell that
+            // does not cross it (priced above the FOK) — it will rest Open. Both
+            // are pending when the single round runs.
+            let fok_id = test_fixtures::place_fok_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            let gtc_id = test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                200 * PRICE_SCALE,
+                lot,
+            );
+            assert_eq!(state.get_order_book(&pair).unwrap().pending_orders_len(), 2);
+
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // The FOK was killed; its quote reservation is released.
+            let fok = record_of(&state, BUYER, fok_id);
+            assert_eq!(fok.status, OrderStatus::Expired);
+            assert_eq!(fok.filled_quantity, Quantity::ZERO);
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.quote),
+                balance(100 * lot, 0u64)
+            );
+
+            // The GTC rested Open, fully reserved, untouched by the FOK kill.
+            let gtc = record_of(&state, SELLER, gtc_id);
+            assert_eq!(gtc.status, OrderStatus::Open);
+            assert_eq!(gtc.filled_quantity, Quantity::ZERO);
+            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, lot));
+        }
+
+        /// The persisted record for `order_id` as `owner` sees it via
+        /// `get_user_order`.
+        fn record_of(
+            state: &State<VectorMemory, VectorMemory>,
+            owner: Principal,
+            order_id: crate::order::OrderId,
+        ) -> OrderRecord {
+            state
+                .get_user_order(&owner, order_id)
+                .map(|(_, _, record)| record)
+                .expect("order record present")
+        }
+
+        /// The resting orders of `pair`'s book — its bid and ask levels — with
+        /// the next-sequence counter and (drained) pending queue excluded, so
+        /// two snapshots compare equal iff the resting book is byte-identical.
+        fn resting_levels(
+            state: &State<VectorMemory, VectorMemory>,
+            pair: &crate::order::TradingPair,
+        ) -> (Vec<crate::order::PriceLevel>, Vec<crate::order::PriceLevel>) {
+            let snapshot =
+                crate::order::OrderBookSnapshot::from(state.get_order_book(pair).unwrap());
+            (snapshot.bids, snapshot.asks)
+        }
     }
 }
 

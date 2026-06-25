@@ -357,15 +357,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         } = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let (refund_token, refund_amount) = match side {
-            Side::Buy => (
-                PairToken::Quote,
-                price
-                    .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
-                    .expect("BUG: price * remaining overflow — validated at placement"),
-            ),
-            Side::Sell => (PairToken::Base, remaining_quantity),
-        };
+        let (refund_token, refund_amount) = refund_for(side, price, remaining_quantity, base_scale);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
@@ -427,6 +419,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             }
             for seq in &output.filled_orders {
                 updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+            }
+            for seq in output.expired_orders.keys() {
+                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
             }
             for (seq, update) in updates {
                 let order_id = OrderId::new(event.book_id, seq);
@@ -926,7 +921,7 @@ fn compute_balance_operations(
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
 ) -> Vec<event::BalanceOperation> {
-    let mut ops = Vec::with_capacity(output.fills.len() * 3);
+    let mut ops = Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
     for fill in &output.fills {
         let (buyer_seq, seller_seq) = match fill.taker_side {
             Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
@@ -971,7 +966,39 @@ fn compute_balance_operations(
             fee: nonzero(base_fee),
         });
     }
+    // A killed fill-or-kill order never touched the book, so its full placement
+    // reservation must be released.
+    for (seq, killed) in &output.expired_orders {
+        let (refund_token, refund_amount) = refund_for(
+            killed.side,
+            killed.price,
+            killed.remaining_quantity,
+            base_scale,
+        );
+        ops.push(event::BalanceOperation::Unreserve {
+            order: *seq,
+            token: refund_token,
+            amount: refund_amount,
+        });
+    }
     ops
+}
+
+fn refund_for(
+    side: Side,
+    price: order::Price,
+    remaining_quantity: Quantity,
+    base_scale: NonZeroU64,
+) -> (PairToken, Quantity) {
+    match side {
+        Side::Buy => (
+            PairToken::Quote,
+            price
+                .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
+                .expect("BUG: price * remaining overflow — validated at placement"),
+        ),
+        Side::Sell => (PairToken::Base, remaining_quantity),
+    }
 }
 
 /// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for

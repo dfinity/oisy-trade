@@ -531,6 +531,195 @@ mod add_limit_order {
     }
 }
 
+mod fill_or_kill {
+    use candid::{Nat, Principal};
+    use oisy_trade_int_tests::icrc_ledger::QUOTE_LEDGER_FEE;
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{Balance, LimitOrderRequest, OrderStatus, Side, TimeInForce};
+
+    const PRICE: u64 = 10_000 * PRICE_SCALE;
+
+    #[tokio::test]
+    async fn should_fill_fok_against_sufficient_liquidity() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let seller = Principal::from_slice(&[0x02]);
+        setup.rest_sell_maker(seller, 1_000_000, PRICE).await;
+
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let required = 1_000_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(PRICE),
+                quantity: 1_000_000u64.into(),
+                time_in_force: Some(TimeInForce::FillOrKill),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let order = buyer_client.get_my_order(buy_id).await.unwrap().order;
+        assert_eq!(order.status, OrderStatus::Filled);
+        assert_eq!(order.filled_quantity, Nat::from(1_000_000u64));
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 1_000_000u64.into(),
+                reserved: 0u64.into(),
+            },
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_expire_fok_against_insufficient_liquidity_without_partial_fill() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let seller = Principal::from_slice(&[0x02]);
+        // Only one lot of the two lots the FOK wants rests in the book.
+        let sell_id = setup.rest_sell_maker(seller, 1_000_000, PRICE).await;
+
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let required = 2_000_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(PRICE),
+                quantity: 2_000_000u64.into(),
+                time_in_force: Some(TimeInForce::FillOrKill),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let order = buyer_client.get_my_order(buy_id).await.unwrap().order;
+        assert_eq!(order.status, OrderStatus::Expired);
+        assert_eq!(
+            order.filled_quantity,
+            Nat::from(0u64),
+            "FOK must not settle a partial fill"
+        );
+        assert_eq!(
+            buyer_client
+                .get_balance(setup.quote_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: required.into(),
+                reserved: 0_u64.into(),
+            },
+        );
+
+        // The resting maker was not touched: it stays Open with its base still
+        // reserved and nothing filled.
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+        let maker = seller_client.get_my_order(sell_id).await.unwrap().order;
+        assert_eq!(maker.status, OrderStatus::Open);
+        assert_eq!(maker.filled_quantity, Nat::from(0u64));
+        assert_eq!(
+            seller_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: 1_000_000u64.into(),
+            },
+        );
+
+        setup.drop().await;
+    }
+
+    /// A killed FOK survives a canister upgrade: the `Expired` terminal state
+    /// and the released reservation are reconstructed by pre_upgrade snapshot →
+    /// post_upgrade load + event-log replay, and the refund is not re-applied.
+    #[tokio::test]
+    async fn should_preserve_expired_fok_and_refund_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let required = 1_000_000_000u64;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(required + 2 * QUOTE_LEDGER_FEE)
+            .approve(required + QUOTE_LEDGER_FEE)
+            .deposit(required)
+            .execute()
+            .await;
+        // FOK Buy against an empty book → killed to Expired with the whole
+        // reservation refunded.
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(PRICE),
+                quantity: 1_000_000u64.into(),
+                time_in_force: Some(TimeInForce::FillOrKill),
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let before_order = buyer_client
+            .get_my_order(buy_id.clone())
+            .await
+            .unwrap()
+            .order;
+        assert_eq!(before_order.status, OrderStatus::Expired);
+        let before_balance = buyer_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            before_balance,
+            Balance {
+                free: required.into(),
+                reserved: 0u64.into(),
+            },
+        );
+
+        // pre_upgrade snapshot save → post_upgrade load + replay.
+        setup.upgrade(None).await;
+
+        let after_order = buyer_client.get_my_order(buy_id).await.unwrap().order;
+        assert_eq!(
+            after_order, before_order,
+            "Expired state must survive upgrade"
+        );
+        let after_balance = buyer_client
+            .get_balance(setup.quote_token_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            after_balance, before_balance,
+            "reservation release must not be double-applied on replay",
+        );
+
+        setup.drop().await;
+    }
+}
+
 mod cancel_limit_order {
     use candid::{Nat, Principal};
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
