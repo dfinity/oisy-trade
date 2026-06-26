@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
     FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
-    TokenId, TokenMetadata,
+    TimeInForce, TokenId, TokenMetadata,
 };
 use candid::Principal;
 use ic_stable_structures::Storable;
@@ -107,6 +107,9 @@ pub struct AddLimitOrderEvent {
     pub price: Price,
     #[n(4)]
     pub quantity: Quantity,
+    /// Time-in-force policy.
+    #[n(5)]
+    pub time_in_force: TimeInForce,
 }
 
 /// Orders processed by the matching engine.

@@ -1,8 +1,8 @@
-use super::{SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
+use super::{CursorNotFound, SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
 use crate::Timestamp;
 use crate::order::{
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, Price,
-    Quantity, Side,
+    Quantity, Side, TimeInForce,
 };
 use crate::test_fixtures::arbitrary::arb_order_record;
 use crate::user::UserId;
@@ -28,6 +28,7 @@ fn test_record() -> OrderRecord {
         status: OrderStatus::Pending,
         created_at: Timestamp::EPOCH,
         last_updated_at: None,
+        time_in_force: TimeInForce::FillOrKill,
     }
 }
 
@@ -54,6 +55,37 @@ fn insert_once_panics_on_duplicate() {
 fn get_returns_none_for_missing() {
     let history = history();
     assert_eq!(history.get(&order_id(42)), None);
+}
+
+#[test]
+fn record_roundtrips_fill_or_kill_through_history() {
+    let mut history = history();
+    let id = order_id(0);
+    let record = test_record();
+    assert_eq!(record.time_in_force, TimeInForce::FillOrKill);
+    history.insert_once(UserId::new(0), id, record.clone());
+
+    let loaded = history.get(&id).unwrap();
+    assert_eq!(loaded.time_in_force, TimeInForce::FillOrKill);
+    assert_eq!(loaded, record);
+}
+
+#[test]
+fn public_record_surfaces_time_in_force() {
+    let record = test_record();
+    let public: oisy_trade_types::OrderRecord = record.into();
+    assert_eq!(
+        public.time_in_force,
+        oisy_trade_types::TimeInForce::FillOrKill
+    );
+
+    let mut gtc = test_record();
+    gtc.time_in_force = TimeInForce::GoodTilCanceled;
+    let public: oisy_trade_types::OrderRecord = gtc.into();
+    assert_eq!(
+        public.time_in_force,
+        oisy_trade_types::TimeInForce::GoodTilCanceled
+    );
 }
 
 #[test]
@@ -190,7 +222,7 @@ fn orders_after_returns_newest_first() {
 
     assert_eq!(
         history.orders_after(owner, None, 10),
-        vec![order_id(2), order_id(1), order_id(0)]
+        Ok(vec![order_id(2), order_id(1), order_id(0)])
     );
 }
 
@@ -205,36 +237,38 @@ fn orders_after_paginates_by_cursor() {
     // last order.
     assert_eq!(
         history.orders_after(owner, None, 2),
-        vec![order_id(4), order_id(3)]
+        Ok(vec![order_id(4), order_id(3)])
     );
     assert_eq!(
         history.orders_after(owner, Some(order_id(3)), 2),
-        vec![order_id(2), order_id(1)]
+        Ok(vec![order_id(2), order_id(1)])
     );
     assert_eq!(
         history.orders_after(owner, Some(order_id(1)), 2),
-        vec![order_id(0)]
+        Ok(vec![order_id(0)])
     );
+    // A valid cursor at the oldest order has no older orders: end of history
+    // is Ok([]), not an error.
     assert_eq!(
         history.orders_after(owner, Some(order_id(0)), 2),
-        Vec::<OrderId>::new()
+        Ok(Vec::<OrderId>::new())
     );
 }
 
 #[test]
-fn orders_after_unknown_cursor_yields_empty() {
+fn orders_after_unknown_cursor_is_not_found() {
     let mut history = history();
     let owner = UserId::new(7);
     history.insert_once(owner, order_id(0), test_record());
 
     assert_eq!(
         history.orders_after(owner, Some(order_id(99)), 10),
-        Vec::<OrderId>::new()
+        Err(CursorNotFound)
     );
 }
 
 #[test]
-fn orders_after_foreign_cursor_yields_empty() {
+fn orders_after_foreign_cursor_is_not_found() {
     let mut history = history();
     let alice = UserId::new(1);
     let bob = UserId::new(2);
@@ -246,7 +280,7 @@ fn orders_after_foreign_cursor_yields_empty() {
     // alice's history after it must not skip into the middle of her orders.
     assert_eq!(
         history.orders_after(alice, Some(order_id(1)), 10),
-        Vec::<OrderId>::new()
+        Err(CursorNotFound)
     );
 }
 
@@ -262,12 +296,12 @@ fn orders_after_isolates_owners() {
 
     assert_eq!(
         history.orders_after(alice, None, 10),
-        vec![order_id(2), order_id(0)]
+        Ok(vec![order_id(2), order_id(0)])
     );
-    assert_eq!(history.orders_after(bob, None, 10), vec![order_id(1)]);
+    assert_eq!(history.orders_after(bob, None, 10), Ok(vec![order_id(1)]));
     assert_eq!(
         history.orders_after(UserId::new(3), None, 10),
-        Vec::<OrderId>::new()
+        Ok(Vec::<OrderId>::new())
     );
 }
 
@@ -284,7 +318,7 @@ fn orders_after_orders_across_books_by_global_seq() {
 
     assert_eq!(
         history.orders_after(owner, None, 10),
-        vec![book0_second, book1, book0_first]
+        Ok(vec![book0_second, book1, book0_first])
     );
 }
 

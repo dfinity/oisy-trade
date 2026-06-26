@@ -11,8 +11,10 @@ mod error;
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
-    DepositRequestError, DepositTemporaryError, Error, ErrorKind, Never, WithdrawError,
-    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
+    GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetOrderBookDepthError,
+    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
+    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
@@ -28,6 +30,17 @@ pub enum Side {
     Buy,
     /// Sell order (ask).
     Sell,
+}
+
+/// Time-in-force policy governing how long a limit order stays active in the
+/// order book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
+pub enum TimeInForce {
+    /// Rests in the book until filled or canceled; may fill partially over time.
+    GoodTilCanceled,
+    /// Must fill in full against resting liquidity when the engine processes it,
+    /// otherwise the whole order is killed with zero execution. Never rests.
+    FillOrKill,
 }
 
 /// A trading pair identified by the base and quote token ledger principals.
@@ -50,6 +63,9 @@ pub struct LimitOrderRequest {
     pub price: Nat,
     /// Order quantity in base token units.
     pub quantity: Nat,
+    /// Time-in-force policy. Absent defaults to
+    /// [`TimeInForce::GoodTilCanceled`].
+    pub time_in_force: Option<TimeInForce>,
 }
 
 /// Error returned by controller-gated endpoints when the caller is not
@@ -123,16 +139,9 @@ pub struct OrderBookDepth {
 pub const DEFAULT_DEPTH_LIMIT: u32 = 100;
 
 /// Maximum depth (levels per side) that `get_order_book_depth` will serve.
-/// Requests for more than this return [`GetOrderBookDepthError::LimitTooLarge`].
+/// Requests for more than this return a [`GetOrderBookDepthError`] carrying
+/// [`GetOrderBookDepthRequestError::LimitTooLarge`] under `kind = RequestError`.
 pub const MAX_DEPTH_LIMIT: u32 = 1_000;
-
-/// Error returned by the `get_order_book_ticker` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetOrderBookTickerError {
-    /// The requested trading pair is not registered on the OISY TRADE.
-    UnknownTradingPair,
-}
 
 /// Request for the `get_order_book_depth` query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -141,25 +150,11 @@ pub struct GetOrderBookDepthRequest {
     pub trading_pair: TradingPair,
     /// Maximum number of price levels returned per side.
     /// When `None`, [`DEFAULT_DEPTH_LIMIT`] is used. Values greater than
-    /// [`MAX_DEPTH_LIMIT`] are rejected with
-    /// [`GetOrderBookDepthError::LimitTooLarge`]. A value of `Some(0)` is
-    /// accepted and returns empty bids/asks vectors.
+    /// [`MAX_DEPTH_LIMIT`] are rejected with a [`GetOrderBookDepthError`]
+    /// carrying [`GetOrderBookDepthRequestError::LimitTooLarge`] under
+    /// `kind = RequestError`. A value of `Some(0)` is accepted and returns
+    /// empty bids/asks vectors.
     pub limit: Option<u32>,
-}
-
-/// Error returned by the `get_order_book_depth` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetOrderBookDepthError {
-    /// The requested trading pair is not registered on the OISY TRADE.
-    UnknownTradingPair,
-    /// The requested depth limit exceeds [`MAX_DEPTH_LIMIT`].
-    LimitTooLarge {
-        /// The rejected limit.
-        requested: u32,
-        /// The maximum limit the OISY TRADE will serve.
-        max: u32,
-    },
 }
 
 /// Status of an order.
@@ -173,6 +168,9 @@ pub enum OrderStatus {
     Filled,
     /// The order has been canceled.
     Canceled,
+    /// The order was terminated by the engine because its time-in-force could
+    /// not be honored (a Fill-or-Kill that could not fully fill).
+    Expired,
 }
 
 /// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
@@ -198,6 +196,8 @@ pub struct OrderRecord {
     /// Time of the most recent modifying event (fill, status transition, or
     /// cancel) in nanoseconds since the Unix epoch; `None` until first modified.
     pub last_updated_at: Option<u64>,
+    /// Time-in-force policy the order was placed with.
+    pub time_in_force: TimeInForce,
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.
@@ -353,28 +353,6 @@ pub struct UserTokenBalance {
     pub token: Token,
     /// The caller's free + reserved holdings for `token`.
     pub balance: Balance,
-}
-
-/// Per-entry error reported in [`get_balances`] responses.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetBalancesError {
-    /// The filter referenced a token that the OISY TRADE does not support.
-    TokenNotSupported(FilterToken),
-}
-
-/// Whole-request error reported when [`get_balances`] rejects the
-/// request before any per-entry lookup runs.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum GetBalancesRequestError {
-    /// The filter exceeded [`MAX_FILTER_LEN`] entries.
-    FilterTooLarge {
-        /// The submitted filter length.
-        len: u32,
-        /// The maximum allowed filter length ([`MAX_FILTER_LEN`]).
-        max: u32,
-    },
 }
 
 /// Request to add a new trading pair to the OISY TRADE.

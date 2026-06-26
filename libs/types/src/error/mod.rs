@@ -3,19 +3,18 @@
 #[cfg(test)]
 mod tests;
 
-use crate::{Nat, Principal, TokenId};
+use crate::{FilterToken, Nat, Principal, TokenId};
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A disposition-tagged, forward-compatible user-facing error.
 ///
-/// The update-endpoint error types use this shape: a [`kind`](Self::kind)
+/// The user-facing error types use this shape: a [`kind`](Self::kind)
 /// carrying the disposition (what the caller should do) plus an advisory,
 /// human-readable [`message`](Self::message). The disposition is the contract;
 /// clients branch on `kind` and the inner leaf, and **must not** parse
-/// `message`. The remaining error types are still flat variants, tracked for
-/// conversion to this shape (see their `// TODO(DEFI-2801)` markers).
+/// `message`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct Error<Request, Temporary, Internal> {
     /// The disposition and, when available, the specific reason.
@@ -176,18 +175,35 @@ pub type CancelLimitOrderError = Error<CancelLimitOrderRequestError, Never, Neve
 /// Caller-side reasons `cancel_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum CancelLimitOrderRequestError {
+    /// The supplied order id was not a well-formed order id.
+    #[error("the supplied order id is not a well-formed order id")]
+    InvalidOrderId,
     /// No order with the given ID exists.
     #[error("no order with the given id exists")]
     OrderNotFound,
     /// The caller does not own the order.
     #[error("the caller does not own the order")]
     NotOrderOwner,
-    /// The order has already been fully filled and cannot be canceled.
-    #[error("the order has already been fully filled")]
-    OrderAlreadyFilled,
-    /// The order has already been canceled.
-    #[error("the order has already been canceled")]
-    OrderAlreadyCanceled,
+    /// The order has reached a terminal state (Filled, Canceled, or Expired)
+    /// and can no longer be canceled.
+    #[error("the order has reached a terminal state and can no longer be canceled")]
+    OrderAlreadyTerminal,
+}
+
+/// Error returned by the `get_my_orders` query.
+pub type GetMyOrdersError = Error<GetMyOrdersRequestError, Never, Never>;
+
+/// Caller-side reasons `get_my_orders` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetMyOrdersRequestError {
+    /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
+    /// not a well-formed order id.
+    #[error("the supplied order id is not a well-formed order id")]
+    InvalidOrderId,
+    /// A well-formed order id in the filter (`ById` target or `ByPage.after`
+    /// cursor) is unknown or not owned by the caller.
+    #[error("no order with the given id exists for the caller")]
+    OrderNotFound,
 }
 
 /// Error returned by the deposit endpoint.
@@ -344,5 +360,59 @@ pub enum WithdrawInternalError {
         method: String,
         /// The reason the response could not be decoded.
         reason: String,
+    },
+}
+
+/// Error returned by the `get_order_book_ticker` query.
+pub type GetOrderBookTickerError = Error<GetOrderBookTickerRequestError, Never, Never>;
+
+/// Caller-side reasons `get_order_book_ticker` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetOrderBookTickerRequestError {
+    /// The requested trading pair is not registered on the OISY TRADE.
+    #[error("the requested trading pair is not registered")]
+    UnknownTradingPair,
+}
+
+/// Error returned by the `get_order_book_depth` query.
+pub type GetOrderBookDepthError = Error<GetOrderBookDepthRequestError, Never, Never>;
+
+/// Caller-side reasons `get_order_book_depth` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetOrderBookDepthRequestError {
+    /// The requested trading pair is not registered on the OISY TRADE.
+    #[error("the requested trading pair is not registered")]
+    UnknownTradingPair,
+    /// The requested depth limit exceeds the maximum supported value.
+    #[error("requested depth limit {requested} exceeds the maximum {max}")]
+    LimitTooLarge {
+        /// The rejected limit.
+        requested: u32,
+        /// The maximum limit the OISY TRADE will serve.
+        max: u32,
+    },
+}
+
+/// Error returned by the `get_balances` / `get_fee_balances` queries.
+///
+/// These are read endpoints, so a failure dooms the whole call: the response is
+/// either every requested balance or this single error (see the spec's
+/// batch-semantic design decision). A blind retry of a read is cheap and
+/// side-effect-free, so there is no per-entry partial-success result.
+pub type GetBalancesError = Error<GetBalancesRequestError, Never, Never>;
+
+/// Caller-side reasons `get_balances` / `get_fee_balances` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetBalancesRequestError {
+    /// The filter referenced a token that the OISY TRADE does not support.
+    #[error("the filter referenced an unsupported token {0:?}")]
+    TokenNotSupported(FilterToken),
+    /// The filter exceeded the maximum number of entries.
+    #[error("the filter has {len} entries, exceeding the maximum {max}")]
+    FilterTooLarge {
+        /// The submitted filter length.
+        len: u32,
+        /// The maximum allowed filter length.
+        max: u32,
     },
 }

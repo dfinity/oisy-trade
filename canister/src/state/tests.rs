@@ -218,7 +218,7 @@ mod record_trading_pair {
 }
 
 mod add_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::{
@@ -248,6 +248,7 @@ mod add_limit_order {
             side: Side::Buy,
             price: Price::new(100 * PRICE_SCALE),
             quantity: Quantity::from(LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         let result = state.validate_limit_order(user, pair, pending);
 
@@ -263,7 +264,7 @@ mod cancel_limit_order {
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
-        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_order,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_fok_order, place_order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -436,7 +437,35 @@ mod cancel_limit_order {
 
         let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
 
-        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyFilled));
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_cancel_pending_fok_into_canceled_and_refund() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Pending));
+
+        assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn should_reject_canceling_expired_fok() {
+        use crate::state::CancelLimitOrderError;
+
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        // FOK against an empty book: matching kills it, ending Expired.
+        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+        assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
+
+        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+
+        assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
 
     /// Cancels `order_id` owned by `user` and asserts that exactly
@@ -512,7 +541,7 @@ mod cancel_limit_order {
 }
 
 mod record_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Side, TimeInForce};
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
@@ -553,6 +582,7 @@ mod record_limit_order {
                     side: Side::Sell,
                     price: Price::new(100 * PRICE_SCALE),
                     quantity: lot.into(),
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             )
             .unwrap();
@@ -584,13 +614,13 @@ mod record_limit_order {
         let owner_id = state.user_registry.lookup(OWNER).unwrap();
         assert_eq!(
             state.order_history.orders_after(owner_id, None, 10),
-            vec![second, first]
+            Ok(vec![second, first])
         );
     }
 }
 
 mod get_user_orders {
-    use crate::order::{FeeRates, OrderBookId, Side};
+    use crate::order::{CursorNotFound, FeeRates, OrderBookId, Side};
     use crate::state::State;
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
@@ -627,7 +657,7 @@ mod get_user_orders {
         let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
         let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
 
-        let orders = state.get_user_orders(&OWNER, None, 10);
+        let orders = state.get_user_orders(&OWNER, None, 10).unwrap();
         let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
         assert_eq!(ids, vec![second, first], "newest first");
         for (_, joined_pair, record) in &orders {
@@ -639,19 +669,43 @@ mod get_user_orders {
         assert_eq!(
             state
                 .get_user_orders(&OWNER, Some(second), 10)
+                .unwrap()
                 .into_iter()
                 .map(|(id, _, _)| id)
                 .collect::<Vec<_>>(),
             vec![first]
         );
-        // Caller isolation, and an unknown cursor yields nothing.
-        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
-        assert!(state.get_user_orders(&OWNER, Some(first), 10).is_empty());
+        // A caller with no orders and no cursor sees an empty page.
+        assert!(
+            state
+                .get_user_orders(&stranger, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        // A cursor that names an order the caller does not own is not found —
+        // whether the caller has no orders at all...
+        assert_eq!(
+            state.get_user_orders(&stranger, Some(first), 10),
+            Err(CursorNotFound)
+        );
+        // ...or the cursor is simply foreign to the (registered) caller.
+        let owned_by_stranger = place_order(&mut state, stranger, &pair, Side::Buy, 100, lot);
+        assert_eq!(
+            state.get_user_orders(&OWNER, Some(owned_by_stranger), 10),
+            Err(CursorNotFound)
+        );
+        // The oldest order is a valid cursor with no older orders: Ok([]).
+        assert!(
+            state
+                .get_user_orders(&OWNER, Some(first), 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 
 mod validate_overflow_invariant {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::test_fixtures;
     use crate::test_fixtures::arbitrary::arb_side;
@@ -716,6 +770,7 @@ mod validate_overflow_invariant {
                     side,
                     price,
                     quantity,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
 
@@ -733,7 +788,7 @@ mod validate_overflow_invariant {
 }
 
 mod validate_limit_order {
-    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+    use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side, TimeInForce};
     use crate::state::AddLimitOrderError;
     use crate::state::State;
     use crate::test_fixtures;
@@ -778,6 +833,7 @@ mod validate_limit_order {
             side: Side::Buy,
             price: Price::new(ticks * TICK_SIZE.get()),
             quantity: Quantity::from(lots * LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         state
             .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
@@ -862,6 +918,7 @@ mod validate_limit_order {
             side: Side::Buy,
             price: Price::new(TICK_SIZE.get() + 1),
             quantity: Quantity::from(6 * LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
         };
         assert_matches!(
             state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
@@ -994,7 +1051,9 @@ mod settle_fills {
     #[test]
     fn should_settle_fill_with_price_exceeding_u64() {
         use crate::Timestamp;
-        use crate::order::{LotSize, PendingOrder, TickSize, TokenId, TokenMetadata, TradingPair};
+        use crate::order::{
+            LotSize, PendingOrder, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+        };
         use crate::state::StableMemoryOptions;
         use std::num::{NonZeroU64, NonZeroU128};
 
@@ -1048,6 +1107,7 @@ mod settle_fills {
                         side,
                         price,
                         quantity,
+                        time_in_force: TimeInForce::GoodTilCanceled,
                     },
                 )
                 .expect("validate_limit_order failed");
@@ -1605,7 +1665,7 @@ mod settle_fills {
 
     mod order_status {
         use super::*;
-        use crate::order::{OrderRecord, OrderStatus};
+        use crate::order::{OrderRecord, OrderStatus, TimeInForce};
 
         /// The persisted record for `order_id` as `owner` sees it via
         /// `get_user_order`.
@@ -1732,6 +1792,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1774,6 +1835,7 @@ mod settle_fills {
                     status: OrderStatus::Filled,
                     created_at: sell.created_at,
                     last_updated_at: sell.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1789,6 +1851,7 @@ mod settle_fills {
                     status: OrderStatus::Open,
                     created_at: buy.created_at,
                     last_updated_at: buy.last_updated_at,
+                    time_in_force: TimeInForce::GoodTilCanceled,
                 },
             );
         }
@@ -2003,8 +2066,9 @@ mod settle_fills {
         /// any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
-        /// - total op count is in `[2 * fills, 3 * fills]` (the extra op is
-        ///   the buy-taker price-improvement `Unreserve`)
+        /// - total op count is in `[2 * fills + expired, 3 * fills + expired]`
+        ///   (the extra per-fill op is the buy-taker price-improvement
+        ///   `Unreserve`; each killed order adds one refund `Unreserve`)
         /// This covers the fuzz shape the retired `settle_fill_ordering`
         /// proptest exercised, moved one layer up to the pure compute fn.
         #[test]
@@ -2020,11 +2084,17 @@ mod settle_fills {
                 std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap(),
             );
             let fills_len = output.fills.len();
+            let expired_len = output.expired_orders.len();
 
             prop_assert!(
-                ops.len() >= 2 * fills_len && ops.len() <= 3 * fills_len,
-                "ops.len() {} outside [{}, {}] for {} fills",
-                ops.len(), 2 * fills_len, 3 * fills_len, fills_len,
+                ops.len() >= 2 * fills_len + expired_len
+                    && ops.len() <= 3 * fills_len + expired_len,
+                "ops.len() {} outside [{}, {}] for {} fills and {} expired",
+                ops.len(),
+                2 * fills_len + expired_len,
+                3 * fills_len + expired_len,
+                fills_len,
+                expired_len,
             );
 
             let quote_transfers = ops.iter().filter(|o| matches!(
@@ -2038,11 +2108,11 @@ mod settle_fills {
             prop_assert_eq!(quote_transfers, fills_len);
             prop_assert_eq!(base_transfers, fills_len);
 
-            // Unreserves only fire for buy-taker fills with strictly positive
-            // price improvement.
+            // Unreserves fire for buy-taker fills with strictly positive price
+            // improvement, plus one refund per killed (expired) order.
             let expected_unreserves = output.fills.iter().filter(|f| {
                 f.taker_side == order::Side::Buy && f.taker_price.get() > f.maker_price.get()
-            }).count();
+            }).count() + expired_len;
             let unreserves = ops.iter().filter(|o| matches!(
                 o,
                 BalanceOperation::Unreserve { .. }
@@ -2283,6 +2353,10 @@ mod settle_fills {
         }
 
         fn setup_with_fees(maker_bps: u16, taker_bps: u16) -> TestState {
+            let fee_rates = FeeRates {
+                maker: BasisPoint::new(maker_bps).unwrap(),
+                taker: BasisPoint::new(taker_bps).unwrap(),
+            };
             let mut state = test_fixtures::state();
             let pair = icp_ckbtc_trading_pair();
             state.record_trading_pair(
@@ -2294,10 +2368,7 @@ mod settle_fills {
                 LOT_SIZE,
                 MIN_NOTIONAL,
                 Some(MAX_NOTIONAL),
-                FeeRates {
-                    maker: BasisPoint::new(maker_bps).unwrap(),
-                    taker: BasisPoint::new(taker_bps).unwrap(),
-                },
+                fee_rates,
             );
             state
         }
@@ -2356,6 +2427,441 @@ mod settle_fills {
         assert_eq!(base_before, base_after, "base token total changed");
         assert_eq!(quote_before, quote_after, "quote token total changed");
     }
+
+    mod fill_or_kill {
+        use super::*;
+        use crate::order::{
+            BasisPoint, OrderBookSnapshot, OrderId, OrderRecord, OrderSeq, OrderStatus,
+        };
+        use crate::test_fixtures::tokens::SupportedTokens;
+        use std::collections::BTreeSet;
+
+        const MAKER: Principal = Principal::from_slice(&[42_u8]);
+        const TAKER: Principal = Principal::from_slice(&[43_u8]);
+
+        const MAKER_BPS: u16 = 10; // 0.1 %
+        const TAKER_BPS: u16 = 25; // 0.25 %
+        const ONE_ICP: u64 = SupportedTokens::ICP.one();
+
+        #[test]
+        fn should_fill() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy fully crosses a single resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::zero(),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "sell fully crosses a single resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(3_990_u64)),
+                    expected_balances_maker: (
+                        Balance::new_free(ONE_ICP - 100_000),
+                        Balance::zero(),
+                    ),
+                    expected_fee_balances: (
+                        Some(Quantity::from(100_000_u64)),
+                        Some(Quantity::from(10_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy above resting ask fills at maker price and refunds surplus"
+                        .to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(5_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(ONE_ICP - 250_000),
+                        Balance::new_free(1_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(3_996_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(250_000_u64)),
+                        Some(Quantity::from(4_u64)),
+                    ),
+                },
+                TestCase {
+                    desc: "buy sweeps several ascending ask levels".to_string(),
+                    bids: vec![],
+                    asks: vec![
+                        (Price::from(4_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(5_000), vec![Quantity::from(ONE_ICP)]),
+                        (Price::from(6_000), vec![Quantity::from(ONE_ICP)]),
+                    ],
+                    fok: (Side::Buy, Price::from(6_000), Quantity::from(3 * ONE_ICP)),
+                    expected_balances_taker: (
+                        Balance::new_free(3 * ONE_ICP - 750_000),
+                        Balance::new_free(3_000_u64),
+                    ),
+                    expected_balances_maker: (Balance::zero(), Balance::new_free(14_985_u64)),
+                    expected_fee_balances: (
+                        Some(Quantity::from(750_000_u64)),
+                        Some(Quantity::from(15_u64)),
+                    ),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
+                case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Filled,
+                    "BUG ({}): a crossing FOK should end Filled",
+                    case.desc
+                );
+                assert_eq!(
+                    fok_order.filled_quantity, fok_order.quantity,
+                    "BUG ({}): a filled FOK should be fully filled",
+                    case.desc
+                );
+
+                let (resting_bids, resting_asks) = resting_levels(&state, &pair);
+                assert!(
+                    resting_bids.is_empty() && resting_asks.is_empty(),
+                    "BUG ({}): the FOK is sized to consume every resting maker, so the book should end empty",
+                    case.desc
+                );
+
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after fill",
+                    case.desc
+                );
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
+                assert_eq!(
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after fill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
+                    "BUG ({}): fee balances differ from expected after fill",
+                    case.desc
+                );
+            }
+        }
+
+        #[test]
+        fn should_expire() {
+            let tests_cases = vec![
+                TestCase {
+                    desc: "buy against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell against empty book".to_string(),
+                    bids: vec![],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy below resting ask (no cross)".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(5_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(4_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell above resting bid (no cross)".to_string(),
+                    bids: vec![(Price::from(3_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(3_000_u64)),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy crosses but exceeds total resting ask".to_string(),
+                    bids: vec![],
+                    asks: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(8_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "sell crosses but exceeds total resting bid".to_string(),
+                    bids: vec![(Price::from(4_000), vec![Quantity::from(ONE_ICP)])],
+                    asks: vec![],
+                    fok: (Side::Sell, Price::from(4_000), Quantity::from(2 * ONE_ICP)),
+                    expected_balances_taker: (Balance::new_free(2 * ONE_ICP), Balance::zero()),
+                    expected_balances_maker: (Balance::zero(), Balance::new_reserved(4_000_u64)),
+                    expected_fee_balances: (None, None),
+                },
+                TestCase {
+                    desc: "buy crosses several resting orders but exceeds their total".to_string(),
+                    bids: vec![],
+                    asks: vec![(
+                        Price::from(4_000),
+                        vec![Quantity::from(ONE_ICP), Quantity::from(ONE_ICP)],
+                    )],
+                    fok: (Side::Buy, Price::from(4_000), Quantity::from(3 * ONE_ICP)),
+                    expected_balances_taker: (Balance::zero(), Balance::new_free(12_000_u64)),
+                    expected_balances_maker: (Balance::new_reserved(2 * ONE_ICP), Balance::zero()),
+                    expected_fee_balances: (None, None),
+                },
+            ];
+            for case in tests_cases {
+                let mut state = state();
+                let pair = icp_ckbtc_trading_pair();
+                let book_before = case.populate_book(&mut state);
+
+                let fok_id = case.execute_fok(&mut state);
+
+                let mut book_after = OrderBookSnapshot::from(state.get_order_book(&pair).unwrap());
+                assert_eq!(
+                    book_after.next_seq,
+                    OrderSeq::new(book_before.next_seq.get() + 1),
+                    "BUG ({}): should add only one order between book snapshots",
+                    case.desc
+                );
+                book_after.next_seq = book_before.next_seq;
+                assert_eq!(
+                    book_before, book_after,
+                    "BUG ({}): book should be the same as before when a FOK order is killed (except for the next_seq increment).",
+                    case.desc
+                );
+
+                let (_, _, fok_order) = state.get_user_order(&TAKER, fok_id).unwrap();
+                assert_eq!(
+                    fok_order.status,
+                    OrderStatus::Expired,
+                    "BUG ({}): killed FOK should end Expired",
+                    case.desc
+                );
+
+                let balances_taker = test_fixtures::balances_pair(&state, &TAKER, &pair);
+                assert_eq!(
+                    balances_taker, case.expected_balances_taker,
+                    "BUG ({}): taker balances differ from expected after kill",
+                    case.desc
+                );
+                let balances_maker = test_fixtures::balances_pair(&state, &MAKER, &pair);
+                assert_eq!(
+                    balances_maker, case.expected_balances_maker,
+                    "BUG ({}): maker balances differ from expected after kill",
+                    case.desc
+                );
+
+                let fee_balances = (
+                    state.balances.fee_balance(&pair.base),
+                    state.balances.fee_balance(&pair.quote),
+                );
+                assert_eq!(
+                    fee_balances, case.expected_fee_balances,
+                    "BUG ({}): a killed FOK order should not change fee balances",
+                    case.desc
+                );
+            }
+        }
+
+        struct TestCase {
+            desc: String,
+            bids: Vec<(Price, Vec<Quantity>)>,
+            asks: Vec<(Price, Vec<Quantity>)>,
+            fok: (Side, Price, Quantity),
+            expected_balances_taker: (Balance, Balance),
+            expected_balances_maker: (Balance, Balance),
+            expected_fee_balances: (Option<Quantity>, Option<Quantity>),
+        }
+
+        impl TestCase {
+            fn populate_book(&self, state: &mut TestState) -> OrderBookSnapshot {
+                let pair = icp_ckbtc_trading_pair();
+                let mut maker_orders = BTreeSet::default();
+
+                for (price, quantities) in &self.bids {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Buy,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                for (price, quantities) in &self.asks {
+                    for quantity in quantities {
+                        let order_id = test_fixtures::place_order(
+                            state,
+                            MAKER,
+                            &pair,
+                            Side::Sell,
+                            price.get(),
+                            *quantity,
+                        );
+                        assert!(
+                            maker_orders.insert(order_id),
+                            "BUG ({}): duplicate order ID",
+                            self.desc
+                        );
+                    }
+                }
+
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+
+                for maker_order in maker_orders {
+                    let (_, _, order) = state.get_user_order(&MAKER, maker_order).unwrap();
+                    assert_eq!(
+                        order.status,
+                        OrderStatus::Open,
+                        "BUG (test setup, {}): maker order is not resting in the book",
+                        self.desc
+                    );
+                }
+
+                OrderBookSnapshot::from(state.get_order_book(&pair).unwrap())
+            }
+
+            fn execute_fok(&self, state: &mut TestState) -> OrderId {
+                let (fok_side, fok_price, fok_quantity) = self.fok;
+
+                let fok_id = test_fixtures::place_fok_order(
+                    state,
+                    TAKER,
+                    &icp_ckbtc_trading_pair(),
+                    fok_side,
+                    fok_price.get(),
+                    fok_quantity,
+                );
+                EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
+                fok_id
+            }
+        }
+
+        fn state() -> TestState {
+            let mut state = test_fixtures::state();
+            let pair = icp_ckbtc_trading_pair();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                pair,
+                icp_metadata(),
+                ckbtc_metadata(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                FeeRates {
+                    maker: BasisPoint::new(MAKER_BPS).unwrap(),
+                    taker: BasisPoint::new(TAKER_BPS).unwrap(),
+                },
+            );
+            state
+        }
+
+        /// A single `process_pending_orders` round carrying both a killed FOK
+        /// and a GTC order: the GTC behaves normally (rests Open) and the FOK
+        /// kill does not disturb it.
+        #[test]
+        fn should_process_killed_fok_and_gtc_in_same_round() {
+            let mut state = setup();
+            let lot = u128::from(LOT_SIZE.get());
+            let pair = icp_ckbtc_trading_pair();
+            // FOK Buy against an empty book — it will be killed. A GTC Sell that
+            // does not cross it (priced above the FOK) — it will rest Open. Both
+            // are pending when the single round runs.
+            let fok_id = test_fixtures::place_fok_order(
+                &mut state,
+                BUYER,
+                &pair,
+                Side::Buy,
+                100 * PRICE_SCALE,
+                lot,
+            );
+            let gtc_id = test_fixtures::place_order(
+                &mut state,
+                SELLER,
+                &pair,
+                Side::Sell,
+                200 * PRICE_SCALE,
+                lot,
+            );
+            assert_eq!(state.get_order_book(&pair).unwrap().pending_orders_len(), 2);
+
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            // The FOK was killed; its quote reservation is released.
+            let fok = record_of(&state, BUYER, fok_id);
+            assert_eq!(fok.status, OrderStatus::Expired);
+            assert_eq!(fok.filled_quantity, Quantity::ZERO);
+            assert_eq!(
+                state.get_balance(&BUYER, &pair.quote),
+                balance(100 * lot, 0u64)
+            );
+
+            // The GTC rested Open, fully reserved, untouched by the FOK kill.
+            let gtc = record_of(&state, SELLER, gtc_id);
+            assert_eq!(gtc.status, OrderStatus::Open);
+            assert_eq!(gtc.filled_quantity, Quantity::ZERO);
+            assert_eq!(state.get_balance(&SELLER, &pair.base), balance(0u64, lot));
+        }
+
+        /// The persisted record for `order_id` as `owner` sees it via
+        /// `get_user_order`.
+        fn record_of(
+            state: &State<VectorMemory, VectorMemory>,
+            owner: Principal,
+            order_id: crate::order::OrderId,
+        ) -> OrderRecord {
+            state
+                .get_user_order(&owner, order_id)
+                .map(|(_, _, record)| record)
+                .expect("order record present")
+        }
+
+        /// The resting orders of `pair`'s book — its bid and ask levels — with
+        /// the next-sequence counter and (drained) pending queue excluded, so
+        /// two snapshots compare equal iff the resting book is byte-identical.
+        fn resting_levels(
+            state: &State<VectorMemory, VectorMemory>,
+            pair: &crate::order::TradingPair,
+        ) -> (Vec<crate::order::PriceLevel>, Vec<crate::order::PriceLevel>) {
+            let snapshot =
+                crate::order::OrderBookSnapshot::from(state.get_order_book(pair).unwrap());
+            (snapshot.bids, snapshot.asks)
+        }
+    }
 }
 
 mod execution_policy {
@@ -2398,7 +2904,7 @@ mod get_balances {
     #[test]
     fn should_return_empty_for_user_without_balances_and_no_filter() {
         let (state, _, _) = test_fixtures::two_token_state();
-        assert_eq!(state.get_balances(&USER, None), vec![]);
+        assert_eq!(state.get_balances(&USER, None), Ok(vec![]));
     }
 
     /// Read paths resolve identities with `lookup`, never `get_or_register`, so
@@ -2409,17 +2915,22 @@ mod get_balances {
         let registry_before = state.user_registry.clone();
         let stranger = Principal::from_slice(&[0xEE]);
 
-        assert_eq!(state.get_balances(&stranger, None), vec![]);
+        assert_eq!(state.get_balances(&stranger, None), Ok(vec![]));
         let filter = vec![FilterToken::ById(a_id.into())];
         assert_eq!(
             state.get_balances(&stranger, Some(&filter)),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)]),
         );
         assert_eq!(
             state.get_balance(&stranger, &a_id),
             crate::balance::Balance::zero()
         );
-        assert!(state.get_user_orders(&stranger, None, 10).is_empty());
+        assert!(
+            state
+                .get_user_orders(&stranger, None, 10)
+                .unwrap()
+                .is_empty()
+        );
 
         assert_eq!(
             state.user_registry, registry_before,
@@ -2434,7 +2945,7 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)],
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 0, 0)]),
         );
     }
 
@@ -2450,13 +2961,15 @@ mod get_balances {
         state.deposit(USER, b_id, Quantity::from(5u64), StableMemoryOptions::Write);
 
         // BTreeMap iteration follows TokenId ordering; assert as a set.
-        let mut got = state.get_balances(&USER, None);
-        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut got = state
+            .get_balances(&USER, None)
+            .expect("no filter cannot fail");
+        got.sort_by_key(|b| b.token.id.ledger_id);
         let mut want = vec![
-            ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-            ok_balance(b_id, test_fixtures::icp_metadata(), 5, 0),
+            balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+            balance(b_id, test_fixtures::icp_metadata(), 5, 0),
         ];
-        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        want.sort_by_key(|b| b.token.id.ledger_id);
         assert_eq!(got, want);
     }
 
@@ -2476,10 +2989,10 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
-            ],
+            Ok(vec![
+                balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ]),
         );
     }
 
@@ -2499,26 +3012,12 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, None),
-            vec![ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)]
+            Ok(vec![balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0)])
         );
     }
 
     #[test]
-    fn should_return_token_not_supported_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
-        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
-
-        assert_eq!(
-            state.get_balances(&USER, Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
-        );
-    }
-
-    #[test]
-    fn should_mix_ok_and_err_entries_in_filter_order() {
+    fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
         let (mut state, a_id, _) = test_fixtures::two_token_state();
         state.deposit(
             USER,
@@ -2534,12 +3033,11 @@ mod get_balances {
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
+            Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::TokenNotSupported(FilterToken::ById(
                     unknown.into()
-                ))),
-            ],
+                ))
+            )),
         );
     }
 
@@ -2552,25 +3050,19 @@ mod get_balances {
             Quantity::from(10u64),
             StableMemoryOptions::Write,
         );
-        let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
         let filter = vec![
             FilterToken::ById(a_id.into()),
             FilterToken::ById(a_id.into()),
             FilterToken::ById(b_id.into()),
-            FilterToken::ById(unknown.into()),
             FilterToken::ById(b_id.into()),
-            FilterToken::ById(unknown.into()),
         ];
 
         assert_eq!(
             state.get_balances(&USER, Some(&filter)),
-            vec![
-                ok_balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
-                ok_balance(b_id, test_fixtures::icp_metadata(), 0, 0),
-                Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                    unknown.into()
-                ))),
-            ],
+            Ok(vec![
+                balance(a_id, test_fixtures::ckbtc_metadata(), 10, 0),
+                balance(b_id, test_fixtures::icp_metadata(), 0, 0),
+            ]),
         );
     }
 
@@ -2584,16 +3076,16 @@ mod get_balances {
             StableMemoryOptions::Write,
         );
 
-        assert_eq!(state.get_balances(&USER, Some(&[])), vec![]);
+        assert_eq!(state.get_balances(&USER, Some(&[])), Ok(vec![]));
     }
 
-    fn ok_balance(
+    fn balance(
         token_id: TokenId,
         metadata: crate::order::TokenMetadata,
         free: u64,
         reserved: u64,
-    ) -> Result<UserTokenBalance, GetBalancesError> {
-        Ok(UserTokenBalance {
+    ) -> UserTokenBalance {
+        UserTokenBalance {
             token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
@@ -2602,7 +3094,7 @@ mod get_balances {
                 free: Nat::from(free),
                 reserved: Nat::from(reserved),
             },
-        })
+        }
     }
 }
 
@@ -2615,7 +3107,7 @@ mod get_fee_balances {
     #[test]
     fn should_return_empty_when_no_fees_accrued_and_no_filter() {
         let (state, _, _) = test_fixtures::two_token_state();
-        assert_eq!(state.get_fee_balances(None), vec![]);
+        assert_eq!(state.get_fee_balances(None), Ok(vec![]));
     }
 
     #[test]
@@ -2625,7 +3117,7 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 0)],
+            Ok(vec![fee_balance(a_id, test_fixtures::ckbtc_metadata(), 0)]),
         );
     }
 
@@ -2635,13 +3127,13 @@ mod get_fee_balances {
         test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
         test_fixtures::accrue_fee(&mut state.balances, b_id, 3);
 
-        let mut got = state.get_fee_balances(None);
-        got.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        let mut got = state.get_fee_balances(None).expect("no filter cannot fail");
+        got.sort_by_key(|b| b.token.id.ledger_id);
         let mut want = vec![
-            ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
-            ok_fee_balance(b_id, test_fixtures::icp_metadata(), 3),
+            fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+            fee_balance(b_id, test_fixtures::icp_metadata(), 3),
         ];
-        want.sort_by_key(|r| r.as_ref().unwrap().token.id.ledger_id);
+        want.sort_by_key(|b| b.token.id.ledger_id);
         assert_eq!(got, want);
     }
 
@@ -2656,24 +3148,30 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![
-                ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
-                ok_fee_balance(b_id, test_fixtures::icp_metadata(), 0),
-            ],
+            Ok(vec![
+                fee_balance(a_id, test_fixtures::ckbtc_metadata(), 7),
+                fee_balance(b_id, test_fixtures::icp_metadata(), 0),
+            ]),
         );
     }
 
     #[test]
-    fn should_return_token_not_supported_for_unknown_filter_entry() {
-        let (state, _, _) = test_fixtures::two_token_state();
+    fn should_fail_whole_call_when_one_filter_entry_is_unknown() {
+        let (mut state, a_id, _) = test_fixtures::two_token_state();
+        test_fixtures::accrue_fee(&mut state.balances, a_id, 7);
         let unknown = TokenId::new(Principal::from_slice(&[0xFF]));
-        let filter = vec![FilterToken::ById(unknown.into())];
+        let filter = vec![
+            FilterToken::ById(a_id.into()),
+            FilterToken::ById(unknown.into()),
+        ];
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![Err(GetBalancesError::TokenNotSupported(FilterToken::ById(
-                unknown.into()
-            )))],
+            Err(GetBalancesError::request(
+                oisy_trade_types::GetBalancesRequestError::TokenNotSupported(FilterToken::ById(
+                    unknown.into()
+                ))
+            )),
         );
     }
 
@@ -2688,7 +3186,7 @@ mod get_fee_balances {
 
         assert_eq!(
             state.get_fee_balances(Some(&filter)),
-            vec![ok_fee_balance(a_id, test_fixtures::ckbtc_metadata(), 5)],
+            Ok(vec![fee_balance(a_id, test_fixtures::ckbtc_metadata(), 5)]),
         );
     }
 
@@ -2697,15 +3195,15 @@ mod get_fee_balances {
         let (mut state, a_id, _) = test_fixtures::two_token_state();
         test_fixtures::accrue_fee(&mut state.balances, a_id, 5);
 
-        assert_eq!(state.get_fee_balances(Some(&[])), vec![]);
+        assert_eq!(state.get_fee_balances(Some(&[])), Ok(vec![]));
     }
 
-    fn ok_fee_balance(
+    fn fee_balance(
         token_id: TokenId,
         metadata: crate::order::TokenMetadata,
         amount: u64,
-    ) -> Result<UserTokenBalance, GetBalancesError> {
-        Ok(UserTokenBalance {
+    ) -> UserTokenBalance {
+        UserTokenBalance {
             token: oisy_trade_types::Token {
                 id: token_id.into(),
                 metadata: metadata.into(),
@@ -2714,7 +3212,7 @@ mod get_fee_balances {
                 free: Nat::from(amount),
                 reserved: Nat::from(0u64),
             },
-        })
+        }
     }
 }
 

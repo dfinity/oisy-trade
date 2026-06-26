@@ -2,7 +2,7 @@ use super::*;
 use crate::balance::Balance;
 use crate::order::{
     FeeRates, OrderBookId, OrderId, OrderStatus, PairToken, PendingOrder, Price, Quantity, Side,
-    TokenId, TradingPair,
+    TimeInForce, TokenId, TradingPair,
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
@@ -163,11 +163,22 @@ impl Scenario {
     /// `AddLimitOrderEvent`. Returns the assigned `OrderId` so the caller can
     /// reference it in later matching/settling fixtures.
     fn with_limit_order(
+        self,
+        user: Principal,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+    ) -> (Self, OrderId) {
+        self.with_limit_order_tif(user, side, price, quantity, TimeInForce::GoodTilCanceled)
+    }
+
+    fn with_limit_order_tif(
         mut self,
         user: Principal,
         side: Side,
         price: Price,
         quantity: Quantity,
+        time_in_force: TimeInForce,
     ) -> (Self, OrderId) {
         let (order_id, order) = self
             .state
@@ -178,6 +189,7 @@ impl Scenario {
                     side,
                     price,
                     quantity,
+                    time_in_force,
                 },
             )
             .unwrap();
@@ -197,6 +209,7 @@ impl Scenario {
                 side,
                 price,
                 quantity,
+                time_in_force,
             }),
         });
         (self, order_id)
@@ -298,6 +311,18 @@ impl Scenario {
             expected.into(),
             "unexpected filled_quantity for {order_id:?}"
         );
+        self
+    }
+
+    /// Asserts the order history entry for `order_id` carries `expected` TIF.
+    fn assert_time_in_force(self, order_id: OrderId, expected: TimeInForce) -> Self {
+        let tif = self
+            .state
+            .order_history
+            .get(&order_id)
+            .unwrap_or_else(|| panic!("order {order_id:?} missing from history"))
+            .time_in_force;
+        assert_eq!(tif, expected, "unexpected time_in_force for {order_id:?}");
         self
     }
 
@@ -415,6 +440,77 @@ fn should_replay_add_limit_order() {
             Quantity::from(quantity),
         );
     scenario.assert_replay_matches();
+}
+
+#[test]
+fn should_replay_fill_or_kill_order_preserving_time_in_force() {
+    let price = 100u128;
+    let quantity = 1_000_000u128;
+    let (scenario, order_id) = Scenario::new()
+        .with_trading_pair()
+        .with_deposit(
+            user_1(),
+            TokenId::new(quote()),
+            Quantity::from(price * quantity),
+        )
+        .with_limit_order_tif(
+            user_1(),
+            Side::Buy,
+            Price::new(price * PRICE_SCALE),
+            Quantity::from(quantity),
+            TimeInForce::FillOrKill,
+        );
+    scenario
+        .assert_time_in_force(order_id, TimeInForce::FillOrKill)
+        .assert_order_status(order_id, OrderStatus::Pending)
+        .assert_replay_matches();
+}
+
+/// A FOK killed against an empty book transitions to `Expired` and releases its
+/// whole placement reservation through a single `Unreserve`. Replaying the
+/// matching round under `Skip` (the post-upgrade path) must reconstruct the
+/// `Expired` status from history without re-applying the release — the
+/// reservation must not be double-refunded.
+#[test]
+fn should_replay_killed_fill_or_kill_order_preserving_expired_state() {
+    let price = 100u128;
+    let quantity = 1_000_000u128;
+    let reserved = price * quantity;
+    let book_id = OrderBookId::ZERO;
+
+    // FOK Buy against an empty book: nothing crosses, so matching kills it.
+    let (scenario, fok_id) = Scenario::new()
+        .with_trading_pair()
+        .with_deposit(user_1(), TokenId::new(quote()), Quantity::from(reserved))
+        .with_limit_order_tif(
+            user_1(),
+            Side::Buy,
+            Price::new(price * PRICE_SCALE),
+            Quantity::from(quantity),
+            TimeInForce::FillOrKill,
+        );
+
+    scenario
+        .with_matching_round(
+            MatchingEvent {
+                book_id,
+                orders: vec![fok_id.seq()],
+            },
+            SettlingEvent {
+                book_id,
+                balance_operations: vec![BalanceOperation::Unreserve {
+                    order: fok_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(reserved),
+                }],
+            },
+        )
+        // The kill released the whole reservation back to free exactly once.
+        .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
+        .assert_order_status(fok_id, OrderStatus::Expired)
+        .assert_filled_quantity(fok_id, 0u64)
+        .assert_time_in_force(fok_id, TimeInForce::FillOrKill)
+        .assert_replay_matches();
 }
 
 #[test]

@@ -2,11 +2,11 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetBalancesRequestError, GetMyOrdersArgs, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
-    WithdrawTemporaryError,
+    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError,
+    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -138,7 +138,7 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
 #[ic_cdk::query]
 fn get_balances(
     filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     use oisy_trade_canister::Runtime;
     oisy_trade_canister::get_balances(filter, oisy_trade_canister::IC_RUNTIME.msg_caller())
 }
@@ -146,19 +146,26 @@ fn get_balances(
 #[ic_cdk::query]
 fn get_fee_balances(
     filter: Option<Vec<FilterToken>>,
-) -> Result<Vec<Result<UserTokenBalance, GetBalancesError>>, GetBalancesRequestError> {
+) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     oisy_trade_canister::get_fee_balances(filter)
 }
 
 #[ic_cdk::query]
-fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Vec<UserOrder> {
+fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Result<Vec<UserOrder>, GetMyOrdersError> {
     use oisy_trade_canister::Runtime;
-    match oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()) {
-        Ok(orders) => orders,
-        Err(oisy_trade_canister::GetMyOrdersError::InvalidOrderId(e)) => {
-            panic!("ERROR: invalid order id: {e}")
-        }
-    }
+    oisy_trade_canister::get_my_orders(args, oisy_trade_canister::IC_RUNTIME.msg_caller()).map_err(
+        |err| {
+            let leaf = match err {
+                oisy_trade_canister::GetMyOrdersError::InvalidOrderId(_) => {
+                    GetMyOrdersRequestError::InvalidOrderId
+                }
+                oisy_trade_canister::GetMyOrdersError::OrderNotFound => {
+                    GetMyOrdersRequestError::OrderNotFound
+                }
+            };
+            GetMyOrdersError::request(leaf)
+        },
+    )
 }
 
 #[ic_cdk::query]
@@ -290,6 +297,7 @@ fn get_events(
                         side,
                         price,
                         quantity,
+                        time_in_force,
                     },
                 ) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                     user,
@@ -300,6 +308,7 @@ fn get_events(
                     side: oisy_trade_types::Side::from(side),
                     price: candid::Nat::from(price),
                     quantity: quantity.into(),
+                    time_in_force: time_in_force.into(),
                 }),
                 EventType::CancelLimitOrder(
                     oisy_trade_canister::state::event::CancelLimitOrderEvent { order_id },

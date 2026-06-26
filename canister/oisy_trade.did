@@ -76,6 +76,16 @@ type TradingPair = record {
 };
 
 // Request to place a new limit order.
+// Time-in-force policy governing how long a limit order stays active in the
+// order book.
+type TimeInForce = variant {
+    // Rests in the book until filled or canceled; may fill partially over time.
+    GoodTilCanceled;
+    // Must fill in full when the engine processes it, otherwise the whole order
+    // is killed with zero execution. Never rests.
+    FillOrKill;
+};
+
 type LimitOrderRequest = record {
     // The trading pair to place the order on.
     pair : TradingPair;
@@ -88,6 +98,8 @@ type LimitOrderRequest = record {
     // Order quantity in base-token smallest units. Must be a positive
     // multiple of the pair's `lot_size`.
     quantity : nat;
+    // Time-in-force policy. Absent defaults to GoodTilCanceled.
+    time_in_force : opt TimeInForce;
 };
 
 
@@ -127,14 +139,15 @@ type AddLimitOrderError = record {
 type CancelLimitOrderError = record {
     kind : variant {
         RequestError : opt variant {
+            // The supplied order id was not a well-formed order id.
+            InvalidOrderId;
             // No order with the given ID exists.
             OrderNotFound;
             // The caller does not own the order.
             NotOrderOwner;
-            // The order has already been fully filled and cannot be canceled.
-            OrderAlreadyFilled;
-            // The order has already been canceled.
-            OrderAlreadyCanceled;
+            // The order has reached a terminal state (Filled, Canceled, or
+            // Expired) and can no longer be canceled.
+            OrderAlreadyTerminal;
         };
         TemporaryError : opt variant {};
         InternalError : opt variant {};
@@ -201,11 +214,18 @@ type OrderBookDepth = record {
     asks : vec PriceLevel;
 };
 
-// Error returned by the `get_order_book_ticker` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookTickerError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
+// Error returned by the `get_order_book_ticker` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookTickerError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookTickerResult = variant { Ok : OrderBookTicker; Err : GetOrderBookTickerError };
@@ -221,13 +241,20 @@ type GetOrderBookDepthRequest = record {
     limit : opt nat32;
 };
 
-// Error returned by the `get_order_book_depth` query.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetOrderBookDepthError = variant {
-    // The requested trading pair is not registered.
-    UnknownTradingPair;
-    // The requested depth limit exceeds the maximum supported value (1000).
-    LimitTooLarge : record { requested : nat32; max : nat32 };
+// Error returned by the `get_order_book_depth` query. See the disposition
+// contract at the top of this file.
+type GetOrderBookDepthError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The requested trading pair is not registered.
+            UnknownTradingPair;
+            // The requested depth limit exceeds the maximum supported value (1000).
+            LimitTooLarge : record { requested : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 type GetOrderBookDepthResult = variant { Ok : OrderBookDepth; Err : GetOrderBookDepthError };
@@ -242,6 +269,9 @@ type OrderStatus = variant {
     Filled;
     /// The order has been canceled.
     Canceled;
+    // The order was terminated by the engine because its time-in-force could
+    // not be honored (a Fill-or-Kill that could not fully fill).
+    Expired;
 };
 
 /// Full view of an order as stored by the canister.
@@ -265,6 +295,8 @@ type OrderRecord = record {
     /// Time of the most recent modifying event (fill, status transition, or
     /// cancel) in nanoseconds since the Unix epoch; null until first modified.
     last_updated_at : opt nat64;
+    /// Time-in-force policy the order was placed with.
+    time_in_force : TimeInForce;
 };
 
 /// Request for `get_my_orders`.
@@ -291,6 +323,24 @@ type UserOrder = record {
     pair : TradingPair;
     /// The full order record.
     order : OrderRecord;
+};
+
+// Error returned by the `get_my_orders` query. See the disposition contract at
+// the top of this file.
+type GetMyOrdersError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // An order id in the filter (`ById` target or `ByPage.after`
+            // cursor) was not a well-formed order id.
+            InvalidOrderId;
+            // A well-formed order id in the filter (`ById` target or
+            // `ByPage.after` cursor) is unknown or not owned by the caller.
+            OrderNotFound;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // A token identified by its ledger canister ID.
@@ -447,29 +497,27 @@ type UserTokenBalance = record {
     balance : Balance;
 };
 
-// Per-entry error reported in `get_balances` responses.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesError = variant {
-    TokenNotSupported : FilterToken;
-};
-
-// Per-entry result.
-type GetBalanceResult = variant {
-    Ok : UserTokenBalance;
-    Err : GetBalancesError;
-};
-
-// Whole-request error reported when `get_balances` rejects the request
-// before any per-entry lookup runs.
-// TODO(DEFI-2801): convert to the disposition-tagged `{ kind; message }` shape
-type GetBalancesRequestError = variant {
-    FilterTooLarge : record { len : nat32; max : nat32 };
+// Error reported by `get_balances` / `get_fee_balances`. These are read
+// endpoints, so a failure dooms the whole call (no per-entry partial success).
+// See the disposition contract at the top of this file.
+type GetBalancesError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The filter referenced a token that the canister does not support.
+            TokenNotSupported : FilterToken;
+            // The filter exceeded the maximum number of entries.
+            FilterTooLarge : record { len : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Response shape for `get_balances`.
-type GetBalancesResponse = variant {
-    Ok : vec GetBalanceResult;
-    Err : GetBalancesRequestError;
+type GetBalancesResult = variant {
+    Ok : vec UserTokenBalance;
+    Err : GetBalancesError;
 };
 
 // Request to add a new trading pair to the canister.
@@ -596,6 +644,7 @@ type AddLimitOrderEvent = record {
     side : Side;
     price : nat;
     quantity : nat;
+    time_in_force : TimeInForce;
 };
 
 // Event payload for a deposit.
@@ -696,6 +745,8 @@ type GetEventsResult = record {
 };
 
 service : (OisyTradeArg) -> {
+    // ===== Public / user endpoints =====
+
     // Submit a new limit order. The order is queued for *asynchronous*
     // processing by the matching engine; an `OrderId` is returned
     // immediately. An `Ok` response means the order was accepted into the
@@ -747,37 +798,47 @@ service : (OisyTradeArg) -> {
     //
     // - `null`: returns every token the caller holds with non-zero balance.
     // - `opt vec { ... }`: looks up each entry in the filter (including
-    //   zero balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicate filter entries are collapsed and
-    //   reported only once. An empty filter (`opt vec {}`) returns an
-    //   empty `Ok` vector, and is semantically distinct from `null`.
+    //   zero balances). Duplicate filter entries are collapsed and returned
+    //   only once. An empty filter (`opt vec {}`) returns an empty `Ok`
+    //   vector, and is semantically distinct from `null`.
     //
-    // The order of entries in the returned `vec GetBalanceResult` is
-    // unspecified; callers must identify each result by the `token` field
-    // (or the `FilterToken` echoed by `TokenNotSupported`).
-    get_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // a token the canister does not support — reads are cheap to re-issue, so
+    // there is no per-entry partial success.
+    //
+    // The order of entries in the returned `vec UserTokenBalance` is
+    // unspecified; callers must identify each result by the `token` field.
+    get_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Query the canister-owned fee pool. Mirrors `get_balances` shape:
     //
     // - `null`: returns every token with a non-zero fee balance.
-    // - `opt vec { ... }`: looks up each entry (including zero
-    //   balances); unsupported tokens are reported per-entry as
-    //   `TokenNotSupported`. Duplicates collapsed; empty filter returns
-    //   an empty `Ok` vector.
+    // - `opt vec { ... }`: looks up each entry (including zero balances).
+    //   Duplicates collapsed; empty filter returns an empty `Ok` vector.
+    //
+    // The whole call fails with `TokenNotSupported` if the filter references
+    // an unsupported token.
     //
     // Each returned `Balance` carries the fee amount in `free`;
     // `reserved` is always zero (fees have no reserved concept).
-    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResponse) query;
+    get_fee_balances : (opt vec FilterToken) -> (GetBalancesResult) query;
 
     // Return the caller's orders, either a single order by id or a page,
     // newest first. The argument is optional: an absent argument is equivalent
     // to a page from the newest order with the maximum length.
-    get_my_orders : (opt GetMyOrdersArgs) -> (vec UserOrder) query;
+    // Returns `InvalidOrderId` if an order id (the `ById` target or the
+    // `ByPage` cursor) is malformed, and `OrderNotFound` if it is well-formed
+    // but unknown or not owned by the caller.
+    get_my_orders : (opt GetMyOrdersArgs) -> (variant { Ok : vec UserOrder; Err : GetMyOrdersError }) query;
 
     // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
+
+    // ===== END of Public / user endpoints =====
+
+    // ===== Admin endpoints (controller-only) =====
 
     // Add a new trading pair to the canister. Only callable by a controller.
     add_trading_pair : (AddTradingPairRequest) -> (AddTradingPairResult);
@@ -797,8 +858,14 @@ service : (OisyTradeArg) -> {
     // trading pairs.
     resume_trading : (opt vec TradingPair) -> (UnauthorizedResult);
 
+    // ===== END of Admin endpoints (controller-only) =====
+
+    // ===== Debug endpoints (no backwards-compatibility guarantee) =====
+
     // *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
     // Returns events from the event log starting at the given index.
     // The response contains at most 2000 events.
     get_events : (GetEventsArgs) -> (GetEventsResult) query;
+
+    // ===== END of Debug endpoints (no backwards-compatibility guarantee) =====
 }

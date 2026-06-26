@@ -1,5 +1,5 @@
 use super::StateSnapshot;
-use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side};
+use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, Side, TimeInForce};
 use crate::state::Permissions;
 use crate::state::{StableMemoryOptions, State};
 use crate::test_fixtures::mocks::mock_runtime_for;
@@ -14,8 +14,8 @@ mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder,
-        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TokenId, TokenMetadata,
-        TradingPair,
+        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce, TokenId,
+        TokenMetadata, TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
@@ -40,6 +40,7 @@ mod schema_stability {
             side: Side::Buy,
             price: Price::new(100),
             quantity: Quantity::from(1_000_000u64),
+            time_in_force: TimeInForce::FillOrKill,
         }
         .into_order(OrderSeq::new(0));
         let resting_buy = RestingOrder::from(
@@ -47,6 +48,7 @@ mod schema_stability {
                 side: Side::Buy,
                 price: Price::new(90),
                 quantity: Quantity::from(500_000u64),
+                time_in_force: TimeInForce::GoodTilCanceled,
             }
             .into_order(OrderSeq::new(1)),
         );
@@ -55,6 +57,7 @@ mod schema_stability {
                 side: Side::Sell,
                 price: Price::new(110),
                 quantity: Quantity::from(500_000u64),
+                time_in_force: TimeInForce::GoodTilCanceled,
             }
             .into_order(OrderSeq::new(2)),
         );
@@ -149,10 +152,10 @@ mod schema_stability {
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
         89820080810882828141018261410882814102826142068182828141018141028107818b81078103\
-        810a811a000f4240818481008200808118641a000f4240818281185a818281011a0007a120818281\
-        186e818281021a0007a12081810482810081000519232881828141011a000186a0818281078282\
-        0085810581068201801a05f5e1001a0003d090820085810681058200801a000f4240f6\
-        18c81b000000012a05f200";
+        810a811a000f4240818581008200808118641a000f4240820180818281185a818381011a0007a120\
+        820080818281186e818381021a0007a12082008081810482810081000519232881828141011a0001\
+        86a08182810782820085810581068201801a05f5e1001a0003d090820085810681058200801a000f\
+        4240f618c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {
@@ -228,6 +231,7 @@ fn should_roundtrip_state_through_snapshot() {
                 side: Side::Buy,
                 price: Price::new(TICK_SIZE.get()),
                 quantity: Quantity::from(LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         )
         .unwrap();
@@ -246,6 +250,7 @@ fn should_roundtrip_state_through_snapshot() {
                 side: Side::Sell,
                 price: Price::new(3 * TICK_SIZE.get()),
                 quantity: Quantity::from(LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
             },
         )
         .unwrap();
