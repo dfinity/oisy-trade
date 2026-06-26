@@ -264,7 +264,7 @@ mod cancel_limit_order {
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances_pair,
-        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, place_fok_order, place_order,
+        ckbtc_metadata, icp_ckbtc_trading_pair, icp_metadata, order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -288,7 +288,7 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
     }
@@ -298,7 +298,7 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot);
+        let sell_id = order(OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
         assert_cancel_refunds(&mut state, OWNER, sell_id, PairToken::Base, lot, lot);
     }
@@ -308,7 +308,7 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Open));
 
@@ -320,7 +320,7 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let sell_id = place_order(&mut state, OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot);
+        let sell_id = order(OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, sell_id), Some(OrderStatus::Open));
 
@@ -333,22 +333,8 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         // Maker sells 1 lot; taker buys 3 lots — taker partially fills and rests with 2 lots.
-        place_order(
-            &mut state,
-            STRANGER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
-        let buy_id = place_order(
-            &mut state,
-            OWNER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            3 * lot,
-        );
+        order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Open));
 
@@ -368,22 +354,8 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         // Maker buys 1 lot; taker sells 3 lots — taker partially fills and rests with 2 lots.
-        place_order(
-            &mut state,
-            STRANGER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            lot,
-        );
-        let sell_id = place_order(
-            &mut state,
-            OWNER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            3 * lot,
-        );
+        order(STRANGER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        let sell_id = order(OWNER, &pair, Side::Sell, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, sell_id), Some(OrderStatus::Open));
 
@@ -406,15 +378,8 @@ mod cancel_limit_order {
         let lot = u128::from(LOT_SIZE.get());
 
         // Crossing pair: both fully fill when matched.
-        let buy_id = place_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        let _sell_id = place_order(
-            &mut state,
-            STRANGER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        let _sell_id = order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
         // Record only the matching half: the book pops both orders into
         // `filled_orders` and the paired `SettlingEvent` lands on the queue
@@ -445,7 +410,9 @@ mod cancel_limit_order {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+            .fill_or_kill()
+            .place(&mut state);
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Pending));
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
@@ -459,7 +426,9 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         // FOK against an empty book: matching kills it, ending Expired.
-        let buy_id = place_fok_order(&mut state, OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+            .fill_or_kill()
+            .place(&mut state);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
@@ -545,7 +514,7 @@ mod record_limit_order {
     use crate::state::{StableMemoryOptions, State};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, ckbtc_metadata,
-        icp_ckbtc_trading_pair, icp_metadata, place_order,
+        icp_ckbtc_trading_pair, icp_metadata, order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -608,8 +577,8 @@ mod record_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
 
-        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
-        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+        let first = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
+        let second = order(OWNER, &pair, Side::Buy, 100, lot).place(&mut state);
 
         let owner_id = state.user_registry.lookup(OWNER).unwrap();
         assert_eq!(
@@ -624,7 +593,7 @@ mod get_user_orders {
     use crate::state::State;
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
-        icp_ckbtc_trading_pair, icp_metadata, place_order,
+        icp_ckbtc_trading_pair, icp_metadata, order,
     };
     use candid::Principal;
     use ic_stable_structures::VectorMemory;
@@ -654,8 +623,8 @@ mod get_user_orders {
         let lot = u128::from(LOT_SIZE.get());
         let stranger = Principal::from_slice(&[0x02]);
 
-        let first = place_order(&mut state, OWNER, &pair, Side::Sell, 100, lot);
-        let second = place_order(&mut state, OWNER, &pair, Side::Buy, 100, lot);
+        let first = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
+        let second = order(OWNER, &pair, Side::Buy, 100, lot).place(&mut state);
 
         let orders = state.get_user_orders(&OWNER, None, 10).unwrap();
         let ids: Vec<_> = orders.iter().map(|(id, _, _)| *id).collect();
@@ -689,7 +658,7 @@ mod get_user_orders {
             Err(CursorNotFound)
         );
         // ...or the cursor is simply foreign to the (registered) caller.
-        let owned_by_stranger = place_order(&mut state, stranger, &pair, Side::Buy, 100, lot);
+        let owned_by_stranger = order(stranger, &pair, Side::Buy, 100, lot).place(&mut state);
         assert_eq!(
             state.get_user_orders(&OWNER, Some(owned_by_stranger), 10),
             Err(CursorNotFound)
@@ -955,22 +924,8 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
         let price = 100u128;
 
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            price * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            price * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, price * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, price * PRICE_SCALE, lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1024,8 +979,8 @@ mod settle_fills {
         let price = 3_000_500_000u128;
         // 0.5 ETH = 5 × 10^17 wei.
         let quantity = 500_000_000_000_000_000u128;
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
-        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, quantity);
+        test_fixtures::order(BUYER, &pair, Side::Buy, price, quantity).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, price, quantity).place(&mut state);
 
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1150,8 +1105,8 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
 
         // Sell rests at 90, buy taker at 100 → fills at maker's 90
-        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot);
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1176,15 +1131,8 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
 
         // Buy rests at 110, sell taker at 100 → fills at maker's 110
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1209,22 +1157,8 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
 
         // Buy 3 lots at 100, only 1 lot of sell available
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            3 * lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1249,23 +1183,9 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
 
         // Two sells at different prices, buy taker sweeps both
-        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            2 * lot,
-        );
+        test_fixtures::order(SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 2 * lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1287,15 +1207,8 @@ mod settle_fills {
 
         // Sell rests at 90 for 1 lot, buy taker at 100 for 3 lots
         // Fills 1 lot at 90, rests 2 lots
-        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            3 * lot,
-        );
+        test_fixtures::order(SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1321,15 +1234,9 @@ mod settle_fills {
         let lot = u128::from(LOT_SIZE.get());
 
         // Buy rests 1 lot at 100, sell taker 3 lots at 100
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            3 * lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 3 * lot)
+            .place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1355,16 +1262,10 @@ mod settle_fills {
 
         // Two buys at different prices, sell taker sweeps both
         // Sell at 100 matches buy at 110 first, then buy at 100
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 110 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            2 * lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(BUYER, &pair, Side::Buy, 110 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 2 * lot)
+            .place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1391,8 +1292,8 @@ mod settle_fills {
         let user = Principal::from_slice(&[0x42]);
 
         // Same user places both buy and sell
-        test_fixtures::place_order(&mut state, user, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        test_fixtures::place_order(&mut state, user, &pair, Side::Sell, 100 * PRICE_SCALE, lot);
+        test_fixtures::order(user, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(user, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
         let base_before = state.get_balance(&user, &pair.base);
         let quote_before = state.get_balance(&user, &pair.quote);
@@ -1438,32 +1339,11 @@ mod settle_fills {
         let seller_b = Principal::from_slice(&[0x0B]);
 
         // Two sellers place 1 lot each at different prices
-        test_fixtures::place_order(
-            &mut state,
-            seller_a,
-            &pair,
-            Side::Sell,
-            90 * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            seller_b,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(seller_a, &pair, Side::Sell, 90 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(seller_b, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
         // Buy taker sweeps both
-        test_fixtures::place_order(
-            &mut state,
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            2 * lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 2 * lot).place(&mut state);
         let participants = [BUYER, seller_a, seller_b];
         let totals_before = snapshot_balances(&state, &participants);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -1511,8 +1391,8 @@ mod settle_fills {
             .checked_mul_u64(u64::MAX)
             .unwrap();
 
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, price, quantity);
-        test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, price, quantity);
+        test_fixtures::order(BUYER, &pair, Side::Buy, price, quantity).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, price, quantity).place(&mut state);
         let totals_before = snapshot_balances(&state, &[BUYER, SELLER]);
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1588,38 +1468,14 @@ mod settle_fills {
         let seller_a = Principal::from_slice(&[0x0A, 0x02]);
         let buyer_b = Principal::from_slice(&[0x0B, 0x01]);
         let seller_b = Principal::from_slice(&[0x0B, 0x02]);
-        test_fixtures::place_order(
-            &mut state,
-            buyer_a,
-            &pair_a,
-            Side::Buy,
-            price * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            seller_a,
-            &pair_a,
-            Side::Sell,
-            price * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            buyer_b,
-            &pair_b,
-            Side::Buy,
-            price * PRICE_SCALE,
-            lot,
-        );
-        test_fixtures::place_order(
-            &mut state,
-            seller_b,
-            &pair_b,
-            Side::Sell,
-            price * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(buyer_a, &pair_a, Side::Buy, price * PRICE_SCALE, lot)
+            .place(&mut state);
+        test_fixtures::order(seller_a, &pair_a, Side::Sell, price * PRICE_SCALE, lot)
+            .place(&mut state);
+        test_fixtures::order(buyer_b, &pair_b, Side::Buy, price * PRICE_SCALE, lot)
+            .place(&mut state);
+        test_fixtures::order(seller_b, &pair_b, Side::Sell, price * PRICE_SCALE, lot)
+            .place(&mut state);
 
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
@@ -1695,14 +1551,8 @@ mod settle_fills {
             let mut state = setup();
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
 
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Pending));
         }
@@ -1712,14 +1562,8 @@ mod settle_fills {
             let mut state = setup();
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Open));
@@ -1730,22 +1574,10 @@ mod settle_fills {
             let mut state = setup();
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            let sell_id = test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1761,22 +1593,11 @@ mod settle_fills {
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell 3 lots, buy only 1 → sell partially filled, remainder rests
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                3 * lot,
-            );
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let sell_id =
+                test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 3 * lot)
+                    .place(&mut state);
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // The maker rests `Open` with `0 < filled_quantity < quantity`.
@@ -1804,22 +1625,10 @@ mod settle_fills {
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell 1 lot, buy 3 lots → buy partially fills and rests with 2 remaining
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                3 * lot,
-            );
+            let sell_id = test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             // The fully consumed maker reports `filled_quantity == quantity`.
@@ -1862,25 +1671,14 @@ mod settle_fills {
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
             // Sell rests with 2 lots; two successive buys deplete it
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                2 * lot,
-            );
+            let sell_id =
+                test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 2 * lot)
+                    .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             assert_eq!(status_of(&state, SELLER, sell_id), Some(OrderStatus::Open));
 
-            let buy1_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy1_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             // Across two batches the maker accrued both fills, one write
             // per batch, and now sits at one of two lots filled, still `Open`.
@@ -1889,14 +1687,8 @@ mod settle_fills {
             assert_eq!(sell.filled_quantity, Quantity::from(lot));
             assert_eq!(status_of(&state, BUYER, buy1_id), Some(OrderStatus::Filled));
 
-            let buy2_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            let buy2_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             let sell = record_of(&state, SELLER, sell_id);
             assert_eq!(sell.status, OrderStatus::Filled);
@@ -1914,32 +1706,14 @@ mod settle_fills {
             let pair = icp_ckbtc_trading_pair();
             // Two resting makers at different prices; one crossing taker sweeps
             // both in a single matching batch (two `Fill`s for the taker seq).
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                101 * PRICE_SCALE,
-                lot,
-            );
+            test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            test_fixtures::order(SELLER, &pair, Side::Sell, 101 * PRICE_SCALE, lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                101 * PRICE_SCALE,
-                2 * lot,
-            );
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 101 * PRICE_SCALE, 2 * lot)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let buy = record_of(&state, BUYER, buy_id);
@@ -1956,21 +1730,16 @@ mod settle_fills {
             let mut state = setup();
             let lot = u128::from(LOT_SIZE.get());
             let pair = icp_ckbtc_trading_pair();
-            // place_order stamps created_at at Timestamp::EPOCH (0).
-            let sell_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                3 * lot,
-            );
+            // order(...).place() stamps created_at at Timestamp::EPOCH (0).
+            let sell_id =
+                test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, 3 * lot)
+                    .place(&mut state);
             let placed = record_of(&state, SELLER, sell_id);
             assert_eq!(placed.created_at, Timestamp::EPOCH);
             assert_eq!(placed.last_updated_at, None);
 
             // First fill at t = 100: partial, maker stays Open.
-            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
+            test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
             EXECUTOR.run_once(
                 &mut state,
                 &mocks::mock_runtime_at(BUYER, Timestamp::new(100)),
@@ -1981,14 +1750,8 @@ mod settle_fills {
             assert_eq!(after_first.filled_quantity, Quantity::from(lot));
 
             // Second fill at t = 200: last_updated_at advances, created_at holds.
-            test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                2 * lot,
-            );
+            test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, 2 * lot)
+                .place(&mut state);
             EXECUTOR.run_once(
                 &mut state,
                 &mocks::mock_runtime_at(BUYER, Timestamp::new(200)),
@@ -2013,22 +1776,10 @@ mod settle_fills {
             let pair = icp_ckbtc_trading_pair();
             // Two crossing orders left pending on the book; history holds them
             // at `Pending` with `filled_quantity == 0`.
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            let buy_id = test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
+            test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            let buy_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
             let orders: Vec<_> = state
                 .order_book(&OrderBookId::ZERO)
                 .unwrap()
@@ -2161,22 +1912,10 @@ mod settle_fills {
                 Side::Sell => (SELLER, BUYER),
                 Side::Buy => (BUYER, SELLER),
             };
-            test_fixtures::place_order(
-                &mut state,
-                first_user,
-                &pair,
-                first_side,
-                price * PRICE_SCALE,
-                qty,
-            );
-            test_fixtures::place_order(
-                &mut state,
-                second_user,
-                &pair,
-                second_side,
-                price * PRICE_SCALE,
-                qty,
-            );
+            test_fixtures::order(first_user, &pair, first_side, price * PRICE_SCALE, qty)
+                .place(&mut state);
+            test_fixtures::order(second_user, &pair, second_side, price * PRICE_SCALE, qty)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let notional = price * qty;
@@ -2226,22 +1965,10 @@ mod settle_fills {
             let price = 100u128;
             let qty = u128::from(LOT_SIZE.get());
 
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                price * PRICE_SCALE,
-                qty,
-            );
-            test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                price * PRICE_SCALE,
-                qty,
-            );
+            test_fixtures::order(SELLER, &pair, Side::Sell, price * PRICE_SCALE, qty)
+                .place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, price * PRICE_SCALE, qty)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             assert_eq!(state.get_balance(&BUYER, &pair.base), balance(qty, 0u64));
@@ -2266,15 +1993,9 @@ mod settle_fills {
             let qty = u64::from(LOT_SIZE) * 1_000_000;
 
             // Sell rests at 90, buy taker at 100 → fills at maker's 90.
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                90 * PRICE_SCALE,
-                qty,
-            );
-            test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, qty);
+            test_fixtures::order(SELLER, &pair, Side::Sell, 90 * PRICE_SCALE, qty)
+                .place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, qty).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let notional = 90u64 * qty;
@@ -2308,39 +2029,15 @@ mod settle_fills {
             let qty = u64::from(LOT_SIZE) * 1_000_000;
 
             // Two fills, each at qty.
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                price * PRICE_SCALE,
-                qty,
-            );
-            test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                price * PRICE_SCALE,
-                qty,
-            );
+            test_fixtures::order(SELLER, &pair, Side::Sell, price * PRICE_SCALE, qty)
+                .place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, price * PRICE_SCALE, qty)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-            test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                price * PRICE_SCALE,
-                qty,
-            );
-            test_fixtures::place_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                price * PRICE_SCALE,
-                qty,
-            );
+            test_fixtures::order(SELLER, &pair, Side::Sell, price * PRICE_SCALE, qty)
+                .place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, price * PRICE_SCALE, qty)
+                .place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let base_fee_per_fill = (qty as u128 * taker_bps as u128 / 10_000) as u64;
@@ -2705,14 +2402,9 @@ mod settle_fills {
 
                 for (price, quantities) in &self.bids {
                     for quantity in quantities {
-                        let order_id = test_fixtures::place_order(
-                            state,
-                            MAKER,
-                            &pair,
-                            Side::Buy,
-                            price.get(),
-                            *quantity,
-                        );
+                        let order_id =
+                            test_fixtures::order(MAKER, &pair, Side::Buy, price.get(), *quantity)
+                                .place(state);
                         assert!(
                             maker_orders.insert(order_id),
                             "BUG ({}): duplicate order ID",
@@ -2723,14 +2415,9 @@ mod settle_fills {
 
                 for (price, quantities) in &self.asks {
                     for quantity in quantities {
-                        let order_id = test_fixtures::place_order(
-                            state,
-                            MAKER,
-                            &pair,
-                            Side::Sell,
-                            price.get(),
-                            *quantity,
-                        );
+                        let order_id =
+                            test_fixtures::order(MAKER, &pair, Side::Sell, price.get(), *quantity)
+                                .place(state);
                         assert!(
                             maker_orders.insert(order_id),
                             "BUG ({}): duplicate order ID",
@@ -2757,14 +2444,15 @@ mod settle_fills {
             fn execute_fok(&self, state: &mut TestState) -> OrderId {
                 let (fok_side, fok_price, fok_quantity) = self.fok;
 
-                let fok_id = test_fixtures::place_fok_order(
-                    state,
+                let fok_id = test_fixtures::order(
                     TAKER,
                     &icp_ckbtc_trading_pair(),
                     fok_side,
                     fok_price.get(),
                     fok_quantity,
-                );
+                )
+                .fill_or_kill()
+                .place(state);
                 EXECUTOR.run_once(state, &mocks::mock_runtime_for_timer());
                 fok_id
             }
@@ -2801,22 +2489,11 @@ mod settle_fills {
             // FOK Buy against an empty book — it will be killed. A GTC Sell that
             // does not cross it (priced above the FOK) — it will rest Open. Both
             // are pending when the single round runs.
-            let fok_id = test_fixtures::place_fok_order(
-                &mut state,
-                BUYER,
-                &pair,
-                Side::Buy,
-                100 * PRICE_SCALE,
-                lot,
-            );
-            let gtc_id = test_fixtures::place_order(
-                &mut state,
-                SELLER,
-                &pair,
-                Side::Sell,
-                200 * PRICE_SCALE,
-                lot,
-            );
+            let fok_id = test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot)
+                .fill_or_kill()
+                .place(&mut state);
+            let gtc_id = test_fixtures::order(SELLER, &pair, Side::Sell, 200 * PRICE_SCALE, lot)
+                .place(&mut state);
             assert_eq!(state.get_order_book(&pair).unwrap().pending_orders_len(), 2);
 
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -3243,15 +2920,8 @@ mod pending_state_predicates {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
 
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
         assert!(state.has_pending_orders());
 
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
@@ -3266,15 +2936,8 @@ mod pending_state_predicates {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
 
-        test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot);
-        test_fixtures::place_order(
-            &mut state,
-            SELLER,
-            &pair,
-            Side::Sell,
-            100 * PRICE_SCALE,
-            lot,
-        );
+        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
         // Apply only the matching event; do not drain settling. The matching
         // produces a SettlingEvent on the queue that must be observable.
