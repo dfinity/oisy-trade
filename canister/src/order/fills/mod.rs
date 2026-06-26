@@ -271,6 +271,42 @@ impl Storable for Trade {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+/// Stored value of [`TradeHistory`]'s primary map: a [`Trade`] paired with the
+/// canister-global insertion sequence assigned when it was inserted. That
+/// sequence keys the per-user index (scanned in reverse for newest-first) and
+/// lets `trades_after` resolve a [`TradeId`] cursor back to its index position
+/// in O(log n). It's an index bookkeeping concern, so it lives in this wrapper
+/// rather than as a field on the domain [`Trade`]. Mirrors
+/// [`crate::order::OrderHistory`]'s `SeqOrderRecord`.
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+struct SeqTrade {
+    #[n(0)]
+    global_seq: u64,
+    #[n(1)]
+    trade: Trade,
+}
+
+impl Storable for SeqTrade {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("seq trade encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf).expect("seq trade encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode seq trade bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
 /// One side-projected trade together with its primary key — what settlement
 /// produces and [`TradeHistory::append`] consumes.
 pub type TradeLeg = (TradeId, Trade);
@@ -287,7 +323,7 @@ pub struct CursorNotFound;
 /// the account-wide read. The two side-projected records of one match share the
 /// book-minted `FillSeq` in their [`TradeId`]s and differ by `OrderId`.
 pub struct TradeHistory<M: Memory> {
-    trades: StableBTreeMap<TradeId, Trade, M>,
+    trades: StableBTreeMap<TradeId, SeqTrade, M>,
     by_user: StableBTreeMap<TradeByUserKey, TradeId, M>,
 }
 
@@ -332,7 +368,7 @@ impl<M: Memory> TradeHistory<M> {
         // len()-derived reuses ids after deletes.
         let global_seq = self.by_user.len();
         assert_eq!(
-            self.trades.insert(id, trade),
+            self.trades.insert(id, SeqTrade { global_seq, trade }),
             None,
             "BUG: duplicate trade id {id:?}"
         );
@@ -373,7 +409,7 @@ impl<M: Memory> TradeHistory<M> {
             .range((Bound::Included(TradeId::first(order)), upper))
             .rev()
             .take(length)
-            .map(|entry| (entry.key().seq, entry.value()))
+            .map(|entry| (entry.key().seq, entry.value().trade))
             .collect())
     }
 
@@ -382,9 +418,11 @@ impl<M: Memory> TradeHistory<M> {
     /// otherwise `after` is a cursor — the last trade of the previous page — and
     /// the page continues with the next-older trade. An `after` whose `TradeId`
     /// is not one of `user`'s trades yields [`CursorNotFound`]; a valid cursor
-    /// with no older trades is `Ok(vec![])`. Each page reverse-scans the
-    /// `by_user` index then resolves each [`TradeId`] from the primary map — the
-    /// exact shape of `OrderHistory::orders_after` — so it is `O(length)`.
+    /// with no older trades is `Ok(vec![])`. The cursor's index position is
+    /// resolved via an O(log n) point lookup of its stored `global_seq` in the
+    /// primary map; each page then reverse-scans the `by_user` index and resolves
+    /// each [`TradeId`] from the primary map — the exact shape of
+    /// `OrderHistory::orders_after` — so it is `O(length)`.
     pub fn trades_after(
         &self,
         user: UserId,
@@ -396,8 +434,12 @@ impl<M: Memory> TradeHistory<M> {
         let upper = match after {
             None => Bound::Included(TradeByUserKey::last(user)),
             Some(cursor) => {
-                let global_seq = self.user_seq_of(user, cursor).ok_or(CursorNotFound)?;
-                Bound::Excluded(TradeByUserKey::from_seq(user, global_seq))
+                let entry = self.trades.get(&cursor).ok_or(CursorNotFound)?;
+                let key = TradeByUserKey::from_seq(user, entry.global_seq);
+                if self.by_user.get(&key) != Some(cursor) {
+                    return Err(CursorNotFound);
+                }
+                Bound::Excluded(key)
             }
         };
         Ok(self
@@ -410,24 +452,11 @@ impl<M: Memory> TradeHistory<M> {
                 let trade = self
                     .trades
                     .get(&id)
-                    .expect("BUG: by_user index references a missing trade");
+                    .expect("BUG: by_user index references a missing trade")
+                    .trade;
                 (id, trade)
             })
             .collect())
-    }
-
-    /// The global sequence under which `cursor` is indexed for `user`, or `None`
-    /// if `cursor` is not one of `user`'s own trades. Walks `user`'s index
-    /// prefix; the index is small relative to a page and this is the cursor path,
-    /// not the per-entry hot path.
-    fn user_seq_of(&self, user: UserId, cursor: TradeId) -> Option<u64> {
-        self.by_user
-            .range((
-                std::ops::Bound::Included(TradeByUserKey::first(user)),
-                std::ops::Bound::Included(TradeByUserKey::last(user)),
-            ))
-            .find(|entry| entry.value() == cursor)
-            .map(|entry| entry.key().seq)
     }
 
     #[cfg(test)]
@@ -436,7 +465,7 @@ impl<M: Memory> TradeHistory<M> {
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (TradeId, Trade)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (TradeId, SeqTrade)> + '_ {
         self.trades
             .iter()
             .map(|entry| (*entry.key(), entry.value()))

@@ -260,6 +260,14 @@ fn should_page_a_users_trades_via_after_cursor() {
             .collect::<Vec<_>>(),
         vec![0]
     );
+    let last_cursor = second.last().unwrap().0;
+    assert!(
+        store
+            .trades_after(alice, Some(last_cursor), 2)
+            .unwrap()
+            .is_empty(),
+        "paging past the oldest trade yields an empty page"
+    );
 }
 
 #[test]
