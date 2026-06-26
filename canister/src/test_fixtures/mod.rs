@@ -1,15 +1,18 @@
 pub mod event;
+mod order;
 pub mod tokens;
+
+pub use order::{PlaceOrder, order};
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
     Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
 };
+use crate::state;
 use crate::state::StableMemoryOptions;
 use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
-use crate::{Timestamp, order, state};
 use candid::Principal;
 use ic_stable_structures::{Memory, VectorMemory};
 use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Token};
@@ -95,7 +98,7 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
-        order::OrderHistory::new(
+        crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
             crate::storage::user_orders_memory(),
         ),
@@ -179,7 +182,7 @@ pub fn icp_token_id() -> TokenId {
     SupportedTokens::ICP.token_id().into()
 }
 
-fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
+fn gtc_order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
         price: Price::new(price.into()),
@@ -190,11 +193,11 @@ fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) 
 }
 
 pub fn buy(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    order(id, Side::Buy, price, quantity)
+    gtc_order(id, Side::Buy, price, quantity)
 }
 
 pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    order(id, Side::Sell, price, quantity)
+    gtc_order(id, Side::Sell, price, quantity)
 }
 
 /// Construct a [`Fill`] for use in test assertions.
@@ -276,7 +279,7 @@ pub fn init_state_with_order_book() {
 }
 
 pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
-    let order_history = order::OrderHistory::new(
+    let order_history = crate::order::OrderHistory::new(
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
@@ -333,101 +336,6 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-/// Deposit just enough of the appropriate token to cover `side`'s reservation,
-/// validate the resulting limit order, and record it. Returns the assigned
-/// `OrderId`. Each call funds the user from zero, so distinct users get
-/// distinct, isolated balances.
-pub fn place_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::GoodTilCanceled,
-    )
-}
-
-/// Like [`place_order`] but for a fill-or-kill order.
-pub fn place_fok_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::FillOrKill,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn place_order_with_tif<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-    time_in_force: TimeInForce,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    let pending = PendingOrder {
-        side,
-        price: Price::new(price),
-        quantity: quantity.into(),
-        time_in_force,
-    };
-    let (token, amount) = match side {
-        Side::Buy => (
-            pair.quote,
-            pending
-                .price
-                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
-                .expect("place_order: price × quantity overflow"),
-        ),
-        Side::Sell => (pair.base, pending.quantity),
-    };
-    state.deposit(user, token, amount, StableMemoryOptions::Write);
-    let (order_id, order) = state
-        .validate_limit_order(user, pair.clone(), pending)
-        .expect("place_order: validate_limit_order failed");
-    state.record_limit_order(
-        user,
-        order_id.book_id(),
-        order,
-        Timestamp::EPOCH,
-        StableMemoryOptions::Write,
-    );
-    order_id
-}
-
 #[cfg(test)]
 pub fn place_limit_order(
     user: Principal,
@@ -455,8 +363,11 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
 /// Asserts two [`OrderRecord`]s are equal on every field except the
 /// `created_at` / `last_updated_at` timestamps, which tests assert separately.
 #[track_caller]
-pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &order::OrderRecord) {
-    let normalized = order::OrderRecord {
+pub fn assert_eq_ignoring_timestamp(
+    actual: &crate::order::OrderRecord,
+    expected: &crate::order::OrderRecord,
+) {
+    let normalized = crate::order::OrderRecord {
         created_at: expected.created_at,
         last_updated_at: expected.last_updated_at,
         ..actual.clone()
@@ -469,8 +380,8 @@ pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &orde
 pub fn record_of<MH, MB>(
     state: &state::State<MH, MB>,
     owner: Principal,
-    order_id: order::OrderId,
-) -> order::OrderRecord
+    order_id: crate::order::OrderId,
+) -> crate::order::OrderRecord
 where
     MH: ic_stable_structures::Memory,
     MB: ic_stable_structures::Memory,
