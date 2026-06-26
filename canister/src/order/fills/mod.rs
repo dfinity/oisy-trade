@@ -4,6 +4,7 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(test)]
 mod tests;
@@ -32,22 +33,32 @@ impl FillSeq {
     }
 }
 
-/// Key into the primary fill map: the owning [`OrderId`] followed by the
-/// canister-global [`FillSeq`]. A range scan over an `order` prefix yields that
-/// order's fills in `seq` order; reversed, newest-first.
+/// First-class identifier of a side-projected fill: the owning [`OrderId`]
+/// followed by the canister-global [`FillSeq`]. A range scan over an `order`
+/// prefix yields that order's fills in `seq` order; reversed, newest-first.
+/// Mirrors [`OrderId`]: opaque outside the canister as a 48-character hex
+/// string (16 bytes of `OrderId` + 8 bytes of `seq`).
 ///
 /// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
 /// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct FillKey {
+pub struct FillId {
     order: OrderId,
     seq: FillSeq,
 }
 
 /// 16 bytes of `OrderId` + 8 bytes of `seq`, both big-endian.
-const FILL_KEY_LEN: usize = 16 + 8;
+const FILL_ID_LEN: usize = 16 + 8;
 
-impl FillKey {
+impl FillId {
+    pub fn new(order: OrderId, seq: FillSeq) -> Self {
+        Self { order, seq }
+    }
+
+    pub fn seq(&self) -> FillSeq {
+        self.seq
+    }
+
     fn first(order: OrderId) -> Self {
         Self {
             order,
@@ -63,9 +74,9 @@ impl FillKey {
     }
 }
 
-impl Storable for FillKey {
+impl Storable for FillId {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; FILL_KEY_LEN];
+        let mut buf = [0u8; FILL_ID_LEN];
         buf[..16].copy_from_slice(&self.order.to_bytes());
         buf[16..].copy_from_slice(&self.seq.get().to_be_bytes());
         Cow::Owned(buf.to_vec())
@@ -79,8 +90,8 @@ impl Storable for FillKey {
         let bytes: &[u8] = bytes.as_ref();
         assert_eq!(
             bytes.len(),
-            FILL_KEY_LEN,
-            "FillKey must decode from exactly {FILL_KEY_LEN} bytes"
+            FILL_ID_LEN,
+            "FillId must decode from exactly {FILL_ID_LEN} bytes"
         );
         let order = OrderId::from_bytes(Cow::Borrowed(&bytes[..16]));
         let seq = FillSeq::new(u64::from_be_bytes(
@@ -90,9 +101,46 @@ impl Storable for FillKey {
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: FILL_KEY_LEN as u32,
+        max_size: FILL_ID_LEN as u32,
         is_fixed_size: true,
     };
+}
+
+impl fmt::Display for FillId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{:016x}", self.order, self.seq.get())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FillIdParseError;
+
+impl fmt::Display for FillIdParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid fill ID: expected 48-character hex string")
+    }
+}
+
+impl FromStr for FillId {
+    type Err = FillIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 48 || !s.is_ascii() {
+            return Err(FillIdParseError);
+        }
+        let order = OrderId::from_str(&s[..32]).map_err(|_| FillIdParseError)?;
+        let seq = u64::from_str_radix(&s[32..], 16).map_err(|_| FillIdParseError)?;
+        Ok(Self {
+            order,
+            seq: FillSeq::new(seq),
+        })
+    }
+}
+
+impl From<FillId> for String {
+    fn from(id: FillId) -> Self {
+        id.to_string()
+    }
 }
 
 /// One side-projected fill, holding everything needed to audit one of the two
@@ -157,7 +205,7 @@ pub struct CursorNotFound;
 /// The account-wide secondary index (`by_user`) and its reader come in a
 /// follow-up; this store implements the per-order feed only.
 pub struct FillStore<M: Memory> {
-    fills: StableBTreeMap<FillKey, FillRecord, M>,
+    fills: StableBTreeMap<FillId, FillRecord, M>,
     next_seq: StableCell<u64, M>,
 }
 
@@ -190,14 +238,11 @@ impl<M: Memory> FillStore<M> {
 
     fn insert(&mut self, record: FillRecord) {
         let seq = FillSeq::new(*self.next_seq.get());
-        let key = FillKey {
-            order: record.order_id,
-            seq,
-        };
+        let id = FillId::new(record.order_id, seq);
         assert_eq!(
-            self.fills.insert(key, record),
+            self.fills.insert(id, record),
             None,
-            "BUG: duplicate fill key for seq {seq:?}"
+            "BUG: duplicate fill id for seq {seq:?}"
         );
         self.next_seq.set(seq.next().get());
     }
@@ -217,18 +262,18 @@ impl<M: Memory> FillStore<M> {
         bench_scopes!("fills", "fills::fills_after");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(FillKey::last(order)),
+            None => Bound::Included(FillId::last(order)),
             Some(seq) => {
-                let key = FillKey { order, seq };
-                if !self.fills.contains_key(&key) {
+                let id = FillId::new(order, seq);
+                if !self.fills.contains_key(&id) {
                     return Err(CursorNotFound);
                 }
-                Bound::Excluded(key)
+                Bound::Excluded(id)
             }
         };
         Ok(self
             .fills
-            .range((Bound::Included(FillKey::first(order)), upper))
+            .range((Bound::Included(FillId::first(order)), upper))
             .rev()
             .take(length)
             .map(|entry| (entry.key().seq, entry.value()))
@@ -246,7 +291,7 @@ impl<M: Memory> FillStore<M> {
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (FillKey, FillRecord)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (FillId, FillRecord)> + '_ {
         self.fills.iter().map(|entry| (*entry.key(), entry.value()))
     }
 }
@@ -258,8 +303,8 @@ impl Clone for FillStore<ic_stable_structures::VectorMemory> {
             ic_stable_structures::VectorMemory::default(),
             ic_stable_structures::VectorMemory::default(),
         );
-        for (key, record) in self.iter() {
-            assert_eq!(fresh.fills.insert(key, record), None);
+        for (id, record) in self.iter() {
+            assert_eq!(fresh.fills.insert(id, record), None);
         }
         fresh.next_seq.set(*self.next_seq.get());
         fresh

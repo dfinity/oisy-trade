@@ -1,7 +1,36 @@
-use super::{CursorNotFound, FillRecord, FillSeq, FillStore};
+use super::{CursorNotFound, FillId, FillIdParseError, FillRecord, FillSeq, FillStore};
 use crate::Timestamp;
 use crate::order::{OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side};
 use ic_stable_structures::VectorMemory;
+
+#[test]
+fn should_roundtrip_fill_id_through_display_and_parse() {
+    let id = FillId::new(order(7), FillSeq::new(42));
+    let parsed: FillId = id.to_string().parse().unwrap();
+    assert_eq!(parsed, id);
+    assert_eq!(id.to_string().len(), 48);
+    assert!(id.to_string().chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn should_reject_a_malformed_fill_id() {
+    assert_eq!("".parse::<FillId>(), Err(FillIdParseError));
+    assert_eq!(
+        "0".repeat(47).parse::<FillId>(),
+        Err(FillIdParseError),
+        "too short"
+    );
+    assert_eq!(
+        "0".repeat(49).parse::<FillId>(),
+        Err(FillIdParseError),
+        "too long"
+    );
+    assert_eq!(
+        "z".repeat(48).parse::<FillId>(),
+        Err(FillIdParseError),
+        "non-hex"
+    );
+}
 
 #[test]
 fn should_append_two_side_projected_records_and_advance_seq_by_two() {
