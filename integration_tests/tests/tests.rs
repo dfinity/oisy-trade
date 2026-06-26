@@ -66,6 +66,28 @@ mod add_limit_order {
         GetMyOrdersArgs::by_page(after, length)
     }
 
+    /// Mints, approves, and deposits `amount` base units for `who`.
+    async fn fund_base(setup: &Setup, who: Principal, amount: u64) {
+        setup
+            .deposit_flow(who, setup.base_token_id())
+            .mint(amount + 2 * BASE_LEDGER_FEE)
+            .approve(amount + BASE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
+    }
+
+    /// Mints, approves, and deposits `amount` quote units for `who`.
+    async fn fund_quote(setup: &Setup, who: Principal, amount: u64) {
+        setup
+            .deposit_flow(who, setup.quote_token_id())
+            .mint(amount + 2 * QUOTE_LEDGER_FEE)
+            .approve(amount + QUOTE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
+    }
+
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
@@ -494,14 +516,7 @@ mod add_limit_order {
         let quantity = 1_000_000u64;
         let notional = maker_price as u128 * quantity as u128 / 1_000_000_000u128;
 
-        let seller_deposit = quantity;
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
-            .approve(seller_deposit + BASE_LEDGER_FEE)
-            .deposit(seller_deposit)
-            .execute()
-            .await;
+        fund_base(&setup, seller, quantity).await;
         let sell_id = seller_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -515,13 +530,7 @@ mod add_limit_order {
         setup.env().tick().await;
 
         let buyer_deposit = taker_price as u128 * quantity as u128 / 1_000_000_000u128;
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(buyer_deposit as u64 + 2 * QUOTE_LEDGER_FEE)
-            .approve(buyer_deposit as u64 + QUOTE_LEDGER_FEE)
-            .deposit(buyer_deposit as u64)
-            .execute()
-            .await;
+        fund_quote(&setup, buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -644,14 +653,7 @@ mod add_limit_order {
         let high_price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
 
-        let seller_deposit = 2 * quantity;
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
-            .approve(seller_deposit + BASE_LEDGER_FEE)
-            .deposit(seller_deposit)
-            .execute()
-            .await;
+        fund_base(&setup, seller, 2 * quantity).await;
         for price in [low_price, high_price] {
             seller_client
                 .add_limit_order(LimitOrderRequest {
@@ -668,13 +670,7 @@ mod add_limit_order {
 
         let taker_price = 11_000 * PRICE_SCALE;
         let buyer_deposit = taker_price as u128 * 2 * quantity as u128 / 1_000_000_000u128;
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(buyer_deposit as u64 + 2 * QUOTE_LEDGER_FEE)
-            .approve(buyer_deposit as u64 + QUOTE_LEDGER_FEE)
-            .deposit(buyer_deposit as u64)
-            .execute()
-            .await;
+        fund_quote(&setup, buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
