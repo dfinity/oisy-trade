@@ -594,7 +594,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns up to `length` of `owner`'s trades across **all** their orders,
     /// newest first, resuming strictly after the `after` cursor (a cursor from a
-    /// prior page). An `after` cursor that is not one of `owner`'s trades yields
+    /// prior page). Returns `Ok(vec![])` when `owner` is not a registered user.
+    /// An `after` cursor that is not one of `owner`'s trades yields
     /// [`TradeCursorNotFound`]; a valid cursor with no older trades is
     /// `Ok(vec![])`.
     pub fn get_user_trades(
@@ -604,10 +605,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         length: usize,
     ) -> Result<Vec<(TradeId, Trade)>, TradeCursorNotFound> {
         let Some(user_id) = self.user_registry.lookup(*owner) else {
-            return match after {
-                Some(_) => Err(TradeCursorNotFound),
-                None => Ok(Vec::new()),
-            };
+            return Ok(Vec::new());
         };
         self.fill_store.trades_after(user_id, after, length)
     }
