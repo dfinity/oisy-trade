@@ -89,8 +89,10 @@ This spec separates two distinct deliverables, which must not be conflated:
   `OrderUpdate`.
 - **R8 — Write-gated, replay-safe, durable.** Fill persistence happens only under
   `StableMemoryOptions::Write`, so event-log replay at `post_upgrade` does not double-write
-  fills. Fill records and the order-level scalars live in stable memory and survive upgrade. The
-  fill sequence is canister-global and monotonic (see [Internal fill store](#internal-fill-store)).
+  fills. Trade records and the order-level scalars live in stable memory and survive upgrade. A
+  match's `FillSeq` is minted per-book by the order book and persisted in its snapshot, so it
+  stays monotonic across upgrades; the account index's `global_seq` is `len()`-derived (see
+  [Internal trade store](#internal-trade-store)).
 - **R9 — Monotonic invariants.** `filled_quote` and `filled_fee` are monotonic non-decreasing;
   each delta is applied with `checked_add` guarded by an **always-on** trap on overflow (a
   `BUG:` panic, matching the codebase convention — not a `debug_assert!`, which is compiled out
@@ -313,10 +315,11 @@ A new per-fill record and the single feed. `PairToken` is the **existing** type 
 in `oisy_trade.did` (reused, not redefined):
 
 ```candid
-// One side-projected fill. The counterparty is intentionally omitted.
-// `fee_token` reuses the existing PairToken type { Base; Quote }.
+// One side-projected trade — the maker/taker view of a match. The counterparty
+// is intentionally omitted. `fee_token` reuses the existing PairToken type
+// { Base; Quote }.
 type Trade = record {
-    id : FillId;            // this fill's identity; pass the last one back as `after` to paginate
+    id : TradeId;           // this trade's identity; pass the last one back as `after` to paginate
     order_id : OrderId;     // the owning (caller's) order
     side : Side;            // this order's side
     price : nat;            // execution (maker) price
@@ -328,15 +331,15 @@ type Trade = record {
     timestamp : nat64;      // settlement time, nanoseconds since the Unix epoch
 };
 
-// Opaque identity of one side-projected fill — a text token like `OrderId`
-// (composite of the owning OrderId and the global fill sequence; see below),
+// Opaque per-side identity of one trade — a text token like `OrderId`
+// (composite of the owning OrderId and the match's per-book FillSeq; see below),
 // NOT a number. Treating it as opaque text lets `get_my_trades` distinguish a
 // malformed token (Err) from a well-formed-but-unknown one (Ok []) per R5.
-type FillId = text;
+type TradeId = text;
 
 type TradesFilter = variant {
-    ByOrder   : record { order_id : OrderId; after : opt FillId; length : nat32 };
-    ByAccount : record { after : opt FillId; length : nat32 };
+    ByOrder   : record { order_id : OrderId; after : opt TradeId; length : nat32 };
+    ByAccount : record { after : opt TradeId; length : nat32 };
 };
 
 // Owner-scoped, newest-first. Non-trapping: returns the DEFI-2801 error
@@ -344,41 +347,49 @@ type TradesFilter = variant {
 get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 ```
 
-`FillId` is the opaque fill identity and pagination cursor — an opaque `text` token like `OrderId`,
-composing the owning `OrderId` with the global fill sequence (see below); callers pass back the
-last value they received and never parse it. Each `Trade` carries its own `id`, so a client
-paginates by passing the last entry's `id` as the next `after` — mirroring `get_my_orders
-{ ByPage }`, where each `UserOrder` exposes the `OrderId` that doubles as the page cursor.
-`GetMyTradesError` is an instantiation of the DEFI-2801 generic error envelope.
-`MAX_FILLS_PER_RESPONSE` mirrors `MAX_ORDERS_PER_RESPONSE`.
+`TradeId` is the opaque per-side trade identity and pagination cursor — an opaque `text` token
+like `OrderId`, composing the owning `OrderId` with the match's per-book `FillSeq` (see below);
+callers pass back the last value they received and never parse it. Each `Trade` carries its own
+`id`, so a client paginates by passing the last entry's `id` as the next `after` — mirroring
+`get_my_orders { ByPage }`, where each `UserOrder` exposes the `OrderId` that doubles as the page
+cursor. The match-level `FillId = (OrderBookId, FillSeq)` is the id of the match itself and is
+derivable from any `TradeId`; it is not part of the candid surface. `GetMyTradesError` is an
+instantiation of the DEFI-2801 generic error envelope. `MAX_FILLS_PER_RESPONSE` mirrors
+`MAX_ORDERS_PER_RESPONSE`.
 
-### Internal fill store
+### Internal trade store
 
-A new module, `canister/src/order/fills`, mirroring `OrderHistory`:
+A new module, `canister/src/order/fills`, mirroring `OrderHistory`. The model is
+**denormalized** (option D): two identities, both mirroring `OrderId = (OrderBookId, OrderSeq)`.
 
-- **The fill sequence (`FillSeq`).** A canister-global, monotonic `u64` assigned to each
-  side-projected record as it is appended — so the two legs of one fill get two consecutive
-  values, every record is globally ordered, and records within one order's prefix are ordered too.
-  `u64` is ample: it matches the existing `OrderSeq` width, is never reused (fills are
-  append-only, never deleted), and at any realistic fill rate will not wrap for longer than the
-  canister can exist. It is persisted (a stable counter, mirroring `OrderHistory`'s insertion seq)
-  so it stays monotonic across upgrades.
-- `FillId { order: OrderId, seq: FillSeq }` — the fill's identity and the `after` cursor for both
-  filter modes; modelled on `OrderId` (opaque `text` on Candid, fixed-width big-endian `Storable`,
-  16 + 8 = 24 bytes, bounded), so a range over an `order` prefix yields that order's fills in `seq`
-  order (R4 `ByOrder`). A fill is addressable by its `FillId` directly via `fills.get`.
-- `FillRecord` — the side-projected record (the fields of `Trade` above, internal types),
-  minicbor-encoded, `Bound::Unbounded`.
-- `FillByUserKey { user: UserId, seq: FillSeq }` — identical layout to `UserOrderKey`; value is
-  `FillId` (R4 `ByAccount`).
-- `FillStore<M>` holds `fills: StableBTreeMap<FillId, FillRecord>` and
-  `by_user: StableBTreeMap<FillByUserKey, FillId>` in **two distinct memory regions**, plus the
-  `FillSeq` counter.
-- `append(taker_leg, maker_leg, now)` writes both side-projected records and both `by_user`
-  entries (denormalized; 2 + 2 inserts per fill). `fills_after(order, after, length)` is a
-  reverse prefix range scan over `fills` (no indirection). `trades_after(user, after, length)`
-  reverse-scans `by_user` then `get`s each `FillId` from `fills` — the exact shape of
-  `orders_after`.
+- **`Fill` = the match** between two orders, identified by **`FillId = (OrderBookId, FillSeq)`**
+  (16 bytes: 8 book + 8 seq). `FillSeq` is a **per-book** monotonic `u64` minted by the order
+  book's new `next_fill` counter, assigned EXACTLY the way the book mints `OrderSeq` for `OrderId`
+  (same snapshot persistence, same replay handling). `Fill` is the matcher's struct, carrying its
+  `fill_seq`; it is NOT stored as its own record.
+- **`Trade` = the per-side (maker/taker) projection** of a fill, identified by
+  **`TradeId = (OrderId, FillSeq)`** (24 bytes: 16 `OrderId` + 8 seq) — the primary store key,
+  modelled on `OrderId` (opaque `text` on Candid, fixed-width big-endian `Storable`, bounded). The
+  two trades of one match share `FillSeq` and differ by `OrderId` (→ side). `FillId` is derivable
+  from any `TradeId` by dropping the `OrderSeq`.
+- `Trade` — the side-projected record, minicbor-encoded, `Bound::Unbounded`. Its `order_id` and
+  the match's `fill_seq` live in the `TradeId` **key**, never in the value; the value is
+  `{ side, price, quantity, notional, fee, fee_token, is_maker, timestamp }`. The counterparty is
+  never stored.
+- `TradeHistory<M>` (renamed from the store, aligned with `OrderHistory`) holds
+  `trades: StableBTreeMap<TradeId, Trade>` and a `by_user: StableBTreeMap<(UserId, global_seq),
+  TradeId>` in **two distinct memory regions** (`MemoryId`s 7 and 8). Because `trades` is keyed by
+  an `OrderId`-prefixed `TradeId`, **`ByOrder` is a prefix range scan with no separate by-order
+  index**. `global_seq` is a separate canister-global monotonic sequence **derived from
+  `by_user.len()`** exactly like `OrderHistory::insert_once` — there is no `StableCell` counter
+  (the former fill-seq cell and its memory region are dropped; `FillSeq` now comes from the book).
+- `append(taker_leg, maker_leg)` — each leg is a `(TradeId, Trade)` pair — writes both
+  side-projected records and both `by_user` entries (denormalized; 2 + 2 inserts per match,
+  i.e. 2 trade records: `(taker_order_id, fill_seq)` [side=taker] and `(maker_order_id, fill_seq)`
+  [side=maker]). `trades_for_order(order, after, length)` is a reverse prefix range scan over
+  `trades` (no indirection). `trades_after(user, after, length)` reverse-scans `by_user` then
+  `get`s each `TradeId` from `trades` — the exact shape of `orders_after`. Records are already
+  side-projected, so there is **no read-time projection** and the counterparty is never returned.
 
 ### Order-level scalars — `canister/src/order/history`
 
@@ -400,18 +411,20 @@ for each `fill`:
   `fee_delta += <taker-side fee>`; the maker order gets `quote_delta += notional` and
   `fee_delta += <maker-side fee>`. (`filled_delta` is already accumulated per DEFI-2852.) Both
   legs share the same `notional`; the `fee_delta` differs by side (R1, R2, R6).
-- Build the two side-projected `FillRecord`s (taker leg, maker leg) — each with its own
-  `order_id`, `side`, `fee`, `fee_token`, `is_maker` — and call `FillStore::append`, stamped with
-  the matching `Event`'s timestamp (R3, R6, R11).
+- Take the match's `fill_seq` (minted by the book on the `Fill`), build the two side-projected
+  `Trade`s keyed by their `TradeId` (taker leg, maker leg) — each with its own `side`, `fee`,
+  `fee_token`, `is_maker` — resolve each leg's owning `UserId`, and call `TradeHistory::append`,
+  stamped with the matching `Event`'s timestamp (R3, R6, R11).
 
-This keeps a single computation of the realized values feeding both balance ops and fills (R11).
-The matcher's `Fill` struct is unchanged.
+This keeps a single computation of the realized values feeding both balance ops and trades (R11).
+The matcher's `Fill` struct gains only its `fill_seq`.
 
 ### Storage & lifecycle — `canister/src/storage`, `canister/src/lifecycle`
 
-- Add `FILLS_MEMORY_ID = MemoryId::new(7)` and `FILLS_BY_USER_MEMORY_ID = MemoryId::new(8)` with
-  accessors mirroring `order_history_memory` / `user_orders_memory`.
-- `init` and `post_upgrade` construct `FillStore::new(fills_memory(), fills_by_user_memory())`
+- Add `TRADES_MEMORY_ID = MemoryId::new(7)` and `TRADES_BY_USER_MEMORY_ID = MemoryId::new(8)` with
+  accessors mirroring `order_history_memory` / `user_orders_memory`. No third region: `FillSeq`
+  comes from the book and `global_seq` from `len()`, so there is no stable counter cell.
+- `init` and `post_upgrade` construct `TradeHistory::new(trades_memory(), trades_by_user_memory())`
   alongside `OrderHistory`; the regions init fresh and auto-load on upgrade — no
   upgrade-serialization cost (R8).
 
@@ -419,7 +432,8 @@ The matcher's `Fill` struct is unchanged.
 
 - `get_my_trades(filter)`: resolve the caller's `UserId`, then match `filter`. `ByOrder { order_id,
   after, length }` → if `order_id` is the caller's (same ownership check as `get_my_orders {
-  ById }`), return `fills_after`, else `Ok([])`. `ByAccount { after, length }` → `trades_after`.
+  ById }`), return `trades_for_order`, else `Ok([])`. `ByAccount { after, length }` →
+  `trades_after`.
   `length` clamped to `MAX_FILLS_PER_RESPONSE` (R10). Malformed `order_id` / cursor → `Err`,
   unknown → `Ok([])` (R5). A `#[ic_cdk::query]` wrapper in `main.rs` over a business fn in
   `lib.rs`, returning the DEFI-2801 envelope.
@@ -431,11 +445,12 @@ Unit (`*/tests.rs`, helpers/fixtures per repo convention):
 - `order/history/tests.rs`: `OrderUpdate::apply` adds `quote_delta` / `fee_delta` in the same
   single write as `filled_delta` and `status` (R7); the monotonic invariant traps on overflow in
   **release config** (always-on, not a compiled-out `debug_assert!`) (R9).
-- `order/fills/tests.rs`: `append` writes two side-projected records + two `by_user` entries per
-  fill and advances `FillSeq` by two (R3, R8); `fills_after` prefix range scan returns one order's
-  fills newest-first and excludes another order's (R4 `ByOrder`); `trades_after` returns a user's
-  fills across orders newest-first (R4 `ByAccount`); unknown cursor → empty page; `length` clamped
-  (R10); counterparty fields absent from the record (R3).
+- `order/fills/tests.rs`: `append` writes two side-projected `Trade`s keyed by their `TradeId` +
+  two `by_user` entries per match, the two legs sharing the match's `FillSeq` (R3, R8);
+  `FillId` is derivable from any `TradeId` (drops the `OrderSeq`); `trades_for_order` prefix range
+  scan returns one order's trades newest-first and excludes another order's (R4 `ByOrder`);
+  `trades_after` returns a user's trades across orders newest-first (R4 `ByAccount`); unknown
+  cursor → empty page; `length` clamped (R10); counterparty fields absent from the record (R3).
 - `state/tests.rs`: the [Worked example](#worked-example) numbers — a buy taker sweeping two
   maker levels (2 ICP @ 10, 3 ICP @ 11) records `filled_quote = 53 ckUSDT`, VWAP `10.6`,
   base-denominated `filled_fee = 0.005 ICP`, with the 7-ckUSDT reservation surplus released (not
@@ -458,8 +473,9 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 canbench (R12):
 
 - A settlement-path bench (a taker sweeping N maker levels) measured with and without
-  `FillStore::append`, reported as instructions/fill, to size the per-fill insert cost against the
-  timer chunk budget. Landed and recorded on the persistence PR.
+  `TradeHistory::append`, reported as instructions/match (≈ 4 inserts: 2 trades + 2 by_user), to
+  size the per-match insert cost against the timer chunk budget. Landed and recorded on the
+  persistence PR.
 
 Verification:
 
@@ -481,14 +497,17 @@ Four stacked PRs, each independently mergeable / compilable / testable.
    the per-fill realized values once and feed the extended `OrderUpdate`. Ships order-level VWAP &
    fees through the existing `get_my_orders` immediately. **Acceptance: R1, R2, R6 (order-level),
    R7, R9, R11.**
-2. **Fill store (full engine).** New `canister/src/order/fills` module (incl. `FillSeq` and the
-   composite `FillId` identity), both `FILLS_MEMORY_ID` and `FILLS_BY_USER_MEMORY_ID` regions,
-   `FillRecord` type; settlement resolves each leg's owning `UserId` and writes the two
-   side-projected records plus their two `by_user` index entries (Write-gated), durable across
-   upgrade / snapshot / event-log replay; the `trades_after` account-wide primitive; and the
-   canbench measurement of the full +4-inserts/fill cost. No public retrieval endpoint yet.
+2. **Trade store (full engine, denormalized).** New `canister/src/order/fills` module
+   (`TradeHistory`) with the two identities — `Fill`/`FillId = (OrderBookId, FillSeq)` (the match,
+   book-minted) and `Trade`/`TradeId = (OrderId, FillSeq)` (the per-side projection, primary key);
+   the order book's `next_fill` counter on `Fill.fill_seq`; both `TRADES_MEMORY_ID` and
+   `TRADES_BY_USER_MEMORY_ID` regions (`by_user` keyed by a `len()`-derived global seq, no counter
+   cell); settlement resolves each leg's owning `UserId` and writes the two side-projected `Trade`s
+   plus their two `by_user` index entries (Write-gated), durable across upgrade / snapshot /
+   event-log replay; the `trades_for_order` and `trades_after` read primitives; and the canbench
+   measurement of the +4-inserts/match cost. No public retrieval endpoint yet.
    **Acceptance: R3, R6 (per-fill), R8, R11, R12.**
-3. **Per-order feed endpoint.** `Trade` / `TradesFilter` / `FillId` Candid types, `get_my_trades`
+3. **Per-order feed endpoint.** `Trade` / `TradesFilter` / `TradeId` Candid types, `get_my_trades`
    with the `ByOrder` filter (error-enveloped, bounded pages), client method, and end-to-end
    tests. **Acceptance: R4 (`ByOrder`), R5, R10.**
 4. **Account-wide filter (API only).** The `ByAccount` filter arm, `get_user_trades` wiring over
