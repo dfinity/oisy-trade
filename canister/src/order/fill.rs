@@ -1,4 +1,8 @@
-use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side};
+use super::{
+    FeeRates, FillRecord, OrderBookId, OrderId, OrderSeq, OrderUpdate, PairToken, Price, Quantity,
+    RemovedOrder, Side,
+};
+use crate::Timestamp;
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
@@ -153,6 +157,42 @@ impl FillSettlement {
                 .expect("BUG: fee_delta overflow");
         }
     }
+
+    /// Build the two side-projected [`FillRecord`]s — the taker leg and the
+    /// maker leg — from this fill's single computed settlement, stamped with the
+    /// settling event's `timestamp`. Each record self-describes one order's view
+    /// of the execution; the counterparty is never referenced.
+    pub fn fill_records(&self, book_id: OrderBookId, timestamp: Timestamp) -> [FillRecord; 2] {
+        let fill = &self.fill;
+        let taker_side = fill.taker_side;
+        let maker_side = match taker_side {
+            Side::Buy => Side::Sell,
+            Side::Sell => Side::Buy,
+        };
+        let taker_leg = FillRecord {
+            order_id: OrderId::new(book_id, fill.taker_order_seq),
+            side: taker_side,
+            price: fill.maker_price,
+            quantity: fill.quantity,
+            notional: self.notional,
+            fee: self.taker_fee,
+            fee_token: fee_token(taker_side),
+            is_maker: false,
+            timestamp,
+        };
+        let maker_leg = FillRecord {
+            order_id: OrderId::new(book_id, fill.maker_order_seq),
+            side: maker_side,
+            price: fill.maker_price,
+            quantity: fill.quantity,
+            notional: self.notional,
+            fee: self.maker_fee,
+            fee_token: fee_token(maker_side),
+            is_maker: true,
+            timestamp,
+        };
+        [taker_leg, maker_leg]
+    }
 }
 
 /// The settlement of a removed order (canceled or killed): the placement
@@ -191,6 +231,15 @@ impl RemovedOrderSettlement {
             token: self.token,
             amount: self.amount,
         });
+    }
+}
+
+/// The token a fill's fee is charged in, per the receive-side convention: a
+/// buyer is charged in the base token it receives, a seller in quote.
+fn fee_token(side: Side) -> PairToken {
+    match side {
+        Side::Buy => PairToken::Base,
+        Side::Sell => PairToken::Quote,
     }
 }
 

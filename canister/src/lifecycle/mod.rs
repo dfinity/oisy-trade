@@ -1,5 +1,5 @@
 use crate::balance::TokenBalance;
-use crate::order::OrderHistory;
+use crate::order::{FillStore, OrderHistory};
 use crate::state::audit;
 use crate::state::event::EventType;
 use crate::state::{State, StateSnapshot};
@@ -22,11 +22,18 @@ pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
         storage::order_history_memory(),
         storage::user_orders_memory(),
     );
+    let fill_store = FillStore::new(storage::fills_memory(), storage::fills_seq_memory());
     let balances = TokenBalance::new(storage::balances_memory());
     let user_registry = UserRegistry::new(storage::user_registry_memory());
     state::init_state(
-        State::new(init_arg.clone(), order_history, user_registry, balances)
-            .expect("ERROR: invalid init args"),
+        State::new(
+            init_arg.clone(),
+            order_history,
+            fill_store,
+            user_registry,
+            balances,
+        )
+        .expect("ERROR: invalid init args"),
     );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
     setup_timers();
@@ -59,7 +66,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
     let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
 
-    let (order_history, balances, user_registry) = {
+    let (order_history, fill_store, balances, user_registry) = {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
         (
@@ -67,6 +74,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
                 storage::order_history_memory(),
                 storage::user_orders_memory(),
             ),
+            FillStore::new(storage::fills_memory(), storage::fills_seq_memory()),
             TokenBalance::new(storage::balances_memory()),
             UserRegistry::new(storage::user_registry_memory()),
         )
@@ -83,7 +91,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
     {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::into_state");
-        state::init_state(snapshot.into_state(order_history, balances, user_registry));
+        state::init_state(snapshot.into_state(order_history, fill_store, balances, user_registry));
     }
 
     match arg {

@@ -1,6 +1,7 @@
 mod book;
 mod fees;
 mod fill;
+mod fills;
 mod history;
 mod plan;
 mod queue;
@@ -13,6 +14,7 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
+pub use fills::{CursorNotFound as FillCursorNotFound, FillRecord, FillSeq, FillStore};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};

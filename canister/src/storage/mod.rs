@@ -12,6 +12,10 @@ const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 const STATE_SNAPSHOT_MEMORY_ID: MemoryId = MemoryId::new(4);
 const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
 const USER_ORDERS_MEMORY_ID: MemoryId = MemoryId::new(6);
+const FILLS_MEMORY_ID: MemoryId = MemoryId::new(7);
+// MemoryId 8 is reserved for the account-wide fill index (`FillStore::by_user`),
+// landing in a follow-up; it is not allocated here yet.
+const FILLS_SEQ_MEMORY_ID: MemoryId = MemoryId::new(9);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -86,6 +90,19 @@ pub fn user_registry_memory() -> VMem {
 /// from [`order_history_memory`], which backs the primary order store.
 pub fn user_orders_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice that backs the primary fill map
+/// (`FillStore::fills`). Used to construct the production `FillStore<VMem>` on
+/// canister `init` / `post_upgrade`.
+pub fn fills_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice that backs `FillStore`'s canister-global
+/// fill-sequence counter. Distinct from [`fills_memory`].
+pub fn fills_seq_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_SEQ_MEMORY_ID))
 }
 pub mod state_snapshot {
     use super::STATE_SNAPSHOT;

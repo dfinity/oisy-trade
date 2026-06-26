@@ -3,11 +3,11 @@ pub mod tokens;
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
-    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+    FeeRates, Fill, FillStore, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq,
+    PendingOrder, Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+    TradingPair,
 };
 use crate::state::StableMemoryOptions;
-use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
 use crate::{Timestamp, order, state};
 use candid::Principal;
@@ -80,6 +80,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
+        fill_store(),
         user_registry(),
         balances(),
     )
@@ -98,6 +99,10 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
         order::OrderHistory::new(
             crate::storage::order_history_memory(),
             crate::storage::user_orders_memory(),
+        ),
+        order::FillStore::new(
+            crate::storage::fills_memory(),
+            crate::storage::fills_seq_memory(),
         ),
         UserRegistry::new(crate::storage::user_registry_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
@@ -168,15 +173,15 @@ pub fn icp_ckusdt_trading_pair() -> TradingPair {
 }
 
 pub fn ckbtc_token_id() -> TokenId {
-    SupportedTokens::CKBTC.token_id().into()
+    TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
 }
 
 pub fn ckusdt_token_id() -> TokenId {
-    SupportedTokens::CKUSDT.token_id().into()
+    TokenId::new(Principal::from_text("cngnf-vqaaa-aaaar-qag4q-cai").unwrap())
 }
 
 pub fn icp_token_id() -> TokenId {
-    SupportedTokens::ICP.token_id().into()
+    TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
 }
 
 fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
@@ -280,6 +285,10 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
+    let fill_store = order::FillStore::new(
+        crate::storage::fills_memory(),
+        crate::storage::fills_seq_memory(),
+    );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
@@ -290,6 +299,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
+            fill_store,
             user_registry,
             balances,
         )
@@ -452,6 +462,10 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
+pub fn fill_store() -> FillStore<VectorMemory> {
+    FillStore::new(VectorMemory::default(), VectorMemory::default())
+}
+
 /// Asserts two [`OrderRecord`]s are equal on every field except the
 /// `created_at` / `last_updated_at` timestamps, which tests assert separately.
 #[track_caller]
@@ -462,23 +476,6 @@ pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &orde
         ..actual.clone()
     };
     assert_eq!(&normalized, expected);
-}
-
-/// The persisted record for `order_id` as `owner` sees it via
-/// `get_user_order`.
-pub fn record_of<MH, MB>(
-    state: &state::State<MH, MB>,
-    owner: Principal,
-    order_id: order::OrderId,
-) -> order::OrderRecord
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    state
-        .get_user_order(&owner, order_id)
-        .map(|(_, _, record)| record)
-        .expect("order record present")
 }
 
 pub fn balances() -> TokenBalance<VectorMemory> {

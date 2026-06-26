@@ -18,10 +18,11 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillSettlement, LotSize, MatchOrderError, MatchingOutput,
-    NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq,
-    OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    CursorNotFound, FeeRates, Fill, FillCursorNotFound, FillRecord, FillSeq, FillSettlement,
+    FillStore, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
+    PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side, TickSize, TokenId,
+    TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -83,6 +84,7 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
+    fill_store: FillStore<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -103,6 +105,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
+        fill_store: FillStore<MH>,
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
@@ -118,6 +121,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
+            fill_store,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -355,21 +359,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let removed = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
+        let mut balance_operations = Vec::with_capacity(1);
+        RemovedOrderSettlement::new(seq, &removed, base_scale)
+            .push_balance_operations(&mut balance_operations);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
-            let mut balance_operations = Vec::with_capacity(1);
-            RemovedOrderSettlement::new(seq, &removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
-            self.pending_settling_events
-                .push_back(event::SettlingEvent {
-                    book_id,
-                    balance_operations,
-                });
         }
+        self.pending_settling_events
+            .push_back(event::SettlingEvent {
+                book_id,
+                balance_operations,
+            });
     }
 
     /// Drive engine matching for the given book; when `persistence` is
@@ -401,8 +405,17 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates) =
-                settle(fills, &expired_orders, fee_rates, base_scale);
+            let (balance_operations, mut updates, fill_records) = settle(
+                fills,
+                &expired_orders,
+                fee_rates,
+                base_scale,
+                event.book_id,
+                now,
+            );
+            for [taker_leg, maker_leg] in fill_records {
+                self.fill_store.append(taker_leg, maker_leg);
+            }
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
@@ -543,6 +556,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: order references an unknown trading pair")
             .clone();
         Some((id, pair, record))
+    }
+
+    /// Returns up to `length` of `owner`'s fills for the single order `order_id`,
+    /// newest first, resuming strictly after the `after` cursor (a cursor from a
+    /// prior page). Returns an empty page when `order_id` is unknown or owned by
+    /// another principal. An `after` cursor that is not one of the order's fills
+    /// yields [`FillCursorNotFound`]; a valid cursor with no older fills is
+    /// `Ok(vec![])`.
+    pub fn get_user_order_fills(
+        &self,
+        owner: &Principal,
+        order_id: OrderId,
+        after: Option<FillSeq>,
+        length: usize,
+    ) -> Result<Vec<(FillSeq, FillRecord)>, FillCursorNotFound> {
+        let owns = self
+            .order_history
+            .get(&order_id)
+            .is_some_and(|record| &record.owner == owner);
+        if !owns {
+            return Ok(Vec::new());
+        }
+        self.fill_store.fills_after(order_id, after, length)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -913,21 +949,26 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
+    book_id: OrderBookId,
+    now: Timestamp,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
+    Vec<[FillRecord; 2]>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
+    let mut fill_records = Vec::with_capacity(fills.len());
     for fill in fills {
         let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
+        fill_records.push(settlement.fill_records(book_id, now));
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    (ops, updates)
+    (ops, updates, fill_records)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in
@@ -956,6 +997,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
+            fill_store,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -972,6 +1014,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
+            fill_store: fill_store.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
             permissions: permissions.clone(),
@@ -994,6 +1037,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
+            fill_store,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1010,6 +1054,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
+            fill_store: other_fill_store,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
             permissions: other_permissions,
@@ -1025,6 +1070,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
+            && fill_store == other_fill_store
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
             && permissions == other_permissions
