@@ -619,6 +619,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![fill(
+                            0,
                             &taker,
                             maker_order_seq,
                             100 * PRICE_SCALE,
@@ -657,6 +658,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![fill(
+                            0,
                             &taker,
                             maker_order_seq,
                             expected_price,
@@ -681,6 +683,7 @@ mod order_book {
                 result,
                 MatchResult::PartiallyFilled {
                     fills: vec![fill(
+                        0,
                         &taker,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,
@@ -730,8 +733,8 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![
-                            fill(&taker, maker1_id, price_fill_1, u64::from(LOT_SIZE)),
-                            fill(&taker, maker2_id, price_fill_2, u64::from(LOT_SIZE)),
+                            fill(0, &taker, maker1_id, price_fill_1, u64::from(LOT_SIZE)),
+                            fill(1, &taker, maker2_id, price_fill_2, u64::from(LOT_SIZE)),
                         ],
                     }
                 );
@@ -750,6 +753,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![fill(
+                        0,
                         &taker1,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,
@@ -764,6 +768,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![fill(
+                        1,
                         &taker2,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,

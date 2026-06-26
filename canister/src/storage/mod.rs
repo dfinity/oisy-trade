@@ -12,9 +12,8 @@ const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(3);
 const STATE_SNAPSHOT_MEMORY_ID: MemoryId = MemoryId::new(4);
 const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
 const USER_ORDERS_MEMORY_ID: MemoryId = MemoryId::new(6);
-const FILLS_MEMORY_ID: MemoryId = MemoryId::new(7);
-const FILLS_BY_USER_MEMORY_ID: MemoryId = MemoryId::new(8);
-const FILLS_SEQ_MEMORY_ID: MemoryId = MemoryId::new(9);
+const TRADES_MEMORY_ID: MemoryId = MemoryId::new(7);
+const TRADES_BY_USER_MEMORY_ID: MemoryId = MemoryId::new(8);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -91,23 +90,18 @@ pub fn user_orders_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
 }
 
-/// Returns the virtual memory slice that backs the primary fill map
-/// (`FillStore::fills`). Used to construct the production `FillStore<VMem>` on
-/// canister `init` / `post_upgrade`.
-pub fn fills_memory() -> VMem {
-    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_MEMORY_ID))
+/// Returns the virtual memory slice that backs the primary trade map
+/// (`TradeHistory::trades`). Used to construct the production
+/// `TradeHistory<VMem>` on canister `init` / `post_upgrade`.
+pub fn trades_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(TRADES_MEMORY_ID))
 }
 
-/// Returns the virtual memory slice that backs `FillStore`'s account-wide
-/// per-user fill index (`FillStore::by_user`). Distinct from [`fills_memory`].
-pub fn fills_by_user_memory() -> VMem {
-    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_BY_USER_MEMORY_ID))
-}
-
-/// Returns the virtual memory slice that backs `FillStore`'s canister-global
-/// fill-sequence counter. Distinct from [`fills_memory`].
-pub fn fills_seq_memory() -> VMem {
-    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_SEQ_MEMORY_ID))
+/// Returns the virtual memory slice that backs `TradeHistory`'s account-wide
+/// per-user trade index (`TradeHistory::by_user`). Distinct from
+/// [`trades_memory`].
+pub fn trades_by_user_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(TRADES_BY_USER_MEMORY_ID))
 }
 pub mod state_snapshot {
     use super::STATE_SNAPSHOT;

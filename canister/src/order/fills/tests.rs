@@ -1,69 +1,116 @@
-use super::{CursorNotFound, FillRecord, FillSeq, FillStore};
+use super::{CursorNotFound, FillId, FillIdParseError, Trade, TradeHistory, TradeId};
 use crate::Timestamp;
-use crate::order::{OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side};
+use crate::order::{FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side};
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
 
-const ALICE: UserId = UserId::new(1);
-const BOB: UserId = UserId::new(2);
+const USER: UserId = UserId::new(0);
 
 #[test]
-fn should_append_two_side_projected_records_and_advance_seq_by_two() {
-    let mut store = store();
-    let order_a = order(0);
-    let order_b = order(1);
+fn should_roundtrip_fill_id_through_display_and_parse() {
+    let id = FillId::new(OrderBookId::new(3), FillSeq::new(42));
+    let parsed: FillId = id.to_string().parse().unwrap();
+    assert_eq!(parsed, id);
+    assert_eq!(id.to_string().len(), 32);
+    assert!(id.to_string().chars().all(|c| c.is_ascii_hexdigit()));
+}
 
-    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
+#[test]
+fn should_reject_a_malformed_fill_id() {
+    assert_eq!("".parse::<FillId>(), Err(FillIdParseError));
+    assert_eq!(
+        "0".repeat(31).parse::<FillId>(),
+        Err(FillIdParseError),
+        "too short"
+    );
+    assert_eq!(
+        "0".repeat(33).parse::<FillId>(),
+        Err(FillIdParseError),
+        "too long"
+    );
+    assert_eq!(
+        "z".repeat(32).parse::<FillId>(),
+        Err(FillIdParseError),
+        "non-hex"
+    );
+}
+
+#[test]
+fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
+    let book = OrderBookId::new(7);
+    let taker = TradeId::new(OrderId::new(book, OrderSeq::new(2)), FillSeq::new(9));
+    let maker = TradeId::new(OrderId::new(book, OrderSeq::new(5)), FillSeq::new(9));
+    assert_eq!(taker.fill_id(), maker.fill_id(), "two legs share a FillId");
+    assert_eq!(taker.fill_id(), FillId::new(book, FillSeq::new(9)));
+}
+
+#[test]
+fn should_append_two_side_projected_records_keyed_by_trade_id() {
+    let mut store = store();
+    let taker = trade_id(0, 0);
+    let maker = trade_id(1, 0);
+
+    store.append((taker, taker_leg()), USER, (maker, maker_leg()), USER);
 
     assert_eq!(store.len(), 2);
-    assert_eq!(store.next_seq(), FillSeq::new(2));
 
-    let a_fills = store.fills_after(order_a, None, 10).unwrap();
-    assert_eq!(a_fills.len(), 1);
-    let (a_seq, a_record) = &a_fills[0];
-    assert_eq!(*a_seq, FillSeq::ZERO);
-    assert_eq!(a_record, &taker_leg(order_a));
+    let taker_trades = store.trades_for_order(taker.order_id(), None, 10).unwrap();
+    assert_eq!(taker_trades.len(), 1);
+    assert_eq!(taker_trades[0].0, FillSeq::ZERO);
+    assert_eq!(taker_trades[0].1, taker_leg());
 
-    let b_fills = store.fills_after(order_b, None, 10).unwrap();
-    assert_eq!(b_fills.len(), 1);
-    let (b_seq, b_record) = &b_fills[0];
-    assert_eq!(*b_seq, FillSeq::new(1));
-    assert_eq!(b_record, &maker_leg(order_b));
+    let maker_trades = store.trades_for_order(maker.order_id(), None, 10).unwrap();
+    assert_eq!(maker_trades.len(), 1);
+    assert_eq!(maker_trades[0].0, FillSeq::ZERO);
+    assert_eq!(maker_trades[0].1, maker_leg());
 }
 
 #[test]
-fn should_return_one_orders_fills_newest_first_excluding_other_orders() {
+fn should_return_one_orders_trades_newest_first_excluding_other_orders() {
     let mut store = store();
-    let order_a = order(0);
-    let order_b = order(1);
-
-    // Two fills against order A (seqs 0, 2) interleaved with a fill against B.
-    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
-    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
-
-    let a_fills = store.fills_after(order_a, None, 10).unwrap();
-    let seqs: Vec<u64> = a_fills.iter().map(|(seq, _)| seq.get()).collect();
-    assert_eq!(seqs, vec![2, 0], "newest-first, only order A's fills");
-    assert!(a_fills.iter().all(|(_, record)| record.order_id == order_a));
-}
-
-#[test]
-fn should_page_via_after_cursor() {
-    let mut store = store();
-    let order_a = order(0);
-    let other = order(1);
-    for _ in 0..3 {
-        store.append(taker_leg(order_a), ALICE, maker_leg(other), BOB);
-    }
-    // order A's seqs are 0, 2, 4 (newest 4).
-    let first = store.fills_after(order_a, None, 2).unwrap();
-    assert_eq!(
-        first.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
-        vec![4, 2]
+    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    // Two matches against order A (fill_seqs 0, 1) each paired with order B.
+    store.append(
+        (TradeId::new(order_a, FillSeq::new(0)), taker_leg()),
+        USER,
+        (trade_id(1, 0), maker_leg()),
+        USER,
+    );
+    store.append(
+        (TradeId::new(order_a, FillSeq::new(1)), taker_leg()),
+        USER,
+        (trade_id(1, 1), maker_leg()),
+        USER,
     );
 
+    let seqs: Vec<u64> = store
+        .trades_for_order(order_a, None, 10)
+        .unwrap()
+        .iter()
+        .map(|(s, _)| s.get())
+        .collect();
+    assert_eq!(seqs, vec![1, 0], "newest-first, only order A's trades");
+}
+
+#[test]
+fn should_page_one_orders_trades_via_after_cursor() {
+    let mut store = store();
+    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    for seq in 0..3 {
+        store.append(
+            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
+            USER,
+            (trade_id(1, seq), maker_leg()),
+            USER,
+        );
+    }
+    let first = store.trades_for_order(order_a, None, 2).unwrap();
+    assert_eq!(
+        first.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
+        vec![2, 1]
+    );
     let cursor = first.last().unwrap().0;
-    let second = store.fills_after(order_a, Some(cursor), 2).unwrap();
+    let second = store.trades_for_order(order_a, Some(cursor), 2).unwrap();
     assert_eq!(
         second.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
         vec![0]
@@ -73,56 +120,234 @@ fn should_page_via_after_cursor() {
 #[test]
 fn should_return_empty_page_for_unknown_order() {
     let mut store = store();
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
-    let fills = store.fills_after(order(7), None, 10).unwrap();
-    assert!(fills.is_empty());
-}
-
-#[test]
-fn should_reject_a_cursor_that_is_not_one_of_the_orders_fills() {
-    let mut store = store();
-    let order_a = order(0);
-    store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
-    // seq 1 belongs to order(1), not order_a.
-    assert_eq!(
-        store.fills_after(order_a, Some(FillSeq::new(1)), 10),
-        Err(CursorNotFound)
+    store.append(
+        (trade_id(0, 0), taker_leg()),
+        USER,
+        (trade_id(1, 0), maker_leg()),
+        USER,
     );
-    // A seq that does not exist at all.
-    assert_eq!(
-        store.fills_after(order_a, Some(FillSeq::new(99)), 10),
-        Err(CursorNotFound)
+    let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(7));
+    assert!(
+        store
+            .trades_for_order(unknown, None, 10)
+            .unwrap()
+            .is_empty()
     );
 }
 
 #[test]
-fn should_return_empty_page_for_a_valid_cursor_with_no_older_fills() {
+fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
     let mut store = store();
-    let order_a = order(0);
-    store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
-    // The only fill of order_a is at seq 0; nothing older.
-    let fills = store.fills_after(order_a, Some(FillSeq::ZERO), 10).unwrap();
-    assert!(fills.is_empty());
+    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    store.append(
+        (TradeId::new(order_a, FillSeq::ZERO), taker_leg()),
+        USER,
+        (trade_id(1, 0), maker_leg()),
+        USER,
+    );
+    assert_eq!(
+        store.trades_for_order(order_a, Some(FillSeq::new(99)), 10),
+        Err(CursorNotFound)
+    );
 }
 
 #[test]
-fn should_clamp_to_requested_length() {
+fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
-    let order_a = order(0);
-    for _ in 0..5 {
-        store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
+    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    store.append(
+        (TradeId::new(order_a, FillSeq::ZERO), taker_leg()),
+        USER,
+        (trade_id(1, 0), maker_leg()),
+        USER,
+    );
+    let trades = store
+        .trades_for_order(order_a, Some(FillSeq::ZERO), 10)
+        .unwrap();
+    assert!(trades.is_empty());
+}
+
+#[test]
+fn should_clamp_one_orders_page_to_requested_length() {
+    let mut store = store();
+    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    for seq in 0..5 {
+        store.append(
+            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
+            USER,
+            (trade_id(1, seq), maker_leg()),
+            USER,
+        );
     }
-    let fills = store.fills_after(order_a, None, 2).unwrap();
-    assert_eq!(fills.len(), 2);
+    assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);
+}
+
+#[test]
+fn should_return_a_users_trades_across_orders_newest_first_scoped_to_owner() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let bob = UserId::new(2);
+    let alice_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    let alice_b = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1));
+    let bob_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(2));
+
+    store.append(
+        (TradeId::new(alice_a, FillSeq::new(0)), taker_leg()),
+        alice,
+        (TradeId::new(bob_order, FillSeq::new(0)), maker_leg()),
+        bob,
+    );
+    store.append(
+        (TradeId::new(alice_b, FillSeq::new(1)), taker_leg()),
+        alice,
+        (TradeId::new(bob_order, FillSeq::new(1)), maker_leg()),
+        bob,
+    );
+
+    let alice_orders: Vec<OrderId> = store
+        .trades_after(alice, None, 10)
+        .unwrap()
+        .iter()
+        .map(|(id, _)| id.order_id())
+        .collect();
+    assert_eq!(
+        alice_orders,
+        vec![alice_b, alice_a],
+        "alice's trades across both orders, newest-first",
+    );
+
+    let bob_orders: Vec<OrderId> = store
+        .trades_after(bob, None, 10)
+        .unwrap()
+        .iter()
+        .map(|(id, _)| id.order_id())
+        .collect();
+    assert_eq!(
+        bob_orders,
+        vec![bob_order, bob_order],
+        "bob sees only his own legs"
+    );
+}
+
+#[test]
+fn should_page_a_users_trades_via_after_cursor() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let other = UserId::new(2);
+    let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    for seq in 0..3 {
+        store.append(
+            (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
+            alice,
+            (trade_id(1, seq), maker_leg()),
+            other,
+        );
+    }
+    let first = store.trades_after(alice, None, 2).unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|(id, _)| id.seq().get())
+            .collect::<Vec<_>>(),
+        vec![2, 1]
+    );
+    let cursor = first.last().unwrap().0;
+    let second = store.trades_after(alice, Some(cursor), 2).unwrap();
+    assert_eq!(
+        second
+            .iter()
+            .map(|(id, _)| id.seq().get())
+            .collect::<Vec<_>>(),
+        vec![0]
+    );
+    let last_cursor = second.last().unwrap().0;
+    assert!(
+        store
+            .trades_after(alice, Some(last_cursor), 2)
+            .unwrap()
+            .is_empty(),
+        "paging past the oldest trade yields an empty page"
+    );
+}
+
+#[test]
+fn should_return_an_empty_account_page_for_an_unknown_user() {
+    let mut store = store();
+    store.append(
+        (trade_id(0, 0), taker_leg()),
+        UserId::new(1),
+        (trade_id(1, 0), maker_leg()),
+        UserId::new(2),
+    );
+    assert!(
+        store
+            .trades_after(UserId::new(7), None, 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let bob = UserId::new(2);
+    let bob_id = trade_id(1, 0);
+    store.append(
+        (trade_id(0, 0), taker_leg()),
+        alice,
+        (bob_id, maker_leg()),
+        bob,
+    );
+    assert_eq!(
+        store.trades_after(alice, Some(bob_id), 10),
+        Err(CursorNotFound)
+    );
+    let unknown = trade_id(0, 99);
+    assert_eq!(
+        store.trades_after(alice, Some(unknown), 10),
+        Err(CursorNotFound)
+    );
+}
+
+#[test]
+fn should_return_an_empty_account_page_for_a_valid_cursor_with_no_older_trades() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let alice_id = trade_id(0, 0);
+    store.append(
+        (alice_id, taker_leg()),
+        alice,
+        (trade_id(1, 0), maker_leg()),
+        UserId::new(2),
+    );
+    assert!(
+        store
+            .trades_after(alice, Some(alice_id), 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn should_clamp_an_account_page_to_requested_length() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    for seq in 0..5 {
+        store.append(
+            (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
+            alice,
+            (trade_id(1, seq), maker_leg()),
+            UserId::new(2),
+        );
+    }
+    assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
 }
 
 #[test]
 fn should_persist_a_record_with_no_counterparty_fields() {
-    // The record type only carries this order's own view; this test pins the
-    // field set so a counterparty field can't be added unnoticed.
-    let record = taker_leg(order(0));
-    let FillRecord {
-        order_id,
+    let Trade {
         side,
         price,
         quantity,
@@ -131,8 +356,7 @@ fn should_persist_a_record_with_no_counterparty_fields() {
         fee_token,
         is_maker,
         timestamp,
-    } = record;
-    assert_eq!(order_id, order(0));
+    } = taker_leg();
     assert_eq!(side, Side::Buy);
     assert_eq!(price, Price::new(10_000_000));
     assert_eq!(quantity, Quantity::from_u128(200_000_000));
@@ -144,123 +368,29 @@ fn should_persist_a_record_with_no_counterparty_fields() {
 }
 
 #[test]
-fn should_round_trip_a_trade_cursor_back_into_a_fill_seq() {
-    let seq = FillSeq::new(7);
-    let trade = taker_leg(order(0)).into_trade(seq);
+fn should_round_trip_a_trade_id_back_through_its_public_cursor() {
+    let id = trade_id(3, 7);
+    let trade = taker_leg().into_public(id);
     assert_eq!(
-        trade.cursor.parse::<FillSeq>(),
-        Ok(seq),
-        "a Trade.cursor must decode with the same encoding get_my_trades accepts for `after`"
+        trade.id.parse::<TradeId>(),
+        Ok(id),
+        "a Trade.id must decode with the same encoding get_my_trades accepts for `after`"
     );
 }
 
-#[test]
-fn should_return_a_users_fills_across_orders_newest_first() {
-    let mut store = store();
-    // Alice owns the taker leg of every fill; her orders differ across fills.
-    // seqs: 0 (Alice/order 0), 2 (Alice/order 1), 4 (Alice/order 0).
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
-    store.append(taker_leg(order(1)), ALICE, maker_leg(order(9)), BOB);
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
-
-    let trades = store.trades_after(ALICE, None, 10).unwrap();
-    let seqs: Vec<u64> = trades.iter().map(|(seq, _)| seq.get()).collect();
-    assert_eq!(seqs, vec![4, 2, 0], "Alice's fills across all her orders");
-    assert!(trades.iter().all(|(_, record)| record.side == Side::Buy));
+fn store() -> TradeHistory<VectorMemory> {
+    TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
-#[test]
-fn should_scope_account_fills_to_their_owner() {
-    let mut store = store();
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
-
-    let alice = store.trades_after(ALICE, None, 10).unwrap();
-    assert_eq!(alice.len(), 1);
-    assert_eq!(alice[0].0, FillSeq::ZERO);
-
-    let bob = store.trades_after(BOB, None, 10).unwrap();
-    assert_eq!(bob.len(), 1);
-    assert_eq!(bob[0].0, FillSeq::new(1));
-    assert!(bob[0].1.is_maker);
-}
-
-#[test]
-fn should_page_account_fills_via_after_cursor() {
-    let mut store = store();
-    for _ in 0..3 {
-        store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
-    }
-    // Alice's seqs are 0, 2, 4 (newest 4).
-    let first = store.trades_after(ALICE, None, 2).unwrap();
-    assert_eq!(
-        first.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
-        vec![4, 2]
-    );
-    let cursor = first.last().unwrap().0;
-    let second = store.trades_after(ALICE, Some(cursor), 2).unwrap();
-    assert_eq!(
-        second.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
-        vec![0]
-    );
-}
-
-#[test]
-fn should_reject_an_account_cursor_that_is_not_one_of_the_users_fills() {
-    let mut store = store();
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
-    // seq 1 is Bob's fill, not Alice's.
-    assert_eq!(
-        store.trades_after(ALICE, Some(FillSeq::new(1)), 10),
-        Err(CursorNotFound)
-    );
-    // A seq that does not exist at all.
-    assert_eq!(
-        store.trades_after(ALICE, Some(FillSeq::new(99)), 10),
-        Err(CursorNotFound)
-    );
-}
-
-#[test]
-fn should_return_empty_account_page_for_a_valid_cursor_with_no_older_fills() {
-    let mut store = store();
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
-    let trades = store.trades_after(ALICE, Some(FillSeq::ZERO), 10).unwrap();
-    assert!(trades.is_empty());
-}
-
-#[test]
-fn should_clamp_account_page_to_requested_length() {
-    let mut store = store();
-    for _ in 0..5 {
-        store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
-    }
-    let trades = store.trades_after(ALICE, None, 2).unwrap();
-    assert_eq!(trades.len(), 2);
-}
-
-#[test]
-fn should_return_empty_account_page_for_a_user_with_no_fills() {
-    let mut store = store();
-    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
-    let trades = store.trades_after(UserId::new(42), None, 10).unwrap();
-    assert!(trades.is_empty());
-}
-
-fn store() -> FillStore<VectorMemory> {
-    FillStore::new(
-        VectorMemory::default(),
-        VectorMemory::default(),
-        VectorMemory::default(),
+fn trade_id(order_seq: u64, fill_seq: u64) -> TradeId {
+    TradeId::new(
+        OrderId::new(OrderBookId::ZERO, OrderSeq::new(order_seq)),
+        FillSeq::new(fill_seq),
     )
 }
 
-fn order(seq: u64) -> OrderId {
-    OrderId::new(OrderBookId::ZERO, OrderSeq::new(seq))
-}
-
-fn taker_leg(order_id: OrderId) -> FillRecord {
-    FillRecord {
-        order_id,
+fn taker_leg() -> Trade {
+    Trade {
         side: Side::Buy,
         price: Price::new(10_000_000),
         quantity: Quantity::from_u128(200_000_000),
@@ -272,9 +402,8 @@ fn taker_leg(order_id: OrderId) -> FillRecord {
     }
 }
 
-fn maker_leg(order_id: OrderId) -> FillRecord {
-    FillRecord {
-        order_id,
+fn maker_leg() -> Trade {
+    Trade {
         side: Side::Sell,
         price: Price::new(10_000_000),
         quantity: Quantity::from_u128(200_000_000),

@@ -66,6 +66,28 @@ mod add_limit_order {
         GetMyOrdersArgs::by_page(after, length)
     }
 
+    /// Mints, approves, and deposits `amount` base units for `who`.
+    async fn fund_base(setup: &Setup, who: Principal, amount: u64) {
+        setup
+            .deposit_flow(who, setup.base_token_id())
+            .mint(amount + 2 * BASE_LEDGER_FEE)
+            .approve(amount + BASE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
+    }
+
+    /// Mints, approves, and deposits `amount` quote units for `who`.
+    async fn fund_quote(setup: &Setup, who: Principal, amount: u64) {
+        setup
+            .deposit_flow(who, setup.quote_token_id())
+            .mint(amount + 2 * QUOTE_LEDGER_FEE)
+            .approve(amount + QUOTE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
+    }
+
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
@@ -494,14 +516,7 @@ mod add_limit_order {
         let quantity = 1_000_000u64;
         let notional = maker_price as u128 * quantity as u128 / 1_000_000_000u128;
 
-        let seller_deposit = quantity;
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
-            .approve(seller_deposit + BASE_LEDGER_FEE)
-            .deposit(seller_deposit)
-            .execute()
-            .await;
+        fund_base(&setup, seller, quantity).await;
         let sell_id = seller_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -515,13 +530,7 @@ mod add_limit_order {
         setup.env().tick().await;
 
         let buyer_deposit = taker_price as u128 * quantity as u128 / 1_000_000_000u128;
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(buyer_deposit as u64 + 2 * QUOTE_LEDGER_FEE)
-            .approve(buyer_deposit as u64 + QUOTE_LEDGER_FEE)
-            .deposit(buyer_deposit as u64)
-            .execute()
-            .await;
+        fund_quote(&setup, buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -639,19 +648,12 @@ mod add_limit_order {
         let seller_client = setup.oisy_trade_client_with_caller(seller);
 
         // Two resting sells at distinct prices; a single buy sweeps both, so the
-        // buy order accumulates two fills (two distinct Trade.cursor values).
+        // buy order accumulates two fills (two distinct Trade.id values).
         let low_price = 9_000 * PRICE_SCALE;
         let high_price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
 
-        let seller_deposit = 2 * quantity;
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
-            .approve(seller_deposit + BASE_LEDGER_FEE)
-            .deposit(seller_deposit)
-            .execute()
-            .await;
+        fund_base(&setup, seller, 2 * quantity).await;
         for price in [low_price, high_price] {
             seller_client
                 .add_limit_order(LimitOrderRequest {
@@ -668,13 +670,7 @@ mod add_limit_order {
 
         let taker_price = 11_000 * PRICE_SCALE;
         let buyer_deposit = taker_price as u128 * 2 * quantity as u128 / 1_000_000_000u128;
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(buyer_deposit as u64 + 2 * QUOTE_LEDGER_FEE)
-            .approve(buyer_deposit as u64 + QUOTE_LEDGER_FEE)
-            .deposit(buyer_deposit as u64)
-            .execute()
-            .await;
+        fund_quote(&setup, buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -706,24 +702,24 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(all.len(), 2, "the buy order swept two maker levels");
 
-        // Page 1: the newest fill, carrying its own cursor.
+        // Page 1: the newest fill, carrying its own id.
         let page1 = buyer_client.get_my_trades(page(None)).await.unwrap();
         assert_eq!(page1.len(), 1);
         assert_eq!(page1[0], all[0]);
 
-        // Page 2: feeding page 1's last cursor back as `after` continues strictly
+        // Page 2: feeding page 1's last id back as `after` continues strictly
         // after it — the next-older fill, with no overlap or gap.
-        let cursor = page1.last().unwrap().cursor.clone();
+        let cursor = page1.last().unwrap().id.clone();
         let page2 = buyer_client
             .get_my_trades(page(Some(cursor)))
             .await
             .unwrap();
         assert_eq!(page2.len(), 1);
         assert_eq!(page2[0], all[1]);
-        assert_ne!(page1[0].cursor, page2[0].cursor);
+        assert_ne!(page1[0].id, page2[0].id);
 
         // Page 3: nothing older remains.
-        let cursor = page2.last().unwrap().cursor.clone();
+        let cursor = page2.last().unwrap().id.clone();
         let page3 = buyer_client
             .get_my_trades(page(Some(cursor)))
             .await
@@ -825,14 +821,14 @@ mod add_limit_order {
             .await
             .unwrap();
         assert_eq!(page1, all[..2].to_vec());
-        let cursor = page1.last().unwrap().cursor.clone();
+        let cursor = page1.last().unwrap().id.clone();
         let page2 = buyer_client
             .get_my_trades(by_account(Some(cursor.clone()), 2))
             .await
             .unwrap();
         assert_eq!(page2, all[2..].to_vec());
         assert!(
-            page2.iter().all(|t| t.cursor != cursor),
+            page2.iter().all(|t| t.id != cursor),
             "the resumed page never repeats the cursor it resumed from",
         );
 
@@ -850,7 +846,7 @@ mod add_limit_order {
         );
 
         // An unknown cursor is an empty page; a malformed one is an error.
-        let unknown = "ffffffffffffffff".to_string();
+        let unknown = "f".repeat(48);
         assert!(
             buyer_client
                 .get_my_trades(by_account(Some(unknown), 10))

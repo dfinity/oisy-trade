@@ -301,11 +301,12 @@ pub enum PairToken {
     Quote,
 }
 
-/// Opaque, caller-supplied pagination cursor for `get_my_trades`, a text token
-/// (like [`OrderId`]). Clients pass back the last value they received and never
-/// parse it; treating it as opaque text lets the endpoint tell a malformed
-/// token (an error) from a well-formed-but-unknown one (an empty page).
-pub type FillCursor = String;
+/// Unique identifier for a trade, encoded as a hex string. Opaque to callers
+/// (like [`OrderId`]): a client passes the last value it received back as the
+/// next page's `after` and never parses it. Treating it as opaque text lets the
+/// endpoint tell a malformed token (an error) from a well-formed-but-unknown one
+/// (an empty page).
+pub type TradeId = String;
 
 /// Maximum number of trades returned by a single `get_my_trades` call.
 /// Requests for more are silently capped to this many.
@@ -315,10 +316,11 @@ pub const MAX_FILLS_PER_RESPONSE: u32 = 100;
 /// caller's orders' executions; the counterparty is intentionally omitted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct Trade {
-    /// This fill's own pagination cursor. Pass the last entry's cursor back as
-    /// the next page's `after`. Mirrors how a `get_my_orders` `ByPage` entry
-    /// exposes the [`OrderId`] that doubles as its page cursor.
-    pub cursor: FillCursor,
+    /// This trade's own identity, which doubles as its pagination cursor. Pass
+    /// the last entry's id back as the next page's `after`. Mirrors how a
+    /// `get_my_orders` `ByPage` entry exposes the [`OrderId`] that doubles as its
+    /// page cursor.
+    pub id: TradeId,
     /// The owning (caller's) order.
     pub order_id: OrderId,
     /// This order's side.
@@ -359,9 +361,9 @@ pub struct TradesByOrder {
     /// The order whose fills should be returned. Returns an empty page if the
     /// caller does not own it.
     pub order_id: OrderId,
-    /// Resume strictly after this cursor — the [`Trade::cursor`] of the prior
-    /// page's last entry. `None` starts from the newest fill.
-    pub after: Option<FillCursor>,
+    /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's
+    /// last entry. `None` starts from the newest fill.
+    pub after: Option<TradeId>,
     /// Maximum number of trades to return.
     pub length: u32,
 }
@@ -370,9 +372,9 @@ pub struct TradesByOrder {
 /// `length` is capped at [`MAX_FILLS_PER_RESPONSE`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct TradesByAccount {
-    /// Resume strictly after this cursor — the [`Trade::cursor`] of the prior
-    /// page's last entry. `None` starts from the newest fill.
-    pub after: Option<FillCursor>,
+    /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's
+    /// last entry. `None` starts from the newest fill.
+    pub after: Option<TradeId>,
     /// Maximum number of trades to return.
     pub length: u32,
 }
