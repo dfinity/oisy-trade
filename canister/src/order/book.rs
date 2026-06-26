@@ -78,10 +78,6 @@ impl OrderBook {
         self.next_seq
     }
 
-    pub fn next_fill(&self) -> FillSeq {
-        self.next_fill
-    }
-
     pub fn is_empty(&self) -> bool {
         assert_eq!(
             self.bids.is_empty() && self.asks.is_empty(),
