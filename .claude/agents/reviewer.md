@@ -203,9 +203,10 @@ block so a long review folds away by default:
     </details>
 
 GitHub only renders markdown inside `<details>` when there is a BLANK LINE after the
-`<summary>` line and before the closing `</details>`. The body is multi-line, so pass it
-via `--body-file <tmpfile>` (write the body to a temp file first) rather than an inline
-`--body "..."`, to avoid shell-quoting problems.
+`<summary>` line (a trailing blank line before `</details>` is not strictly required, but
+keep one for readability). The body is multi-line, so pass it via `--body-file <tmpfile>`
+(write the body to a temp file first) rather than an inline `--body "..."`, to avoid
+shell-quoting problems.
 
 - Any 🔴/🟠 remaining, or CI not green →
     gh pr review <num> --request-changes --body-file <tmpfile>
