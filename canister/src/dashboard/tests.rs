@@ -1,7 +1,4 @@
-use super::{
-    DashboardTemplate, bar_width_percent, format_scaled, group_digits, quantity_digits,
-    saturating_to_u128,
-};
+use super::{DashboardTemplate, bar_width_percent, format_scaled, saturating_to_u128};
 use crate::order::{
     BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TimeInForce,
     TradingPair,
@@ -239,7 +236,7 @@ fn should_format_scaled_exact_mid_value() {
 
 #[test]
 fn should_format_scaled_u256_quantity_without_precision_loss() {
-    let raw = quantity_digits(&Quantity::new(1, 0));
+    let raw = Quantity::new(1, 0).to_nat().0.to_string();
     assert_eq!(
         raw, "340282366920938463463374607431768211456",
         "Quantity::new(1, 0) is 2^128"
@@ -247,27 +244,6 @@ fn should_format_scaled_u256_quantity_without_precision_loss() {
     assert_eq!(
         format_scaled(&raw, 18),
         "340282366920938463463.374607431768211456"
-    );
-}
-
-#[test]
-fn should_strip_underscores_from_quantity_digits() {
-    assert_eq!(
-        quantity_digits(&Quantity::new(1, 0)),
-        "340282366920938463463374607431768211456",
-        "candid::Nat::to_string groups digits with '_'; quantity_digits strips them"
-    );
-}
-
-#[test]
-fn should_group_digits_with_underscores() {
-    assert_eq!(group_digits("0"), "0");
-    assert_eq!(group_digits("100"), "100");
-    assert_eq!(group_digits("12345"), "12_345");
-    assert_eq!(group_digits("1000000"), "1_000_000");
-    assert_eq!(
-        group_digits("340282366920938463463374607431768211456"),
-        "340_282_366_920_938_463_463_374_607_431_768_211_456"
     );
 }
 

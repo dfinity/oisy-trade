@@ -4,7 +4,7 @@ mod tests;
 use crate::order::{OrderBook, Price, Quantity};
 use crate::state::State;
 use askama::Template;
-use candid::Principal;
+use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::Mode;
 
@@ -56,11 +56,10 @@ pub struct Amount {
 }
 
 impl Amount {
-    fn new(raw: impl ToString, decimals: u8) -> Self {
-        let raw = raw.to_string();
+    fn new(raw: Nat, decimals: u8) -> Self {
         Self {
-            decimal_value: format_scaled(&raw, decimals),
-            raw_value: group_digits(&raw),
+            decimal_value: format_scaled(&raw.0.to_string(), decimals),
+            raw_value: raw.to_string(),
         }
     }
 }
@@ -155,7 +154,7 @@ fn build_pair(
     let spread = match (best_bid_level, best_ask_level) {
         (Some((bid, _)), Some((ask, _))) => ask
             .checked_sub(bid)
-            .map(|s| Amount::new(s.get(), decimals.quote)),
+            .map(|s| Amount::new(Nat::from(s.get()), decimals.quote)),
         _ => None,
     };
     DashboardPair {
@@ -163,8 +162,8 @@ fn build_pair(
         base_symbol,
         quote_symbol,
         quote_decimals: decimals.quote,
-        tick_size: Amount::new(book.tick_size().get(), decimals.quote),
-        lot_size: Amount::new(book.lot_size().get(), decimals.base),
+        tick_size: Amount::new(Nat::from(book.tick_size().get()), decimals.quote),
+        lot_size: Amount::new(Nat::from(book.lot_size().get()), decimals.base),
         maker_fee_bps: book.fee_rates().maker.get(),
         taker_fee_bps: book.fee_rates().taker.get(),
         bids_len: book.bids_len(),
@@ -203,8 +202,8 @@ fn depth_levels(
     levels
         .iter()
         .map(|(price, qty)| DashboardDepthLevel {
-            price: Amount::new(price.get(), decimals.quote),
-            quantity: Amount::new(quantity_digits(qty), decimals.base),
+            price: Amount::new(Nat::from(price.get()), decimals.quote),
+            quantity: Amount::new(qty.to_nat(), decimals.base),
             bar_width_percent: bar_width_percent(saturating_to_u128(qty), max),
         })
         .collect()
@@ -223,13 +222,9 @@ fn bar_width_percent(qty: u128, max: u128) -> u8 {
 
 fn level((price, quantity): (Price, Quantity), decimals: &PairDecimals) -> DashboardLevel {
     DashboardLevel {
-        price: Amount::new(price.get(), decimals.quote),
-        quantity: Amount::new(quantity_digits(&quantity), decimals.base),
+        price: Amount::new(Nat::from(price.get()), decimals.quote),
+        quantity: Amount::new(quantity.to_nat(), decimals.base),
     }
-}
-
-fn quantity_digits(quantity: &Quantity) -> String {
-    quantity.to_nat().to_string().replace('_', "")
 }
 
 fn format_scaled(raw: &str, decimals: u8) -> String {
@@ -245,18 +240,6 @@ fn format_scaled(raw: &str, decimals: u8) -> String {
     } else {
         format!("{}.{}", &padded[..split], frac)
     }
-}
-
-fn group_digits(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut grouped = String::with_capacity(s.len() + s.len() / 3);
-    for (i, &b) in bytes.iter().enumerate() {
-        if i != 0 && (bytes.len() - i).is_multiple_of(3) {
-            grouped.push('_');
-        }
-        grouped.push(b as char);
-    }
-    grouped
 }
 
 fn saturating_to_u128(q: &Quantity) -> u128 {
