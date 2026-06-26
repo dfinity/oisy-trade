@@ -1,6 +1,6 @@
 use super::{StableMemoryOptions, State};
 use crate::balance::TokenBalance;
-use crate::order::{FillStore, OrderHistory};
+use crate::order::{OrderHistory, TradeHistory};
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
     SetHaltEvent, WithdrawEvent,
@@ -172,7 +172,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
 pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
     events: T,
     order_history: OrderHistory<MH>,
-    fill_store: FillStore<MH>,
+    fill_store: TradeHistory<MH>,
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     persistence: StableMemoryOptions,

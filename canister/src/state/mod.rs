@@ -18,11 +18,11 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillCursorNotFound, FillRecord, FillSeq, FillSettlement,
-    FillStore, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order, OrderBook,
-    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
-    PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side, TickSize, TokenId,
-    TokenMetadata, TradingPair,
+    CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
+    MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
+    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, Trade, TradeCursorNotFound,
+    TradeHistory, TradeLeg, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -84,7 +84,7 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
-    fill_store: FillStore<MH>,
+    fill_store: TradeHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -105,7 +105,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
-        fill_store: FillStore<MH>,
+        fill_store: TradeHistory<MH>,
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
@@ -405,7 +405,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates, fill_records) = settle(
+            let (balance_operations, mut updates, trades) = settle(
                 fills,
                 &expired_orders,
                 fee_rates,
@@ -413,9 +413,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 event.book_id,
                 now,
             );
-            for [taker_leg, maker_leg] in fill_records {
-                let taker_user = self.order_owner_user(&taker_leg.order_id);
-                let maker_user = self.order_owner_user(&maker_leg.order_id);
+            for [taker_leg, maker_leg] in trades {
+                let taker_user = self.order_owner_user(&taker_leg.0.order_id());
+                let maker_user = self.order_owner_user(&maker_leg.0.order_id());
                 self.fill_store
                     .append(taker_leg, taker_user, maker_leg, maker_user);
             }
@@ -561,19 +561,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         Some((id, pair, record))
     }
 
-    /// Returns up to `length` of `owner`'s fills for the single order `order_id`,
-    /// newest first, resuming strictly after the `after` cursor (a cursor from a
-    /// prior page). Returns an empty page when `order_id` is unknown or owned by
-    /// another principal. An `after` cursor that is not one of the order's fills
-    /// yields [`FillCursorNotFound`]; a valid cursor with no older fills is
-    /// `Ok(vec![])`.
+    /// Returns up to `length` of `owner`'s trades for the single order
+    /// `order_id`, newest first, resuming strictly after the `after` cursor (a
+    /// cursor from a prior page). Returns an empty page when `order_id` is
+    /// unknown or owned by another principal. An `after` cursor that is not one
+    /// of the order's trades yields [`TradeCursorNotFound`]; a valid cursor with
+    /// no older trades is `Ok(vec![])`.
     pub fn get_user_order_fills(
         &self,
         owner: &Principal,
         order_id: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, FillRecord)>, FillCursorNotFound> {
+    ) -> Result<Vec<(FillSeq, Trade)>, TradeCursorNotFound> {
         let owns = self
             .order_history
             .get(&order_id)
@@ -581,7 +581,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if !owns {
             return Ok(Vec::new());
         }
-        self.fill_store.fills_after(order_id, after, length)
+        self.fill_store.trades_for_order(order_id, after, length)
     }
 
     /// Resolves the [`UserId`] that owns `order_id`. Panics if the order or its
@@ -971,21 +971,21 @@ fn settle(
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<[FillRecord; 2]>,
+    Vec<[TradeLeg; 2]>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
-    let mut fill_records = Vec::with_capacity(fills.len());
+    let mut trades = Vec::with_capacity(fills.len());
     for fill in fills {
         let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
-        fill_records.push(settlement.fill_records(book_id, now));
+        trades.push(settlement.trades(book_id, now));
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    (ops, updates, fill_records)
+    (ops, updates, trades)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

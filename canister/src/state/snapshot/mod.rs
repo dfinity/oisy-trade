@@ -13,7 +13,7 @@
 use super::State;
 use crate::balance::{FeeEntry, TokenBalance};
 use crate::order::{
-    FillStore, OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata,
+    OrderBook, OrderBookId, OrderBookSnapshot, OrderHistory, TokenId, TokenMetadata, TradeHistory,
     TradingPair,
 };
 use crate::state::ExecutionPolicy;
@@ -175,7 +175,7 @@ impl StateSnapshot {
     pub fn into_state<MH: Memory, MB: Memory>(
         self,
         order_history: OrderHistory<MH>,
-        fill_store: FillStore<MH>,
+        fill_store: TradeHistory<MH>,
         mut balances: TokenBalance<MB>,
         user_registry: UserRegistry<MB>,
     ) -> State<MH, MB> {

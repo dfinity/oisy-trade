@@ -1,8 +1,8 @@
 use super::plan::{FillPlan, FillPlanBuilder, PlanOutcome};
 use super::queue::{OrderQueue, OrderQueueIter};
 use super::{
-    FeeRates, Fill, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side,
-    TickSize,
+    FeeRates, Fill, FillSeq, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder,
+    Side, TickSize,
 };
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
@@ -19,6 +19,8 @@ pub struct OrderBook {
     id: OrderBookId,
     /// Per-book sequence counter for generating order IDs.
     next_seq: OrderSeq,
+    /// Per-book sequence counter for generating fill IDs.
+    next_fill: FillSeq,
     /// Minimum price increment. All order prices must be a multiple of this value.
     tick_size: TickSize,
     /// Minimum order quantity. All order quantities must be a multiple of this value.
@@ -54,6 +56,7 @@ impl OrderBook {
         Self {
             id,
             next_seq: OrderSeq::default(),
+            next_fill: FillSeq::default(),
             tick_size,
             lot_size,
             min_notional,
@@ -73,6 +76,10 @@ impl OrderBook {
 
     pub fn next_seq(&self) -> OrderSeq {
         self.next_seq
+    }
+
+    pub fn next_fill(&self) -> FillSeq {
+        self.next_fill
     }
 
     pub fn is_empty(&self) -> bool {
@@ -249,6 +256,7 @@ impl OrderBook {
             let full_qty = *filled.remaining_quantity();
             order.reduce_quantity(&full_qty);
             fills.push(Fill {
+                fill_seq: self.mint_fill_seq(),
                 taker_order_seq: order.id(),
                 taker_side: side,
                 taker_price,
@@ -278,6 +286,7 @@ impl OrderBook {
             );
             order.reduce_quantity(&fill_qty);
             fills.push(Fill {
+                fill_seq: self.mint_fill_seq(),
                 taker_order_seq: order.id(),
                 taker_side: side,
                 taker_price,
@@ -407,6 +416,12 @@ impl OrderBook {
             filled_orders,
             expired_orders,
         }
+    }
+
+    fn mint_fill_seq(&mut self) -> FillSeq {
+        let seq = self.next_fill;
+        self.next_fill.increment();
+        seq
     }
 
     fn insert_order(&mut self, order: Order) {
@@ -627,6 +642,8 @@ pub struct OrderBookSnapshot {
     pub min_notional: Quantity,
     #[n(10)]
     pub max_notional: Option<Quantity>,
+    #[n(11)]
+    pub next_fill: FillSeq,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -642,6 +659,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
         Self {
             id: book.id,
             next_seq: book.next_seq,
+            next_fill: book.next_fill,
             tick_size: book.tick_size,
             lot_size: book.lot_size,
             pending_orders: book.pending_orders.iter().cloned().collect(),
@@ -716,6 +734,7 @@ impl From<OrderBookSnapshot> for OrderBook {
         Self {
             id: snapshot.id,
             next_seq: snapshot.next_seq,
+            next_fill: snapshot.next_fill,
             tick_size: snapshot.tick_size,
             lot_size: snapshot.lot_size,
             min_notional: snapshot.min_notional,

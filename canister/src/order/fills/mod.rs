@@ -1,8 +1,8 @@
-use super::{OrderId, PairToken, Price, Quantity, Side};
+use super::{FillSeq, OrderBookId, OrderId, PairToken, Price, Quantity, Side};
 use crate::Timestamp;
 use crate::user::UserId;
 use ic_stable_structures::storable::Bound;
-use ic_stable_structures::{Memory, StableBTreeMap, StableCell, Storable};
+use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
@@ -10,54 +10,104 @@ use std::str::FromStr;
 #[cfg(test)]
 mod tests;
 
-/// Canister-global, monotonic sequence assigned to each side-projected fill
-/// record as it is appended. The two legs of one fill get two consecutive
-/// values; it is never reused (fills are append-only) and orders records both
-/// globally and within an order's prefix. It is the `after` cursor for the
-/// per-order fill scan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FillSeq(u64);
-
-impl FillSeq {
-    pub const ZERO: Self = Self(0);
-
-    pub const fn new(seq: u64) -> Self {
-        Self(seq)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-
-    fn next(self) -> Self {
-        Self(self.0.checked_add(1).expect("BUG: FillSeq overflow"))
-    }
-}
-
-/// First-class identifier of a side-projected fill: the owning [`OrderId`]
-/// followed by the canister-global [`FillSeq`]. A range scan over an `order`
-/// prefix yields that order's fills in `seq` order; reversed, newest-first.
-/// Mirrors [`OrderId`]: opaque outside the canister as a 48-character hex
-/// string (16 bytes of `OrderId` + 8 bytes of `seq`).
+/// Identity of a match: the order book it happened in and the per-book
+/// [`FillSeq`] the book minted for it. Mirrors [`OrderId`] — opaque outside the
+/// canister as a 32-character hex string (8 bytes book + 8 bytes seq) — and is
+/// derivable from any [`TradeId`] by dropping its `OrderSeq`.
 ///
 /// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
 /// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FillId {
+    book_id: OrderBookId,
+    seq: FillSeq,
+}
+
+/// 8 bytes of `OrderBookId` + 8 bytes of `seq`, both big-endian.
+const FILL_ID_LEN: usize = 8 + 8;
+
+impl FillId {
+    pub fn new(book_id: OrderBookId, seq: FillSeq) -> Self {
+        Self { book_id, seq }
+    }
+
+    pub fn seq(&self) -> FillSeq {
+        self.seq
+    }
+}
+
+impl fmt::Display for FillId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}{:016x}", self.book_id.get(), self.seq.get())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FillIdParseError;
+
+impl fmt::Display for FillIdParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid fill ID: expected 32-character hex string")
+    }
+}
+
+impl FromStr for FillId {
+    type Err = FillIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 2 * FILL_ID_LEN || !s.is_ascii() {
+            return Err(FillIdParseError);
+        }
+        let book_id = u64::from_str_radix(&s[..16], 16).map_err(|_| FillIdParseError)?;
+        let seq = u64::from_str_radix(&s[16..], 16).map_err(|_| FillIdParseError)?;
+        Ok(Self {
+            book_id: OrderBookId::new(book_id),
+            seq: FillSeq::new(seq),
+        })
+    }
+}
+
+impl From<FillId> for String {
+    fn from(id: FillId) -> Self {
+        id.to_string()
+    }
+}
+
+/// Primary store key and per-side identity: the owning [`OrderId`] followed by
+/// the match's per-book [`FillSeq`]. A range scan over an `order` prefix yields
+/// that order's trades in `seq` order; reversed, newest-first. Mirrors
+/// [`OrderId`]: opaque outside the canister as a 48-character hex string (16
+/// bytes of `OrderId` + 8 bytes of `seq`). The match's [`FillId`] is derivable
+/// via [`TradeId::fill_id`].
+///
+/// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
+/// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TradeId {
     order: OrderId,
     seq: FillSeq,
 }
 
 /// 16 bytes of `OrderId` + 8 bytes of `seq`, both big-endian.
-const FILL_ID_LEN: usize = 16 + 8;
+const TRADE_ID_LEN: usize = 16 + 8;
 
-impl FillId {
+impl TradeId {
     pub fn new(order: OrderId, seq: FillSeq) -> Self {
         Self { order, seq }
     }
 
+    pub fn order_id(&self) -> OrderId {
+        self.order
+    }
+
     pub fn seq(&self) -> FillSeq {
         self.seq
+    }
+
+    /// The id of the match this trade is one side of — the owning order's book
+    /// paired with the shared `FillSeq`, dropping the `OrderSeq`.
+    pub fn fill_id(&self) -> FillId {
+        FillId::new(self.order.book_id(), self.seq)
     }
 
     fn first(order: OrderId) -> Self {
@@ -75,9 +125,9 @@ impl FillId {
     }
 }
 
-impl Storable for FillId {
+impl Storable for TradeId {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; FILL_ID_LEN];
+        let mut buf = [0u8; TRADE_ID_LEN];
         buf[..16].copy_from_slice(&self.order.to_bytes());
         buf[16..].copy_from_slice(&self.seq.get().to_be_bytes());
         Cow::Owned(buf.to_vec())
@@ -91,8 +141,8 @@ impl Storable for FillId {
         let bytes: &[u8] = bytes.as_ref();
         assert_eq!(
             bytes.len(),
-            FILL_ID_LEN,
-            "FillId must decode from exactly {FILL_ID_LEN} bytes"
+            TRADE_ID_LEN,
+            "TradeId must decode from exactly {TRADE_ID_LEN} bytes"
         );
         let order = OrderId::from_bytes(Cow::Borrowed(&bytes[..16]));
         let seq = FillSeq::new(u64::from_be_bytes(
@@ -102,86 +152,50 @@ impl Storable for FillId {
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: FILL_ID_LEN as u32,
+        max_size: TRADE_ID_LEN as u32,
         is_fixed_size: true,
     };
 }
 
-impl fmt::Display for FillId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{:016x}", self.order, self.seq.get())
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct FillIdParseError;
-
-impl fmt::Display for FillIdParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid fill ID: expected 48-character hex string")
-    }
-}
-
-impl FromStr for FillId {
-    type Err = FillIdParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 48 || !s.is_ascii() {
-            return Err(FillIdParseError);
-        }
-        let order = OrderId::from_str(&s[..32]).map_err(|_| FillIdParseError)?;
-        let seq = u64::from_str_radix(&s[32..], 16).map_err(|_| FillIdParseError)?;
-        Ok(Self {
-            order,
-            seq: FillSeq::new(seq),
-        })
-    }
-}
-
-impl From<FillId> for String {
-    fn from(id: FillId) -> Self {
-        id.to_string()
-    }
-}
-
 /// Key into the account-wide secondary index: the interned [`UserId`] followed
-/// by the canister-global [`FillSeq`], so a range scan over a user's prefix
-/// yields their fills oldest-first across all their orders —
-/// [`FillStore::trades_after`] reverses it for newest-first. The value is the
-/// [`FillId`], pointing back into the primary `fills` map.
+/// by a canister-global insertion sequence, so a range scan over a user's prefix
+/// yields their trades oldest-first across all their orders —
+/// [`TradeHistory::trades_after`] reverses it for newest-first. The value is the
+/// [`TradeId`], pointing back into the primary `trades` map.
 ///
 /// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
 /// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct FillByUserKey {
+struct TradeByUserKey {
     user: UserId,
-    seq: FillSeq,
+    seq: u64,
 }
 
 /// 8 bytes of `UserId` + 8 bytes of `seq`, both big-endian.
-const FILL_BY_USER_KEY_LEN: usize = 8 + 8;
+const TRADE_BY_USER_KEY_LEN: usize = 8 + 8;
 
-impl FillByUserKey {
+impl TradeByUserKey {
+    fn from_seq(user: UserId, seq: u64) -> Self {
+        Self { user, seq }
+    }
+
     fn first(user: UserId) -> Self {
-        Self {
-            user,
-            seq: FillSeq::ZERO,
-        }
+        Self { user, seq: 0 }
     }
 
     fn last(user: UserId) -> Self {
         Self {
             user,
-            seq: FillSeq::new(u64::MAX),
+            seq: u64::MAX,
         }
     }
 }
 
-impl Storable for FillByUserKey {
+impl Storable for TradeByUserKey {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; FILL_BY_USER_KEY_LEN];
+        let mut buf = [0u8; TRADE_BY_USER_KEY_LEN];
         buf[..8].copy_from_slice(&self.user.get().to_be_bytes());
-        buf[8..].copy_from_slice(&self.seq.get().to_be_bytes());
+        buf[8..].copy_from_slice(&self.seq.to_be_bytes());
         Cow::Owned(buf.to_vec())
     }
 
@@ -193,119 +207,118 @@ impl Storable for FillByUserKey {
         let bytes: &[u8] = bytes.as_ref();
         assert_eq!(
             bytes.len(),
-            FILL_BY_USER_KEY_LEN,
-            "FillByUserKey must decode from exactly {FILL_BY_USER_KEY_LEN} bytes"
+            TRADE_BY_USER_KEY_LEN,
+            "TradeByUserKey must decode from exactly {TRADE_BY_USER_KEY_LEN} bytes"
         );
         let user = UserId::new(u64::from_be_bytes(
             bytes[..8].try_into().expect("8-byte slice"),
         ));
-        let seq = FillSeq::new(u64::from_be_bytes(
-            bytes[8..].try_into().expect("8-byte slice"),
-        ));
+        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
         Self { user, seq }
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: FILL_BY_USER_KEY_LEN as u32,
+        max_size: TRADE_BY_USER_KEY_LEN as u32,
         is_fixed_size: true,
     };
 }
 
-/// One side-projected fill, holding everything needed to audit one of the two
-/// orders' view of an execution. The counterparty is never stored.
+/// One side-projected trade, holding everything needed to audit one of the two
+/// orders' view of a match. The owning `order_id` and the match's `fill_seq`
+/// live in the [`TradeId`] key, never in the value; the counterparty is never
+/// stored.
 ///
 /// Once the canister is launched its CBOR layout is an upgrade-durable schema;
 /// pre-launch there are no persisted records, so schema changes are acceptable.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct FillRecord {
+pub struct Trade {
     #[n(0)]
-    pub order_id: OrderId,
-    #[n(1)]
     pub side: Side,
-    #[n(2)]
+    #[n(1)]
     pub price: Price,
-    #[n(3)]
+    #[n(2)]
     pub quantity: Quantity,
-    #[n(4)]
+    #[n(3)]
     pub notional: Quantity,
-    #[n(5)]
+    #[n(4)]
     pub fee: Quantity,
-    #[n(6)]
+    #[n(5)]
     pub fee_token: PairToken,
-    #[n(7)]
+    #[n(6)]
     pub is_maker: bool,
-    #[n(8)]
+    #[n(7)]
     pub timestamp: Timestamp,
 }
 
-impl Storable for FillRecord {
+impl Storable for Trade {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        minicbor::encode(self, &mut buf).expect("fill record encoding should always succeed");
+        minicbor::encode(self, &mut buf).expect("trade encoding should always succeed");
         Cow::Owned(buf)
     }
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        minicbor::encode(&self, &mut buf).expect("fill record encoding should always succeed");
+        minicbor::encode(&self, &mut buf).expect("trade encoding should always succeed");
         buf
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         minicbor::decode(bytes.as_ref())
-            .unwrap_or_else(|e| panic!("failed to decode fill record bytes: {e}"))
+            .unwrap_or_else(|e| panic!("failed to decode trade bytes: {e}"))
     }
 
     const BOUND: Bound = Bound::Unbounded;
 }
 
-/// The `after` cursor passed to [`FillStore::fills_after`] names a fill that is
-/// unknown (no record with that global sequence in the order's prefix).
+/// One side-projected trade together with its primary key — what settlement
+/// produces and [`TradeHistory::append`] consumes.
+pub type TradeLeg = (TradeId, Trade);
+
+/// The `after` cursor passed to a reader names a trade that is unknown (no
+/// record with that sequence in the scanned prefix) or not owned by the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CursorNotFound;
 
-/// Append-only store of side-projected fill records, mirroring the storage
+/// Append-only store of side-projected trade records, mirroring the storage
 /// shape of [`crate::order::OrderHistory`]: a primary map keyed by an
-/// `OrderId`-prefixed [`FillId`] (so a per-order read is a range scan), a
-/// `(UserId, global_seq)` secondary index for the account-wide read, plus a
-/// canister-global monotonic [`FillSeq`] counter persisted in its own cell so
-/// it stays monotonic across upgrades.
-pub struct FillStore<M: Memory> {
-    fills: StableBTreeMap<FillId, FillRecord, M>,
-    by_user: StableBTreeMap<FillByUserKey, FillId, M>,
-    next_seq: StableCell<u64, M>,
+/// `OrderId`-prefixed [`TradeId`] (so a per-order read is a prefix range scan,
+/// no separate by-order index) plus a `(UserId, global_seq)` secondary index for
+/// the account-wide read. The two side-projected records of one match share the
+/// book-minted `FillSeq` in their [`TradeId`]s and differ by `OrderId`.
+pub struct TradeHistory<M: Memory> {
+    trades: StableBTreeMap<TradeId, Trade, M>,
+    by_user: StableBTreeMap<TradeByUserKey, TradeId, M>,
 }
 
-impl<M: Memory> fmt::Debug for FillStore<M> {
+impl<M: Memory> fmt::Debug for TradeHistory<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FillStore")
-            .field("len", &self.fills.len())
-            .field("next_seq", self.next_seq.get())
+        f.debug_struct("TradeHistory")
+            .field("len", &self.trades.len())
             .finish()
     }
 }
 
-impl<M: Memory> FillStore<M> {
-    /// `fills_memory`, `by_user_memory`, and `seq_memory` **must be three
-    /// distinct memory regions**.
-    pub fn new(fills_memory: M, by_user_memory: M, seq_memory: M) -> Self {
+impl<M: Memory> TradeHistory<M> {
+    /// `trades_memory` and `by_user_memory` **must be two distinct memory
+    /// regions**.
+    pub fn new(trades_memory: M, by_user_memory: M) -> Self {
         Self {
-            fills: StableBTreeMap::init(fills_memory),
+            trades: StableBTreeMap::init(trades_memory),
             by_user: StableBTreeMap::init(by_user_memory),
-            next_seq: StableCell::init(seq_memory, 0),
         }
     }
 
-    /// Append the two side-projected records of one fill — the taker leg owned by
-    /// `taker_user` and the maker leg owned by `maker_user` — each under the next
-    /// global [`FillSeq`], advancing the sequence by two. Each record is written
-    /// to the primary map and indexed under its owner in `by_user` (2 + 2
-    /// inserts per fill).
+    /// Append the two side-projected records of one match — the taker leg owned
+    /// by `taker_user` and the maker leg owned by `maker_user`, both already
+    /// keyed by their [`TradeId`] (the match's shared `FillSeq` paired with each
+    /// owning `OrderId`). Each record is written to the primary map and indexed
+    /// under its owner in `by_user` (2 + 2 inserts per match).
     pub fn append(
         &mut self,
-        taker_leg: FillRecord,
+        taker_leg: TradeLeg,
         taker_user: UserId,
-        maker_leg: FillRecord,
+        maker_leg: TradeLeg,
         maker_user: UserId,
     ) {
         bench_scopes!("fills", "fills::append");
@@ -313,117 +326,124 @@ impl<M: Memory> FillStore<M> {
         self.insert(maker_leg, maker_user);
     }
 
-    fn insert(&mut self, record: FillRecord, user: UserId) {
-        let seq = FillSeq::new(*self.next_seq.get());
-        let id = FillId::new(record.order_id, seq);
+    fn insert(&mut self, leg: TradeLeg, user: UserId) {
+        let (id, trade) = leg;
+        // TODO(DEFI-2901): retention/pruning must restore a monotonic counter;
+        // len()-derived reuses ids after deletes.
+        let global_seq = self.by_user.len();
         assert_eq!(
-            self.fills.insert(id, record),
+            self.trades.insert(id, trade),
             None,
-            "BUG: duplicate fill id for seq {seq:?}"
+            "BUG: duplicate trade id {id:?}"
         );
         assert_eq!(
-            self.by_user.insert(FillByUserKey { user, seq }, id),
+            self.by_user
+                .insert(TradeByUserKey::from_seq(user, global_seq), id),
             None,
-            "BUG: duplicate user-fill index entry for {user:?} seq {seq:?}"
+            "BUG: duplicate user-trade index entry for {user:?} seq {global_seq}"
         );
-        self.next_seq.set(seq.next().get());
     }
 
-    /// Returns up to `length` of `order`'s fills, newest first. With
-    /// `after: None` the page starts at the newest fill; otherwise `after` is a
-    /// cursor — the last fill of the previous page — and the page continues with
-    /// the next-older fill. An `after` whose sequence is not one of `order`'s
-    /// fills yields [`CursorNotFound`]; a valid cursor with no older fills is
+    /// Returns up to `length` of `order`'s trades, newest first. With
+    /// `after: None` the page starts at the newest trade; otherwise `after` is a
+    /// cursor — the last trade of the previous page — and the page continues with
+    /// the next-older trade. An `after` whose sequence is not one of `order`'s
+    /// trades yields [`CursorNotFound`]; a valid cursor with no older trades is
     /// `Ok(vec![])`.
-    pub fn fills_after(
+    pub fn trades_for_order(
         &self,
         order: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, FillRecord)>, CursorNotFound> {
-        bench_scopes!("fills", "fills::fills_after");
+    ) -> Result<Vec<(FillSeq, Trade)>, CursorNotFound> {
+        bench_scopes!("fills", "fills::trades_for_order");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(FillId::last(order)),
+            None => Bound::Included(TradeId::last(order)),
             Some(seq) => {
-                let id = FillId::new(order, seq);
-                if !self.fills.contains_key(&id) {
+                let id = TradeId::new(order, seq);
+                if !self.trades.contains_key(&id) {
                     return Err(CursorNotFound);
                 }
                 Bound::Excluded(id)
             }
         };
         Ok(self
-            .fills
-            .range((Bound::Included(FillId::first(order)), upper))
+            .trades
+            .range((Bound::Included(TradeId::first(order)), upper))
             .rev()
             .take(length)
             .map(|entry| (entry.key().seq, entry.value()))
             .collect())
     }
 
-    /// Returns up to `length` of `user`'s fills across **all** their orders,
-    /// newest first. With `after: None` the page starts at the newest fill;
-    /// otherwise `after` is a cursor — the last fill of the previous page — and
-    /// the page continues with the next-older fill. An `after` whose sequence is
-    /// not one of `user`'s fills yields [`CursorNotFound`]; a valid cursor with
-    /// no older fills is `Ok(vec![])`. Each page reverse-scans the `by_user`
-    /// index then resolves each [`FillId`] from the primary map — the exact
-    /// shape of `OrderHistory::orders_after` — so it is `O(length)`.
+    /// Returns up to `length` of `user`'s trades across **all** their orders,
+    /// newest first. With `after: None` the page starts at the newest trade;
+    /// otherwise `after` is a cursor — the last trade of the previous page — and
+    /// the page continues with the next-older trade. An `after` whose `TradeId`
+    /// is not one of `user`'s trades yields [`CursorNotFound`]; a valid cursor
+    /// with no older trades is `Ok(vec![])`. Each page reverse-scans the
+    /// `by_user` index then resolves each [`TradeId`] from the primary map — the
+    /// exact shape of `OrderHistory::orders_after` — so it is `O(length)`.
     pub fn trades_after(
         &self,
         user: UserId,
-        after: Option<FillId>,
+        after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, FillRecord)>, CursorNotFound> {
+    ) -> Result<Vec<(TradeId, Trade)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_after");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(FillByUserKey::last(user)),
-            Some(fill_id) => {
-                let key = FillByUserKey {
-                    user,
-                    seq: fill_id.seq(),
-                };
-                if !self.by_user.contains_key(&key) {
-                    return Err(CursorNotFound);
-                }
-                Bound::Excluded(key)
+            None => Bound::Included(TradeByUserKey::last(user)),
+            Some(cursor) => {
+                let global_seq = self.user_seq_of(user, cursor).ok_or(CursorNotFound)?;
+                Bound::Excluded(TradeByUserKey::from_seq(user, global_seq))
             }
         };
         Ok(self
             .by_user
-            .range((Bound::Included(FillByUserKey::first(user)), upper))
+            .range((Bound::Included(TradeByUserKey::first(user)), upper))
             .rev()
             .take(length)
             .map(|entry| {
-                let fill_id = entry.value();
-                let record = self
-                    .fills
-                    .get(&fill_id)
-                    .expect("BUG: by_user index references a missing fill record");
-                (fill_id.seq(), record)
+                let id = entry.value();
+                let trade = self
+                    .trades
+                    .get(&id)
+                    .expect("BUG: by_user index references a missing trade");
+                (id, trade)
             })
             .collect())
     }
 
+    /// The global sequence under which `cursor` is indexed for `user`, or `None`
+    /// if `cursor` is not one of `user`'s own trades. Walks `user`'s index
+    /// prefix; the index is small relative to a page and this is the cursor path,
+    /// not the per-entry hot path.
+    fn user_seq_of(&self, user: UserId, cursor: TradeId) -> Option<u64> {
+        self.by_user
+            .range((
+                std::ops::Bound::Included(TradeByUserKey::first(user)),
+                std::ops::Bound::Included(TradeByUserKey::last(user)),
+            ))
+            .find(|entry| entry.value() == cursor)
+            .map(|entry| entry.key().seq)
+    }
+
     #[cfg(test)]
     fn len(&self) -> u64 {
-        self.fills.len()
+        self.trades.len()
     }
 
     #[cfg(test)]
-    fn next_seq(&self) -> FillSeq {
-        FillSeq::new(*self.next_seq.get())
+    fn iter(&self) -> impl Iterator<Item = (TradeId, Trade)> + '_ {
+        self.trades
+            .iter()
+            .map(|entry| (*entry.key(), entry.value()))
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (FillId, FillRecord)> + '_ {
-        self.fills.iter().map(|entry| (*entry.key(), entry.value()))
-    }
-
-    #[cfg(test)]
-    fn user_index_iter(&self) -> impl Iterator<Item = (FillByUserKey, FillId)> + '_ {
+    fn user_index_iter(&self) -> impl Iterator<Item = (TradeByUserKey, TradeId)> + '_ {
         self.by_user
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
@@ -431,32 +451,28 @@ impl<M: Memory> FillStore<M> {
 }
 
 #[cfg(test)]
-impl Clone for FillStore<ic_stable_structures::VectorMemory> {
+impl Clone for TradeHistory<ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
         let mut fresh = Self::new(
             ic_stable_structures::VectorMemory::default(),
             ic_stable_structures::VectorMemory::default(),
-            ic_stable_structures::VectorMemory::default(),
         );
-        for (id, record) in self.iter() {
-            assert_eq!(fresh.fills.insert(id, record), None);
+        for (id, trade) in self.iter() {
+            assert_eq!(fresh.trades.insert(id, trade), None);
         }
-        for (key, fill_id) in self.user_index_iter() {
-            assert_eq!(fresh.by_user.insert(key, fill_id), None);
+        for (key, id) in self.user_index_iter() {
+            assert_eq!(fresh.by_user.insert(key, id), None);
         }
-        fresh.next_seq.set(*self.next_seq.get());
         fresh
     }
 }
 
 #[cfg(test)]
-impl PartialEq for FillStore<ic_stable_structures::VectorMemory> {
+impl PartialEq for TradeHistory<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.next_seq.get() == other.next_seq.get()
-            && self.iter().eq(other.iter())
-            && self.user_index_iter().eq(other.user_index_iter())
+        self.iter().eq(other.iter()) && self.user_index_iter().eq(other.user_index_iter())
     }
 }
 
 #[cfg(test)]
-impl Eq for FillStore<ic_stable_structures::VectorMemory> {}
+impl Eq for TradeHistory<ic_stable_structures::VectorMemory> {}

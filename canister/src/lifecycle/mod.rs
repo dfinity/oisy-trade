@@ -1,5 +1,5 @@
 use crate::balance::TokenBalance;
-use crate::order::{FillStore, OrderHistory};
+use crate::order::{OrderHistory, TradeHistory};
 use crate::state::audit;
 use crate::state::event::EventType;
 use crate::state::{State, StateSnapshot};
@@ -22,11 +22,7 @@ pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
         storage::order_history_memory(),
         storage::user_orders_memory(),
     );
-    let fill_store = FillStore::new(
-        storage::fills_memory(),
-        storage::fills_by_user_memory(),
-        storage::fills_seq_memory(),
-    );
+    let fill_store = TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory());
     let balances = TokenBalance::new(storage::balances_memory());
     let user_registry = UserRegistry::new(storage::user_registry_memory());
     state::init_state(
@@ -78,11 +74,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
                 storage::order_history_memory(),
                 storage::user_orders_memory(),
             ),
-            FillStore::new(
-                storage::fills_memory(),
-                storage::fills_by_user_memory(),
-                storage::fills_seq_memory(),
-            ),
+            TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory()),
             TokenBalance::new(storage::balances_memory()),
             UserRegistry::new(storage::user_registry_memory()),
         )

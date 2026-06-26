@@ -15,7 +15,8 @@ pub use book::{
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
 pub use fills::{
-    CursorNotFound as FillCursorNotFound, FillId, FillIdParseError, FillRecord, FillSeq, FillStore,
+    CursorNotFound as TradeCursorNotFound, FillId, FillIdParseError, Trade, TradeHistory, TradeId,
+    TradeLeg,
 };
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
@@ -184,6 +185,40 @@ impl OrderSeq {
 
     pub fn increment(&mut self) {
         self.0 = self.0.checked_add(1).expect("OrderSeq overflow");
+    }
+}
+
+/// Sequence number identifying a [`Fill`] within a single order book, minted by
+/// the book's `next_fill` counter exactly as [`OrderSeq`] is minted for orders.
+/// The two side-projected [`Trade`]s of one match share its `FillSeq`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct FillSeq(#[n(0)] u64);
+
+impl FillSeq {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(seq: u64) -> Self {
+        Self(seq)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
+    }
+
+    pub fn increment(&mut self) {
+        self.0 = self.0.checked_add(1).expect("FillSeq overflow");
     }
 }
 

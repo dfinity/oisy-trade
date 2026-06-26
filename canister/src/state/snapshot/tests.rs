@@ -13,9 +13,9 @@ use proptest::prelude::*;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        FeeRates, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder,
-        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce, TokenId,
-        TokenMetadata, TradingPair,
+        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce,
+        TokenId, TokenMetadata, TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
@@ -103,6 +103,7 @@ mod schema_stability {
                 fee_rates: FeeRates::default(),
                 min_notional: Quantity::from_u128(5),
                 max_notional: Some(Quantity::from_u128(9_000)),
+                next_fill: FillSeq::new(2),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -151,11 +152,11 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818b81078103\
+        89820080810882828141018261410882814102826142068182828141018141028107818c81078103\
         810a811a000f4240818581008200808118641a000f4240820180818281185a818381011a0007a120\
-        820080818281186e818381021a0007a12082008081810482810081000519232881828141011a0001\
-        86a08182810782820085810581068201801a05f5e1001a0003d090820085810681058200801a000f\
-        4240f618c81b000000012a05f200";
+        820080818281186e818381021a0007a120820080818104828100810005192328810281828141011a\
+        000186a08182810782820085810581068201801a05f5e1001a0003d090820085810681058200801a\
+        000f4240f618c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {

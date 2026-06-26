@@ -6,8 +6,8 @@ pub use order::{PlaceOrder, order};
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    FeeRates, Fill, FillStore, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq,
-    PendingOrder, Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+    FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
+    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeHistory,
     TradingPair,
 };
 use crate::state;
@@ -104,10 +104,9 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             crate::storage::order_history_memory(),
             crate::storage::user_orders_memory(),
         ),
-        crate::order::FillStore::new(
-            crate::storage::fills_memory(),
-            crate::storage::fills_by_user_memory(),
-            crate::storage::fills_seq_memory(),
+        crate::order::TradeHistory::new(
+            crate::storage::trades_memory(),
+            crate::storage::trades_by_user_memory(),
         ),
         UserRegistry::new(crate::storage::user_registry_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
@@ -209,15 +208,18 @@ pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order 
 
 /// Construct a [`Fill`] for use in test assertions.
 ///
-/// `taker` provides the taker context (seq, side, price).
+/// `fill_seq` is the per-book sequence the order book is expected to have minted
+/// for this match. `taker` provides the taker context (seq, side, price).
 /// `maker_order_seq`, `maker_price`, and `quantity` describe the fill itself.
 pub fn fill(
+    fill_seq: u64,
     taker: &Order,
     maker_order_seq: OrderSeq,
     maker_price: impl Into<u128>,
     quantity: impl Into<u64>,
 ) -> Fill {
     Fill {
+        fill_seq: crate::order::FillSeq::new(fill_seq),
         taker_order_seq: taker.id(),
         taker_side: taker.side(),
         taker_price: taker.price(),
@@ -290,10 +292,9 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
-    let fill_store = crate::order::FillStore::new(
-        crate::storage::fills_memory(),
-        crate::storage::fills_by_user_memory(),
-        crate::storage::fills_seq_memory(),
+    let fill_store = crate::order::TradeHistory::new(
+        crate::storage::trades_memory(),
+        crate::storage::trades_by_user_memory(),
     );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
@@ -373,12 +374,8 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
-pub fn fill_store() -> FillStore<VectorMemory> {
-    FillStore::new(
-        VectorMemory::default(),
-        VectorMemory::default(),
-        VectorMemory::default(),
-    )
+pub fn fill_store() -> TradeHistory<VectorMemory> {
+    TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
 /// Asserts two [`OrderRecord`]s are equal on every field except the
@@ -576,6 +573,7 @@ pub mod arbitrary {
                     (Side::Sell, Price::new(lo), Price::new(hi))
                 };
                 Fill {
+                    fill_seq: crate::order::FillSeq::new(index),
                     taker_order_seq: OrderSeq::new(2 * index),
                     taker_side,
                     taker_price,

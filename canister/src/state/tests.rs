@@ -61,8 +61,7 @@ mod assert_caller_is_allowed {
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
-            crate::state::FillStore::new(
-                ic_stable_structures::VectorMemory::default(),
+            crate::state::TradeHistory::new(
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
@@ -2426,7 +2425,7 @@ mod settle_fills {
             state: &TestState,
             owner: Principal,
             order_id: crate::order::OrderId,
-        ) -> Vec<crate::order::FillRecord> {
+        ) -> Vec<crate::order::Trade> {
             state
                 .get_user_order_fills(&owner, order_id, None, 100)
                 .expect("owner-scoped fill read should not error")
@@ -2445,7 +2444,7 @@ mod settle_fills {
                 .trades_after(user, None, 100)
                 .expect("account-wide fill read should not error")
                 .into_iter()
-                .map(|(_, record)| record.order_id)
+                .map(|(id, _)| id.order_id())
                 .collect()
         }
     }
@@ -2907,7 +2906,7 @@ mod settle_fills {
 
 mod execution_policy {
     use crate::balance::TokenBalance;
-    use crate::order::{FillStore, OrderHistory};
+    use crate::order::{OrderHistory, TradeHistory};
     use crate::state::{ExecutionPolicy, State};
     use ic_stable_structures::VectorMemory;
     use oisy_trade_types_internal::{InitArg, Mode};
@@ -2921,11 +2920,7 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
-            FillStore::new(
-                VectorMemory::default(),
-                VectorMemory::default(),
-                VectorMemory::default(),
-            ),
+            TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
             crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
