@@ -4,7 +4,7 @@ use crate::order::{
 };
 
 use crate::EXECUTOR;
-use crate::order::{FillStore, OrderHistory, OrderId};
+use crate::order::{OrderHistory, OrderId, TradeHistory};
 use crate::state::execution_policy::ExecutionPolicy;
 use crate::state::{StableMemoryOptions, State};
 use crate::storage;
@@ -389,7 +389,7 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             storage::order_history_memory(),
             storage::user_orders_memory(),
         ),
-        FillStore::new(storage::fills_memory(), storage::fills_seq_memory()),
+        TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory()),
         crate::user::UserRegistry::new(storage::user_registry_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),
     )

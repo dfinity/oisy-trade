@@ -61,7 +61,7 @@ mod assert_caller_is_allowed {
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
-            crate::state::FillStore::new(
+            crate::state::TradeHistory::new(
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
@@ -2360,6 +2360,38 @@ mod settle_fills {
             assert_eq!(fills_of(&state, SELLER, maker_a).len(), 1);
         }
 
+        /// Settlement populates the account-wide `by_user` index: a user's fills
+        /// span all their orders, newest-first, and stay scoped to their owner.
+        #[test]
+        fn settlement_indexes_account_wide_fills_newest_first() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+            let maker_a =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let maker_b =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            let taker_2 =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buyer_orders = account_trade_orders(&state, BUYER);
+            assert_eq!(
+                buyer_orders.len(),
+                2,
+                "buyer has one fill per taker order, newest-first",
+            );
+            assert_eq!(buyer_orders[0], taker_2, "newest taker fill first");
+
+            let seller_orders = account_trade_orders(&state, SELLER);
+            assert_eq!(
+                seller_orders,
+                vec![maker_b, maker_a],
+                "seller sees only their own maker fills",
+            );
+        }
+
         /// Replay under `Skip` (post-upgrade) writes no fill records, so durable
         /// fills are not double-written.
         #[test]
@@ -2393,12 +2425,26 @@ mod settle_fills {
             state: &TestState,
             owner: Principal,
             order_id: crate::order::OrderId,
-        ) -> Vec<crate::order::FillRecord> {
+        ) -> Vec<crate::order::Trade> {
             state
                 .get_user_order_fills(&owner, order_id, None, 100)
                 .expect("owner-scoped fill read should not error")
                 .into_iter()
                 .map(|(_, record)| record)
+                .collect()
+        }
+
+        fn account_trade_orders(state: &TestState, owner: Principal) -> Vec<crate::order::OrderId> {
+            let user = state
+                .user_registry
+                .lookup(owner)
+                .expect("owner should be registered after settlement");
+            state
+                .fill_store
+                .trades_after(user, None, 100)
+                .expect("account-wide fill read should not error")
+                .into_iter()
+                .map(|(id, _)| id.order_id())
                 .collect()
         }
     }
@@ -2860,7 +2906,7 @@ mod settle_fills {
 
 mod execution_policy {
     use crate::balance::TokenBalance;
-    use crate::order::{FillStore, OrderHistory};
+    use crate::order::{OrderHistory, TradeHistory};
     use crate::state::{ExecutionPolicy, State};
     use ic_stable_structures::VectorMemory;
     use oisy_trade_types_internal::{InitArg, Mode};
@@ -2874,7 +2920,7 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
-            FillStore::new(VectorMemory::default(), VectorMemory::default()),
+            TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
             crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
