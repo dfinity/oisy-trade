@@ -22,7 +22,7 @@ use crate::order::{
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
     RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, Trade, TradeCursorNotFound,
-    TradeHistory, TradeLeg, TradingPair,
+    TradeHistory, TradeId, TradeLeg, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -590,6 +590,26 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             return Ok(Vec::new());
         }
         self.fill_store.trades_for_order(order_id, after, length)
+    }
+
+    /// Returns up to `length` of `owner`'s trades across **all** their orders,
+    /// newest first, resuming strictly after the `after` cursor (a cursor from a
+    /// prior page). An `after` cursor that is not one of `owner`'s trades yields
+    /// [`TradeCursorNotFound`]; a valid cursor with no older trades is
+    /// `Ok(vec![])`.
+    pub fn get_user_trades(
+        &self,
+        owner: &Principal,
+        after: Option<TradeId>,
+        length: usize,
+    ) -> Result<Vec<(TradeId, Trade)>, TradeCursorNotFound> {
+        let Some(user_id) = self.user_registry.lookup(*owner) else {
+            return match after {
+                Some(_) => Err(TradeCursorNotFound),
+                None => Ok(Vec::new()),
+            };
+        };
+        self.fill_store.trades_after(user_id, after, length)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {

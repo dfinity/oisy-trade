@@ -2116,7 +2116,7 @@ mod get_my_trades {
             vec![buy_3, buy_2],
         );
 
-        let cursor = page_1.last().unwrap().cursor.clone();
+        let cursor = page_1.last().unwrap().id.clone();
         let page_2 = get_my_trades(by_account(Some(cursor), 2), BUYER).unwrap();
         assert_eq!(
             page_2
@@ -2151,8 +2151,8 @@ mod get_my_trades {
         init_state_with_order_book();
         fund_user(BUYER);
         fund_user(SELLER);
-        match_one_more();
-        let cursor = "ffffffffffffffff".to_string();
+        let buy = match_one_more();
+        let cursor = format!("{buy}ffffffffffffffff");
         let trades = get_my_trades(by_account(Some(cursor), 10), BUYER).unwrap();
         assert!(trades.is_empty());
     }
