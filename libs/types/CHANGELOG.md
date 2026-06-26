@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-26
+
+### Added
+
+- Add FOK data model — TimeInForce, Expired status (2/3) ([#164](https://github.com/dfinity/oisy-trade/pull/164))
+
+### Changed
+
+- Distinct InvalidOrderId/OrderNotFound; non-panicking get_my_orders (3/3) ([#172](https://github.com/dfinity/oisy-trade/pull/172))
+- Disposition-tagged errors for query endpoints (2/3) ([#168](https://github.com/dfinity/oisy-trade/pull/168))
+- Disposition-tagged errors for update endpoints (1/3) ([#158](https://github.com/dfinity/oisy-trade/pull/158))
+
+[0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
+
 ## [Unreleased]
 
 ## [0.1.0] - 2026-06-16
