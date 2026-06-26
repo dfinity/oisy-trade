@@ -53,7 +53,7 @@ impl Amount {
     fn new(raw: String, decimals: u8) -> Self {
         Self {
             value: format_scaled(&raw, decimals),
-            raw,
+            raw: group_digits(&raw),
         }
     }
 }
@@ -237,6 +237,18 @@ fn format_scaled(raw: &str, decimals: u8) -> String {
     } else {
         format!("{}.{}", &padded[..split], frac)
     }
+}
+
+fn group_digits(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut grouped = String::with_capacity(s.len() + s.len() / 3);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i != 0 && (bytes.len() - i).is_multiple_of(3) {
+            grouped.push('_');
+        }
+        grouped.push(b as char);
+    }
+    grouped
 }
 
 fn saturating_to_u128(q: &Quantity) -> u128 {

@@ -1,5 +1,6 @@
 use super::{
-    DashboardTemplate, bar_width_percent, format_scaled, quantity_digits, saturating_to_u128,
+    DashboardTemplate, bar_width_percent, format_scaled, group_digits, quantity_digits,
+    saturating_to_u128,
 };
 use crate::order::{
     BasisPoint, FeeRates, OrderBookId, OrderId, PendingOrder, Price, Quantity, Side, TimeInForce,
@@ -129,19 +130,19 @@ fn should_render_per_pair_metadata() {
     );
     assert_eq!(
         value_for("Lot size").as_deref(),
-        Some("0.01 ICP raw 1000000")
+        Some("0.01 ICP raw 1_000_000")
     );
     assert_eq!(
         value_for("Best bid").as_deref(),
-        Some("100 ckBTC/ICP (0.01 ICP) raw 10000000000 / 1000000")
+        Some("100 ckBTC/ICP (0.01 ICP) raw 10_000_000_000 / 1_000_000")
     );
     assert_eq!(
         value_for("Best ask").as_deref(),
-        Some("110 ckBTC/ICP (0.01 ICP) raw 11000000000 / 1000000")
+        Some("110 ckBTC/ICP (0.01 ICP) raw 11_000_000_000 / 1_000_000")
     );
     assert_eq!(
         value_for("Spread").as_deref(),
-        Some("10 ckBTC/ICP raw 1000000000")
+        Some("10 ckBTC/ICP raw 1_000_000_000")
     );
     assert!(
         dl_text.contains("0.000001"),
@@ -160,11 +161,11 @@ fn should_render_depth_chart_for_resting_orders() {
     let dom = render(&state, 0);
 
     let bid_prices = cells(&dom, "table.depth-bids td.price");
-    assert_eq!(bid_prices, vec!["100 10000000000"]);
+    assert_eq!(bid_prices, vec!["100 10_000_000_000"]);
     let ask_prices = cells(&dom, "table.depth-asks td.price");
-    assert_eq!(ask_prices, vec!["110 11000000000"]);
+    assert_eq!(ask_prices, vec!["110 11_000_000_000"]);
     let bid_qtys = cells(&dom, "table.depth-bids tbody tr td:nth-child(2)");
-    assert_eq!(bid_qtys, vec!["0.01 1000000"]);
+    assert_eq!(bid_qtys, vec!["0.01 1_000_000"]);
 
     assert_eq!(bar_widths(&dom), vec!["width: 100%", "width: 100%"]);
 }
@@ -255,6 +256,18 @@ fn should_strip_underscores_from_quantity_digits() {
         quantity_digits(&Quantity::new(1, 0)),
         "340282366920938463463374607431768211456",
         "candid::Nat::to_string groups digits with '_'; quantity_digits strips them"
+    );
+}
+
+#[test]
+fn should_group_digits_with_underscores() {
+    assert_eq!(group_digits("0"), "0");
+    assert_eq!(group_digits("100"), "100");
+    assert_eq!(group_digits("12345"), "12_345");
+    assert_eq!(group_digits("1000000"), "1_000_000");
+    assert_eq!(
+        group_digits("340282366920938463463374607431768211456"),
+        "340_282_366_920_938_463_463_374_607_431_768_211_456"
     );
 }
 
