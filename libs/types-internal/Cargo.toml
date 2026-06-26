@@ -19,5 +19,5 @@ candid = { workspace = true }
 canlog = { workspace = true, features = ["derive"], optional = true }
 icrc-cbor = { workspace = true, optional = true }
 minicbor = { workspace = true, features = ["derive"], optional = true }
-oisy_trade_types = { path = "../types" }
+oisy_trade_types = { path = "../types", version = "0.2.0" }
 serde = { workspace = true, features = ["derive"] }

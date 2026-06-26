@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-26
+
+### Added
+
+- Fill-or-kill (FOK) orders: a time-in-force on order submission with an `Expired` order status, enforced as a matching gate and through execution ([#164](https://github.com/dfinity/oisy-trade/pull/164), [#169](https://github.com/dfinity/oisy-trade/pull/169))
+
+### Changed
+
+- Disposition-tagged errors on update and query endpoints, with distinct `InvalidOrderId` and `OrderNotFound` errors and a non-panicking `get_my_orders` ([#158](https://github.com/dfinity/oisy-trade/pull/158), [#168](https://github.com/dfinity/oisy-trade/pull/168), [#172](https://github.com/dfinity/oisy-trade/pull/172))
+- Group user, admin, and debug endpoints in the candid service interface ([#174](https://github.com/dfinity/oisy-trade/pull/174))
+
+### Fixed
+
+- Validate lifecycle init and post-upgrade arguments ([#159](https://github.com/dfinity/oisy-trade/pull/159))
+
 ## [0.1.0] - 2026-06-16
 
 ### Added
@@ -36,4 +51,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 - Surface trading-pair fee rates in `get_events` ([#134](https://github.com/dfinity/oisy-trade/pull/134))
 
+[0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.1.0..oisy_trade_canister-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.0.0..oisy_trade_canister-v0.1.0
