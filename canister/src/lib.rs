@@ -49,11 +49,6 @@ mod tests;
 
 pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
-pub enum Task {
-    ProcessPendingOrders,
-}
-
 pub fn add_limit_order(
     request: LimitOrderRequest,
     runtime: &impl Runtime,
@@ -108,12 +103,26 @@ pub fn cancel_limit_order(
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatus {
-    let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
-        Some(guard) => guard,
-        None => return execute::ExecutionStatus::AlreadyRunning,
-    };
-
     state::with_state_mut(|s| EXECUTOR.run_once(s, runtime))
+}
+
+/// Schedule a zero-delay timer to drive matching, unless one is already
+/// pending. Collapses a burst of kickoffs — e.g. back-to-back `add_limit_order`
+/// calls plus the [`drive_matching`] self-reschedule chain — into a single
+/// drive loop instead of one timer per call.
+pub fn schedule_matching_timer() {
+    let should_schedule = state::with_state_mut(|s| s.try_mark_matching_timer_scheduled());
+    if should_schedule {
+        ic_cdk_timers::set_timer(Duration::ZERO, async {
+            // The scheduled timer has now fired: clear the flag so the drive
+            // below (or a fresh kickoff) can re-arm exactly one continuation.
+            // The flag is owned solely by this scheduled-timer lifecycle, so
+            // `drive_matching` stays free of flag bookkeeping and other callers
+            // (the periodic interval timer) can't clear a still-pending timer.
+            state::with_state_mut(|s| s.clear_matching_timer_scheduled());
+            drive_matching();
+        });
+    }
 }
 
 /// Run one chunk of matching/settling and, if more work remains, schedule a
@@ -122,18 +131,8 @@ pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatu
 /// [`process_pending_orders`] directly, which is synchronous and timer-free.
 pub fn drive_matching() {
     match process_pending_orders(&IC_RUNTIME) {
-        execute::ExecutionStatus::MoreWork => {
-            // TODO DEFI-2823: coalesce zero-delay matching timers so a
-            // burst of `add_limit_order` kickoffs plus this self-reschedule
-            // chain doesn't queue O(N) redundant timers per burst.
-            ic_cdk_timers::set_timer(Duration::ZERO, async {
-                drive_matching();
-            });
-        }
-        // Complete: nothing left to do. AlreadyRunning: the holder will
-        // reschedule itself if its run left work unfinished, so we don't
-        // pile on another timer.
-        execute::ExecutionStatus::Complete | execute::ExecutionStatus::AlreadyRunning => {}
+        execute::ExecutionStatus::MoreWork => schedule_matching_timer(),
+        execute::ExecutionStatus::Complete => {}
     }
 }
 

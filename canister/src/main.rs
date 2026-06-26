@@ -22,11 +22,8 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         request
     );
     // Trigger matching immediately, no need to wait for the periodic timer.
-    // TODO DEFI-2823: coalesce — a burst of order placements currently
-    // queues one zero-delay timer per call.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
+    // Coalesced: a burst of placements schedules a single matching timer.
+    oisy_trade_canister::schedule_matching_timer();
     Ok(order_id)
 }
 
@@ -191,9 +188,7 @@ fn resume_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedErr
     oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)?;
     // Re-arm matching immediately so orders that piled up while halted match now,
     // without waiting for the periodic timer. Mirrors the add_limit_order kickoff.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
+    oisy_trade_canister::schedule_matching_timer();
     Ok(())
 }
 

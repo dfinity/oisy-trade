@@ -111,7 +111,7 @@ impl StateSnapshot {
             // ignored: live in stable memory,
             order_history: _,
             // ignored: timers are reset upon upgrades
-            active_tasks: _,
+            matching_timer_scheduled: _,
             ledger_fee_cache,
             pending_settling_events,
             // ignored: per-request guard set, reset upon upgrades
@@ -246,7 +246,7 @@ impl StateSnapshot {
             user_registry,
             balances,
             order_history,
-            active_tasks: Default::default(),
+            matching_timer_scheduled: false,
             ledger_fee_cache,
             pending_settling_events,
             in_flight_user_ops: Default::default(),
