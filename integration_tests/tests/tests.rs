@@ -731,9 +731,6 @@ mod cancel_limit_order {
 
     #[tokio::test]
     async fn should_cancel_partially_filled_buy_and_refund_residual() {
-        // Non-zero maker/taker fees so the partially filled buy accrues a
-        // non-trivial `filled_fee` and a `filled_quote` consistent with the
-        // realized notional.
         const MAKER_FEE_BPS: u16 = 10;
         const TAKER_FEE_BPS: u16 = 23;
         let setup = Setup::new().await;
