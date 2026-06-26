@@ -45,16 +45,22 @@ pub struct DashboardPair {
     pub depth: DashboardDepth,
 }
 
+/// A numeric dashboard field shown both as a human-readable decimal and as its
+/// underlying integer.
+///
+/// For a price `1_000_000_000` at 8 decimals: `decimal_value = "10"`,
+/// `raw_value = "1_000_000_000"`.
 pub struct Amount {
-    pub value: String,
-    pub raw: String,
+    pub decimal_value: String,
+    pub raw_value: String,
 }
 
 impl Amount {
-    fn new(raw: String, decimals: u8) -> Self {
+    fn new(raw: impl ToString, decimals: u8) -> Self {
+        let raw = raw.to_string();
         Self {
-            value: format_scaled(&raw, decimals),
-            raw: group_digits(&raw),
+            decimal_value: format_scaled(&raw, decimals),
+            raw_value: group_digits(&raw),
         }
     }
 }
@@ -149,7 +155,7 @@ fn build_pair(
     let spread = match (best_bid_level, best_ask_level) {
         (Some((bid, _)), Some((ask, _))) => ask
             .checked_sub(bid)
-            .map(|s| Amount::new(s.get().to_string(), decimals.quote)),
+            .map(|s| Amount::new(s.get(), decimals.quote)),
         _ => None,
     };
     DashboardPair {
@@ -157,8 +163,8 @@ fn build_pair(
         base_symbol,
         quote_symbol,
         quote_decimals: decimals.quote,
-        tick_size: Amount::new(book.tick_size().get().to_string(), decimals.quote),
-        lot_size: Amount::new(book.lot_size().get().to_string(), decimals.base),
+        tick_size: Amount::new(book.tick_size().get(), decimals.quote),
+        lot_size: Amount::new(book.lot_size().get(), decimals.base),
         maker_fee_bps: book.fee_rates().maker.get(),
         taker_fee_bps: book.fee_rates().taker.get(),
         bids_len: book.bids_len(),
@@ -197,7 +203,7 @@ fn depth_levels(
     levels
         .iter()
         .map(|(price, qty)| DashboardDepthLevel {
-            price: Amount::new(price.get().to_string(), decimals.quote),
+            price: Amount::new(price.get(), decimals.quote),
             quantity: Amount::new(quantity_digits(qty), decimals.base),
             bar_width_percent: bar_width_percent(saturating_to_u128(qty), max),
         })
@@ -217,7 +223,7 @@ fn bar_width_percent(qty: u128, max: u128) -> u8 {
 
 fn level((price, quantity): (Price, Quantity), decimals: &PairDecimals) -> DashboardLevel {
     DashboardLevel {
-        price: Amount::new(price.get().to_string(), decimals.quote),
+        price: Amount::new(price.get(), decimals.quote),
         quantity: Amount::new(quantity_digits(&quantity), decimals.base),
     }
 }
