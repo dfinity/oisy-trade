@@ -1944,6 +1944,137 @@ mod get_my_orders {
     }
 }
 
+mod get_my_trades {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+    };
+    use crate::{GetMyTradesError, add_limit_order, get_my_trades};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{
+        LimitOrderRequest, OrderId, Side, TradesByAccount, TradesByOrder, TradesFilter,
+    };
+
+    const BUYER: Principal = Principal::from_slice(&[0x01]);
+    const SELLER: Principal = Principal::from_slice(&[0x02]);
+
+    fn by_order(order_id: OrderId, after: Option<String>, length: u32) -> TradesFilter {
+        TradesFilter::ByOrder(TradesByOrder {
+            order_id,
+            after,
+            length,
+        })
+    }
+
+    /// Places a resting sell from `SELLER` and a crossing buy from `BUYER` at the
+    /// same price, runs matching, and returns `(buy_id, sell_id)`.
+    fn place_and_match() -> (OrderId, OrderId) {
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let sell = place(SELLER, Side::Sell);
+        let buy = place(BUYER, Side::Buy);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        (buy, sell)
+    }
+
+    fn place(user: Principal, side: Side) -> OrderId {
+        add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side,
+                price: Nat::from(100u64),
+                quantity: Nat::from(u64::from(LOT_SIZE)),
+                time_in_force: None,
+            },
+            &mock_runtime_for(user),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn returns_each_orders_fill_owner_scoped() {
+        init_state_with_order_book();
+        let (buy, sell) = place_and_match();
+
+        let buy_trades = get_my_trades(by_order(buy.clone(), None, 10), BUYER).unwrap();
+        assert_eq!(buy_trades.len(), 1);
+        assert_eq!(buy_trades[0].order_id, buy);
+        assert_eq!(buy_trades[0].side, Side::Buy);
+        assert!(!buy_trades[0].is_maker);
+
+        let sell_trades = get_my_trades(by_order(sell.clone(), None, 10), SELLER).unwrap();
+        assert_eq!(sell_trades.len(), 1);
+        assert_eq!(sell_trades[0].order_id, sell);
+        assert!(sell_trades[0].is_maker);
+    }
+
+    #[test]
+    fn malformed_order_id_is_err() {
+        init_state_with_order_book();
+        let result = get_my_trades(by_order("not-an-order-id".to_string(), None, 10), BUYER);
+        assert!(matches!(result, Err(GetMyTradesError::InvalidOrderId(_))));
+    }
+
+    #[test]
+    fn malformed_cursor_is_err() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        let result = get_my_trades(by_order(buy, Some("xyz".to_string()), 10), BUYER);
+        assert!(matches!(result, Err(GetMyTradesError::InvalidCursor(_))));
+    }
+
+    #[test]
+    fn unknown_order_is_empty_page() {
+        init_state_with_order_book();
+        place_and_match();
+        let unknown = "ffffffffffffffffffffffffffffffff".to_string();
+        let trades = get_my_trades(by_order(unknown, None, 10), BUYER).unwrap();
+        assert!(trades.is_empty());
+    }
+
+    #[test]
+    fn order_owned_by_another_principal_is_empty_page() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        let trades = get_my_trades(by_order(buy, None, 10), SELLER).unwrap();
+        assert!(trades.is_empty());
+    }
+
+    #[test]
+    fn unknown_cursor_is_empty_page() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        // A well-formed but unknown cursor yields an empty page, not an error.
+        let cursor = "ffffffffffffffff".to_string();
+        let trades = get_my_trades(by_order(buy, Some(cursor), 10), BUYER).unwrap();
+        assert!(trades.is_empty());
+    }
+
+    #[test]
+    fn length_is_clamped_to_max() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        // Above the cap is accepted and clamped; the single fill still returns.
+        let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
+        assert_eq!(trades.len(), 1);
+    }
+
+    #[test]
+    fn by_account_is_empty_until_the_account_index_lands() {
+        init_state_with_order_book();
+        place_and_match();
+        let trades = get_my_trades(
+            TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+            BUYER,
+        )
+        .unwrap();
+        assert!(trades.is_empty());
+    }
+}
+
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::order::{BasisPoint, FeeRates};

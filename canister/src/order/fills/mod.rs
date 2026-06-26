@@ -4,6 +4,7 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(test)]
 mod tests;
@@ -11,8 +12,8 @@ mod tests;
 /// Canister-global, monotonic sequence assigned to each side-projected fill
 /// record as it is appended. The two legs of one fill get two consecutive
 /// values; it is never reused (fills are append-only) and orders records both
-/// globally and within an order's prefix. It is the `after` cursor for the
-/// per-order fill scan.
+/// globally and within an order's prefix. It is the `after` cursor exposed to
+/// callers as an opaque text token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FillSeq(u64);
 
@@ -29,6 +30,29 @@ impl FillSeq {
 
     fn next(self) -> Self {
         Self(self.0.checked_add(1).expect("BUG: FillSeq overflow"))
+    }
+}
+
+impl fmt::Display for FillSeq {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
+/// A [`FillSeq`] cursor was not a well-formed token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FillSeqParseError;
+
+impl FromStr for FillSeq {
+    type Err = FillSeqParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 16 || !s.is_ascii() {
+            return Err(FillSeqParseError);
+        }
+        u64::from_str_radix(s, 16)
+            .map(Self)
+            .map_err(|_| FillSeqParseError)
     }
 }
 
@@ -143,6 +167,26 @@ impl Storable for FillRecord {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+impl FillRecord {
+    /// Projects this record to the public [`oisy_trade_types::Trade`], stamping
+    /// it with `seq` as its pagination cursor — encoded with the same scheme
+    /// `get_my_trades` decodes for `after`, so a returned cursor round-trips.
+    pub fn into_trade(self, seq: FillSeq) -> oisy_trade_types::Trade {
+        oisy_trade_types::Trade {
+            cursor: seq.to_string(),
+            order_id: self.order_id.into(),
+            side: self.side.into(),
+            price: candid::Nat::from(self.price),
+            quantity: self.quantity.into(),
+            notional: self.notional.into(),
+            fee: self.fee.into(),
+            fee_token: self.fee_token.into(),
+            is_maker: self.is_maker,
+            timestamp: self.timestamp.as_nanos(),
+        }
+    }
+}
+
 /// The `after` cursor passed to [`FillStore::fills_after`] names a fill that is
 /// unknown (no record with that global sequence in the order's prefix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,7 +241,7 @@ impl<M: Memory> FillStore<M> {
         assert_eq!(
             self.fills.insert(key, record),
             None,
-            "BUG: duplicate fill key for seq {seq:?}"
+            "BUG: duplicate fill key for seq {seq}"
         );
         self.next_seq.set(seq.next().get());
     }

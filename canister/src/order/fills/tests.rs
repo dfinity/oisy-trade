@@ -139,6 +139,17 @@ fn should_persist_a_record_with_no_counterparty_fields() {
     assert_eq!(timestamp, Timestamp::new(42));
 }
 
+#[test]
+fn should_round_trip_a_trade_cursor_back_into_a_fill_seq() {
+    let seq = FillSeq::new(7);
+    let trade = taker_leg(order(0)).into_trade(seq);
+    assert_eq!(
+        trade.cursor.parse::<FillSeq>(),
+        Ok(seq),
+        "a Trade.cursor must decode with the same encoding get_my_trades accepts for `after`"
+    );
+}
+
 fn store() -> FillStore<VectorMemory> {
     FillStore::new(VectorMemory::default(), VectorMemory::default())
 }

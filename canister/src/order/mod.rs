@@ -14,7 +14,9 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
-pub use fills::{CursorNotFound as FillCursorNotFound, FillRecord, FillSeq, FillStore};
+pub use fills::{
+    CursorNotFound as FillCursorNotFound, FillRecord, FillSeq, FillSeqParseError, FillStore,
+};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};
@@ -36,6 +38,15 @@ pub enum PairToken {
     Base,
     #[n(1)]
     Quote,
+}
+
+impl From<PairToken> for oisy_trade_types::PairToken {
+    fn from(token: PairToken) -> Self {
+        match token {
+            PairToken::Base => oisy_trade_types::PairToken::Base,
+            PairToken::Quote => oisy_trade_types::PairToken::Quote,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]

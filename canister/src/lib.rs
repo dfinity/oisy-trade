@@ -2,10 +2,10 @@ use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
     GetBalancesError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN,
-    MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel,
-    Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILLS_PER_RESPONSE,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
+    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -437,6 +437,47 @@ pub fn get_my_orders(
             pair: pair.into(),
             order: record.into(),
         })
+        .collect())
+}
+
+/// Why a [`get_my_trades`] call could not be served.
+///
+/// Both variants indicate malformed caller input.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetMyTradesError {
+    /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
+    InvalidOrderId(order::OrderIdParseError),
+    /// The `after` cursor was not a well-formed fill cursor.
+    InvalidCursor(order::FillSeqParseError),
+}
+
+pub fn get_my_trades(
+    filter: oisy_trade_types::TradesFilter,
+    caller: candid::Principal,
+) -> Result<Vec<oisy_trade_types::Trade>, GetMyTradesError> {
+    use oisy_trade_types::TradesFilter;
+    let trades = match filter {
+        TradesFilter::ByOrder(by_order) => {
+            let order_id = by_order
+                .order_id
+                .parse::<order::OrderId>()
+                .map_err(GetMyTradesError::InvalidOrderId)?;
+            let after = by_order
+                .after
+                .map(|cursor| cursor.parse::<order::FillSeq>())
+                .transpose()
+                .map_err(GetMyTradesError::InvalidCursor)?;
+            let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
+            state::with_state(|s| s.get_user_order_fills(&caller, order_id, after, length))
+                .unwrap_or_default()
+        }
+        // The account-wide scan lands in a follow-up; until then `ByAccount`
+        // serves an empty page rather than trapping.
+        TradesFilter::ByAccount(_) => Vec::new(),
+    };
+    Ok(trades
+        .into_iter()
+        .map(|(seq, record)| record.into_trade(seq))
         .collect())
 }
 
