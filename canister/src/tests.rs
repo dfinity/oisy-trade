@@ -2002,6 +2002,13 @@ mod get_my_trades {
         assert_eq!(buy_trades[0].side, Side::Buy);
         assert!(!buy_trades[0].is_maker);
 
+        let next_page = get_my_trades(
+            by_order(buy.clone(), Some(buy_trades[0].id.clone()), 10),
+            BUYER,
+        )
+        .unwrap();
+        assert!(next_page.is_empty());
+
         let sell_trades = get_my_trades(by_order(sell.clone(), None, 10), SELLER).unwrap();
         assert_eq!(sell_trades.len(), 1);
         assert_eq!(sell_trades[0].order_id, sell);
@@ -2044,8 +2051,7 @@ mod get_my_trades {
     fn unknown_cursor_is_empty_page() {
         init_state_with_order_book();
         let (buy, _) = place_and_match();
-        // A well-formed but unknown cursor yields an empty page, not an error.
-        let cursor = "ffffffffffffffff".to_string();
+        let cursor = format!("{buy}ffffffffffffffff");
         let trades = get_my_trades(by_order(buy, Some(cursor), 10), BUYER).unwrap();
         assert!(trades.is_empty());
     }

@@ -639,7 +639,7 @@ mod add_limit_order {
         let seller_client = setup.oisy_trade_client_with_caller(seller);
 
         // Two resting sells at distinct prices; a single buy sweeps both, so the
-        // buy order accumulates two fills (two distinct Trade.cursor values).
+        // buy order accumulates two fills (two distinct Trade.id values).
         let low_price = 9_000 * PRICE_SCALE;
         let high_price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
@@ -706,24 +706,24 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(all.len(), 2, "the buy order swept two maker levels");
 
-        // Page 1: the newest fill, carrying its own cursor.
+        // Page 1: the newest fill, carrying its own id.
         let page1 = buyer_client.get_my_trades(page(None)).await.unwrap();
         assert_eq!(page1.len(), 1);
         assert_eq!(page1[0], all[0]);
 
-        // Page 2: feeding page 1's last cursor back as `after` continues strictly
+        // Page 2: feeding page 1's last id back as `after` continues strictly
         // after it — the next-older fill, with no overlap or gap.
-        let cursor = page1.last().unwrap().cursor.clone();
+        let cursor = page1.last().unwrap().id.clone();
         let page2 = buyer_client
             .get_my_trades(page(Some(cursor)))
             .await
             .unwrap();
         assert_eq!(page2.len(), 1);
         assert_eq!(page2[0], all[1]);
-        assert_ne!(page1[0].cursor, page2[0].cursor);
+        assert_ne!(page1[0].id, page2[0].id);
 
         // Page 3: nothing older remains.
-        let cursor = page2.last().unwrap().cursor.clone();
+        let cursor = page2.last().unwrap().id.clone();
         let page3 = buyer_client
             .get_my_trades(page(Some(cursor)))
             .await

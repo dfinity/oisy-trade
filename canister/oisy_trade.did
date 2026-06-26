@@ -351,19 +351,20 @@ type GetMyOrdersError = record {
     message : opt text;
 };
 
-// Opaque, caller-supplied pagination cursor for `get_my_trades`, a text token
-// (like `OrderId`). Clients pass back the last value they received and never
-// parse it.
-type FillCursor = text;
+// Unique identifier for a trade, a text token opaque to callers (like
+// `OrderId`). Clients pass the last value they received back as the next page's
+// `after` and never parse it.
+type TradeId = text;
 
 // One side-projected fill, as returned by `get_my_trades`. Describes one of the
 // caller's orders' executions; the counterparty is intentionally omitted.
 // `fee_token` reuses the `PairToken` type { Base; Quote }.
 type Trade = record {
-    // This fill's own pagination cursor. Pass the last entry's cursor back as
-    // the next page's `after`, mirroring how a `get_my_orders` `ByPage` entry
-    // exposes the `OrderId` that doubles as its page cursor.
-    cursor : FillCursor;
+    // This trade's own identity, which doubles as its pagination cursor. Pass
+    // the last entry's id back as the next page's `after`, mirroring how a
+    // `get_my_orders` `ByPage` entry exposes the `OrderId` that doubles as its
+    // page cursor.
+    id : TradeId;
     // The owning (caller's) order.
     order_id : OrderId;
     // This order's side.
@@ -392,10 +393,10 @@ type Trade = record {
 type TradesFilter = variant {
     // The caller's fills for a single order. Returns an empty page if the
     // caller does not own `order_id`. Pages via a cursor: pass the previous
-    // page's last `Trade.cursor` as `after`; null starts from the newest fill.
-    ByOrder : record { order_id : OrderId; after : opt FillCursor; length : nat32 };
+    // page's last `Trade.id` as `after`; null starts from the newest fill.
+    ByOrder : record { order_id : OrderId; after : opt TradeId; length : nat32 };
     // The caller's fills across all their orders.
-    ByAccount : record { after : opt FillCursor; length : nat32 };
+    ByAccount : record { after : opt TradeId; length : nat32 };
 };
 
 // Error returned by the `get_my_trades` query. See the disposition contract at
@@ -405,7 +406,7 @@ type GetMyTradesError = record {
         RequestError : opt variant {
             // The `order_id` in a `ByOrder` filter was not a well-formed order id.
             InvalidOrderId;
-            // The `after` cursor was not a well-formed fill cursor.
+            // The `after` cursor was not a well-formed trade id.
             InvalidCursor;
         };
         TemporaryError : opt variant {};

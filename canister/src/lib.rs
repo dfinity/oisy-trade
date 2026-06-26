@@ -447,8 +447,8 @@ pub fn get_my_orders(
 pub enum GetMyTradesError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     InvalidOrderId(order::OrderIdParseError),
-    /// The `after` cursor was not a well-formed fill cursor.
-    InvalidCursor(order::FillSeqParseError),
+    /// The `after` cursor was not a well-formed trade id.
+    InvalidCursor(order::TradeIdParseError),
 }
 
 pub fn get_my_trades(
@@ -464,21 +464,20 @@ pub fn get_my_trades(
                 .map_err(GetMyTradesError::InvalidOrderId)?;
             let after = by_order
                 .after
-                .map(|cursor| cursor.parse::<order::FillSeq>())
+                .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
-                .map_err(GetMyTradesError::InvalidCursor)?;
+                .map_err(GetMyTradesError::InvalidCursor)?
+                .map(|id| id.seq());
             let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
             state::with_state(|s| s.get_user_order_fills(&caller, order_id, after, length))
                 .unwrap_or_default()
+                .into_iter()
+                .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
+                .collect()
         }
-        // The account-wide scan lands in a follow-up; until then `ByAccount`
-        // serves an empty page rather than trapping.
         TradesFilter::ByAccount(_) => Vec::new(),
     };
-    Ok(trades
-        .into_iter()
-        .map(|(seq, record)| record.into_trade(seq))
-        .collect())
+    Ok(trades)
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {
