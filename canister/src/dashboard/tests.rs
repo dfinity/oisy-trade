@@ -126,23 +126,23 @@ fn should_render_per_pair_metadata() {
     );
     assert_eq!(
         value_for("Tick size").as_deref(),
-        Some("0.000001 ckBTC/ICP raw 100")
+        Some("0.000001 ckBTC/ICP (100/10^8)")
     );
     assert_eq!(
         value_for("Lot size").as_deref(),
-        Some("0.01 ICP raw 1_000_000")
+        Some("0.01 ICP (1_000_000)")
     );
     assert_eq!(
         value_for("Best bid").as_deref(),
-        Some("100 ckBTC/ICP (0.01 ICP) raw 10_000_000_000 / 1_000_000")
+        Some("0.01 ICP @ 100 ckBTC/ICP (1_000_000 @ 10_000_000_000/10^8)")
     );
     assert_eq!(
         value_for("Best ask").as_deref(),
-        Some("110 ckBTC/ICP (0.01 ICP) raw 11_000_000_000 / 1_000_000")
+        Some("0.01 ICP @ 110 ckBTC/ICP (1_000_000 @ 11_000_000_000/10^8)")
     );
     assert_eq!(
         value_for("Spread").as_deref(),
-        Some("10 ckBTC/ICP raw 1_000_000_000")
+        Some("10 ckBTC/ICP (1_000_000_000/10^8)")
     );
     assert!(
         dl_text.contains("0.000001"),
@@ -161,11 +161,11 @@ fn should_render_depth_chart_for_resting_orders() {
     let dom = render(&state, 0);
 
     let bid_prices = cells(&dom, "table.depth-bids td.price");
-    assert_eq!(bid_prices, vec!["100 10_000_000_000"]);
+    assert_eq!(bid_prices, vec!["100 (10_000_000_000/10^8)"]);
     let ask_prices = cells(&dom, "table.depth-asks td.price");
-    assert_eq!(ask_prices, vec!["110 11_000_000_000"]);
+    assert_eq!(ask_prices, vec!["110 (11_000_000_000/10^8)"]);
     let bid_qtys = cells(&dom, "table.depth-bids tbody tr td:nth-child(2)");
-    assert_eq!(bid_qtys, vec!["0.01 1_000_000"]);
+    assert_eq!(bid_qtys, vec!["0.01 (1_000_000)"]);
 
     assert_eq!(bar_widths(&dom), vec!["width: 100%", "width: 100%"]);
 }
