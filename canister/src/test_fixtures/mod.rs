@@ -466,6 +466,23 @@ pub fn fill_store() -> FillStore<VectorMemory> {
     FillStore::new(VectorMemory::default(), VectorMemory::default())
 }
 
+/// The persisted record for `order_id` as `owner` sees it via
+/// `get_user_order`.
+pub fn record_of<MH, MB>(
+    state: &state::State<MH, MB>,
+    owner: Principal,
+    order_id: order::OrderId,
+) -> order::OrderRecord
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    state
+        .get_user_order(&owner, order_id)
+        .map(|(_, _, record)| record)
+        .expect("order record present")
+}
+
 /// Asserts two [`OrderRecord`]s are equal on every field except the
 /// `created_at` / `last_updated_at` timestamps, which tests assert separately.
 #[track_caller]
