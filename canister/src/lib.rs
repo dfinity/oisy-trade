@@ -114,6 +114,12 @@ pub fn schedule_matching_timer() {
     let should_schedule = state::with_state_mut(|s| s.try_mark_matching_timer_scheduled());
     if should_schedule {
         ic_cdk_timers::set_timer(Duration::ZERO, async {
+            // The scheduled timer has now fired: clear the flag so the drive
+            // below (or a fresh kickoff) can re-arm exactly one continuation.
+            // The flag is owned solely by this scheduled-timer lifecycle, so
+            // `drive_matching` stays free of flag bookkeeping and other callers
+            // (the periodic interval timer) can't clear a still-pending timer.
+            state::with_state_mut(|s| s.clear_matching_timer_scheduled());
             drive_matching();
         });
     }
@@ -124,9 +130,6 @@ pub fn schedule_matching_timer() {
 /// matching timer and the post-`add_limit_order` kickoff) — tests should call
 /// [`process_pending_orders`] directly, which is synchronous and timer-free.
 pub fn drive_matching() {
-    // This timer has now fired; clear the flag so the `MoreWork` path below
-    // re-arms exactly one continuation and a fresh kickoff can schedule again.
-    state::with_state_mut(|s| s.clear_matching_timer_scheduled());
     match process_pending_orders(&IC_RUNTIME) {
         execute::ExecutionStatus::MoreWork => schedule_matching_timer(),
         execute::ExecutionStatus::Complete => {}
