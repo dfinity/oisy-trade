@@ -1,6 +1,6 @@
 [package]
 name = "oisy_trade_types_internal"
-version = "0.1.0"
+version = "0.2.0"
 description = "Internal types used by the OISY TRADE canister"
 authors.workspace = true
 edition.workspace = true

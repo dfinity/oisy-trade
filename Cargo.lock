@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "candid",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "oisy_trade_types_internal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "candid",
  "canlog",
