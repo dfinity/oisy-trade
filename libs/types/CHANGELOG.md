@@ -9,13 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add FOK data model — TimeInForce, Expired status (2/3) ([#164](https://github.com/dfinity/oisy-trade/pull/164))
+- Fill-or-kill (FOK) order types: a time-in-force field and an `Expired` order status ([#164](https://github.com/dfinity/oisy-trade/pull/164))
 
 ### Changed
 
-- Distinct InvalidOrderId/OrderNotFound; non-panicking get_my_orders (3/3) ([#172](https://github.com/dfinity/oisy-trade/pull/172))
-- Disposition-tagged errors for query endpoints (2/3) ([#168](https://github.com/dfinity/oisy-trade/pull/168))
-- Disposition-tagged errors for update endpoints (1/3) ([#158](https://github.com/dfinity/oisy-trade/pull/158))
+- Disposition-tagged errors across update and query endpoints, with distinct `InvalidOrderId` and `OrderNotFound` errors and a non-panicking `get_my_orders` ([#158](https://github.com/dfinity/oisy-trade/pull/158), [#168](https://github.com/dfinity/oisy-trade/pull/168), [#172](https://github.com/dfinity/oisy-trade/pull/172))
 
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
 
