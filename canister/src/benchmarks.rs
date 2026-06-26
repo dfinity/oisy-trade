@@ -389,7 +389,11 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             storage::order_history_memory(),
             storage::user_orders_memory(),
         ),
-        FillStore::new(storage::fills_memory(), storage::fills_seq_memory()),
+        FillStore::new(
+            storage::fills_memory(),
+            storage::fills_by_user_memory(),
+            storage::fills_seq_memory(),
+        ),
         crate::user::UserRegistry::new(storage::user_registry_memory()),
         crate::balance::TokenBalance::new(storage::balances_memory()),
     )
