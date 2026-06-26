@@ -471,9 +471,15 @@ pub fn get_my_trades(
             state::with_state(|s| s.get_user_order_fills(&caller, order_id, after, length))
                 .unwrap_or_default()
         }
-        // The account-wide scan lands in a follow-up; until then `ByAccount`
-        // serves an empty page rather than trapping.
-        TradesFilter::ByAccount(_) => Vec::new(),
+        TradesFilter::ByAccount(by_account) => {
+            let after = by_account
+                .after
+                .map(|cursor| cursor.parse::<order::FillSeq>())
+                .transpose()
+                .map_err(GetMyTradesError::InvalidCursor)?;
+            let length = by_account.length.min(MAX_FILLS_PER_RESPONSE) as usize;
+            state::with_state(|s| s.get_user_trades(&caller, after, length)).unwrap_or_default()
+        }
     };
     Ok(trades
         .into_iter()

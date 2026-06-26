@@ -414,7 +414,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 now,
             );
             for [taker_leg, maker_leg] in fill_records {
-                self.fill_store.append(taker_leg, maker_leg);
+                let taker_user = self.order_owner_user(&taker_leg.order_id);
+                let maker_user = self.order_owner_user(&maker_leg.order_id);
+                self.fill_store
+                    .append(taker_leg, taker_user, maker_leg, maker_user);
             }
             {
                 #[cfg(feature = "canbench-rs")]
@@ -579,6 +582,37 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             return Ok(Vec::new());
         }
         self.fill_store.fills_after(order_id, after, length)
+    }
+
+    /// Returns up to `length` of `owner`'s fills across **all** their orders,
+    /// newest first, resuming strictly after the `after` cursor (a cursor from a
+    /// prior page). Returns an empty page when `owner` has never been registered.
+    /// An `after` cursor that is not one of the user's fills yields
+    /// [`FillCursorNotFound`]; a valid cursor with no older fills is `Ok(vec![])`.
+    pub fn get_user_trades(
+        &self,
+        owner: &Principal,
+        after: Option<FillSeq>,
+        length: usize,
+    ) -> Result<Vec<(FillSeq, FillRecord)>, FillCursorNotFound> {
+        let Some(user_id) = self.user_registry.lookup(*owner) else {
+            return Ok(Vec::new());
+        };
+        self.fill_store.trades_after(user_id, after, length)
+    }
+
+    /// Resolves the [`UserId`] that owns `order_id`. Panics if the order or its
+    /// owner is unknown — every settled order has been recorded in
+    /// `order_history` and its owner registered.
+    fn order_owner_user(&self, order_id: &OrderId) -> UserId {
+        let owner = self
+            .order_history
+            .get(order_id)
+            .expect("BUG: settled fill references a missing order_history entry")
+            .owner;
+        self.user_registry
+            .lookup(owner)
+            .expect("BUG: order owner not registered")
     }
 
     pub fn next_book_id(&self) -> OrderBookId {

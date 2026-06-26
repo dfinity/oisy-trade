@@ -1,7 +1,11 @@
 use super::{CursorNotFound, FillRecord, FillSeq, FillStore};
 use crate::Timestamp;
 use crate::order::{OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side};
+use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
+
+const ALICE: UserId = UserId::new(1);
+const BOB: UserId = UserId::new(2);
 
 #[test]
 fn should_append_two_side_projected_records_and_advance_seq_by_two() {
@@ -9,7 +13,7 @@ fn should_append_two_side_projected_records_and_advance_seq_by_two() {
     let order_a = order(0);
     let order_b = order(1);
 
-    store.append(taker_leg(order_a), maker_leg(order_b));
+    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
 
     assert_eq!(store.len(), 2);
     assert_eq!(store.next_seq(), FillSeq::new(2));
@@ -34,8 +38,8 @@ fn should_return_one_orders_fills_newest_first_excluding_other_orders() {
     let order_b = order(1);
 
     // Two fills against order A (seqs 0, 2) interleaved with a fill against B.
-    store.append(taker_leg(order_a), maker_leg(order_b));
-    store.append(taker_leg(order_a), maker_leg(order_b));
+    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
+    store.append(taker_leg(order_a), ALICE, maker_leg(order_b), BOB);
 
     let a_fills = store.fills_after(order_a, None, 10).unwrap();
     let seqs: Vec<u64> = a_fills.iter().map(|(seq, _)| seq.get()).collect();
@@ -49,7 +53,7 @@ fn should_page_via_after_cursor() {
     let order_a = order(0);
     let other = order(1);
     for _ in 0..3 {
-        store.append(taker_leg(order_a), maker_leg(other));
+        store.append(taker_leg(order_a), ALICE, maker_leg(other), BOB);
     }
     // order A's seqs are 0, 2, 4 (newest 4).
     let first = store.fills_after(order_a, None, 2).unwrap();
@@ -69,7 +73,7 @@ fn should_page_via_after_cursor() {
 #[test]
 fn should_return_empty_page_for_unknown_order() {
     let mut store = store();
-    store.append(taker_leg(order(0)), maker_leg(order(1)));
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
     let fills = store.fills_after(order(7), None, 10).unwrap();
     assert!(fills.is_empty());
 }
@@ -78,7 +82,7 @@ fn should_return_empty_page_for_unknown_order() {
 fn should_reject_a_cursor_that_is_not_one_of_the_orders_fills() {
     let mut store = store();
     let order_a = order(0);
-    store.append(taker_leg(order_a), maker_leg(order(1)));
+    store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
     // seq 1 belongs to order(1), not order_a.
     assert_eq!(
         store.fills_after(order_a, Some(FillSeq::new(1)), 10),
@@ -95,7 +99,7 @@ fn should_reject_a_cursor_that_is_not_one_of_the_orders_fills() {
 fn should_return_empty_page_for_a_valid_cursor_with_no_older_fills() {
     let mut store = store();
     let order_a = order(0);
-    store.append(taker_leg(order_a), maker_leg(order(1)));
+    store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
     // The only fill of order_a is at seq 0; nothing older.
     let fills = store.fills_after(order_a, Some(FillSeq::ZERO), 10).unwrap();
     assert!(fills.is_empty());
@@ -106,7 +110,7 @@ fn should_clamp_to_requested_length() {
     let mut store = store();
     let order_a = order(0);
     for _ in 0..5 {
-        store.append(taker_leg(order_a), maker_leg(order(1)));
+        store.append(taker_leg(order_a), ALICE, maker_leg(order(1)), BOB);
     }
     let fills = store.fills_after(order_a, None, 2).unwrap();
     assert_eq!(fills.len(), 2);
@@ -150,8 +154,104 @@ fn should_round_trip_a_trade_cursor_back_into_a_fill_seq() {
     );
 }
 
+#[test]
+fn should_return_a_users_fills_across_orders_newest_first() {
+    let mut store = store();
+    // Alice owns the taker leg of every fill; her orders differ across fills.
+    // seqs: 0 (Alice/order 0), 2 (Alice/order 1), 4 (Alice/order 0).
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
+    store.append(taker_leg(order(1)), ALICE, maker_leg(order(9)), BOB);
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
+
+    let trades = store.trades_after(ALICE, None, 10).unwrap();
+    let seqs: Vec<u64> = trades.iter().map(|(seq, _)| seq.get()).collect();
+    assert_eq!(seqs, vec![4, 2, 0], "Alice's fills across all her orders");
+    assert!(trades.iter().all(|(_, record)| record.side == Side::Buy));
+}
+
+#[test]
+fn should_scope_account_fills_to_their_owner() {
+    let mut store = store();
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
+
+    let alice = store.trades_after(ALICE, None, 10).unwrap();
+    assert_eq!(alice.len(), 1);
+    assert_eq!(alice[0].0, FillSeq::ZERO);
+
+    let bob = store.trades_after(BOB, None, 10).unwrap();
+    assert_eq!(bob.len(), 1);
+    assert_eq!(bob[0].0, FillSeq::new(1));
+    assert!(bob[0].1.is_maker);
+}
+
+#[test]
+fn should_page_account_fills_via_after_cursor() {
+    let mut store = store();
+    for _ in 0..3 {
+        store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
+    }
+    // Alice's seqs are 0, 2, 4 (newest 4).
+    let first = store.trades_after(ALICE, None, 2).unwrap();
+    assert_eq!(
+        first.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
+        vec![4, 2]
+    );
+    let cursor = first.last().unwrap().0;
+    let second = store.trades_after(ALICE, Some(cursor), 2).unwrap();
+    assert_eq!(
+        second.iter().map(|(s, _)| s.get()).collect::<Vec<_>>(),
+        vec![0]
+    );
+}
+
+#[test]
+fn should_reject_an_account_cursor_that_is_not_one_of_the_users_fills() {
+    let mut store = store();
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
+    // seq 1 is Bob's fill, not Alice's.
+    assert_eq!(
+        store.trades_after(ALICE, Some(FillSeq::new(1)), 10),
+        Err(CursorNotFound)
+    );
+    // A seq that does not exist at all.
+    assert_eq!(
+        store.trades_after(ALICE, Some(FillSeq::new(99)), 10),
+        Err(CursorNotFound)
+    );
+}
+
+#[test]
+fn should_return_empty_account_page_for_a_valid_cursor_with_no_older_fills() {
+    let mut store = store();
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
+    let trades = store.trades_after(ALICE, Some(FillSeq::ZERO), 10).unwrap();
+    assert!(trades.is_empty());
+}
+
+#[test]
+fn should_clamp_account_page_to_requested_length() {
+    let mut store = store();
+    for _ in 0..5 {
+        store.append(taker_leg(order(0)), ALICE, maker_leg(order(9)), BOB);
+    }
+    let trades = store.trades_after(ALICE, None, 2).unwrap();
+    assert_eq!(trades.len(), 2);
+}
+
+#[test]
+fn should_return_empty_account_page_for_a_user_with_no_fills() {
+    let mut store = store();
+    store.append(taker_leg(order(0)), ALICE, maker_leg(order(1)), BOB);
+    let trades = store.trades_after(UserId::new(42), None, 10).unwrap();
+    assert!(trades.is_empty());
+}
+
 fn store() -> FillStore<VectorMemory> {
-    FillStore::new(VectorMemory::default(), VectorMemory::default())
+    FillStore::new(
+        VectorMemory::default(),
+        VectorMemory::default(),
+        VectorMemory::default(),
+    )
 }
 
 fn order(seq: u64) -> OrderId {

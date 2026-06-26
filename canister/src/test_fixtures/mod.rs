@@ -103,6 +103,7 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
         ),
         order::FillStore::new(
             crate::storage::fills_memory(),
+            crate::storage::fills_by_user_memory(),
             crate::storage::fills_seq_memory(),
         ),
         UserRegistry::new(crate::storage::user_registry_memory()),
@@ -288,6 +289,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
     );
     let fill_store = order::FillStore::new(
         crate::storage::fills_memory(),
+        crate::storage::fills_by_user_memory(),
         crate::storage::fills_seq_memory(),
     );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
@@ -464,7 +466,11 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
 }
 
 pub fn fill_store() -> FillStore<VectorMemory> {
-    FillStore::new(VectorMemory::default(), VectorMemory::default())
+    FillStore::new(
+        VectorMemory::default(),
+        VectorMemory::default(),
+        VectorMemory::default(),
+    )
 }
 
 /// The persisted record for `order_id` as `owner` sees it via

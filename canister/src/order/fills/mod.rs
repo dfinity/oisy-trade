@@ -1,5 +1,6 @@
 use super::{OrderId, PairToken, Price, Quantity, Side};
 use crate::Timestamp;
+use crate::user::UserId;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
@@ -119,6 +120,73 @@ impl Storable for FillKey {
     };
 }
 
+/// Key into the account-wide secondary index: the interned [`UserId`] followed
+/// by the canister-global [`FillSeq`], so a range scan over a user's prefix
+/// yields their fills oldest-first across all their orders —
+/// [`FillStore::trades_after`] reverses it for newest-first. The value is the
+/// [`FillKey`], pointing back into the primary `fills` map.
+///
+/// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
+/// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FillByUserKey {
+    user: UserId,
+    seq: FillSeq,
+}
+
+/// 8 bytes of `UserId` + 8 bytes of `seq`, both big-endian.
+const FILL_BY_USER_KEY_LEN: usize = 8 + 8;
+
+impl FillByUserKey {
+    fn first(user: UserId) -> Self {
+        Self {
+            user,
+            seq: FillSeq::ZERO,
+        }
+    }
+
+    fn last(user: UserId) -> Self {
+        Self {
+            user,
+            seq: FillSeq::new(u64::MAX),
+        }
+    }
+}
+
+impl Storable for FillByUserKey {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = [0u8; FILL_BY_USER_KEY_LEN];
+        buf[..8].copy_from_slice(&self.user.get().to_be_bytes());
+        buf[8..].copy_from_slice(&self.seq.get().to_be_bytes());
+        Cow::Owned(buf.to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(
+            bytes.len(),
+            FILL_BY_USER_KEY_LEN,
+            "FillByUserKey must decode from exactly {FILL_BY_USER_KEY_LEN} bytes"
+        );
+        let user = UserId::new(u64::from_be_bytes(
+            bytes[..8].try_into().expect("8-byte slice"),
+        ));
+        let seq = FillSeq::new(u64::from_be_bytes(
+            bytes[8..].try_into().expect("8-byte slice"),
+        ));
+        Self { user, seq }
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: FILL_BY_USER_KEY_LEN as u32,
+        is_fixed_size: true,
+    };
+}
+
 /// One side-projected fill, holding everything needed to audit one of the two
 /// orders' view of an execution. The counterparty is never stored.
 ///
@@ -194,14 +262,13 @@ pub struct CursorNotFound;
 
 /// Append-only store of side-projected fill records, mirroring the storage
 /// shape of [`crate::order::OrderHistory`]: a primary map keyed by an
-/// `OrderId`-prefixed key (so a per-order read is a range scan), plus a
+/// `OrderId`-prefixed key (so a per-order read is a range scan), a
+/// `(UserId, global_seq)` secondary index for the account-wide read, plus a
 /// canister-global monotonic [`FillSeq`] counter persisted in its own cell so
 /// it stays monotonic across upgrades.
-///
-/// The account-wide secondary index (`by_user`) and its reader come in a
-/// follow-up; this store implements the per-order feed only.
 pub struct FillStore<M: Memory> {
     fills: StableBTreeMap<FillKey, FillRecord, M>,
+    by_user: StableBTreeMap<FillByUserKey, FillKey, M>,
     next_seq: StableCell<u64, M>,
 }
 
@@ -215,24 +282,34 @@ impl<M: Memory> fmt::Debug for FillStore<M> {
 }
 
 impl<M: Memory> FillStore<M> {
-    /// `fills_memory` and `seq_memory` **must be distinct memory regions**.
-    pub fn new(fills_memory: M, seq_memory: M) -> Self {
+    /// `fills_memory`, `by_user_memory`, and `seq_memory` **must be three
+    /// distinct memory regions**.
+    pub fn new(fills_memory: M, by_user_memory: M, seq_memory: M) -> Self {
         Self {
             fills: StableBTreeMap::init(fills_memory),
+            by_user: StableBTreeMap::init(by_user_memory),
             next_seq: StableCell::init(seq_memory, 0),
         }
     }
 
-    /// Append the two side-projected records of one fill — the taker leg and the
-    /// maker leg — each under the next global [`FillSeq`], advancing the
-    /// sequence by two.
-    pub fn append(&mut self, taker_leg: FillRecord, maker_leg: FillRecord) {
+    /// Append the two side-projected records of one fill — the taker leg owned by
+    /// `taker_user` and the maker leg owned by `maker_user` — each under the next
+    /// global [`FillSeq`], advancing the sequence by two. Each record is written
+    /// to the primary map and indexed under its owner in `by_user` (2 + 2
+    /// inserts per fill).
+    pub fn append(
+        &mut self,
+        taker_leg: FillRecord,
+        taker_user: UserId,
+        maker_leg: FillRecord,
+        maker_user: UserId,
+    ) {
         bench_scopes!("fills", "fills::append");
-        self.insert(taker_leg);
-        self.insert(maker_leg);
+        self.insert(taker_leg, taker_user);
+        self.insert(maker_leg, maker_user);
     }
 
-    fn insert(&mut self, record: FillRecord) {
+    fn insert(&mut self, record: FillRecord, user: UserId) {
         let seq = FillSeq::new(*self.next_seq.get());
         let key = FillKey {
             order: record.order_id,
@@ -242,6 +319,11 @@ impl<M: Memory> FillStore<M> {
             self.fills.insert(key, record),
             None,
             "BUG: duplicate fill key for seq {seq}"
+        );
+        assert_eq!(
+            self.by_user.insert(FillByUserKey { user, seq }, key),
+            None,
+            "BUG: duplicate user-fill index entry for {user:?} seq {seq}"
         );
         self.next_seq.set(seq.next().get());
     }
@@ -279,6 +361,48 @@ impl<M: Memory> FillStore<M> {
             .collect())
     }
 
+    /// Returns up to `length` of `user`'s fills across **all** their orders,
+    /// newest first. With `after: None` the page starts at the newest fill;
+    /// otherwise `after` is a cursor — the last fill of the previous page — and
+    /// the page continues with the next-older fill. An `after` whose sequence is
+    /// not one of `user`'s fills yields [`CursorNotFound`]; a valid cursor with
+    /// no older fills is `Ok(vec![])`. Each page reverse-scans the `by_user`
+    /// index then resolves each [`FillKey`] from the primary map — the exact
+    /// shape of `OrderHistory::orders_after` — so it is `O(length)`.
+    pub fn trades_after(
+        &self,
+        user: UserId,
+        after: Option<FillSeq>,
+        length: usize,
+    ) -> Result<Vec<(FillSeq, FillRecord)>, CursorNotFound> {
+        bench_scopes!("fills", "fills::trades_after");
+        use std::ops::Bound;
+        let upper = match after {
+            None => Bound::Included(FillByUserKey::last(user)),
+            Some(seq) => {
+                let key = FillByUserKey { user, seq };
+                if !self.by_user.contains_key(&key) {
+                    return Err(CursorNotFound);
+                }
+                Bound::Excluded(key)
+            }
+        };
+        Ok(self
+            .by_user
+            .range((Bound::Included(FillByUserKey::first(user)), upper))
+            .rev()
+            .take(length)
+            .map(|entry| {
+                let fill_key = entry.value();
+                let record = self
+                    .fills
+                    .get(&fill_key)
+                    .expect("BUG: by_user index references a missing fill record");
+                (fill_key.seq, record)
+            })
+            .collect())
+    }
+
     #[cfg(test)]
     fn len(&self) -> u64 {
         self.fills.len()
@@ -293,6 +417,13 @@ impl<M: Memory> FillStore<M> {
     fn iter(&self) -> impl Iterator<Item = (FillKey, FillRecord)> + '_ {
         self.fills.iter().map(|entry| (*entry.key(), entry.value()))
     }
+
+    #[cfg(test)]
+    fn user_index_iter(&self) -> impl Iterator<Item = (FillByUserKey, FillKey)> + '_ {
+        self.by_user
+            .iter()
+            .map(|entry| (*entry.key(), entry.value()))
+    }
 }
 
 #[cfg(test)]
@@ -301,9 +432,13 @@ impl Clone for FillStore<ic_stable_structures::VectorMemory> {
         let mut fresh = Self::new(
             ic_stable_structures::VectorMemory::default(),
             ic_stable_structures::VectorMemory::default(),
+            ic_stable_structures::VectorMemory::default(),
         );
         for (key, record) in self.iter() {
             assert_eq!(fresh.fills.insert(key, record), None);
+        }
+        for (key, fill_key) in self.user_index_iter() {
+            assert_eq!(fresh.by_user.insert(key, fill_key), None);
         }
         fresh.next_seq.set(*self.next_seq.get());
         fresh
@@ -313,7 +448,9 @@ impl Clone for FillStore<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for FillStore<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.next_seq.get() == other.next_seq.get() && self.iter().eq(other.iter())
+        self.next_seq.get() == other.next_seq.get()
+            && self.iter().eq(other.iter())
+            && self.user_index_iter().eq(other.user_index_iter())
     }
 }
 

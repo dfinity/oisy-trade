@@ -13,8 +13,7 @@ const STATE_SNAPSHOT_MEMORY_ID: MemoryId = MemoryId::new(4);
 const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
 const USER_ORDERS_MEMORY_ID: MemoryId = MemoryId::new(6);
 const FILLS_MEMORY_ID: MemoryId = MemoryId::new(7);
-// MemoryId 8 is reserved for the account-wide fill index (`FillStore::by_user`),
-// landing in a follow-up; it is not allocated here yet.
+const FILLS_BY_USER_MEMORY_ID: MemoryId = MemoryId::new(8);
 const FILLS_SEQ_MEMORY_ID: MemoryId = MemoryId::new(9);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
@@ -97,6 +96,12 @@ pub fn user_orders_memory() -> VMem {
 /// canister `init` / `post_upgrade`.
 pub fn fills_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice that backs `FillStore`'s account-wide
+/// per-user fill index (`FillStore::by_user`). Distinct from [`fills_memory`].
+pub fn fills_by_user_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(FILLS_BY_USER_MEMORY_ID))
 }
 
 /// Returns the virtual memory slice that backs `FillStore`'s canister-global

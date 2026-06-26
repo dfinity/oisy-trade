@@ -64,6 +64,7 @@ mod assert_caller_is_allowed {
             crate::state::FillStore::new(
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
             ),
             crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
@@ -2661,6 +2662,51 @@ mod settle_fills {
             assert_eq!(fills_of(&state, SELLER, maker_a).len(), 1);
         }
 
+        /// The account-wide read returns a user's fills across all their orders,
+        /// newest-first, and stays scoped to the querying principal.
+        #[test]
+        fn account_trades_span_a_users_orders_newest_first() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+            let maker_a =
+                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+            let maker_b =
+                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+            let taker_1 =
+                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_2);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            let taker_2 =
+                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_2);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buyer_trades = state.get_user_trades(&BUYER, None, 10).unwrap();
+            let buyer_orders: Vec<crate::order::OrderId> =
+                buyer_trades.iter().map(|(_, r)| r.order_id).collect();
+            assert_eq!(
+                buyer_orders,
+                vec![taker_2, taker_1],
+                "buyer's fills across both orders, newest-first",
+            );
+
+            let seqs: Vec<u64> = buyer_trades.iter().map(|(seq, _)| seq.get()).collect();
+            assert!(
+                seqs.windows(2).all(|w| w[0] > w[1]),
+                "cursors strictly descend across the account-wide page",
+            );
+
+            let seller_orders: Vec<crate::order::OrderId> = state
+                .get_user_trades(&SELLER, None, 10)
+                .unwrap()
+                .iter()
+                .map(|(_, r)| r.order_id)
+                .collect();
+            assert_eq!(
+                seller_orders,
+                vec![maker_b, maker_a],
+                "seller sees only their own maker fills",
+            );
+        }
+
         /// Replay under `Skip` (post-upgrade) writes no fill records, so durable
         /// fills are not double-written.
         #[test]
@@ -2687,6 +2733,11 @@ mod settle_fills {
                     .get_user_order_fills(&SELLER, maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
+            );
+            assert_eq!(state.get_user_trades(&BUYER, None, 10).unwrap(), Vec::new());
+            assert_eq!(
+                state.get_user_trades(&SELLER, None, 10).unwrap(),
+                Vec::new()
             );
         }
 
@@ -3195,7 +3246,11 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
-            FillStore::new(VectorMemory::default(), VectorMemory::default()),
+            FillStore::new(
+                VectorMemory::default(),
+                VectorMemory::default(),
+                VectorMemory::default(),
+            ),
             crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )
