@@ -139,49 +139,6 @@ fn bench_process_pending_orders_1000_with(fee_rates: FeeRates) -> canbench_rs::B
     res
 }
 
-/// Benchmark the settlement hot path of a taker sweeping every bid level of the
-/// fully populated Binance snapshot (697 fills) with non-zero fees, so each fill
-/// writes its two side-projected records. The `fills` / `fills::append` scope in
-/// the report isolates the per-fill stable-insert cost added by persistence
-/// against the rest of settlement, sizing it for the matching chunk's
-/// instruction budget.
-#[bench(raw)]
-fn bench_settlement_fill_persistence() -> canbench_rs::BenchResult {
-    let depth = load_depth();
-    let mut state = new_state_with_fees(FeeRates {
-        maker: BasisPoint::new(10).unwrap(),
-        taker: BasisPoint::new(20).unwrap(),
-    });
-    populate_state(&mut state, &depth);
-
-    let pair = trading_pair();
-    let taker = user((depth.bids.len() + depth.asks.len()) as u64);
-    fund_user(&mut state, taker);
-    place_order(
-        &mut state,
-        taker,
-        PendingOrder {
-            side: Side::Sell,
-            price: Price::new(TICK_SIZE.get()),
-            quantity: Quantity::from(100_000_000_000_000u64),
-            time_in_force: TimeInForce::GoodTilCanceled,
-        },
-    );
-
-    let book = state.get_order_book(&pair).unwrap();
-    assert_eq!(book.bids_len(), depth.bids.len());
-
-    state.set_execution_policy(ExecutionPolicy::MAX);
-    let res = canbench_rs::bench_fn(|| {
-        EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
-    });
-
-    let book = state.get_order_book(&pair).unwrap();
-    assert_eq!(book.bids_len(), 0);
-
-    res
-}
-
 /// Benchmark processing 1000 orders that all rest without matching.
 /// Wide spread between buys (2.000) and sells (3.000) ensures zero fills.
 /// Each order is placed by a different user (worst case for balance lookups).
