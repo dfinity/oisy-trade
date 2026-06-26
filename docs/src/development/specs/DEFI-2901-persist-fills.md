@@ -472,18 +472,21 @@ just bench                # settlement path, R12 (canbench)
 
 ### Delivery / PR sequence
 
-Three stacked PRs, each independently mergeable / compilable / testable.
+Four stacked PRs, each independently mergeable / compilable / testable.
 
 1. **Order-level scalars.** `OrderRecord += filled_quote, filled_fee` (internal + `libs/types` +
    `.did`); `OrderUpdate += quote_delta, fee_delta` and `apply`; settlement extended to compute
    the per-fill realized values once and feed the extended `OrderUpdate`. Ships order-level VWAP &
    fees through the existing `get_my_orders` immediately. **Acceptance: R1, R2, R6 (order-level),
    R7, R9, R11.**
-2. **Fill store + per-order feed.** New `canister/src/order/fills` module (incl. `FillSeq`),
-   `FILLS_MEMORY_ID`, `FillRecord` / `Trade` types, settlement writes the two side-projected
-   records (Write-gated), `get_my_trades` with the `ByOrder` filter (error-enveloped), and the
-   canbench measurement. **Acceptance: R3, R5, R6 (per-fill), R8, R10, R11, R12, R4 (`ByOrder`).**
-3. **Account-wide filter.** `FILLS_BY_USER_MEMORY_ID` index, `trades_after`, the `ByAccount`
+2. **Fill store.** New `canister/src/order/fills` module (incl. `FillSeq`), `FILLS_MEMORY_ID`,
+   `FillRecord` type, settlement writes the two side-projected records (Write-gated), durable
+   across upgrade / snapshot / event-log replay, and the canbench measurement. No public retrieval
+   endpoint yet. **Acceptance: R3, R6 (per-fill), R8, R11, R12.**
+3. **Per-order feed endpoint.** `Trade` / `TradesFilter` / `FillCursor` types, `get_my_trades`
+   with the `ByOrder` filter (error-enveloped, bounded pages), client method, and end-to-end
+   tests. **Acceptance: R4 (`ByOrder`), R5, R10.**
+4. **Account-wide filter.** `FILLS_BY_USER_MEMORY_ID` index, `trades_after`, the `ByAccount`
    filter arm. **Acceptance: R4 (`ByAccount`).**
 
 ## Discussed Alternatives
