@@ -8,6 +8,7 @@ use crate::order::{
     TradingPair,
 };
 use crate::state::StableMemoryOptions;
+use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
 use crate::{Timestamp, order, state};
 use candid::Principal;
@@ -173,15 +174,15 @@ pub fn icp_ckusdt_trading_pair() -> TradingPair {
 }
 
 pub fn ckbtc_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
+    SupportedTokens::CKBTC.token_id().into()
 }
 
 pub fn ckusdt_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("cngnf-vqaaa-aaaar-qag4q-cai").unwrap())
+    SupportedTokens::CKUSDT.token_id().into()
 }
 
 pub fn icp_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
+    SupportedTokens::ICP.token_id().into()
 }
 
 fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
