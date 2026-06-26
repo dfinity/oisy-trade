@@ -2368,14 +2368,14 @@ mod settle_fills {
             let mut state = setup_ckusdt_with_fees(5, 10);
             let pair = icp_ckusdt_trading_pair();
             let maker_a =
-                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
             let maker_b =
-                test_fixtures::place_order(&mut state, SELLER, &pair, Side::Sell, PRICE_10, QTY_2);
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
             let taker_1 =
-                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_2);
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             let taker_2 =
-                test_fixtures::place_order(&mut state, BUYER, &pair, Side::Buy, PRICE_10, QTY_2);
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
             let buyer_trades = state.get_user_trades(&BUYER, None, 10).unwrap();
