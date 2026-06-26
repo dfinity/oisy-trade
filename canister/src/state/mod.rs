@@ -413,17 +413,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 event.book_id,
                 now,
             );
-            let user_cache = resolve_op_users(
-                &event.book_id,
-                &balance_operations,
-                &self.order_history,
-                &self.user_registry,
-            );
-            for [taker_leg, maker_leg] in trades {
-                let taker_user = user_cache[&taker_leg.0.order_id().seq()];
-                let maker_user = user_cache[&maker_leg.0.order_id().seq()];
-                self.fill_store
-                    .append(taker_leg, taker_user, maker_leg, maker_user);
+            if !trades.is_empty() {
+                let user_cache = resolve_op_users(
+                    &event.book_id,
+                    &balance_operations,
+                    &self.order_history,
+                    &self.user_registry,
+                );
+                for [taker_leg, maker_leg] in trades {
+                    let taker_user = user_cache[&taker_leg.0.order_id().seq()];
+                    let maker_user = user_cache[&maker_leg.0.order_id().seq()];
+                    self.fill_store
+                        .append(taker_leg, taker_user, maker_leg, maker_user);
+                }
             }
             {
                 #[cfg(feature = "canbench-rs")]
