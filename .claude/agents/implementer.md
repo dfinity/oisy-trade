@@ -67,9 +67,28 @@ You implement code against a specification.
   no `test_helper` method in `my_module/mod.rs`.
 - Gather common test helpers in a top-level `test_fixtures` module (e.g.
   `canister/src/test_fixtures/`).
+- When test cases differ only in DATA (inputs → expected outputs) under a uniform
+  assertion shape, write ONE `#[test]` driving a `Vec<TestCase>` table — a `TestCase`
+  struct (a `desc` plus inputs and expected outputs, with any per-case setup as methods
+  on it), a `vec![TestCase { .. }, ..]`, and a `for case in cases` loop with `case.desc`
+  echoed into every assertion message. Do NOT write a separate `#[test]` per case, nor a
+  shared helper called once per `#[test]`. Buy/Sell, fill/kill, Ok/Err, etc. are ROWS in
+  the table. Canonical example: `state::tests::fill_or_kill::should_fill` (introduced in
+  #169 — exact line:
+  https://github.com/dfinity/oisy-trade/blob/dd12f17ea7c7ac410b03781d6fe554421a80611e/canister/src/state/tests.rs#L2447;
+  if renamed/moved, `git log -L` or blame this line to find it). Use a plain
+  loop or proptest only when cases vary by control flow or span a fuzzed input space,
+  where a static table doesn't fit.
 - Order content by importance, most important first. For example, put `#[test]`
   functions before the helpers they use.
-- Don't write comments unless explicitly requested. In particular, don't write
-  comments noting which specification requirement a piece of code covers.
+- Don't write inline comments. No `//` explanatory comments inside function
+  bodies, and never comments noting which specification requirement a piece of
+  code covers (no `R3`/`R11`-style tags). When porting a spec's `.did` or type
+  sketch into code, strip the comments the spec used to explain itself.
+  `///` doc-comments on public items (types, fields, functions) ARE allowed —
+  but only to match a pattern an immediate sibling module already establishes
+  (e.g. mirroring `order/history`'s doc style in `order/fills`); do not introduce
+  doc-comments where the surrounding module has none, and keep them to a terse
+  one-liner of what the item is, never why or how the code works.
 - Use explicit imports. Example: avoid `use proptest::prelude::*;`; use instead
   `use proptest::prelude::{Strategy, any};`
