@@ -96,7 +96,8 @@ impl From<TradeId> for String {
 impl Storable for TradeId {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = [0u8; TRADE_ID_LEN];
-        buf[..16].copy_from_slice(&self.order.to_bytes());
+        buf[..8].copy_from_slice(&self.order.book_id().get().to_be_bytes());
+        buf[8..16].copy_from_slice(&self.order.seq().get().to_be_bytes());
         buf[16..].copy_from_slice(&self.seq.get().to_be_bytes());
         Cow::Owned(buf.to_vec())
     }
