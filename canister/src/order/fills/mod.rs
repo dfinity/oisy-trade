@@ -1,5 +1,5 @@
-use super::ids::book_scoped_id;
-use super::{FillSeq, OrderId};
+use super::ids::{Composite, parse_hex};
+use super::{FillSeq, OrderBookId, OrderId};
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 use std::borrow::Cow;
@@ -7,13 +7,72 @@ use std::borrow::Cow;
 #[cfg(test)]
 mod tests;
 
-book_scoped_id! {
-    /// Identity of a match: the order book it happened in and the per-book
-    /// [`FillSeq`] the book minted for it. Mirrors [`OrderId`] — opaque outside
-    /// the canister as a 32-character hex string (8 bytes book + 8 bytes seq) —
-    /// and is derivable from any [`TradeId`] by dropping its `OrderSeq`.
-    pub struct FillId(FillSeq);
-    error FillIdParseError = "invalid fill ID: expected 32-character hex string";
+/// Identity of a match: the order book it happened in and the per-book
+/// [`FillSeq`] the book minted for it. Mirrors [`OrderId`] — opaque outside
+/// the canister as a 32-character hex string (8 bytes book + 8 bytes seq) —
+/// and is derivable from any [`TradeId`] by dropping its `OrderSeq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FillId(Composite<OrderBookId, FillSeq>);
+
+impl FillId {
+    pub fn new(book_id: OrderBookId, seq: FillSeq) -> Self {
+        Self(Composite::new(book_id, seq))
+    }
+
+    pub fn book_id(&self) -> OrderBookId {
+        self.0.first()
+    }
+
+    pub fn seq(&self) -> FillSeq {
+        self.0.second()
+    }
+}
+
+impl std::fmt::Display for FillId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// The string passed to [`FillId`]'s [`FromStr`](std::str::FromStr) was not a
+/// 32-character hex string.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FillIdParseError;
+
+impl std::fmt::Display for FillIdParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid fill ID: expected 32-character hex string")
+    }
+}
+
+impl std::str::FromStr for FillId {
+    type Err = FillIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_hex(s).map(Self).ok_or(FillIdParseError)
+    }
+}
+
+impl From<FillId> for String {
+    fn from(id: FillId) -> Self {
+        id.to_string()
+    }
+}
+
+impl Storable for FillId {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Owned(self.0.into_bytes())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.0.into_bytes()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Self(Composite::from_bytes(bytes))
+    }
+
+    const BOUND: Bound = <Composite<OrderBookId, FillSeq> as Storable>::BOUND;
 }
 
 /// Primary store key and per-side identity: the owning [`OrderId`] followed by
@@ -26,37 +85,31 @@ book_scoped_id! {
 /// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
 /// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TradeId {
-    order: OrderId,
-    seq: FillSeq,
-}
-
-/// 16 bytes of `OrderId` + 8 bytes of `seq`, both big-endian.
-const TRADE_ID_LEN: usize = 16 + 8;
+pub struct TradeId(Composite<OrderId, FillSeq>);
 
 impl TradeId {
     pub fn new(order: OrderId, seq: FillSeq) -> Self {
-        Self { order, seq }
+        Self(Composite::new(order, seq))
     }
 
     pub fn order_id(&self) -> OrderId {
-        self.order
+        self.0.first()
     }
 
     pub fn seq(&self) -> FillSeq {
-        self.seq
+        self.0.second()
     }
 
     /// The id of the match this trade is one side of — the owning order's book
     /// paired with the shared `FillSeq`, dropping the `OrderSeq`.
     pub fn fill_id(&self) -> FillId {
-        FillId::new(self.order.book_id(), self.seq)
+        FillId::new(self.order_id().book_id(), self.seq())
     }
 }
 
 impl std::fmt::Display for TradeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{:016x}", self.order, self.seq.get())
+        std::fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -75,15 +128,7 @@ impl std::str::FromStr for TradeId {
     type Err = TradeIdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 48 || !s.is_ascii() {
-            return Err(TradeIdParseError);
-        }
-        let order = OrderId::from_str(&s[..32]).map_err(|_| TradeIdParseError)?;
-        let seq = u64::from_str_radix(&s[32..], 16).map_err(|_| TradeIdParseError)?;
-        Ok(Self {
-            order,
-            seq: FillSeq::new(seq),
-        })
+        parse_hex(s).map(Self).ok_or(TradeIdParseError)
     }
 }
 
@@ -95,33 +140,16 @@ impl From<TradeId> for String {
 
 impl Storable for TradeId {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; TRADE_ID_LEN];
-        buf[..8].copy_from_slice(&self.order.book_id().get().to_be_bytes());
-        buf[8..16].copy_from_slice(&self.order.seq().get().to_be_bytes());
-        buf[16..].copy_from_slice(&self.seq.get().to_be_bytes());
-        Cow::Owned(buf.to_vec())
+        Cow::Owned(self.0.into_bytes())
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
+        self.0.into_bytes()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let bytes: &[u8] = bytes.as_ref();
-        assert_eq!(
-            bytes.len(),
-            TRADE_ID_LEN,
-            "TradeId must decode from exactly {TRADE_ID_LEN} bytes"
-        );
-        let order = OrderId::from_bytes(Cow::Borrowed(&bytes[..16]));
-        let seq = FillSeq::new(u64::from_be_bytes(
-            bytes[16..].try_into().expect("8-byte slice"),
-        ));
-        Self { order, seq }
+        Self(Composite::from_bytes(bytes))
     }
 
-    const BOUND: Bound = Bound::Bounded {
-        max_size: TRADE_ID_LEN as u32,
-        is_fixed_size: true,
-    };
+    const BOUND: Bound = <Composite<OrderId, FillSeq> as Storable>::BOUND;
 }

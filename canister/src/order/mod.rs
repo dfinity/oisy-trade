@@ -18,7 +18,7 @@ pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
 pub use fills::{FillId, FillIdParseError, TradeId, TradeIdParseError};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
-use ids::{book_scoped_id, seq_newtype};
+use ids::{Composite, HexComponent, Seq, SeqMarker, parse_hex};
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
@@ -150,37 +150,157 @@ impl OrderBookId {
     }
 }
 
-seq_newtype! {
-    /// Sequence number identifying an order within a single order book.
-    pub struct OrderSeq;
-    const ONE = 1;
-}
+impl HexComponent for OrderBookId {
+    const WIDTH: usize = 8;
 
-seq_newtype! {
-    /// Sequence number identifying a [`Fill`] within a single order book, minted
-    /// by the book's `next_fill` counter exactly as [`OrderSeq`] is minted for
-    /// orders.
-    pub struct FillSeq;
-}
-
-book_scoped_id! {
-    /// Unique order identifier encoding the order book ID and a per-book sequence number.
-    ///
-    /// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
-    pub struct OrderId(OrderSeq);
-    derive(minicbor::Encode, minicbor::Decode);
-    field_attrs(#[n(0)] ; #[n(1)]);
-    error OrderIdParseError = "invalid order ID: expected 32-character hex string";
-    extra {
-        pub const ZERO: Self = Self {
-            book_id: OrderBookId::ZERO,
-            seq: OrderSeq::ZERO,
-        };
-
-        pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
-            (self.book_id, self.seq)
-        }
+    fn write_be_bytes(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.0.to_be_bytes());
     }
+
+    fn write_hex(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+
+    fn from_hex(s: &str) -> Option<Self> {
+        u64::from_str_radix(s, 16).ok().map(Self::new)
+    }
+
+    fn from_be_bytes(bytes: &[u8]) -> Self {
+        Self::new(u64::from_be_bytes(bytes.try_into().expect("8-byte slice")))
+    }
+}
+
+/// Marker distinguishing the order-sequence family of [`Seq`].
+#[derive(Debug, Clone, Copy)]
+pub struct OrderSeqMarker;
+
+impl SeqMarker for OrderSeqMarker {
+    const NAME: &'static str = "OrderSeq";
+}
+
+/// Sequence number identifying an order within a single order book.
+pub type OrderSeq = Seq<OrderSeqMarker>;
+
+/// Marker distinguishing the fill-sequence family of [`Seq`].
+#[derive(Debug, Clone, Copy)]
+pub struct FillSeqMarker;
+
+impl SeqMarker for FillSeqMarker {
+    const NAME: &'static str = "FillSeq";
+}
+
+/// Sequence number identifying a [`Fill`] within a single order book, minted by
+/// the book's `next_fill` counter exactly as [`OrderSeq`] is minted for orders.
+pub type FillSeq = Seq<FillSeqMarker>;
+
+/// Unique order identifier encoding the order book ID and a per-book sequence number.
+///
+/// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OrderId(Composite<OrderBookId, OrderSeq>);
+
+impl<C> minicbor::Encode<C> for OrderId {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        self.0.encode(e, ctx)
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for OrderId {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        Composite::decode(d, ctx).map(Self)
+    }
+}
+
+impl OrderId {
+    pub const ZERO: Self = Self(Composite::new(OrderBookId::ZERO, OrderSeq::ZERO));
+
+    pub fn new(book_id: OrderBookId, seq: OrderSeq) -> Self {
+        Self(Composite::new(book_id, seq))
+    }
+
+    pub fn book_id(&self) -> OrderBookId {
+        self.0.first()
+    }
+
+    pub fn seq(&self) -> OrderSeq {
+        self.0.second()
+    }
+
+    pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
+        (self.0.first(), self.0.second())
+    }
+}
+
+impl std::fmt::Display for OrderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl HexComponent for OrderId {
+    const WIDTH: usize = <Composite<OrderBookId, OrderSeq> as HexComponent>::WIDTH;
+
+    fn write_be_bytes(&self, out: &mut Vec<u8>) {
+        self.0.write_be_bytes(out);
+    }
+
+    fn write_hex(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.write_hex(f)
+    }
+
+    fn from_hex(s: &str) -> Option<Self> {
+        HexComponent::from_hex(s).map(Self)
+    }
+
+    fn from_be_bytes(bytes: &[u8]) -> Self {
+        Self(HexComponent::from_be_bytes(bytes))
+    }
+}
+
+/// The string passed to [`OrderId`]'s [`FromStr`](std::str::FromStr) was not a
+/// 32-character hex string.
+#[derive(Debug, PartialEq, Eq)]
+pub struct OrderIdParseError;
+
+impl std::fmt::Display for OrderIdParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid order ID: expected 32-character hex string")
+    }
+}
+
+impl std::str::FromStr for OrderId {
+    type Err = OrderIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_hex(s).map(Self).ok_or(OrderIdParseError)
+    }
+}
+
+impl From<OrderId> for String {
+    fn from(id: OrderId) -> Self {
+        id.to_string()
+    }
+}
+
+impl ic_stable_structures::Storable for OrderId {
+    fn to_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Owned(self.0.into_bytes())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.0.into_bytes()
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        Self(Composite::from_bytes(bytes))
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        <Composite<OrderBookId, OrderSeq> as ic_stable_structures::Storable>::BOUND;
 }
 
 #[derive(
