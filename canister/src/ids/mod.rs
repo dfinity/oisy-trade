@@ -110,7 +110,7 @@ impl<'b, C, M> minicbor::Decode<'b, C> for Seq<M> {
     }
 }
 
-/// An identifier represented by a fix number of bytes.
+/// An identifier represented by a fixed number of bytes.
 pub trait FixedWidthId: Sized {
     /// Number of bytes taken by the identifier
     const WIDTH: usize;
