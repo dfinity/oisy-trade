@@ -120,37 +120,12 @@ impl From<OrderStatus> for oisy_trade_types::OrderStatus {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    minicbor::Encode,
-    minicbor::Decode,
-)]
-pub struct OrderBookId(#[n(0)] u64);
-
-impl OrderBookId {
-    pub const ZERO: Self = Self(0);
-    pub const ONE: Self = Self(1);
-
-    pub const fn new(id: u64) -> Self {
-        Self(id)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-
-    pub fn increment(&mut self) {
-        self.0 = self.0.checked_add(1).expect("OrderBookId overflow");
-    }
+pub struct OrderBookMarker;
+impl SeqMarker for OrderBookMarker {
+    const NAME: &'static str = "OrderBookId";
 }
+
+pub type OrderBookId = Seq<OrderBookMarker>;
 
 /// Marker distinguishing the order-sequence family of [`Seq`].
 #[derive(Debug, Clone, Copy)]
@@ -228,7 +203,7 @@ impl Storable for OrderId {
 
 impl fmt::Display for OrderId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}{:016x}", self.book_id.0, self.seq.get())
+        write!(f, "{:016x}{:016x}", self.book_id.get(), self.seq.get())
     }
 }
 
@@ -251,7 +226,7 @@ impl FromStr for OrderId {
         let book_id = u64::from_str_radix(&s[..16], 16).map_err(|_| OrderIdParseError)?;
         let seq = u64::from_str_radix(&s[16..], 16).map_err(|_| OrderIdParseError)?;
         Ok(Self {
-            book_id: OrderBookId(book_id),
+            book_id: OrderBookId::new(book_id),
             seq: OrderSeq::new(seq),
         })
     }
