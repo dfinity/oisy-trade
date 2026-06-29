@@ -1952,7 +1952,8 @@ mod get_my_trades {
     use crate::{GetMyTradesError, add_limit_order, get_my_trades};
     use candid::{Nat, Principal};
     use oisy_trade_types::{
-        LimitOrderRequest, OrderId, Side, TradesByAccount, TradesByOrder, TradesFilter,
+        LimitOrderRequest, MAX_FILLS_PER_RESPONSE, OrderId, Side, TradesByAccount, TradesByOrder,
+        TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -2069,13 +2070,34 @@ mod get_my_trades {
         assert!(trades.is_empty());
     }
 
+    fn place_buy_crossing_resting_sells(lots: u32) -> OrderId {
+        fund_user(BUYER);
+        fund_user(SELLER);
+        for _ in 0..lots {
+            place(SELLER, Side::Sell);
+        }
+        let buy = add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side: Side::Buy,
+                price: Nat::from(100u64),
+                quantity: Nat::from(u64::from(LOT_SIZE) * u64::from(lots)),
+                time_in_force: None,
+            },
+            &mock_runtime_for(BUYER),
+        )
+        .unwrap();
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        buy
+    }
+
     #[test]
     fn length_is_clamped_to_max() {
         init_state_with_order_book();
-        let (buy, _) = place_and_match();
-        // Above the cap is accepted and clamped; the single fill still returns.
+        let lots = MAX_FILLS_PER_RESPONSE + 5;
+        let buy = place_buy_crossing_resting_sells(lots);
         let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
-        assert_eq!(trades.len(), 1);
+        assert_eq!(trades.len(), MAX_FILLS_PER_RESPONSE as usize);
     }
 
     #[test]
