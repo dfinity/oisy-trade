@@ -1,6 +1,9 @@
-use super::{CursorNotFound, FillId, FillIdParseError, Trade, TradeHistory, TradeId};
+use super::{CursorNotFound, Trade, TradeHistory};
 use crate::Timestamp;
-use crate::order::{FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side};
+use crate::ids::ParseFixedWithIdError;
+use crate::order::{
+    FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
+};
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
 
@@ -17,20 +20,20 @@ fn should_roundtrip_fill_id_through_display_and_parse() {
 
 #[test]
 fn should_reject_a_malformed_fill_id() {
-    assert_eq!("".parse::<FillId>(), Err(FillIdParseError));
+    assert_eq!("".parse::<FillId>(), Err(ParseFixedWithIdError {}));
     assert_eq!(
         "0".repeat(31).parse::<FillId>(),
-        Err(FillIdParseError),
+        Err(ParseFixedWithIdError {}),
         "too short"
     );
     assert_eq!(
         "0".repeat(33).parse::<FillId>(),
-        Err(FillIdParseError),
+        Err(ParseFixedWithIdError {}),
         "too long"
     );
     assert_eq!(
         "z".repeat(32).parse::<FillId>(),
-        Err(FillIdParseError),
+        Err(ParseFixedWithIdError {}),
         "non-hex"
     );
 }

@@ -638,6 +638,7 @@ pub struct OrderBookSnapshot {
     pub min_notional: Quantity,
     #[n(10)]
     pub max_notional: Option<Quantity>,
+    /// Per-book fill sequence counter.
     #[n(11)]
     pub next_fill: FillSeq,
 }
