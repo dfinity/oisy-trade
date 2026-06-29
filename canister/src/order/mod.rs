@@ -2,6 +2,7 @@ mod book;
 mod fees;
 mod fill;
 mod history;
+mod ids;
 mod plan;
 mod queue;
 #[cfg(test)]
@@ -15,6 +16,7 @@ pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
+use crate::order::ids::{Seq, SeqMarker};
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
 use ic_stable_structures::Storable;
@@ -150,44 +152,22 @@ impl OrderBookId {
     }
 }
 
-/// Sequence number identifying an order within a single order book.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    minicbor::Encode,
-    minicbor::Decode,
-)]
-pub struct OrderSeq(#[n(0)] u64);
+/// Marker distinguishing the order-sequence family of [`Seq`].
+#[derive(Debug, Clone, Copy)]
+pub struct OrderSeqMarker;
 
-impl OrderSeq {
-    pub const ZERO: Self = Self(0);
-    pub const ONE: Self = Self(1);
-
-    pub const fn new(seq: u64) -> Self {
-        Self(seq)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-
-    pub fn increment(&mut self) {
-        self.0 = self.0.checked_add(1).expect("OrderSeq overflow");
-    }
+impl SeqMarker for OrderSeqMarker {
+    const NAME: &'static str = "OrderSeq";
 }
+
+/// Sequence number identifying an order within a single order book.
+pub type OrderSeq = Seq<OrderSeqMarker>;
 
 /// Unique order identifier encoding the order book ID and a per-book sequence number.
 ///
 /// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode,
 )]
 pub struct OrderId {
     #[n(0)]
@@ -248,7 +228,7 @@ impl Storable for OrderId {
 
 impl fmt::Display for OrderId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}{:016x}", self.book_id.0, self.seq.0)
+        write!(f, "{:016x}{:016x}", self.book_id.0, self.seq.get())
     }
 }
 
@@ -272,7 +252,7 @@ impl FromStr for OrderId {
         let seq = u64::from_str_radix(&s[16..], 16).map_err(|_| OrderIdParseError)?;
         Ok(Self {
             book_id: OrderBookId(book_id),
-            seq: OrderSeq(seq),
+            seq: OrderSeq::new(seq),
         })
     }
 }
