@@ -1,12 +1,12 @@
 use super::plan::{FillPlan, FillPlanBuilder, PlanOutcome};
 use super::queue::{OrderQueue, OrderQueueIter};
 use super::{
-    FeeRates, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side, TickSize,
+    FeeRates, Fill, LotSize, Order, OrderBookId, OrderSeq, Price, Quantity, RestingOrder, Side,
+    TickSize,
 };
 use minicbor::{Decode, Encode};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::num::NonZeroU64;
 
 /// Central limit order book for a single trading pair.
 ///
@@ -576,44 +576,6 @@ impl MatchResult {
             MatchResult::Filled { fills } | MatchResult::PartiallyFilled { fills, .. } => fills,
             MatchResult::Resting { .. } | MatchResult::Killed { .. } => Vec::new(),
         }
-    }
-}
-
-/// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
-pub struct Fill {
-    /// The sequence of the incoming (taker) order.
-    #[n(0)]
-    pub taker_order_seq: OrderSeq,
-    /// The side of the taker order.
-    #[n(1)]
-    pub taker_side: Side,
-    /// The limit price of the taker order.
-    #[n(2)]
-    pub taker_price: Price,
-    /// The sequence of the resting (maker) order that was matched.
-    #[n(3)]
-    pub maker_order_seq: OrderSeq,
-    /// The price at which the fill occurred (always the maker's price).
-    #[n(4)]
-    pub maker_price: Price,
-    /// The quantity filled.
-    #[n(5)]
-    pub quantity: Quantity,
-}
-
-impl Fill {
-    /// The amount of quote tokens exchanged:
-    /// `maker_price × quantity / base_scale` (`base_scale = 10^base_decimals`).
-    pub fn quote_amount(&self, base_scale: NonZeroU64) -> Quantity {
-        self.maker_price
-            .checked_mul_quantity_scaled(&self.quantity, base_scale)
-            .expect("BUG: validation of order should prevent overflow")
-    }
-
-    /// The amount of base tokens exchanged (same as quantity).
-    pub fn base_amount(&self) -> &Quantity {
-        &self.quantity
     }
 }
 

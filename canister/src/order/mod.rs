@@ -1,5 +1,6 @@
 mod book;
 mod fees;
+mod fill;
 mod history;
 mod plan;
 mod queue;
@@ -7,10 +8,11 @@ mod queue;
 mod tests;
 
 pub use book::{
-    Fill, MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook,
-    OrderBookSnapshot, PriceLevel, RemovedOrder,
+    MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,
+    PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
+pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use candid::{Nat, Principal};

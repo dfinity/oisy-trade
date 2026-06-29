@@ -29,6 +29,8 @@ fn test_record() -> OrderRecord {
         created_at: Timestamp::EPOCH,
         last_updated_at: None,
         time_in_force: TimeInForce::FillOrKill,
+        filled_quote: Quantity::ZERO,
+        filled_fee: Quantity::ZERO,
     }
 }
 
@@ -134,6 +136,8 @@ fn apply_update_status_and_delta_in_one_write() {
         OrderUpdate {
             status: Some(OrderStatus::Open),
             filled_delta: Quantity::from(300_000u64),
+            quote_delta: Quantity::from(3u64),
+            fee_delta: Quantity::from(1u64),
         },
         Timestamp::new(11),
     );
@@ -142,14 +146,78 @@ fn apply_update_status_and_delta_in_one_write() {
         OrderUpdate {
             status: Some(OrderStatus::Filled),
             filled_delta: Quantity::from(700_000u64),
+            quote_delta: Quantity::from(7u64),
+            fee_delta: Quantity::from(2u64),
         },
         Timestamp::new(13),
     );
     let record = history.get(&id).expect("record present");
-    // Deltas accumulate; status reflects the latest update.
+    // The fill, quote, and fee deltas all accumulate within the same single
+    // read-modify-write; status reflects the latest update.
     assert_eq!(record.status, OrderStatus::Filled);
     assert_eq!(record.filled_quantity, Quantity::from(1_000_000u64));
+    assert_eq!(record.filled_quote, Quantity::from(10u64));
+    assert_eq!(record.filled_fee, Quantity::from(3u64));
     assert_eq!(record.last_updated_at, Some(Timestamp::new(13)));
+}
+
+#[test]
+fn apply_update_accumulates_quote_and_fee_in_one_write() {
+    let mut history = history();
+    let id = order_id(0);
+    history.insert_once(UserId::new(0), id, test_record());
+
+    // A fill-only update that carries quote and fee deltas writes all three
+    // scalars (and `last_updated_at`) in a single read-modify-write, leaving
+    // status untouched.
+    history.apply_update(
+        &id,
+        OrderUpdate {
+            status: None,
+            filled_delta: Quantity::from(200_000u64),
+            quote_delta: Quantity::from(20_000_000u64),
+            fee_delta: Quantity::from(10_000u64),
+        },
+        Timestamp::new(5),
+    );
+    let record = history.get(&id).expect("record present");
+    assert_eq!(record.status, OrderStatus::Pending);
+    assert_eq!(record.filled_quantity, Quantity::from(200_000u64));
+    assert_eq!(record.filled_quote, Quantity::from(20_000_000u64));
+    assert_eq!(record.filled_fee, Quantity::from(10_000u64));
+    assert_eq!(record.last_updated_at, Some(Timestamp::new(5)));
+}
+
+#[test]
+#[should_panic(expected = "BUG: filled_quote overflow")]
+fn apply_update_traps_on_filled_quote_overflow() {
+    // The monotonic `filled_quote` invariant is enforced by an always-on trap,
+    // not a `debug_assert!` compiled out of the release canister: starting from
+    // `Quantity::MAX`, any positive `quote_delta` overflows and must panic even
+    // when tests run in release config.
+    let mut record = test_record();
+    record.filled_quote = Quantity::MAX;
+    OrderUpdate {
+        status: None,
+        filled_delta: Quantity::ZERO,
+        quote_delta: Quantity::from(1u64),
+        fee_delta: Quantity::ZERO,
+    }
+    .apply(&mut record);
+}
+
+#[test]
+#[should_panic(expected = "BUG: filled_fee overflow")]
+fn apply_update_traps_on_filled_fee_overflow() {
+    let mut record = test_record();
+    record.filled_fee = Quantity::MAX;
+    OrderUpdate {
+        status: None,
+        filled_delta: Quantity::ZERO,
+        quote_delta: Quantity::ZERO,
+        fee_delta: Quantity::from(1u64),
+    }
+    .apply(&mut record);
 }
 
 #[test]

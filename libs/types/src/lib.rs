@@ -198,6 +198,14 @@ pub struct OrderRecord {
     pub last_updated_at: Option<u64>,
     /// Time-in-force policy the order was placed with.
     pub time_in_force: TimeInForce,
+    /// Cumulative realized quote notional transacted across the order's fills.
+    /// Always quote-denominated; a buy taker's released reservation surplus is
+    /// excluded. VWAP (average execution price) is `filled_quote / filled_quantity`,
+    /// a ratio in the two tokens' smallest units.
+    pub filled_quote: Nat,
+    /// Cumulative realized fee charged across the order's fills, denominated in
+    /// the order's receive token — base for a buy, quote for a sell.
+    pub filled_fee: Nat,
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.

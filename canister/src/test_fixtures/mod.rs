@@ -11,6 +11,7 @@ use crate::order::{
 };
 use crate::state;
 use crate::state::StableMemoryOptions;
+use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
 use candid::Principal;
 use ic_stable_structures::{Memory, VectorMemory};
@@ -159,12 +160,26 @@ pub fn icp_ckbtc_trading_pair() -> TradingPair {
     }
 }
 
+/// ICP (base, 8 decimals) / ckUSDT (quote, 6 decimals) pair for the DEFI-2901
+/// worked example. Base stays ICP, so `base_scale = 10^8` is unchanged from the
+/// ckBTC pair; only the quote token's decimals differ.
+pub fn icp_ckusdt_trading_pair() -> TradingPair {
+    TradingPair {
+        base: icp_token_id(),
+        quote: ckusdt_token_id(),
+    }
+}
+
 pub fn ckbtc_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
+    SupportedTokens::CKBTC.token_id().into()
+}
+
+pub fn ckusdt_token_id() -> TokenId {
+    SupportedTokens::CKUSDT.token_id().into()
 }
 
 pub fn icp_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
+    SupportedTokens::ICP.token_id().into()
 }
 
 fn gtc_order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
@@ -358,6 +373,23 @@ pub fn assert_eq_ignoring_timestamp(
         ..actual.clone()
     };
     assert_eq!(&normalized, expected);
+}
+
+/// The persisted record for `order_id` as `owner` sees it via
+/// `get_user_order`.
+pub fn record_of<MH, MB>(
+    state: &state::State<MH, MB>,
+    owner: Principal,
+    order_id: crate::order::OrderId,
+) -> crate::order::OrderRecord
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    state
+        .get_user_order(&owner, order_id)
+        .map(|(_, _, record)| record)
+        .expect("order record present")
 }
 
 pub fn balances() -> TokenBalance<VectorMemory> {
@@ -622,16 +654,32 @@ pub mod arbitrary {
                     last_updated_at,
                     time_in_force,
                 )| {
-                    (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
-                        owner,
-                        side,
-                        price: Price::new(price_ticks as u128 * tick),
-                        quantity: Quantity::from(qty_lots * lot),
-                        filled_quantity: Quantity::from(filled_lots * lot),
-                        status,
-                        created_at,
-                        last_updated_at,
-                        time_in_force,
+                    (0..=qty_lots).prop_map(move |filled_lots| {
+                        let price = Price::new(price_ticks as u128 * tick);
+                        let filled_quantity = Quantity::from(filled_lots * lot);
+                        // Realized quote notional, derived exactly as the engine
+                        // does: `maker_price × filled_quantity / base_scale`
+                        // (cf. `Fill::quote_amount`), with `base_scale = 10^8`
+                        // for this fixture.
+                        let filled_quote = price
+                            .checked_mul_quantity_scaled(
+                                &filled_quantity,
+                                NonZeroU64::new(100_000_000).unwrap(),
+                            )
+                            .expect("fixture notional fits in 256 bits");
+                        OrderRecord {
+                            owner,
+                            side,
+                            price,
+                            quantity: Quantity::from(qty_lots * lot),
+                            filled_quantity,
+                            status,
+                            created_at,
+                            last_updated_at,
+                            time_in_force,
+                            filled_quote,
+                            filled_fee: Quantity::from(u128::from(filled_lots)),
+                        }
                     })
                 },
             )

@@ -18,10 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CursorNotFound, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order,
-    OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
-    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    CursorNotFound, FeeRates, Fill, FillSettlement, LotSize, MatchOrderError, MatchingOutput,
+    NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq,
+    OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side,
+    TickSize, TokenId, TokenMetadata, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -270,6 +270,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     created_at: timestamp,
                     last_updated_at: None,
                     time_in_force: order.time_in_force(),
+                    filled_quote: Quantity::ZERO,
+                    filled_fee: Quantity::ZERO,
                 },
             );
         }
@@ -350,30 +352,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing for canceled order");
-        let RemovedOrder {
-            side,
-            price,
-            remaining_quantity,
-        } = book.remove_order(seq).expect(
+        let removed = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let (refund_token, refund_amount) = refund_for(side, price, remaining_quantity, base_scale);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
+            let mut balance_operations = Vec::with_capacity(1);
+            RemovedOrderSettlement::new(seq, &removed, base_scale)
+                .push_balance_operations(&mut balance_operations);
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id,
+                    balance_operations,
+                });
         }
-        self.pending_settling_events
-            .push_back(event::SettlingEvent {
-                book_id,
-                balance_operations: vec![event::BalanceOperation::Unreserve {
-                    order: seq,
-                    token: refund_token,
-                    amount: refund_amount,
-                }],
-            });
     }
 
     /// Drive engine matching for the given book; when `persistence` is
@@ -397,44 +393,40 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: trading pair registered but order book missing");
         let fee_rates = book.fee_rates();
         let output = book.process_pending_orders(&event.orders);
+
         if matches!(persistence, StableMemoryOptions::Write) {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("status");
-            // Fold the batch into one update per touched order, then write each
-            // once: a single batch can fill one order across many `Fill`s (a
-            // taker sweeping several makers, or a maker hit repeatedly) and an
-            // order can both change status and accrue fills in the same batch.
-            let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
-            for fill in &output.fills {
-                for seq in [fill.taker_order_seq, fill.maker_order_seq] {
-                    let entry = updates.entry(seq).or_default();
-                    entry.filled_delta = entry
-                        .filled_delta
-                        .checked_add(fill.quantity)
-                        .expect("BUG: filled_delta overflow");
+            let MatchingOutput {
+                fills,
+                resting_orders,
+                filled_orders,
+                expired_orders,
+            } = output;
+            let (balance_operations, mut updates) =
+                settle(fills, &expired_orders, fee_rates, base_scale);
+            {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("apply_order_updates");
+                for seq in &resting_orders {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+                }
+                for seq in &filled_orders {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
+                }
+                for seq in expired_orders.keys() {
+                    updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
+                }
+                for (seq, update) in updates {
+                    let order_id = OrderId::new(event.book_id, seq);
+                    self.order_history.apply_update(&order_id, update, now);
                 }
             }
-            for seq in &output.resting_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+            if !balance_operations.is_empty() {
+                self.pending_settling_events
+                    .push_back(event::SettlingEvent {
+                        book_id: event.book_id,
+                        balance_operations,
+                    });
             }
-            for seq in &output.filled_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
-            }
-            for seq in output.expired_orders.keys() {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
-            }
-            for (seq, update) in updates {
-                let order_id = OrderId::new(event.book_id, seq);
-                self.order_history.apply_update(&order_id, update, now);
-            }
-        }
-        let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
-        if !balance_operations.is_empty() {
-            self.pending_settling_events
-                .push_back(event::SettlingEvent {
-                    book_id: event.book_id,
-                    balance_operations,
-                });
         }
     }
 
@@ -916,97 +908,26 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
         .collect()
 }
 
-fn compute_balance_operations(
-    output: &MatchingOutput,
+fn settle(
+    fills: Vec<Fill>,
+    expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
-) -> Vec<event::BalanceOperation> {
-    let mut ops = Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
-    for fill in &output.fills {
-        let (buyer_seq, seller_seq) = match fill.taker_side {
-            Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
-            Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
-        };
-        // Receive-side convention: buyer pays fee in base (the asset they
-        // receive), seller in quote. Each side's rate is `taker` if they
-        // were the taker, else `maker`.
-        let (buyer_rate, seller_rate) = match fill.taker_side {
-            Side::Buy => (fee_rates.taker, fee_rates.maker),
-            Side::Sell => (fee_rates.maker, fee_rates.taker),
-        };
-        let notional = fill.quote_amount(base_scale);
-        let quote_fee = seller_rate.mul_ceil(notional);
-        let base_fee = buyer_rate.mul_ceil(fill.quantity);
-
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: buyer_seq,
-            to_order: seller_seq,
-            token: order::PairToken::Quote,
-            amount: notional,
-            fee: nonzero(quote_fee),
-        });
-        if fill.taker_side == Side::Buy
-            && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
-            && !diff.is_zero()
-        {
-            let surplus = diff
-                .checked_mul_quantity_scaled(&fill.quantity, base_scale)
-                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
-            ops.push(event::BalanceOperation::Unreserve {
-                order: fill.taker_order_seq,
-                token: order::PairToken::Quote,
-                amount: surplus,
-            });
-        }
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: seller_seq,
-            to_order: buyer_seq,
-            token: order::PairToken::Base,
-            amount: fill.quantity,
-            fee: nonzero(base_fee),
-        });
+) -> (
+    Vec<event::BalanceOperation>,
+    BTreeMap<OrderSeq, OrderUpdate>,
+) {
+    let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
+    let mut updates = BTreeMap::new();
+    for fill in fills {
+        let settlement = FillSettlement::new(fill, fee_rates, base_scale);
+        settlement.push_balance_operations(&mut ops);
+        settlement.accrue_fill(&mut updates);
     }
-    // A killed fill-or-kill order never touched the book, so its full placement
-    // reservation must be released.
-    for (seq, killed) in &output.expired_orders {
-        let (refund_token, refund_amount) = refund_for(
-            killed.side,
-            killed.price,
-            killed.remaining_quantity,
-            base_scale,
-        );
-        ops.push(event::BalanceOperation::Unreserve {
-            order: *seq,
-            token: refund_token,
-            amount: refund_amount,
-        });
+    for (seq, removed) in expired_orders {
+        RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    ops
-}
-
-fn refund_for(
-    side: Side,
-    price: order::Price,
-    remaining_quantity: Quantity,
-    base_scale: NonZeroU64,
-) -> (PairToken, Quantity) {
-    match side {
-        Side::Buy => (
-            PairToken::Quote,
-            price
-                .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
-                .expect("BUG: price * remaining overflow — validated at placement"),
-        ),
-        Side::Sell => (PairToken::Base, remaining_quantity),
-    }
-}
-
-/// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for
-/// "fee was actually charged" so callers (audit log, apply path,
-/// `/metrics`) can distinguish "no fee on this fill" from "fee of zero
-/// charged".
-fn nonzero(q: Quantity) -> Option<Quantity> {
-    if q.is_zero() { None } else { Some(q) }
+    (ops, updates)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

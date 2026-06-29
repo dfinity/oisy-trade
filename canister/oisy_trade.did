@@ -297,6 +297,14 @@ type OrderRecord = record {
     last_updated_at : opt nat64;
     /// Time-in-force policy the order was placed with.
     time_in_force : TimeInForce;
+    /// Cumulative realized quote notional transacted across the order's fills,
+    /// in quote-token smallest units. The average execution price is
+    /// `filled_quote / filled_quantity` (VWAP), a ratio of the two tokens'
+    /// smallest units.
+    filled_quote : nat;
+    /// Cumulative realized fee charged across the order's fills, in the order's
+    /// receive token — base for a buy, quote for a sell.
+    filled_fee : nat;
 };
 
 /// Request for `get_my_orders`.
