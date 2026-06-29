@@ -202,15 +202,18 @@ pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order 
 
 /// Construct a [`Fill`] for use in test assertions.
 ///
-/// `taker` provides the taker context (seq, side, price).
+/// `fill_seq` is the per-book sequence the order book is expected to have minted
+/// for this match. `taker` provides the taker context (seq, side, price).
 /// `maker_order_seq`, `maker_price`, and `quantity` describe the fill itself.
 pub fn fill(
+    fill_seq: u64,
     taker: &Order,
     maker_order_seq: OrderSeq,
     maker_price: impl Into<u128>,
     quantity: impl Into<u64>,
 ) -> Fill {
     Fill {
+        fill_seq: crate::order::FillSeq::new(fill_seq),
         taker_order_seq: taker.id(),
         taker_side: taker.side(),
         taker_price: taker.price(),
@@ -555,6 +558,7 @@ pub mod arbitrary {
                     (Side::Sell, Price::new(lo), Price::new(hi))
                 };
                 Fill {
+                    fill_seq: crate::order::FillSeq::new(index),
                     taker_order_seq: OrderSeq::new(2 * index),
                     taker_side,
                     taker_price,

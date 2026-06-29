@@ -13,7 +13,7 @@ pub use book::{
     PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
+pub use fill::{Fill, FillSeq, FillSettlement, RemovedOrderSettlement};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use crate::order::ids::{Seq, SeqMarker};
