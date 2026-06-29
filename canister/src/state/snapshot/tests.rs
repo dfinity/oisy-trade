@@ -103,7 +103,7 @@ mod schema_stability {
                 fee_rates: FeeRates::default(),
                 min_notional: Quantity::from_u128(5),
                 max_notional: Some(Quantity::from_u128(9_000)),
-                next_fill: FillSeq::new(2),
+                next_fill: Some(FillSeq::new(2)),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -490,4 +490,65 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
         state.user_registry.clone(),
     );
     assert_eq!(state, restored);
+}
+
+/// An `OrderBookSnapshot` written before the `next_fill` field existed (the
+/// `#[n(11)]` slot absent) decodes with `next_fill` as `None`, which rebuilds
+/// the book's fill counter as [`FillSeq::ZERO`].
+#[test]
+fn should_decode_old_format_order_book_snapshot_to_zero_next_fill() {
+    use crate::order::{
+        FeeRates, FillSeq, LotSize, OrderBook, OrderBookId, OrderBookSnapshot, OrderSeq, Quantity,
+        TickSize,
+    };
+    use std::num::{NonZeroU64, NonZeroU128};
+
+    #[derive(minicbor::Encode)]
+    struct OldOrderBookSnapshot {
+        #[n(0)]
+        id: OrderBookId,
+        #[n(1)]
+        next_seq: OrderSeq,
+        #[n(2)]
+        tick_size: TickSize,
+        #[n(3)]
+        lot_size: LotSize,
+        #[n(4)]
+        pending_orders: Vec<crate::order::Order>,
+        #[n(5)]
+        bids: Vec<crate::order::PriceLevel>,
+        #[n(6)]
+        asks: Vec<crate::order::PriceLevel>,
+        #[n(7)]
+        filled_orders: Vec<OrderSeq>,
+        #[n(8)]
+        fee_rates: FeeRates,
+        #[n(9)]
+        min_notional: Quantity,
+        #[n(10)]
+        max_notional: Option<Quantity>,
+    }
+
+    let old = OldOrderBookSnapshot {
+        id: OrderBookId::new(1),
+        next_seq: OrderSeq::new(5),
+        tick_size: TickSize::new(NonZeroU128::new(10).unwrap()),
+        lot_size: LotSize::new(NonZeroU64::new(1_000_000).unwrap()),
+        pending_orders: vec![],
+        bids: vec![],
+        asks: vec![],
+        filled_orders: vec![],
+        fee_rates: FeeRates::default(),
+        min_notional: Quantity::from_u128(5),
+        max_notional: Some(Quantity::from_u128(9_000)),
+    };
+
+    let mut buf = vec![];
+    minicbor::encode(&old, &mut buf).unwrap();
+    let decoded: OrderBookSnapshot = minicbor::decode(&buf).unwrap();
+
+    assert_eq!(decoded.next_fill, None);
+    let book = OrderBook::from(decoded);
+    let snapshot = OrderBookSnapshot::from(&book);
+    assert_eq!(snapshot.next_fill, Some(FillSeq::ZERO));
 }

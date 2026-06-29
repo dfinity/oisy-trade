@@ -638,8 +638,10 @@ pub struct OrderBookSnapshot {
     pub min_notional: Quantity,
     #[n(10)]
     pub max_notional: Option<Quantity>,
+    /// Per-book fill sequence counter. Absent in snapshots written before this
+    /// field existed; decodes to `None` there and rebuilds as [`FillSeq::ZERO`].
     #[n(11)]
-    pub next_fill: FillSeq,
+    pub next_fill: Option<FillSeq>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -655,7 +657,7 @@ impl From<&OrderBook> for OrderBookSnapshot {
         Self {
             id: book.id,
             next_seq: book.next_seq,
-            next_fill: book.next_fill,
+            next_fill: Some(book.next_fill),
             tick_size: book.tick_size,
             lot_size: book.lot_size,
             pending_orders: book.pending_orders.iter().cloned().collect(),
@@ -730,7 +732,7 @@ impl From<OrderBookSnapshot> for OrderBook {
         Self {
             id: snapshot.id,
             next_seq: snapshot.next_seq,
-            next_fill: snapshot.next_fill,
+            next_fill: snapshot.next_fill.unwrap_or_default(),
             tick_size: snapshot.tick_size,
             lot_size: snapshot.lot_size,
             min_notional: snapshot.min_notional,
