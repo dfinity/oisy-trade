@@ -364,8 +364,6 @@ impl<M: Memory> TradeHistory<M> {
 
     fn insert(&mut self, leg: TradeLeg, user: UserId) {
         let (id, trade) = leg;
-        // TODO(DEFI-2901): retention/pruning must restore a monotonic counter;
-        // len()-derived reuses ids after deletes.
         let global_seq = self.by_user.len();
         assert_eq!(
             self.trades.insert(id, SeqTrade { global_seq, trade }),
