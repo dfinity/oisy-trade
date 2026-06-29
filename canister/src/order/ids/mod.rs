@@ -1,6 +1,10 @@
+use ic_stable_structures::Storable;
+use ic_stable_structures::storable::Bound;
 use minicbor::encode::{Error, Write};
 use minicbor::{Decoder, Encoder};
+use std::borrow::Cow;
 use std::fmt;
+use std::fmt::Formatter;
 use std::marker::PhantomData;
 
 #[cfg(test)]
@@ -103,4 +107,112 @@ impl<'b, C, M> minicbor::Decode<'b, C> for Seq<M> {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.u64().map(Self::new)
     }
+}
+
+/// An identifier represented by a fix number of bytes.
+pub trait FixedWidthId: Sized {
+    /// Number of bytes taken by the identifier
+    const WIDTH: usize;
+
+    fn write_be_bytes(&self, bytes: &mut Vec<u8>);
+    fn from_be_bytes(bytes: &[u8]) -> Result<Self, ParseFixedWithIdError>;
+
+    fn write_hex(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
+    fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError>;
+}
+
+pub struct ParseFixedWithIdError {}
+
+impl<M> FixedWidthId for Seq<M> {
+    const WIDTH: usize = 8;
+
+    fn write_be_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(&self.0.to_be_bytes());
+    }
+
+    fn from_be_bytes(bytes: &[u8]) -> Result<Self, ParseFixedWithIdError> {
+        Ok(Self::new(u64::from_be_bytes(
+            bytes.try_into().map_err(|_e| ParseFixedWithIdError {})?,
+        )))
+    }
+
+    fn write_hex(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+
+    fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
+        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
+            return Err(ParseFixedWithIdError {});
+        }
+        u64::from_str_radix(s, 16)
+            .map(Self::new)
+            .map_err(|_e| ParseFixedWithIdError {})
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode)]
+pub struct CompositeId<A, B>(#[n(0)] A, #[n(1)] B);
+
+impl<A: FixedWidthId, B: FixedWidthId> FixedWidthId for CompositeId<A, B> {
+    const WIDTH: usize = A::WIDTH + B::WIDTH;
+
+    fn write_be_bytes(&self, bytes: &mut Vec<u8>) {
+        self.0.write_be_bytes(bytes);
+        self.1.write_be_bytes(bytes);
+    }
+
+    fn from_be_bytes(bytes: &[u8]) -> Result<Self, ParseFixedWithIdError> {
+        if bytes.len() != Self::WIDTH {
+            return Err(ParseFixedWithIdError {});
+        }
+        let split = A::WIDTH;
+        Ok(Self(
+            A::from_be_bytes(&bytes[..split])?,
+            B::from_be_bytes(&bytes[split..])?,
+        ))
+    }
+
+    fn write_hex(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.write_hex(f)?;
+        self.1.write_hex(f)
+    }
+
+    fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
+        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
+            return Err(ParseFixedWithIdError {});
+        }
+        let split = A::WIDTH * 2;
+        let first = A::from_hex(&s[..split])?;
+        let second = B::from_hex(&s[split..])?;
+        Ok(Self(first, second))
+    }
+}
+
+impl<A: FixedWidthId, B: FixedWidthId> Storable for CompositeId<A, B> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = Vec::with_capacity(Self::WIDTH);
+        self.write_be_bytes(&mut buf);
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let bytes: &[u8] = bytes.as_ref();
+        assert_eq!(
+            bytes.len(),
+            Self::WIDTH,
+            "composite id must decode from exactly {} bytes",
+            Self::WIDTH
+        );
+        Self::from_be_bytes(bytes)
+            .unwrap_or_else(|_e| panic!("BUG: expected exactly {} bytes.", Self::WIDTH))
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: Self::WIDTH as u32,
+        is_fixed_size: true,
+    };
 }
