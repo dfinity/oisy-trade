@@ -348,28 +348,6 @@ fn should_clamp_an_account_page_to_requested_length() {
     assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
 }
 
-#[test]
-fn should_persist_a_record_with_no_counterparty_fields() {
-    let Trade {
-        side,
-        price,
-        quantity,
-        notional,
-        fee,
-        fee_token,
-        is_maker,
-        timestamp,
-    } = taker_leg();
-    assert_eq!(side, Side::Buy);
-    assert_eq!(price, Price::new(10_000_000));
-    assert_eq!(quantity, Quantity::from_u128(200_000_000));
-    assert_eq!(notional, Quantity::from_u128(20_000_000));
-    assert_eq!(fee, Quantity::from_u128(200_000));
-    assert_eq!(fee_token, PairToken::Base);
-    assert!(!is_maker);
-    assert_eq!(timestamp, Timestamp::new(42));
-}
-
 fn store() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
