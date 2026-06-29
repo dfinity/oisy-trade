@@ -6,10 +6,12 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ids::{FixedWidthId, ParseFixedWithIdError};
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
+use std::fmt;
 
 /// Compact, stable handle for a user identity. Assigned densely (`0..n`) by
 /// [`UserRegistry`] and never reused — identities are never removed.
@@ -50,6 +52,33 @@ impl Storable for UserId {
         max_size: 8,
         is_fixed_size: true,
     };
+}
+
+impl FixedWidthId for UserId {
+    const WIDTH: usize = 8;
+
+    fn write_be_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(&self.0.to_be_bytes());
+    }
+
+    fn from_be_bytes(bytes: &[u8]) -> Result<Self, ParseFixedWithIdError> {
+        Ok(Self(u64::from_be_bytes(
+            bytes.try_into().map_err(|_e| ParseFixedWithIdError {})?,
+        )))
+    }
+
+    fn write_hex(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+
+    fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
+        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
+            return Err(ParseFixedWithIdError {});
+        }
+        u64::from_str_radix(s, 16)
+            .map(Self)
+            .map_err(|_e| ParseFixedWithIdError {})
+    }
 }
 
 /// Point-lookup key wrapping a `Principal` (the registry never range-scans, so
