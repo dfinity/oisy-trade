@@ -289,7 +289,7 @@ before copying.
 |                   | Binance `ICPUSDT`  | `0.001`                | `0.01`                               | `$5`               |
 |                   | Coinbase `ICP-USD` | `0.001`                | `0.0001`                             | `$1`               |
 |                   | Kraken `ICPUSD`    | `0.001`                | `0.00000001`                         | `$0.50`            |
-| **ckBTC/ckUSDT**  | OISY TRADE         | `0.01` USDT = `10_000` | `0.0001` BTC = `10_000`              | `$5` = `5_000_000` |
+| **ckBTC/ckUSDT**  | OISY TRADE         | `0.1` USDT = `100_000` | `0.00001` BTC = `1_000`             | `$5` = `5_000_000` |
 |                   | Binance `BTCUSDT`  | `0.01`                 | `0.00001`                            | `$5`               |
 |                   | Coinbase `BTC-USD` | `0.01`                 | `0.00000001`                         | `$1`               |
 |                   | Kraken `XBTUSD`    | `0.1`                  | `0.00000001`                         | `$0.50`            |
