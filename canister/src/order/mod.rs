@@ -1,7 +1,9 @@
 mod book;
 mod fees;
 mod fill;
+mod fills;
 mod history;
+mod ids;
 mod plan;
 mod queue;
 #[cfg(test)]
@@ -13,18 +15,16 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
+pub use fills::{FillId, FillIdParseError, TradeId};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
+
+use ids::{book_scoped_id, seq_newtype};
 
 use candid::{Nat, Principal};
 pub use history::OrderRecord;
-use ic_stable_structures::Storable;
-use ic_stable_structures::storable::Bound;
 use minicbor::{Decode, Encode};
 use num_bigint::BigUint;
-use std::borrow::Cow;
-use std::fmt;
 use std::num::{NonZeroU64, NonZeroU128};
-use std::str::FromStr;
 
 /// Selector for the base or quote token of a [`TradingPair`]. Resolved to a
 /// concrete [`TokenId`] via [`TradingPair::token`].
@@ -150,136 +150,36 @@ impl OrderBookId {
     }
 }
 
-/// Sequence number identifying an order within a single order book.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    minicbor::Encode,
-    minicbor::Decode,
-)]
-pub struct OrderSeq(#[n(0)] u64);
-
-impl OrderSeq {
-    pub const ZERO: Self = Self(0);
-    pub const ONE: Self = Self(1);
-
-    pub const fn new(seq: u64) -> Self {
-        Self(seq)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-
-    pub fn increment(&mut self) {
-        self.0 = self.0.checked_add(1).expect("OrderSeq overflow");
-    }
+seq_newtype! {
+    /// Sequence number identifying an order within a single order book.
+    pub struct OrderSeq;
+    const ONE = 1;
 }
 
-/// Unique order identifier encoding the order book ID and a per-book sequence number.
-///
-/// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
-)]
-pub struct OrderId {
-    #[n(0)]
-    book_id: OrderBookId,
-    #[n(1)]
-    seq: OrderSeq,
+seq_newtype! {
+    /// Sequence number identifying a [`Fill`] within a single order book, minted
+    /// by the book's `next_fill` counter exactly as [`OrderSeq`] is minted for
+    /// orders.
+    pub struct FillSeq;
 }
 
-impl OrderId {
-    pub const ZERO: Self = Self {
-        book_id: OrderBookId::ZERO,
-        seq: OrderSeq::ZERO,
-    };
+book_scoped_id! {
+    /// Unique order identifier encoding the order book ID and a per-book sequence number.
+    ///
+    /// Represented as an opaque 32-character hex string (16 bytes: 8 for book ID, 8 for sequence) to the outside.
+    pub struct OrderId(OrderSeq);
+    derive(minicbor::Encode, minicbor::Decode);
+    field_attrs(#[n(0)] ; #[n(1)]);
+    error OrderIdParseError = "invalid order ID: expected 32-character hex string";
+    extra {
+        pub const ZERO: Self = Self {
+            book_id: OrderBookId::ZERO,
+            seq: OrderSeq::ZERO,
+        };
 
-    pub fn new(book_id: OrderBookId, seq: OrderSeq) -> Self {
-        Self { book_id, seq }
-    }
-
-    pub fn book_id(&self) -> OrderBookId {
-        self.book_id
-    }
-
-    pub fn seq(&self) -> OrderSeq {
-        self.seq
-    }
-
-    pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
-        (self.book_id, self.seq)
-    }
-}
-
-impl Storable for OrderId {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let (book, seq) = self.into_parts();
-        let mut buf = [0u8; 16];
-        buf[..8].copy_from_slice(&book.get().to_be_bytes());
-        buf[8..].copy_from_slice(&seq.get().to_be_bytes());
-        Cow::Owned(buf.to_vec())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let bytes: &[u8] = bytes.as_ref();
-        assert_eq!(bytes.len(), 16, "OrderId must decode from exactly 16 bytes");
-        let book = u64::from_be_bytes(bytes[..8].try_into().expect("8-byte slice"));
-        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
-        OrderId::new(OrderBookId::new(book), OrderSeq::new(seq))
-    }
-
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 16,
-        is_fixed_size: true,
-    };
-}
-
-impl fmt::Display for OrderId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}{:016x}", self.book_id.0, self.seq.0)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct OrderIdParseError;
-
-impl fmt::Display for OrderIdParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid order ID: expected 32-character hex string")
-    }
-}
-
-impl FromStr for OrderId {
-    type Err = OrderIdParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 32 || !s.is_ascii() {
-            return Err(OrderIdParseError);
+        pub fn into_parts(self) -> (OrderBookId, OrderSeq) {
+            (self.book_id, self.seq)
         }
-        let book_id = u64::from_str_radix(&s[..16], 16).map_err(|_| OrderIdParseError)?;
-        let seq = u64::from_str_radix(&s[16..], 16).map_err(|_| OrderIdParseError)?;
-        Ok(Self {
-            book_id: OrderBookId(book_id),
-            seq: OrderSeq(seq),
-        })
-    }
-}
-
-impl From<OrderId> for String {
-    fn from(id: OrderId) -> Self {
-        id.to_string()
     }
 }
 

@@ -1,4 +1,6 @@
-use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side};
+use super::{
+    FeeRates, FillSeq, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side,
+};
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
@@ -7,23 +9,26 @@ use std::num::NonZeroU64;
 /// A single fill produced when an incoming order matches a resting order.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct Fill {
-    /// The sequence of the incoming (taker) order.
+    /// The per-book sequence of this match, minted by the order book.
     #[n(0)]
+    pub fill_seq: FillSeq,
+    /// The sequence of the incoming (taker) order.
+    #[n(1)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
-    #[n(1)]
+    #[n(2)]
     pub taker_side: Side,
     /// The limit price of the taker order.
-    #[n(2)]
+    #[n(3)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
-    #[n(3)]
+    #[n(4)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
-    #[n(4)]
+    #[n(5)]
     pub maker_price: Price,
     /// The quantity filled.
-    #[n(5)]
+    #[n(6)]
     pub quantity: Quantity,
 }
 
