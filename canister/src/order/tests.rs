@@ -1,5 +1,6 @@
 mod order_id {
-    use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use crate::ids::ParseFixedWithIdError;
+    use crate::order::{OrderBookId, OrderId, OrderSeq};
     use crate::test_fixtures::arbitrary::arb_order_id;
     use ic_stable_structures::Storable;
     use proptest::prelude::*;
@@ -22,12 +23,12 @@ mod order_id {
 
         #[test]
         fn should_reject_wrong_length(s in ".{0,31}|.{33,64}") {
-            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+            prop_assert_eq!(s.parse::<OrderId>(), Err(ParseFixedWithIdError {}));
         }
 
         #[test]
         fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
-            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+            prop_assert_eq!(s.parse::<OrderId>(), Err(ParseFixedWithIdError {}));
         }
 
         #[test]

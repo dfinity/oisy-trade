@@ -1,5 +1,5 @@
 use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side};
-use crate::order::ids::{Seq, SeqMarker};
+use crate::ids::{Seq, SeqMarker};
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;

@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::str::FromStr;
 
 #[cfg(test)]
 mod tests;
@@ -121,6 +122,7 @@ pub trait FixedWidthId: Sized {
     fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError>;
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct ParseFixedWithIdError {}
 
 impl<M> FixedWidthId for Seq<M> {
@@ -150,8 +152,28 @@ impl<M> FixedWidthId for Seq<M> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, minicbor::Encode, minicbor::Decode,
+)]
 pub struct CompositeId<A, B>(#[n(0)] A, #[n(1)] B);
+
+impl<A, B> CompositeId<A, B> {
+    pub const fn new(a: A, b: B) -> Self {
+        Self(a, b)
+    }
+
+    pub const fn first(&self) -> &A {
+        &self.0
+    }
+
+    pub const fn second(&self) -> &B {
+        &self.1
+    }
+
+    pub fn into_parts(self) -> (A, B) {
+        (self.0, self.1)
+    }
+}
 
 impl<A: FixedWidthId, B: FixedWidthId> FixedWidthId for CompositeId<A, B> {
     const WIDTH: usize = A::WIDTH + B::WIDTH;
@@ -215,4 +237,18 @@ impl<A: FixedWidthId, B: FixedWidthId> Storable for CompositeId<A, B> {
         max_size: Self::WIDTH as u32,
         is_fixed_size: true,
     };
+}
+
+impl<A: FixedWidthId, B: FixedWidthId> fmt::Display for CompositeId<A, B> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_hex(f)
+    }
+}
+
+impl<A: FixedWidthId, B: FixedWidthId> FromStr for CompositeId<A, B> {
+    type Err = ParseFixedWithIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_hex(s)
+    }
 }

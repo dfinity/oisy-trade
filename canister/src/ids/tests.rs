@@ -1,5 +1,5 @@
 mod seq {
-    use crate::order::ids::{Seq, SeqMarker};
+    use crate::ids::{Seq, SeqMarker};
     use minicbor::{Decode, Encode};
     use proptest::arbitrary::any;
     use proptest::prelude::TestCaseError;
