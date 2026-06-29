@@ -66,9 +66,9 @@ impl<M> Default for Seq<M> {
     }
 }
 
-impl<M> fmt::Debug for Seq<M> {
+impl<M: SeqMarker> fmt::Debug for Seq<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Seq").field(&self.0).finish()
+        f.debug_tuple(M::NAME).field(&self.0).finish()
     }
 }
 

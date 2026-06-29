@@ -1,9 +1,16 @@
 mod seq {
-    use crate::order::ids::Seq;
+    use crate::order::ids::{Seq, SeqMarker};
     use minicbor::{Decode, Encode};
     use proptest::arbitrary::any;
     use proptest::prelude::TestCaseError;
     use proptest::{prop_assert_eq, proptest};
+
+    #[test]
+    fn should_have_debug_representation() {
+        let seq = SeqTest::new(42);
+        let dbg = format!("{seq:?}");
+        assert_eq!(dbg, "SeqTest(42)");
+    }
 
     proptest! {
         #[test]
@@ -25,4 +32,8 @@ mod seq {
 
     struct SeqTestMarker;
     type SeqTest = Seq<SeqTestMarker>;
+
+    impl SeqMarker for SeqTestMarker {
+        const NAME: &'static str = "SeqTest";
+    }
 }
