@@ -15,7 +15,7 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillSettlement, RemovedOrderSettlement};
-pub use fills::{FillId, FillIdParseError, TradeId};
+pub use fills::{FillId, FillIdParseError, TradeId, TradeIdParseError};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 
 use ids::{book_scoped_id, seq_newtype};

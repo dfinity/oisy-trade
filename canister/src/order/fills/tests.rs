@@ -53,9 +53,11 @@ mod fill_id {
 }
 
 mod trade_id {
-    use crate::order::{FillId, FillSeq, OrderBookId, OrderId, OrderSeq, TradeId};
+    use crate::order::{
+        FillId, FillSeq, OrderBookId, OrderId, OrderSeq, TradeId, TradeIdParseError,
+    };
     use ic_stable_structures::Storable;
-    use proptest::prelude::{Strategy, any, prop_assert_eq, proptest};
+    use proptest::prelude::{Strategy, any, prop_assert, prop_assert_eq, proptest};
 
     fn arb_trade_id() -> impl Strategy<Value = TradeId> {
         (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(|(book, order_seq, fill_seq)| {
@@ -67,6 +69,37 @@ mod trade_id {
     }
 
     proptest! {
+        #[test]
+        fn should_roundtrip_through_display_and_parse(book: u64, order_seq: u64, fill_seq: u64) {
+            let id = TradeId::new(
+                OrderId::new(OrderBookId::new(book), OrderSeq::new(order_seq)),
+                FillSeq::new(fill_seq),
+            );
+            let parsed: TradeId = id.to_string().parse().unwrap();
+            prop_assert_eq!(parsed, id);
+        }
+
+        #[test]
+        fn should_always_encode_as_48_char_hex(book: u64, order_seq: u64, fill_seq: u64) {
+            let id = TradeId::new(
+                OrderId::new(OrderBookId::new(book), OrderSeq::new(order_seq)),
+                FillSeq::new(fill_seq),
+            );
+            let s = id.to_string();
+            prop_assert_eq!(s.len(), 48);
+            prop_assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+
+        #[test]
+        fn should_reject_wrong_length(s in ".{0,47}|.{49,96}") {
+            prop_assert_eq!(s.parse::<TradeId>(), Err(TradeIdParseError));
+        }
+
+        #[test]
+        fn should_reject_non_hex(s in "[^0-9a-fA-F]{48}") {
+            prop_assert_eq!(s.parse::<TradeId>(), Err(TradeIdParseError));
+        }
+
         #[test]
         fn should_roundtrip_through_stable_bytes(id in arb_trade_id()) {
             let bytes = id.to_bytes();

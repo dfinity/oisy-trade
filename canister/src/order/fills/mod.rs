@@ -54,6 +54,45 @@ impl TradeId {
     }
 }
 
+impl std::fmt::Display for TradeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{:016x}", self.order, self.seq.get())
+    }
+}
+
+/// The string passed to [`TradeId`]'s [`FromStr`](std::str::FromStr) was not a
+/// 48-character hex string.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TradeIdParseError;
+
+impl std::fmt::Display for TradeIdParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid trade ID: expected 48-character hex string")
+    }
+}
+
+impl std::str::FromStr for TradeId {
+    type Err = TradeIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 48 || !s.is_ascii() {
+            return Err(TradeIdParseError);
+        }
+        let order = OrderId::from_str(&s[..32]).map_err(|_| TradeIdParseError)?;
+        let seq = u64::from_str_radix(&s[32..], 16).map_err(|_| TradeIdParseError)?;
+        Ok(Self {
+            order,
+            seq: FillSeq::new(seq),
+        })
+    }
+}
+
+impl From<TradeId> for String {
+    fn from(id: TradeId) -> Self {
+        id.to_string()
+    }
+}
+
 impl Storable for TradeId {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = [0u8; TRADE_ID_LEN];
