@@ -1,5 +1,6 @@
 use super::{FillSeq, OrderId, PairToken, Price, Quantity, Side, TradeId};
 use crate::Timestamp;
+use crate::ids::{CompositeId, Seq, SeqMarker};
 use crate::user::UserId;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
@@ -9,70 +10,34 @@ use std::fmt;
 #[cfg(test)]
 mod tests;
 
+/// Marker distinguishing the canister-global trade-insertion family of [`Seq`].
+pub struct TradeGlobalSeqMarker;
+impl SeqMarker for TradeGlobalSeqMarker {
+    const NAME: &'static str = "TradeGlobalSeq";
+}
+
+/// Canister-global insertion sequence assigned to each appended trade record.
+pub type TradeGlobalSeq = Seq<TradeGlobalSeqMarker>;
+
 /// Key into the account-wide secondary index: the interned [`UserId`] followed
 /// by a canister-global insertion sequence, so a range scan over a user's prefix
 /// yields their trades oldest-first across all their orders —
 /// [`TradeHistory::trades_after`] reverses it for newest-first. The value is the
-/// [`TradeId`], pointing back into the primary `trades` map.
-///
-/// Both fields are fixed-width big-endian, so the derived field-wise `Ord`
-/// matches the [`Storable`] byte order that `StableBTreeMap` relies on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct TradeByUserKey {
-    user: UserId,
-    seq: u64,
+/// [`TradeId`], pointing back into the primary `trades` map. Both components are
+/// fixed-width big-endian via [`CompositeId`], so the derived field-wise `Ord`
+/// matches the byte order `StableBTreeMap` relies on.
+type TradeByUserKey = CompositeId<UserId, TradeGlobalSeq>;
+
+fn trade_by_user_key(user: UserId, seq: TradeGlobalSeq) -> TradeByUserKey {
+    TradeByUserKey::new(user, seq)
 }
 
-/// 8 bytes of `UserId` + 8 bytes of `seq`, both big-endian.
-const TRADE_BY_USER_KEY_LEN: usize = 8 + 8;
-
-impl TradeByUserKey {
-    fn from_seq(user: UserId, seq: u64) -> Self {
-        Self { user, seq }
-    }
-
-    fn first(user: UserId) -> Self {
-        Self { user, seq: 0 }
-    }
-
-    fn last(user: UserId) -> Self {
-        Self {
-            user,
-            seq: u64::MAX,
-        }
-    }
+fn trade_by_user_first(user: UserId) -> TradeByUserKey {
+    TradeByUserKey::new(user, TradeGlobalSeq::ZERO)
 }
 
-impl Storable for TradeByUserKey {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = [0u8; TRADE_BY_USER_KEY_LEN];
-        buf[..8].copy_from_slice(&self.user.get().to_be_bytes());
-        buf[8..].copy_from_slice(&self.seq.to_be_bytes());
-        Cow::Owned(buf.to_vec())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let bytes: &[u8] = bytes.as_ref();
-        assert_eq!(
-            bytes.len(),
-            TRADE_BY_USER_KEY_LEN,
-            "TradeByUserKey must decode from exactly {TRADE_BY_USER_KEY_LEN} bytes"
-        );
-        let user = UserId::new(u64::from_be_bytes(
-            bytes[..8].try_into().expect("8-byte slice"),
-        ));
-        let seq = u64::from_be_bytes(bytes[8..].try_into().expect("8-byte slice"));
-        Self { user, seq }
-    }
-
-    const BOUND: Bound = Bound::Bounded {
-        max_size: TRADE_BY_USER_KEY_LEN as u32,
-        is_fixed_size: true,
-    };
+fn trade_by_user_last(user: UserId) -> TradeByUserKey {
+    TradeByUserKey::new(user, TradeGlobalSeq::new(u64::MAX))
 }
 
 /// One side-projected trade, holding everything needed to audit one of the two
@@ -245,7 +210,7 @@ impl<M: Memory> TradeHistory<M> {
         );
         assert_eq!(
             self.by_user
-                .insert(TradeByUserKey::from_seq(user, global_seq), id),
+                .insert(trade_by_user_key(user, TradeGlobalSeq::new(global_seq)), id),
             None,
             "BUG: duplicate user-trade index entry for {user:?} seq {global_seq}"
         );
@@ -303,10 +268,10 @@ impl<M: Memory> TradeHistory<M> {
         bench_scopes!("fills", "fills::trades_after");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(TradeByUserKey::last(user)),
+            None => Bound::Included(trade_by_user_last(user)),
             Some(cursor) => {
                 let entry = self.trades.get(&cursor).ok_or(CursorNotFound)?;
-                let key = TradeByUserKey::from_seq(user, entry.global_seq);
+                let key = trade_by_user_key(user, TradeGlobalSeq::new(entry.global_seq));
                 if self.by_user.get(&key) != Some(cursor) {
                     return Err(CursorNotFound);
                 }
@@ -315,7 +280,7 @@ impl<M: Memory> TradeHistory<M> {
         };
         Ok(self
             .by_user
-            .range((Bound::Included(TradeByUserKey::first(user)), upper))
+            .range((Bound::Included(trade_by_user_first(user)), upper))
             .rev()
             .take(length)
             .map(|entry| {
