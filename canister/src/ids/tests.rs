@@ -60,6 +60,30 @@ mod composite {
     }
 }
 
+mod nested {
+    use crate::ids::tests::{
+        arb_nested_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+    };
+    use proptest::proptest;
+
+    proptest! {
+        #[test]
+        fn should_encode_decode_minicbor(nested in arb_nested_test()) {
+            check_minicbor_roundtrip(&nested)?;
+        }
+
+        #[test]
+        fn should_have_fixed_size(nested in arb_nested_test()) {
+            check_fixed_size::<_,24>(nested)?;
+        }
+
+        #[test]
+        fn should_roundtrip_hex(nested in arb_nested_test()) {
+            check_hex_roundtrip::<_,48>(nested)?;
+        }
+    }
+}
+
 pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
 where
     for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
@@ -122,6 +146,8 @@ type TestId = Seq<TestIdMarker>;
 
 type CompositeTest = CompositeId<TestId, SeqTest>;
 
+type NestedTest = CompositeId<CompositeTest, SeqTest>;
+
 fn arb_seq<M: SeqMarker>() -> impl Strategy<Value = Seq<M>> {
     any::<u64>().prop_map(Seq::new)
 }
@@ -133,4 +159,9 @@ fn arb_seq_test() -> impl Strategy<Value = SeqTest> {
 fn arb_composite_test() -> impl Strategy<Value = CompositeTest> {
     (arb_seq::<TestIdMarker>(), arb_seq::<SeqTestMarker>())
         .prop_map(|(id, seq)| CompositeTest::new(id, seq))
+}
+
+fn arb_nested_test() -> impl Strategy<Value = NestedTest> {
+    (arb_composite_test(), arb_seq::<SeqTestMarker>())
+        .prop_map(|(id, seq)| NestedTest::new(id, seq))
 }
