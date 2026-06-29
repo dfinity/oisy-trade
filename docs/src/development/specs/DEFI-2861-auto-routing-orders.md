@@ -109,6 +109,11 @@ The headline contract is all-or-nothing on the user's target, with exactly two o
   with well-defined `filled_quote` / `filled_fee` and per-leg fills); on kill, it returns a
   single `Expired` record (zero fills/fees). Each leg carries the route id so the legs and
   their `get_my_trades` are attributable to the route.
+- **R9 — Taker on both legs, gross-matched target.** A routed order pays the **taker fee on
+  each** leg, in that leg's receive token — the funding leg in the hub token, the destination
+  leg in the requested token. The target is **gross-matched** on the destination leg: a
+  "buy/sell N" matches N and the user receives N net of that leg's taker fee, exactly as a
+  direct order. (Two taker fees is an inherent cost of routing through two books.)
 
 ## Non-goals
 
@@ -291,17 +296,31 @@ Each leg is planned with `require_full`; if either cannot fully fill — or the 
 budget is exceeded — the route kills. The transit (`H`) flows internally; the residual
 `P − C` is the user's hub change (R3).
 
-### Limit semantics — *(open sub-decision; recommendation below)*
+### Limit semantics — input budget
 
-**Recommended:** reuse the existing reservation model and express the limit as an
-**input budget**: reserve `price × quantity` of the input token (buy ⇒ the `quote` token;
-sell ⇒ the `base` token), exactly as a direct order does. The route kills if the destination
-cannot be satisfied within that budget (buy ⇒ it would need to sell more than the reserved
-input; sell ⇒ the `quote` obtained would fall below `price × quantity`). This avoids
-cross-token "effective price" math (the hub change is in a third token) and keeps placement
-identical to a direct limit order. *Confirm before building; the alternative — a synthetic
-limit price translated into per-leg price bounds — is more familiar to traders but makes the
-realized price ambiguous because of the change.*
+The order's `price` caps the **input token** spent, reusing the existing reservation model:
+reserve `price × quantity` of the input token (buy ⇒ the synthetic `quote`; sell ⇒ the
+synthetic `base`), exactly as a direct limit order does. The funding leg then sells the
+**smallest** whole-lot amount whose proceeds — **net of its taker fee** — cover the transit
+the destination leg needs, capped at the reservation; the route **kills** if even the full
+reservation cannot cover it. This keeps placement byte-identical to a direct order and avoids
+any cross-token "effective price" math (the hub change is in a third token). The narrow cost
+— it can kill a route affordable by ≤ one funding lot, because it counts gross input sold and
+does not credit the change back — is acceptable given the user can resubmit. (A synthetic
+limit price on the realized rate was the alternative — see Discussed Alternatives.)
+
+Worked flow — buy synthetic `ICP/ckBTC`, FOK, `price` = 5,000 sat/ICP, `quantity` = 15,
+taker fee 20 bps, ckBTC bid 100,000, ICP asks 10 @ 4.80 / 5 @ 5.00:
+
+1. Reserve `5,000 × 15 = 75,000 sat` ckBTC.
+2. Plan destination (buy 15 ICP on `ICP/ckUSDT`) → notional `C = 73.00 ckUSDT`; the leg's
+   `0.03 ICP` taker fee is withheld from the ICP received (user nets `14.97 ICP`).
+3. Plan funding (sell ckBTC on `ckBTC/ckUSDT`, `1.00 ckUSDT` gross/lot, `0.998` net of fee):
+   smallest sale netting ≥ `C` ⇒ **74 lots** (net `73.852`), `74,000 sat ≤ 75,000` ⇒ fills.
+
+On fill the user ends with `14.97 ICP`, `0.852 ckUSDT` change (`73.852 − 73.00`), and the
+`1,000 sat` unspent reservation refunded. Had `C` been `75.00`, funding would need
+`76 lots = 76,000 sat > 75,000` ⇒ **kill**, reservation released, zero effect.
 
 ### Execution & settlement — `canister/src/order/book.rs`, `canister/src/state/mod.rs`
 
@@ -311,7 +330,10 @@ outcome with **no mutation** and the reservation released; on commit `apply_plan
 fills' balance operations onto `pending_settling_events`. Kick `drive_matching` so
 `drain_settling` finishes settlement across chunks, as `add_limit_order` already does. The
 change `P − C` falls out of settling both legs into the user's hub balance — no dedicated
-"change" operation.
+"change" operation. Both legs are taker fills, so the existing per-fill fee logic
+(`compute_balance_operations`) bills the route the taker fee on each leg — in the hub token on
+the funding leg, in the requested token on the destination leg — with no routing-specific fee
+code (R9).
 
 ### Identity, records & retrieval — `canister/src/order/history`, query API
 
@@ -439,3 +461,9 @@ A stack, each PR independently compilable/testable.
   no index is needed. Rejected: it rigidly assumes exactly two legs, yields a long opaque id,
   and has no form for a killed route (which has no legs) — breaking the uniform id contract a
   single `route_id` + `Expired` record provides.
+- **A synthetic limit price (limit on the realized rate).** Express `price` as a ceiling on
+  the blended `quote`-per-`base` rate realized across both legs, instead of an input budget.
+  Rejected: it requires a two-leg VWAP plus a rule for valuing the hub change in the input
+  token (itself ambiguous), and it diverges from the input-budget result only within a window
+  one funding-lot wide (≤ ~$1). The input budget reuses the existing reservation exactly, is
+  single-token, and that marginal precision is not worth the cross-token math.
