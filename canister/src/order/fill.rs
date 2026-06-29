@@ -1,5 +1,8 @@
-use super::{FeeRates, OrderSeq, OrderUpdate, PairToken, Price, Quantity, RemovedOrder, Side};
-use crate::ids::{Seq, SeqMarker};
+use super::{
+    FeeRates, OrderBookId, OrderId, OrderSeq, OrderUpdate, PairToken, Price, Quantity,
+    RemovedOrder, Side,
+};
+use crate::ids::{CompositeId, Seq, SeqMarker};
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
@@ -14,6 +17,16 @@ impl SeqMarker for FillSeqMarker {
 
 /// Sequence number identifying a [`Fill`] within a single order book.
 pub type FillSeq = Seq<FillSeqMarker>;
+
+/// Identity of a match in the order book.
+#[allow(dead_code)] // TODO DEFI-2901: use me!
+pub type FillId = CompositeId<OrderBookId, FillSeq>;
+
+/// Identity of a trade associated with a given order.
+///
+/// One fill touches the maker and the taker orders.
+#[allow(dead_code)] // TODO DEFI-2901: use me!
+pub type TradeId = CompositeId<OrderId, FillSeq>;
 
 /// A single fill produced when an incoming order matches a resting order.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]

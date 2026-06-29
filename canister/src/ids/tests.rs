@@ -1,9 +1,15 @@
+use crate::ids::{CompositeId, FixedWidthId, Seq, SeqMarker};
+use minicbor::{Decode, Encode};
+use proptest::arbitrary::any;
+use proptest::prelude::TestCaseError;
+use proptest::prop_assert_eq;
+use proptest::strategy::Strategy;
+
 mod seq {
-    use crate::ids::{Seq, SeqMarker};
-    use minicbor::{Decode, Encode};
-    use proptest::arbitrary::any;
-    use proptest::prelude::TestCaseError;
-    use proptest::{prop_assert_eq, proptest};
+    use crate::ids::tests::{
+        SeqTest, arb_seq_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+    };
+    use proptest::proptest;
 
     #[test]
     fn should_have_debug_representation() {
@@ -14,26 +20,117 @@ mod seq {
 
     proptest! {
         #[test]
-        fn u64_id_encoding_roundtrip(n in any::<u64>()) {
-            check_roundtrip(&SeqTest::new(n))?;
+        fn should_encode_decode_minicbor(seq in arb_seq_test()) {
+            check_minicbor_roundtrip(&seq)?;
+        }
+
+        #[test]
+        fn should_have_fixed_size(seq in arb_seq_test()) {
+            check_fixed_size::<_,8>(seq)?;
+        }
+
+        #[test]
+        fn should_roundtrip_hex(seq in arb_seq_test()) {
+            check_hex_roundtrip::<_,16>(seq)?;
+        }
+    }
+}
+
+mod composite {
+    use crate::ids::tests::{
+        arb_composite_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+    };
+    use proptest::proptest;
+
+    proptest! {
+        #[test]
+        fn should_encode_decode_minicbor(composite in arb_composite_test()) {
+            check_minicbor_roundtrip(&composite)?;
+        }
+
+        #[test]
+        fn should_have_fixed_size(composite in arb_composite_test()) {
+            check_fixed_size::<_,16>(composite)?;
+        }
+
+        #[test]
+        fn should_roundtrip_hex(composite in arb_composite_test()) {
+            check_hex_roundtrip::<_,32>(composite)?;
+        }
+    }
+}
+
+pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
+where
+    for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
+{
+    let mut buf = vec![];
+    minicbor::encode(v, &mut buf).expect("encoding should succeed");
+    let decoded = minicbor::decode(&buf).expect("decoding should succeed");
+    prop_assert_eq!(v, &decoded);
+    Ok(())
+}
+
+pub fn check_fixed_size<T: FixedWidthId + PartialEq + std::fmt::Debug, const N: usize>(
+    id: T,
+) -> Result<(), TestCaseError> {
+    let mut bytes = Vec::with_capacity(N);
+    id.write_be_bytes(&mut bytes);
+    prop_assert_eq!(bytes.len(), N);
+
+    let deser = T::from_be_bytes(&bytes).unwrap();
+    prop_assert_eq!(id, deser);
+
+    Ok(())
+}
+
+pub fn check_hex_roundtrip<T: FixedWidthId + PartialEq + std::fmt::Debug, const N: usize>(
+    id: T,
+) -> Result<(), TestCaseError> {
+    struct Hex<'a, T>(&'a T);
+
+    impl<T: FixedWidthId> std::fmt::Display for Hex<'_, T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.write_hex(f)
         }
     }
 
-    pub fn check_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
-    where
-        for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
-    {
-        let mut buf = vec![];
-        minicbor::encode(v, &mut buf).expect("encoding should succeed");
-        let decoded = minicbor::decode(&buf).expect("decoding should succeed");
-        prop_assert_eq!(v, &decoded);
-        Ok(())
-    }
+    let hex = format!("{}", Hex(&id));
+    prop_assert_eq!(hex.len(), N);
 
-    struct SeqTestMarker;
-    type SeqTest = Seq<SeqTestMarker>;
+    let deser = T::from_hex(&hex).unwrap();
+    prop_assert_eq!(id, deser);
 
-    impl SeqMarker for SeqTestMarker {
-        const NAME: &'static str = "SeqTest";
-    }
+    Ok(())
+}
+
+struct SeqTestMarker;
+
+impl SeqMarker for SeqTestMarker {
+    const NAME: &'static str = "SeqTest";
+}
+
+type SeqTest = Seq<SeqTestMarker>;
+
+struct TestIdMarker;
+
+impl SeqMarker for TestIdMarker {
+    const NAME: &'static str = "TestId";
+}
+
+type TestId = Seq<TestIdMarker>;
+
+type CompositeTest = CompositeId<TestId, SeqTest>;
+
+fn arb_seq<M: SeqMarker>() -> impl Strategy<Value = Seq<M>> {
+    any::<u64>().prop_map(Seq::new)
+}
+
+fn arb_seq_test() -> impl Strategy<Value = SeqTest> {
+    arb_seq()
+}
+
+fn arb_composite_test() -> impl Strategy<Value = CompositeTest> {
+    (arb_seq::<TestIdMarker>(), arb_seq::<SeqTestMarker>())
+        .prop_map(|(id, seq)| CompositeTest::new(id, seq))
 }
