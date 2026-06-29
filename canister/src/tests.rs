@@ -2189,11 +2189,10 @@ mod get_my_trades {
     #[test]
     fn by_account_length_is_clamped_to_max() {
         init_state_with_order_book();
-        fund_user(BUYER);
-        fund_user(SELLER);
-        match_one_more();
+        let lots = MAX_FILLS_PER_RESPONSE + 5;
+        place_buy_crossing_resting_sells(lots);
         let trades = get_my_trades(by_account(None, u32::MAX), BUYER).unwrap();
-        assert_eq!(trades.len(), 1);
+        assert_eq!(trades.len(), MAX_FILLS_PER_RESPONSE as usize);
     }
 
     #[test]
