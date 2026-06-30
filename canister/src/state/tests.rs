@@ -2489,7 +2489,7 @@ mod settle_fills {
             state: &TestState,
             owner: Principal,
             order_id: crate::order::OrderId,
-        ) -> Vec<crate::order::Trade> {
+        ) -> Vec<crate::order::TradeRecord> {
             state
                 .get_user_order_fills(&owner, order_id, None, 100)
                 .expect("owner-scoped fill read should not error")
@@ -2504,7 +2504,7 @@ mod settle_fills {
                 .lookup(owner)
                 .expect("owner should be registered after settlement");
             state
-                .fill_store
+                .trade_history
                 .trades_after(user, None, 100)
                 .expect("account-wide fill read should not error")
                 .into_iter()

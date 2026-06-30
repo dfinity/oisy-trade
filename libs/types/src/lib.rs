@@ -21,7 +21,7 @@ pub use error::{
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
 
-/// Unique identifier for an order, encoded as a hex string.
+/// Unique identifier for an order, encoded as a lowercase hex string.
 pub type OrderId = String;
 
 /// Side of an order.

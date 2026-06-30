@@ -1,6 +1,6 @@
 use super::{
     FeeRates, OrderBookId, OrderId, OrderSeq, OrderUpdate, PairToken, Price, Quantity,
-    RemovedOrder, Side, Trade, TradeLeg,
+    RemovedOrder, Side, TradeLeg, TradeRecord,
 };
 use crate::Timestamp;
 use crate::ids::{CompositeId, Seq, SeqMarker};
@@ -202,13 +202,25 @@ impl FillSettlement {
         }
     }
 
-    /// Build the two side-projected [`Trade`]s — the taker leg and the maker
+    /// The taker order's per-book sequence, used to resolve its owner before
+    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    pub fn taker_order_seq(&self) -> OrderSeq {
+        self.fill.taker_order_seq
+    }
+
+    /// The maker order's per-book sequence, used to resolve its owner before
+    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    pub fn maker_order_seq(&self) -> OrderSeq {
+        self.fill.maker_order_seq
+    }
+
+    /// Build the two side-projected [`TradeRecord`]s — the taker leg and the maker
     /// leg — from this fill's single computed settlement, each keyed by its
     /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the settling event's
     /// `timestamp`. The two legs share the match's `fill_seq`; each record
     /// self-describes one order's view of the execution and never references the
-    /// counterparty.
-    pub fn trades(&self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
+    /// counterparty. Consumed by [`crate::order::TradeHistory::append`].
+    pub(crate) fn trade_legs(self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
         let fill = &self.fill;
         let taker_side = fill.taker_side;
         let maker_side = match taker_side {
@@ -216,7 +228,7 @@ impl FillSettlement {
             Side::Sell => Side::Buy,
         };
         let taker_id = TradeId::new(OrderId::new(book_id, fill.taker_order_seq), fill.fill_seq);
-        let taker_leg = Trade {
+        let taker_leg = TradeRecord {
             side: taker_side,
             price: fill.maker_price,
             quantity: fill.quantity,
@@ -227,7 +239,7 @@ impl FillSettlement {
             timestamp,
         };
         let maker_id = TradeId::new(OrderId::new(book_id, fill.maker_order_seq), fill.fill_seq);
-        let maker_leg = Trade {
+        let maker_leg = TradeRecord {
             side: maker_side,
             price: fill.maker_price,
             quantity: fill.quantity,

@@ -22,14 +22,15 @@ pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
         storage::order_history_memory(),
         storage::user_orders_memory(),
     );
-    let fill_store = TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory());
+    let trade_history =
+        TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory());
     let balances = TokenBalance::new(storage::balances_memory());
     let user_registry = UserRegistry::new(storage::user_registry_memory());
     state::init_state(
         State::new(
             init_arg.clone(),
             order_history,
-            fill_store,
+            trade_history,
             user_registry,
             balances,
         )
@@ -66,7 +67,7 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
     let _scope = canbench_rs::bench_scope("post_upgrade");
     let start = runtime.instruction_counter();
 
-    let (order_history, fill_store, balances, user_registry) = {
+    let (order_history, trade_history, balances, user_registry) = {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::load_stable_memory");
         (
@@ -91,7 +92,12 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
     {
         #[cfg(feature = "canbench-rs")]
         let _scope = canbench_rs::bench_scope("post_upgrade::into_state");
-        state::init_state(snapshot.into_state(order_history, fill_store, balances, user_registry));
+        state::init_state(snapshot.into_state(
+            order_history,
+            trade_history,
+            balances,
+            user_registry,
+        ));
     }
 
     match arg {

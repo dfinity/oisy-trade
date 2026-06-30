@@ -112,7 +112,7 @@ impl StateSnapshot {
             // ignored: live in stable memory,
             order_history: _,
             // ignored: lives in stable memory, survives upgrades on its own
-            fill_store: _,
+            trade_history: _,
             // ignored: timers are reset upon upgrades
             active_tasks: _,
             ledger_fee_cache,
@@ -175,7 +175,7 @@ impl StateSnapshot {
     pub fn into_state<MH: Memory, MB: Memory>(
         self,
         order_history: OrderHistory<MH>,
-        fill_store: TradeHistory<MH>,
+        trade_history: TradeHistory<MH>,
         mut balances: TokenBalance<MB>,
         user_registry: UserRegistry<MB>,
     ) -> State<MH, MB> {
@@ -250,7 +250,7 @@ impl StateSnapshot {
             user_registry,
             balances,
             order_history,
-            fill_store,
+            trade_history,
             active_tasks: Default::default(),
             ledger_fee_cache,
             pending_settling_events,
