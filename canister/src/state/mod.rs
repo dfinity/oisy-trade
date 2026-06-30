@@ -21,8 +21,8 @@ use crate::order::{
     CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
-    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, Trade, TradeCursorNotFound,
-    TradeHistory, TradeLeg, TradingPair,
+    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeCursorNotFound,
+    TradeHistory, TradeLeg, TradeRecord, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -581,7 +581,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_id: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, Trade)>, TradeCursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, TradeCursorNotFound> {
         let owns = self
             .order_history
             .get(&order_id)

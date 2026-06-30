@@ -46,7 +46,7 @@ impl TradeByUserKey {
 /// Once the canister is launched its CBOR layout is an upgrade-durable schema;
 /// pre-launch there are no persisted records, so schema changes are acceptable.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct Trade {
+pub struct TradeRecord {
     #[n(0)]
     pub side: Side,
     #[n(1)]
@@ -65,7 +65,7 @@ pub struct Trade {
     pub timestamp: Timestamp,
 }
 
-impl Storable for Trade {
+impl Storable for TradeRecord {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         minicbor::encode(self, &mut buf).expect("trade encoding should always succeed");
@@ -86,19 +86,19 @@ impl Storable for Trade {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-/// Stored value of [`TradeHistory`]'s primary map: a [`Trade`] paired with the
+/// Stored value of [`TradeHistory`]'s primary map: a [`TradeRecord`] paired with the
 /// canister-global insertion sequence assigned when it was inserted. That
 /// sequence keys the per-user index (scanned in reverse for newest-first) and
 /// lets `trades_after` resolve a [`TradeId`] cursor back to its index position
 /// in O(log n). It's an index bookkeeping concern, so it lives in this wrapper
-/// rather than as a field on the domain [`Trade`]. Mirrors
+/// rather than as a field on the domain [`TradeRecord`]. Mirrors
 /// [`crate::order::OrderHistory`]'s `SeqOrderRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 struct SeqTrade {
     #[n(0)]
     global_seq: u64,
     #[n(1)]
-    trade: Trade,
+    trade: TradeRecord,
 }
 
 impl Storable for SeqTrade {
@@ -124,7 +124,7 @@ impl Storable for SeqTrade {
 
 /// One side-projected trade together with its primary key — what settlement
 /// produces and [`TradeHistory::append`] consumes.
-pub type TradeLeg = (TradeId, Trade);
+pub type TradeLeg = (TradeId, TradeRecord);
 
 /// The `after` cursor passed to a reader names a trade that is unknown (no
 /// record with that sequence in the scanned prefix) or not owned by the caller.
@@ -206,7 +206,7 @@ impl<M: Memory> TradeHistory<M> {
         order: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, Trade)>, CursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_for_order");
         use std::ops::Bound;
         let upper = match after {
@@ -243,7 +243,7 @@ impl<M: Memory> TradeHistory<M> {
         user: UserId,
         after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(TradeId, Trade)>, CursorNotFound> {
+    ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_after");
         use std::ops::Bound;
         let upper = match after {

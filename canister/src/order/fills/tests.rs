@@ -1,4 +1,4 @@
-use super::{CursorNotFound, Trade, TradeHistory};
+use super::{CursorNotFound, TradeHistory, TradeRecord};
 use crate::Timestamp;
 use crate::order::{
     FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
@@ -329,8 +329,8 @@ fn trade_id(order_seq: u64, fill_seq: u64) -> TradeId {
     )
 }
 
-fn taker_leg() -> Trade {
-    Trade {
+fn taker_leg() -> TradeRecord {
+    TradeRecord {
         side: Side::Buy,
         price: Price::new(10_000_000),
         quantity: Quantity::from_u128(200_000_000),
@@ -342,8 +342,8 @@ fn taker_leg() -> Trade {
     }
 }
 
-fn maker_leg() -> Trade {
-    Trade {
+fn maker_leg() -> TradeRecord {
+    TradeRecord {
         side: Side::Sell,
         price: Price::new(10_000_000),
         quantity: Quantity::from_u128(200_000_000),

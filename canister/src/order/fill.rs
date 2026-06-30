@@ -1,6 +1,6 @@
 use super::{
     FeeRates, OrderBookId, OrderId, OrderSeq, OrderUpdate, PairToken, Price, Quantity,
-    RemovedOrder, Side, Trade, TradeLeg,
+    RemovedOrder, Side, TradeLeg, TradeRecord,
 };
 use crate::Timestamp;
 use crate::ids::{CompositeId, Seq, SeqMarker};
@@ -202,7 +202,7 @@ impl FillSettlement {
         }
     }
 
-    /// Build the two side-projected [`Trade`]s — the taker leg and the maker
+    /// Build the two side-projected [`TradeRecord`]s — the taker leg and the maker
     /// leg — from this fill's single computed settlement, each keyed by its
     /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the settling event's
     /// `timestamp`. The two legs share the match's `fill_seq`; each record
@@ -216,7 +216,7 @@ impl FillSettlement {
             Side::Sell => Side::Buy,
         };
         let taker_id = TradeId::new(OrderId::new(book_id, fill.taker_order_seq), fill.fill_seq);
-        let taker_leg = Trade {
+        let taker_leg = TradeRecord {
             side: taker_side,
             price: fill.maker_price,
             quantity: fill.quantity,
@@ -227,7 +227,7 @@ impl FillSettlement {
             timestamp,
         };
         let maker_id = TradeId::new(OrderId::new(book_id, fill.maker_order_seq), fill.fill_seq);
-        let maker_leg = Trade {
+        let maker_leg = TradeRecord {
             side: maker_side,
             price: fill.maker_price,
             quantity: fill.quantity,
