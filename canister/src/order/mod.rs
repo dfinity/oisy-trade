@@ -1,8 +1,8 @@
 mod book;
 mod fees;
 mod fill;
-mod fills;
 mod history;
+mod trades;
 mod plan;
 mod queue;
 #[cfg(test)]
@@ -14,8 +14,8 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, TradeId};
-pub use fills::{CursorNotFound as TradeCursorNotFound, TradeHistory, TradeLeg, TradeRecord};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
+pub use trades::{CursorNotFound as TradeCursorNotFound, TradeHistory, TradeLeg, TradeRecord};
 
 use crate::ids::{CompositeId, Seq, SeqMarker};
 use candid::{Nat, Principal};
