@@ -7,7 +7,8 @@ pub use order::{PlaceOrder, order};
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
-    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeHistory,
+    TradingPair,
 };
 use crate::state;
 use crate::state::StableMemoryOptions;
@@ -83,6 +84,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
+        trade_history(),
         user_registry(),
         balances(),
     )
@@ -101,6 +103,10 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
         crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
             crate::storage::user_orders_memory(),
+        ),
+        crate::order::TradeHistory::new(
+            crate::storage::trades_memory(),
+            crate::storage::trades_by_user_memory(),
         ),
         UserRegistry::new(crate::storage::user_registry_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
@@ -286,6 +292,10 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
+    let trade_history = crate::order::TradeHistory::new(
+        crate::storage::trades_memory(),
+        crate::storage::trades_by_user_memory(),
+    );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
@@ -296,6 +306,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
+            trade_history,
             user_registry,
             balances,
         )
@@ -361,6 +372,10 @@ pub fn place_limit_order(
 
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
+}
+
+pub fn trade_history() -> TradeHistory<VectorMemory> {
+    TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
 /// Asserts two [`OrderRecord`]s are equal on every field except the
@@ -444,7 +459,7 @@ pub mod arbitrary {
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
         OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
-        Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+        Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -452,11 +467,13 @@ pub mod arbitrary {
     };
     use crate::user::UserId;
     use candid::Principal;
+    use minicbor::{Decode, Encode};
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::{SizeRange, btree_set, vec};
     use proptest::option;
-    use proptest::prelude::{Just, Strategy, any};
+    use proptest::prelude::{Just, Strategy, TestCaseError, any};
+    use proptest::prop_assert_eq;
     use proptest::prop_oneof;
     use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
@@ -685,6 +702,34 @@ pub mod arbitrary {
                             filled_fee: Quantity::from(u128::from(filled_lots)),
                         }
                     })
+                },
+            )
+    }
+
+    /// Strategy for an arbitrary [`TradeRecord`].
+    pub fn arb_trade_record() -> impl Strategy<Value = TradeRecord> {
+        (
+            arb_side(),
+            arb_price(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_pair_token(),
+            any::<bool>(),
+            arb_timestamp(),
+        )
+            .prop_map(
+                |(side, price, quantity, notional, fee, fee_token, is_maker, timestamp)| {
+                    TradeRecord {
+                        side,
+                        price,
+                        quantity,
+                        notional,
+                        fee,
+                        fee_token,
+                        is_maker,
+                        timestamp,
+                    }
                 },
             )
     }
@@ -1031,6 +1076,17 @@ pub mod arbitrary {
     pub fn arb_event() -> impl Strategy<Value = Event> {
         (arb_timestamp(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
+    }
+
+    pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
+    where
+        for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
+    {
+        let mut buf = vec![];
+        minicbor::encode(v, &mut buf).expect("encoding should succeed");
+        let decoded = minicbor::decode(&buf).expect("decoding should succeed");
+        prop_assert_eq!(v, &decoded);
+        Ok(())
     }
 }
 
