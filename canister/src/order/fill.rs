@@ -5,6 +5,7 @@ use super::{
 use crate::Timestamp;
 use crate::ids::{CompositeId, Seq, SeqMarker};
 use crate::state::event;
+use crate::user::UserId;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
@@ -94,24 +95,56 @@ impl Fill {
 /// once in settlement (the only point where both `fee_rates` and `base_scale`
 /// are in scope) and reused to build both the [`event::BalanceOperation`]s and
 /// the per-order scalar deltas, so the two can never diverge.
+///
+/// Produced during matching (pure heap) and carried in the paired
+/// [`event::SettlingEvent`]; the settling phase is where its two orders'
+/// owners are resolved and stamped via [`Self::resolve_owners`] before the
+/// settlement is handed to [`crate::order::TradeHistory::append`]. It is
+/// therefore CBOR-encoded into the persisted settling event with both owners
+/// unresolved, and re-resolved on replay.
+#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct FillSettlement {
+    #[n(0)]
     fill: Fill,
     /// Quote notional `maker_price × quantity / base_scale` (the executed
     /// price; a buy taker's reservation surplus is excluded).
+    #[n(1)]
     notional: Quantity,
     /// Fee charged to the taker order, in its receive token (base if the taker
     /// bought, quote if it sold).
+    #[n(2)]
     taker_fee: Quantity,
     /// Fee charged to the maker order, in its receive token.
+    #[n(3)]
     maker_fee: Quantity,
     /// Quote surplus released back to a buy taker that crossed below its limit;
     /// Zero for a sell taker or an exact-price fill.
+    #[n(4)]
     surplus: Quantity,
+    /// The book the fill executed in.
+    #[n(5)]
+    book_id: OrderBookId,
+    /// The match timestamp, stamped onto both projected trade records.
+    #[n(6)]
+    timestamp: Timestamp,
+    /// Owner of the taker order, resolved during the settling phase.
+    #[n(7)]
+    taker_user: Option<UserId>,
+    /// Owner of the maker order, resolved during the settling phase.
+    #[n(8)]
+    maker_user: Option<UserId>,
 }
 
 impl FillSettlement {
-    /// Compute the realized values of a single fill once.
-    pub fn new(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> Self {
+    /// Compute the realized values of a single fill once. Owners are left
+    /// unresolved; the settling phase stamps them via [`Self::resolve_owners`].
+    pub fn new(
+        fill: Fill,
+        fee_rates: FeeRates,
+        base_scale: NonZeroU64,
+        book_id: OrderBookId,
+        timestamp: Timestamp,
+    ) -> Self {
         // Receive-side convention: buyer pays fee in base (the asset they
         // receive), seller in quote. Each side's rate is `taker` if they
         // were the taker, else `maker`.
@@ -143,6 +176,10 @@ impl FillSettlement {
             taker_fee,
             maker_fee,
             surplus,
+            book_id,
+            timestamp,
+            taker_user: None,
+            maker_user: None,
         }
     }
 
@@ -202,26 +239,41 @@ impl FillSettlement {
         }
     }
 
-    /// The taker order's per-book sequence, used to resolve its owner before
-    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    /// The taker order's per-book sequence.
     pub fn taker_order_seq(&self) -> OrderSeq {
         self.fill.taker_order_seq
     }
 
-    /// The maker order's per-book sequence, used to resolve its owner before
-    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    /// The maker order's per-book sequence.
     pub fn maker_order_seq(&self) -> OrderSeq {
         self.fill.maker_order_seq
     }
 
+    /// Stamp the resolved owners of the two orders onto the settlement. Called
+    /// in the settling phase after the single `OrderSeq -> UserId` resolution,
+    /// before the settlement is handed to [`crate::order::TradeHistory::append`].
+    pub fn resolve_owners(&mut self, taker_user: UserId, maker_user: UserId) {
+        self.taker_user = Some(taker_user);
+        self.maker_user = Some(maker_user);
+    }
+
     /// Build the two side-projected [`TradeRecord`]s — the taker leg and the maker
     /// leg — from this fill's single computed settlement, each keyed by its
-    /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the settling event's
-    /// `timestamp`. The two legs share the match's `fill_seq`; each record
-    /// self-describes one order's view of the execution and never references the
-    /// counterparty. Consumed by [`crate::order::TradeHistory::append`].
-    pub(crate) fn trade_legs(self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
+    /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the match `timestamp`.
+    /// The two legs share the match's `fill_seq`; each record self-describes one
+    /// order's view of the execution and never references the counterparty.
+    /// Consumed by [`crate::order::TradeHistory::append`], which pairs each leg
+    /// with its owner stamped via [`Self::resolve_owners`].
+    pub(crate) fn trade_legs(self) -> [(TradeLeg, UserId); 2] {
         let fill = &self.fill;
+        let book_id = self.book_id;
+        let timestamp = self.timestamp;
+        let taker_user = self
+            .taker_user
+            .expect("BUG: taker owner not resolved before trade projection");
+        let maker_user = self
+            .maker_user
+            .expect("BUG: maker owner not resolved before trade projection");
         let taker_side = fill.taker_side;
         let maker_side = match taker_side {
             Side::Buy => Side::Sell,
@@ -249,7 +301,10 @@ impl FillSettlement {
             is_maker: true,
             timestamp,
         };
-        [(taker_id, taker_leg), (maker_id, maker_leg)]
+        [
+            ((taker_id, taker_leg), taker_user),
+            ((maker_id, maker_leg), maker_user),
+        ]
     }
 }
 

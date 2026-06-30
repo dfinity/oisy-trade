@@ -459,9 +459,9 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
-        Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        self, BasisPoint, FeeRates, Fill, FillSettlement, LotSize, MatchingOutput, Order,
+        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price,
+        Quantity, RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -1003,13 +1003,29 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
+    pub fn arb_fill_settlement() -> impl Strategy<Value = FillSettlement> {
+        ((0..1_000u64).prop_flat_map(arb_fill), arb_fee_rates()).prop_map(|(fill, fee_rates)| {
+            FillSettlement::new(
+                fill,
+                fee_rates,
+                NonZeroU64::new(100_000_000).unwrap(),
+                OrderBookId::ZERO,
+                Timestamp::EPOCH,
+            )
+        })
+    }
+
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (any::<u64>(), vec(arb_balance_operation(), 0..10)).prop_map(
-            |(book_id, balance_operations)| SettlingEvent {
+        (
+            any::<u64>(),
+            vec(arb_balance_operation(), 0..10),
+            vec(arb_fill_settlement(), 0..10),
+        )
+            .prop_map(|(book_id, balance_operations, fills)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
                 balance_operations,
-            },
-        )
+                fills,
+            })
     }
 
     pub fn arb_permissions() -> impl Strategy<Value = crate::state::permissions::Permissions> {

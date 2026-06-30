@@ -372,6 +372,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 .push_back(event::SettlingEvent {
                     book_id,
                     balance_operations,
+                    fills: Vec::new(),
                 });
         }
     }
@@ -405,27 +406,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates, settlements) =
-                settle(fills, &expired_orders, fee_rates, base_scale);
-            if !settlements.is_empty() {
-                let user_cache = resolve_op_users(
-                    &event.book_id,
-                    &balance_operations,
-                    &self.order_history,
-                    &self.user_registry,
-                );
-                for settlement in settlements {
-                    let taker_user = user_cache[&settlement.taker_order_seq()];
-                    let maker_user = user_cache[&settlement.maker_order_seq()];
-                    self.trade_history.append(
-                        settlement,
-                        event.book_id,
-                        now,
-                        taker_user,
-                        maker_user,
-                    );
-                }
-            }
+            let (balance_operations, mut updates, settlements) = settle(
+                fills,
+                &expired_orders,
+                fee_rates,
+                base_scale,
+                event.book_id,
+                now,
+            );
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
@@ -443,11 +431,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     self.order_history.apply_update(&order_id, update, now);
                 }
             }
-            if !balance_operations.is_empty() {
+            if !balance_operations.is_empty() || !settlements.is_empty() {
                 self.pending_settling_events
                     .push_back(event::SettlingEvent {
                         book_id: event.book_id,
                         balance_operations,
+                        fills: settlements,
                     });
             }
         }
@@ -484,6 +473,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             &self.order_history,
             &self.user_registry,
         );
+        for settlement in &event.fills {
+            let mut settlement = settlement.clone();
+            settlement.resolve_owners(
+                user_cache[&settlement.taker_order_seq()],
+                user_cache[&settlement.maker_order_seq()],
+            );
+            self.trade_history.append(settlement);
+        }
         for op in &event.balance_operations {
             let token = pair.token(match op {
                 event::BalanceOperation::Transfer { token, .. }
@@ -574,7 +571,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// unknown or owned by another principal. An `after` cursor that is not one
     /// of the order's trades yields [`TradeCursorNotFound`]; a valid cursor with
     /// no older trades is `Ok(vec![])`.
-    pub fn get_user_order_fills(
+    pub fn get_user_order_trades(
         &self,
         owner: &Principal,
         order_id: OrderId,
@@ -959,6 +956,8 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
+    book_id: OrderBookId,
+    timestamp: Timestamp,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
@@ -968,7 +967,7 @@ fn settle(
     let mut updates = BTreeMap::new();
     let mut settlements = Vec::with_capacity(fills.len());
     for fill in fills {
-        let settlement = FillSettlement::new(fill, fee_rates, base_scale);
+        let settlement = FillSettlement::new(fill, fee_rates, base_scale, book_id, timestamp);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
         settlements.push(settlement);

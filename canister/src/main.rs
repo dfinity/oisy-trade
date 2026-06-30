@@ -333,6 +333,7 @@ fn get_events(
                 EventType::Settling(oisy_trade_canister::state::event::SettlingEvent {
                     book_id,
                     balance_operations,
+                    fills: _,
                 }) => event::EventType::Settling(event::SettlingEvent {
                     book_id: book_id.get(),
                     balance_operations: balance_operations

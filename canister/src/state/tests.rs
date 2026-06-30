@@ -1843,7 +1843,7 @@ mod settle_fills {
         fn settlement_balance_ops_match_fill_shape(
             output in crate::test_fixtures::arbitrary::arb_matching_output()
         ) {
-            use crate::order::{self, FillSettlement, PairToken, RemovedOrderSettlement};
+            use crate::order::{self, FillSettlement, OrderBookId, PairToken, RemovedOrderSettlement};
             use crate::state::event::BalanceOperation;
 
             let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
@@ -1851,7 +1851,13 @@ mod settle_fills {
             let expired_len = output.expired_orders.len();
             let mut ops = Vec::new();
             for fill in &output.fills {
-                let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
+                let settlement = FillSettlement::new(
+                    fill.clone(),
+                    FeeRates::default(),
+                    base_scale,
+                    OrderBookId::ZERO,
+                    crate::Timestamp::EPOCH,
+                );
                 settlement.push_balance_operations(&mut ops);
             }
             for (seq, killed) in &output.expired_orders {
@@ -2339,7 +2345,7 @@ mod settle_fills {
 
             // Taker's two fills, newest-first: Fill 2 (3 ICP @ 11) then Fill 1
             // (2 ICP @ 10) — each at the maker's price, never the taker's 12.
-            let taker_fills = fills_of(&state, BUYER, taker);
+            let taker_fills = order_trades_of(&state, BUYER, taker);
             assert_eq!(taker_fills.len(), 2);
             let fill2 = &taker_fills[0];
             assert_eq!(fill2.side, Side::Buy);
@@ -2357,7 +2363,7 @@ mod settle_fills {
             assert_eq!(fill1.fee_token, PairToken::Base);
 
             // Maker A's single fill: maker role, quote-denominated 0.01 fee.
-            let a_fills = fills_of(&state, SELLER, maker_a);
+            let a_fills = order_trades_of(&state, SELLER, maker_a);
             assert_eq!(a_fills.len(), 1);
             assert_eq!(a_fills[0].side, Side::Sell);
             assert!(a_fills[0].is_maker);
@@ -2367,7 +2373,7 @@ mod settle_fills {
             assert_eq!(a_fills[0].fee_token, PairToken::Quote);
 
             // Maker B's single fill: quote-denominated 0.0165 fee.
-            let b_fills = fills_of(&state, MAKER_B, maker_b);
+            let b_fills = order_trades_of(&state, MAKER_B, maker_b);
             assert_eq!(b_fills.len(), 1);
             assert!(b_fills[0].is_maker);
             assert_eq!(b_fills[0].notional, Quantity::from(33_000_000u128));
@@ -2389,7 +2395,7 @@ mod settle_fills {
             test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let fills = fills_of(&state, BUYER, pivot);
+            let fills = order_trades_of(&state, BUYER, pivot);
             assert_eq!(fills.len(), 2);
             // Newest-first: the maker leg (rested, then hit) followed by the
             // taker leg (crossed on entry).
@@ -2416,12 +2422,12 @@ mod settle_fills {
 
             assert_eq!(
                 state
-                    .get_user_order_fills(&BUYER, maker_a, None, 10)
+                    .get_user_order_trades(&BUYER, maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
                 "a non-owner sees no fills for the maker's order",
             );
-            assert_eq!(fills_of(&state, SELLER, maker_a).len(), 1);
+            assert_eq!(order_trades_of(&state, SELLER, maker_a).len(), 1);
         }
 
         /// Settlement populates the account-wide `by_user` index: a user's fills
@@ -2474,24 +2480,26 @@ mod settle_fills {
             state.record_matching_event(&event, Timestamp::EPOCH, StableMemoryOptions::Skip);
 
             assert_eq!(
-                state.get_user_order_fills(&BUYER, taker, None, 10).unwrap(),
+                state
+                    .get_user_order_trades(&BUYER, taker, None, 10)
+                    .unwrap(),
                 Vec::new(),
             );
             assert_eq!(
                 state
-                    .get_user_order_fills(&SELLER, maker_a, None, 10)
+                    .get_user_order_trades(&SELLER, maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
             );
         }
 
-        fn fills_of(
+        fn order_trades_of(
             state: &TestState,
             owner: Principal,
             order_id: crate::order::OrderId,
         ) -> Vec<crate::order::TradeRecord> {
             state
-                .get_user_order_fills(&owner, order_id, None, 100)
+                .get_user_order_trades(&owner, order_id, None, 100)
                 .expect("owner-scoped fill read should not error")
                 .into_iter()
                 .map(|(_, record)| record)
