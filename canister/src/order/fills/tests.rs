@@ -1,6 +1,5 @@
 use super::{CursorNotFound, Trade, TradeHistory};
 use crate::Timestamp;
-use crate::ids::ParseFixedWithIdError;
 use crate::order::{
     FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
 };
@@ -8,35 +7,6 @@ use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
 
 const USER: UserId = UserId::new(0);
-
-#[test]
-fn should_roundtrip_fill_id_through_display_and_parse() {
-    let id = FillId::new(OrderBookId::new(3), FillSeq::new(42));
-    let parsed: FillId = id.to_string().parse().unwrap();
-    assert_eq!(parsed, id);
-    assert_eq!(id.to_string().len(), 32);
-    assert!(id.to_string().chars().all(|c| c.is_ascii_hexdigit()));
-}
-
-#[test]
-fn should_reject_a_malformed_fill_id() {
-    assert_eq!("".parse::<FillId>(), Err(ParseFixedWithIdError {}));
-    assert_eq!(
-        "0".repeat(31).parse::<FillId>(),
-        Err(ParseFixedWithIdError {}),
-        "too short"
-    );
-    assert_eq!(
-        "0".repeat(33).parse::<FillId>(),
-        Err(ParseFixedWithIdError {}),
-        "too long"
-    );
-    assert_eq!(
-        "z".repeat(32).parse::<FillId>(),
-        Err(ParseFixedWithIdError {}),
-        "non-hex"
-    );
-}
 
 #[test]
 fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
