@@ -33,31 +33,6 @@ fn test_record() -> OrderRecord {
 }
 
 #[test]
-fn insert_once_and_get() {
-    let mut history = history();
-    let id = order_id(0);
-    let record = test_record();
-    history.insert_once(UserId::new(0), id, record.clone());
-
-    assert_eq!(history.get(&id), Some(record));
-}
-
-#[test]
-#[should_panic(expected = "duplicate history key")]
-fn insert_once_panics_on_duplicate() {
-    let mut history = history();
-    let id = order_id(0);
-    history.insert_once(UserId::new(0), id, test_record());
-    history.insert_once(UserId::new(0), id, test_record());
-}
-
-#[test]
-fn get_returns_none_for_missing() {
-    let history = history();
-    assert_eq!(history.get(&order_id(42)), None);
-}
-
-#[test]
 fn record_roundtrips_fill_or_kill_through_history() {
     let mut history = history();
     let id = order_id(0);

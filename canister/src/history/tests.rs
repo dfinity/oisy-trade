@@ -22,6 +22,30 @@ fn store() -> TestStore {
 const ALICE: UserId = UserId::new(1);
 const BOB: UserId = UserId::new(2);
 
+#[test]
+fn should_insert_and_get() {
+    let mut store = store();
+    store.insert(ALICE, TestKey::new(10), 100);
+    assert_eq!(store.get(&TestKey::new(10)), Some(100));
+    assert_eq!(store.len(), 1);
+    assert!(store.contains_key(&TestKey::new(10)));
+}
+
+#[test]
+fn should_return_none_for_missing_key() {
+    let store = store();
+    assert_eq!(store.get(&TestKey::new(10)), None);
+    assert!(!store.contains_key(&TestKey::new(10)));
+}
+
+#[test]
+#[should_panic(expected = "duplicate history key")]
+fn should_panic_on_duplicate_key() {
+    let mut store = store();
+    store.insert(ALICE, TestKey::new(10), 100);
+    store.insert(BOB, TestKey::new(10), 200);
+}
+
 /// A `page_by_user` scenario: a list of `(user, key)` insertions in order, the
 /// user and cursor to page from, the requested length, and the expected keys
 /// (as raw `u64`s) newest-first — or `None` when [`CursorNotFound`] is expected.
