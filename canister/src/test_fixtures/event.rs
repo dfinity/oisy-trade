@@ -132,14 +132,14 @@ impl WorstCaseEvent {
         match self {
             Self::Init => 343,
             Self::Upgrade => 343,
-            Self::AddTradingPair => 225,
+            Self::AddTradingPair => 224,
             Self::Deposit => 96,
             Self::Withdraw => 105,
-            Self::AddLimitOrder => 110,
-            Self::CancelLimitOrder => 36,
-            Self::Matching => 10_028,
-            Self::Settling => 127_328,
-            Self::SetHalt => 1_018,
+            Self::AddLimitOrder => 108,
+            Self::CancelLimitOrder => 34,
+            Self::Matching => 9_027,
+            Self::Settling => 122_327,
+            Self::SetHalt => 918,
         }
     }
 }

@@ -31,6 +31,7 @@ pub mod cbor;
 pub mod dashboard;
 pub mod execute;
 pub mod guard;
+pub mod ids;
 pub mod lifecycle;
 pub mod metrics;
 pub mod order;
@@ -399,7 +400,7 @@ pub fn get_fee_balances(
 pub enum GetMyOrdersError {
     /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
     /// not a well-formed order id.
-    InvalidOrderId(order::OrderIdParseError),
+    InvalidOrderId(ids::ParseFixedWithIdError),
     /// A well-formed order id (`ById` target or `ByPage.after` cursor) is
     /// unknown or not owned by the caller.
     OrderNotFound,
@@ -433,7 +434,7 @@ pub fn get_my_orders(
     Ok(results
         .into_iter()
         .map(|(id, pair, record)| UserOrder {
-            id: id.into(),
+            id: id.to_string(),
             pair: pair.into(),
             order: record.into(),
         })

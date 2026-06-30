@@ -1,5 +1,6 @@
 mod order_id {
-    use crate::order::{OrderBookId, OrderId, OrderIdParseError, OrderSeq};
+    use crate::ids::ParseFixedWithIdError;
+    use crate::order::{OrderBookId, OrderId, OrderSeq};
     use crate::test_fixtures::arbitrary::arb_order_id;
     use ic_stable_structures::Storable;
     use proptest::prelude::*;
@@ -22,12 +23,12 @@ mod order_id {
 
         #[test]
         fn should_reject_wrong_length(s in ".{0,31}|.{33,64}") {
-            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+            prop_assert_eq!(s.parse::<OrderId>(), Err(ParseFixedWithIdError {}));
         }
 
         #[test]
         fn should_reject_non_hex(s in "[^0-9a-fA-F]") {
-            prop_assert_eq!(s.parse::<OrderId>(), Err(OrderIdParseError));
+            prop_assert_eq!(s.parse::<OrderId>(), Err(ParseFixedWithIdError {}));
         }
 
         #[test]
@@ -619,6 +620,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![fill(
+                            0,
                             &taker,
                             maker_order_seq,
                             100 * PRICE_SCALE,
@@ -657,6 +659,7 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![fill(
+                            0,
                             &taker,
                             maker_order_seq,
                             expected_price,
@@ -681,6 +684,7 @@ mod order_book {
                 result,
                 MatchResult::PartiallyFilled {
                     fills: vec![fill(
+                        0,
                         &taker,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,
@@ -730,8 +734,8 @@ mod order_book {
                     result,
                     MatchResult::Filled {
                         fills: vec![
-                            fill(&taker, maker1_id, price_fill_1, u64::from(LOT_SIZE)),
-                            fill(&taker, maker2_id, price_fill_2, u64::from(LOT_SIZE)),
+                            fill(0, &taker, maker1_id, price_fill_1, u64::from(LOT_SIZE)),
+                            fill(1, &taker, maker2_id, price_fill_2, u64::from(LOT_SIZE)),
                         ],
                     }
                 );
@@ -750,6 +754,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![fill(
+                        0,
                         &taker1,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,
@@ -764,6 +769,7 @@ mod order_book {
                 result,
                 MatchResult::Filled {
                     fills: vec![fill(
+                        1,
                         &taker2,
                         OrderSeq::ONE,
                         100 * PRICE_SCALE,
