@@ -2487,6 +2487,115 @@ mod settle_fills {
             );
         }
 
+        /// The `Skip` gate at the top of `record_settling_event` is the
+        /// load-bearing replay-safety mechanism for R8: a settling event that
+        /// carries real fills and balance operations must write trades and move
+        /// balances under `Write`, yet be a strict no-op under `Skip` so a
+        /// post-upgrade replay does not double-write the durable fills.
+        #[test]
+        fn settling_event_under_skip_writes_no_fills_and_no_balances() {
+            let pair = icp_ckusdt_trading_pair();
+
+            let settling_event = {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                state
+                    .take_next_pending_settling_event()
+                    .expect("matching a full cross must produce a settling event")
+            };
+            assert!(
+                !settling_event.fills.is_empty(),
+                "the settling event must carry fills for the gate to be exercised",
+            );
+            assert!(
+                !settling_event.balance_operations.is_empty(),
+                "the settling event must carry balance operations for the gate to be exercised",
+            );
+
+            let prepare = || {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                let _ = state.take_next_pending_settling_event();
+                (state, maker, taker)
+            };
+
+            let balances_of = |state: &TestState| {
+                [
+                    state.get_balance(&BUYER, &pair.base),
+                    state.get_balance(&BUYER, &pair.quote),
+                    state.get_balance(&SELLER, &pair.base),
+                    state.get_balance(&SELLER, &pair.quote),
+                ]
+            };
+
+            let (mut skip_state, skip_maker, skip_taker) = prepare();
+            let balances_before = balances_of(&skip_state);
+            skip_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Skip,
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, BUYER, skip_taker),
+                Vec::new(),
+                "Skip replay must not write the taker's fill",
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, SELLER, skip_maker),
+                Vec::new(),
+                "Skip replay must not write the maker's fill",
+            );
+            assert_eq!(
+                balances_of(&skip_state),
+                balances_before,
+                "Skip replay must not move any balances",
+            );
+
+            let (mut write_state, write_maker, write_taker) = prepare();
+            write_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+            assert_eq!(
+                order_trades_of(&write_state, BUYER, write_taker).len(),
+                1,
+                "Write must write the taker's fill exactly once",
+            );
+            assert_eq!(
+                order_trades_of(&write_state, SELLER, write_maker).len(),
+                1,
+                "Write must write the maker's fill exactly once",
+            );
+            assert_ne!(
+                balances_of(&write_state),
+                balances_before,
+                "Write must move balances, proving the Skip case is a real no-op",
+            );
+        }
+
         fn order_trades_of(
             state: &TestState,
             owner: Principal,
