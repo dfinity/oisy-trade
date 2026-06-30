@@ -28,16 +28,14 @@ pub type TradeGlobalSeq = Seq<TradeGlobalSeqMarker>;
 /// matches the byte order `StableBTreeMap` relies on.
 type TradeByUserKey = CompositeId<UserId, TradeGlobalSeq>;
 
-fn trade_by_user_key(user: UserId, seq: TradeGlobalSeq) -> TradeByUserKey {
-    TradeByUserKey::new(user, seq)
-}
+impl TradeByUserKey {
+    fn first_of(user: UserId) -> Self {
+        Self::new(user, TradeGlobalSeq::ZERO)
+    }
 
-fn trade_by_user_first(user: UserId) -> TradeByUserKey {
-    TradeByUserKey::new(user, TradeGlobalSeq::ZERO)
-}
-
-fn trade_by_user_last(user: UserId) -> TradeByUserKey {
-    TradeByUserKey::new(user, TradeGlobalSeq::new(u64::MAX))
+    fn last_of(user: UserId) -> Self {
+        Self::new(user, TradeGlobalSeq::new(u64::MAX))
+    }
 }
 
 /// One side-projected trade, holding everything needed to audit one of the two
@@ -188,8 +186,10 @@ impl<M: Memory> TradeHistory<M> {
             "BUG: duplicate trade id {id:?}"
         );
         assert_eq!(
-            self.by_user
-                .insert(trade_by_user_key(user, TradeGlobalSeq::new(global_seq)), id),
+            self.by_user.insert(
+                TradeByUserKey::new(user, TradeGlobalSeq::new(global_seq)),
+                id
+            ),
             None,
             "BUG: duplicate user-trade index entry for {user:?} seq {global_seq}"
         );
@@ -247,10 +247,10 @@ impl<M: Memory> TradeHistory<M> {
         bench_scopes!("fills", "fills::trades_after");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(trade_by_user_last(user)),
+            None => Bound::Included(TradeByUserKey::last_of(user)),
             Some(cursor) => {
                 let entry = self.trades.get(&cursor).ok_or(CursorNotFound)?;
-                let key = trade_by_user_key(user, TradeGlobalSeq::new(entry.global_seq));
+                let key = TradeByUserKey::new(user, TradeGlobalSeq::new(entry.global_seq));
                 if self.by_user.get(&key) != Some(cursor) {
                     return Err(CursorNotFound);
                 }
@@ -259,7 +259,7 @@ impl<M: Memory> TradeHistory<M> {
         };
         Ok(self
             .by_user
-            .range((Bound::Included(trade_by_user_first(user)), upper))
+            .range((Bound::Included(TradeByUserKey::first_of(user)), upper))
             .rev()
             .take(length)
             .map(|entry| {
