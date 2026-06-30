@@ -170,7 +170,11 @@ impl<M> FixedWidthId for Seq<M> {
     }
 
     fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
-        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
+        if s.len() != 2 * Self::WIDTH
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
             return Err(ParseFixedWithIdError {});
         }
         u64::from_str_radix(s, 16)
@@ -227,7 +231,11 @@ impl<A: FixedWidthId, B: FixedWidthId> FixedWidthId for CompositeId<A, B> {
     }
 
     fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
-        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
+        if s.len() != 2 * Self::WIDTH
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
             return Err(ParseFixedWithIdError {});
         }
         let split = A::WIDTH * 2;
