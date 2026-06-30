@@ -13,7 +13,9 @@ pub use book::{
     PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use fill::{Fill, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, TradeId};
+pub use fill::{
+    Fill, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, SettledFill, TradeId,
+};
 pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
 pub use trades::{CursorNotFound as TradeCursorNotFound, TradeHistory, TradeLeg, TradeRecord};
 

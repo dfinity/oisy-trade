@@ -1,6 +1,4 @@
-use super::{
-    FillSeq, FillSettlement, OrderBookId, OrderId, PairToken, Price, Quantity, Side, TradeId,
-};
+use super::{FillSeq, OrderId, PairToken, Price, Quantity, Side, TradeId};
 use crate::Timestamp;
 use crate::ids::{CompositeId, Seq, SeqMarker};
 use crate::user::UserId;
@@ -162,22 +160,20 @@ impl<M: Memory> TradeHistory<M> {
         }
     }
 
-    /// Project `settlement` into its two side-projected records — the taker leg
-    /// owned by `taker_user` and the maker leg owned by `maker_user` — and append
-    /// them. Each leg is keyed by its [`TradeId`] (the match's shared `FillSeq`
-    /// paired with each owning `OrderId`, built from `book_id`) and stamped with
-    /// `timestamp`. Each record is written to the primary map and indexed under
-    /// its owner in `by_user` (2 + 2 inserts per match).
+    /// Append a match's two side-projected records — the taker leg and the maker
+    /// leg, each owned by the order's resolved owner. Each leg is keyed by its
+    /// [`TradeId`] (the match's shared `FillSeq` paired with each owning
+    /// `OrderId`) and stamped with the settle-time. Each record is written to the
+    /// primary map and indexed under its owner in `by_user` (2 + 2 inserts per
+    /// match).
     pub fn append(
         &mut self,
-        settlement: FillSettlement,
-        book_id: OrderBookId,
-        timestamp: Timestamp,
+        taker_leg: TradeLeg,
         taker_user: UserId,
+        maker_leg: TradeLeg,
         maker_user: UserId,
     ) {
         bench_scopes!("fills", "fills::append");
-        let [taker_leg, maker_leg] = settlement.trade_legs(book_id, timestamp);
         self.insert(taker_leg, taker_user);
         self.insert(maker_leg, maker_user);
     }

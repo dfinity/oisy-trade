@@ -91,9 +91,16 @@ impl Fill {
 }
 
 /// A single [`Fill`] together with the realized values derived from it, computed
-/// once in settlement (the only point where both `fee_rates` and `base_scale`
-/// are in scope) and reused to build both the [`event::BalanceOperation`]s and
-/// the per-order scalar deltas, so the two can never diverge.
+/// once in the matching phase (the only point where both `fee_rates` and
+/// `base_scale` are in scope) and used to project both the
+/// [`event::BalanceOperation`]s and the per-order scalar deltas, so the two can
+/// never diverge.
+///
+/// This is a matching-phase, heap-only helper: it is never CBOR-encoded into the
+/// event log. The settling event carries the lean [`SettledFill`] instead, and the
+/// settling phase recovers side/price from the order records and recomputes the
+/// realized values to rebuild the two side-projected [`TradeRecord`]s.
+#[derive(Debug)]
 pub struct FillSettlement {
     fill: Fill,
     /// Quote notional `maker_price × quantity / base_scale` (the executed
@@ -107,27 +114,15 @@ pub struct FillSettlement {
     /// Quote surplus released back to a buy taker that crossed below its limit;
     /// Zero for a sell taker or an exact-price fill.
     surplus: Quantity,
+    /// Snapshot of the book's fee rates at match time, carried onto the lean
+    /// [`SettledFill`] so settling can recompute the fees off the pinned rates.
+    fee_rates: FeeRates,
 }
 
 impl FillSettlement {
     /// Compute the realized values of a single fill once.
     pub fn new(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> Self {
-        // Receive-side convention: buyer pays fee in base (the asset they
-        // receive), seller in quote. Each side's rate is `taker` if they
-        // were the taker, else `maker`.
-        let (buyer_rate, seller_rate) = match fill.taker_side {
-            Side::Buy => (fee_rates.taker, fee_rates.maker),
-            Side::Sell => (fee_rates.maker, fee_rates.taker),
-        };
-        let notional = fill.quote_amount(base_scale);
-        let quote_fee = seller_rate.mul_ceil(notional);
-        let base_fee = buyer_rate.mul_ceil(fill.quantity);
-        // The taker pays on the side it traded: base if it bought, quote if
-        // it sold. The maker pays on the opposite side.
-        let (taker_fee, maker_fee) = match fill.taker_side {
-            Side::Buy => (base_fee, quote_fee),
-            Side::Sell => (quote_fee, base_fee),
-        };
+        let (notional, taker_fee, maker_fee) = fees(&fill, fee_rates, base_scale);
         let surplus = if fill.taker_side == Side::Buy
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !diff.is_zero()
@@ -143,6 +138,7 @@ impl FillSettlement {
             taker_fee,
             maker_fee,
             surplus,
+            fee_rates,
         }
     }
 
@@ -202,55 +198,126 @@ impl FillSettlement {
         }
     }
 
-    /// The taker order's per-book sequence, used to resolve its owner before
-    /// the settlement is handed to [`crate::order::TradeHistory::append`].
-    pub fn taker_order_seq(&self) -> OrderSeq {
-        self.fill.taker_order_seq
+    /// The lean, normalized record persisted on the settling event: the fill's
+    /// identity, quantity, and the fee-rate snapshot — everything else is
+    /// recovered or recomputed in the settling phase.
+    pub fn settled_fill(&self) -> SettledFill {
+        SettledFill {
+            fill_seq: self.fill.fill_seq,
+            taker_order_seq: self.fill.taker_order_seq,
+            maker_order_seq: self.fill.maker_order_seq,
+            quantity: self.fill.quantity,
+            fee_rates: self.fee_rates,
+        }
     }
+}
 
-    /// The maker order's per-book sequence, used to resolve its owner before
-    /// the settlement is handed to [`crate::order::TradeHistory::append`].
-    pub fn maker_order_seq(&self) -> OrderSeq {
-        self.fill.maker_order_seq
-    }
+/// The lean, normalized per-fill record carried on the settling event and the only
+/// fill data persisted in the event log. It stores just what cannot be recovered
+/// otherwise: the fill's identity, the matched `quantity`, and a snapshot of the
+/// book's `fee_rates` at match time.
+///
+/// The fill's execution price (the maker price) and its taker `side` are NOT
+/// stored: they are recovered in the settling phase from the two referenced order
+/// records, which is sound because an order's stored limit price is **immutable**
+/// for the life of its [`OrderSeq`] — a reprice must be modeled as cancel + a new
+/// order (a fresh seq), exactly as Binance, Kraken, and Coinbase treat one (the
+/// reprice loses queue priority, i.e. is a new resting order). `fee_rates` is
+/// snapshotted here rather than recovered because the rate lives on the book and is
+/// mutable — it is the one fee input pinned by neither the fill identity nor the
+/// orders.
+#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode)]
+pub struct SettledFill {
+    #[n(0)]
+    pub fill_seq: FillSeq,
+    #[n(1)]
+    pub taker_order_seq: OrderSeq,
+    #[n(2)]
+    pub maker_order_seq: OrderSeq,
+    #[n(3)]
+    pub quantity: Quantity,
+    #[n(4)]
+    pub fee_rates: FeeRates,
+}
 
-    /// Build the two side-projected [`TradeRecord`]s — the taker leg and the maker
-    /// leg — from this fill's single computed settlement, each keyed by its
-    /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the settling event's
-    /// `timestamp`. The two legs share the match's `fill_seq`; each record
-    /// self-describes one order's view of the execution and never references the
-    /// counterparty. Consumed by [`crate::order::TradeHistory::append`].
-    pub(crate) fn trade_legs(self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
-        let fill = &self.fill;
-        let taker_side = fill.taker_side;
+impl SettledFill {
+    /// Rebuild the two side-projected [`TradeRecord`]s — the taker leg and the
+    /// maker leg — from this lean record, the side/price recovered from the order
+    /// records, and the freshly recomputed `notional` and fees. Each leg is keyed
+    /// by its [`TradeId`] `(OrderId, FillSeq)`, shares the match's `fill_seq`, and
+    /// self-describes one order's view of the execution without ever referencing
+    /// the counterparty. Consumed by [`crate::order::TradeHistory::append`].
+    pub fn trade_legs(
+        &self,
+        book_id: OrderBookId,
+        taker_side: Side,
+        maker_price: Price,
+        base_scale: NonZeroU64,
+        timestamp: Timestamp,
+    ) -> [TradeLeg; 2] {
+        let fill = Fill {
+            fill_seq: self.fill_seq,
+            taker_order_seq: self.taker_order_seq,
+            taker_side,
+            taker_price: maker_price,
+            maker_order_seq: self.maker_order_seq,
+            maker_price,
+            quantity: self.quantity,
+        };
+        let (notional, taker_fee, maker_fee) = fees(&fill, self.fee_rates, base_scale);
         let maker_side = match taker_side {
             Side::Buy => Side::Sell,
             Side::Sell => Side::Buy,
         };
-        let taker_id = TradeId::new(OrderId::new(book_id, fill.taker_order_seq), fill.fill_seq);
+        let taker_id = TradeId::new(OrderId::new(book_id, self.taker_order_seq), self.fill_seq);
         let taker_leg = TradeRecord {
             side: taker_side,
-            price: fill.maker_price,
-            quantity: fill.quantity,
-            notional: self.notional,
-            fee: self.taker_fee,
+            price: maker_price,
+            quantity: self.quantity,
+            notional,
+            fee: taker_fee,
             fee_token: fee_token(taker_side),
             is_maker: false,
             timestamp,
         };
-        let maker_id = TradeId::new(OrderId::new(book_id, fill.maker_order_seq), fill.fill_seq);
+        let maker_id = TradeId::new(OrderId::new(book_id, self.maker_order_seq), self.fill_seq);
         let maker_leg = TradeRecord {
             side: maker_side,
-            price: fill.maker_price,
-            quantity: fill.quantity,
-            notional: self.notional,
-            fee: self.maker_fee,
+            price: maker_price,
+            quantity: self.quantity,
+            notional,
+            fee: maker_fee,
             fee_token: fee_token(maker_side),
             is_maker: true,
             timestamp,
         };
         [(taker_id, taker_leg), (maker_id, maker_leg)]
     }
+}
+
+/// The fill's `(notional, taker_fee, maker_fee)`: the quote notional and the fee
+/// charged to each of the fill's two orders, each in its receive token. Shared by
+/// the matching-phase [`FillSettlement::new`] and the settling-phase
+/// [`SettledFill::trade_legs`] recompute, so the balance ops and the persisted trade
+/// legs can never diverge, and the notional (the costliest arithmetic) is computed
+/// once per fill at each call site.
+fn fees(
+    fill: &Fill,
+    fee_rates: FeeRates,
+    base_scale: NonZeroU64,
+) -> (Quantity, Quantity, Quantity) {
+    let (buyer_rate, seller_rate) = match fill.taker_side {
+        Side::Buy => (fee_rates.taker, fee_rates.maker),
+        Side::Sell => (fee_rates.maker, fee_rates.taker),
+    };
+    let notional = fill.quote_amount(base_scale);
+    let quote_fee = seller_rate.mul_ceil(notional);
+    let base_fee = buyer_rate.mul_ceil(fill.quantity);
+    let (taker_fee, maker_fee) = match fill.taker_side {
+        Side::Buy => (base_fee, quote_fee),
+        Side::Sell => (quote_fee, base_fee),
+    };
+    (notional, taker_fee, maker_fee)
 }
 
 /// The settlement of a removed order (canceled or killed): the placement

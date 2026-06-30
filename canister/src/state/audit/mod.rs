@@ -143,7 +143,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_matching_event(event, timestamp, persistence);
         }
         EventType::Settling(event) => {
-            state.record_settling_event(event, persistence);
+            state.record_settling_event(event, timestamp, persistence);
         }
         EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
             let permissions = state.permissions_mut();
