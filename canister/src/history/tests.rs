@@ -46,6 +46,31 @@ fn should_panic_on_duplicate_key() {
     store.insert(BOB, TestKey::new(10), 200);
 }
 
+#[test]
+fn should_write_back_only_a_changed_record() {
+    let mut store = store();
+    store.insert(ALICE, TestKey::new(10), 100);
+
+    store.modify(&TestKey::new(10), |record| {
+        *record = 999;
+        true
+    });
+    assert_eq!(store.get(&TestKey::new(10)), Some(999));
+
+    store.modify(&TestKey::new(10), |record| {
+        *record = 0; // mutated but reported unchanged: must not persist.
+        false
+    });
+    assert_eq!(store.get(&TestKey::new(10)), Some(999));
+}
+
+#[test]
+#[should_panic(expected = "missing")]
+fn should_panic_when_modifying_a_missing_key() {
+    let mut store = store();
+    store.modify(&TestKey::new(10), |_| true);
+}
+
 /// A `page_by_user` scenario: a list of `(user, key)` insertions in order, the
 /// user and cursor to page from, the requested length, and the expected keys
 /// (as raw `u64`s) newest-first — or `None` when [`CursorNotFound`] is expected.

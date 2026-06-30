@@ -194,25 +194,6 @@ fn apply_update_traps_on_filled_fee_overflow() {
 }
 
 #[test]
-fn apply_update_is_a_noop_when_update_is_a_noop() {
-    let mut history = history();
-    let id = order_id(0);
-    history.insert_once(UserId::new(0), id, test_record());
-
-    // An empty update is a no-op: nothing written, `last_updated_at` stays None.
-    history.apply_update(&id, OrderUpdate::default(), Timestamp::new(99));
-    assert_eq!(history.get(&id), Some(test_record()));
-
-    // A status equal to the current one with a zero delta is also a no-op.
-    history.apply_update(
-        &id,
-        OrderUpdate::status(OrderStatus::Pending),
-        Timestamp::new(99),
-    );
-    assert_eq!(history.get(&id), Some(test_record()));
-}
-
-#[test]
 fn apply_update_does_not_change_last_updated_at_on_noop() {
     let mut history = history();
     let id = order_id(0);
