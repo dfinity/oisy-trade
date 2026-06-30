@@ -100,7 +100,7 @@ impl Fill {
 /// event log. The settling event carries the lean [`SettledFill`] instead, and the
 /// settling phase recovers side/price from the order records and recomputes the
 /// realized values to rebuild the two side-projected [`TradeRecord`]s.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Debug)]
 pub struct FillSettlement {
     fill: Fill,
     /// Quote notional `maker_price × quantity / base_scale` (the executed
