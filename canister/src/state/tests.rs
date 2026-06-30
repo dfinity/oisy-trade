@@ -677,6 +677,128 @@ mod get_user_orders {
     }
 }
 
+mod get_user_order_trades {
+    use crate::Timestamp;
+    use crate::order::{
+        FeeRates, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
+        TradeId, TradeLeg, TradeRecord,
+    };
+    use crate::state::State;
+    use crate::test_fixtures::{
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, order,
+    };
+    use crate::user::UserId;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+
+    #[test]
+    fn owner_sees_their_trades_newest_first_and_a_non_owner_sees_an_empty_page() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let owner_order = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
+        let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
+
+        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
+        seed_trade(&mut state, (stranger_order, stranger_id), FillSeq::new(2));
+
+        assert!(
+            state
+                .get_user_order_trades(&STRANGER, owner_order, None, 10)
+                .unwrap()
+                .is_empty(),
+            "a non-owner must not see another principal's trades"
+        );
+        assert!(
+            state
+                .get_user_order_trades(&OWNER, stranger_order, None, 10)
+                .unwrap()
+                .is_empty(),
+            "the owner of one order must not see another principal's order's trades"
+        );
+
+        let seqs: Vec<_> = state
+            .get_user_order_trades(&OWNER, owner_order, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|(seq, _)| seq)
+            .collect();
+        assert_eq!(
+            seqs,
+            vec![FillSeq::new(1), FillSeq::new(0)],
+            "the owner sees their order's trades newest first"
+        );
+    }
+
+    #[test]
+    fn an_unknown_order_yields_an_empty_page() {
+        let state = setup();
+        let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
+        assert!(
+            state
+                .get_user_order_trades(&OWNER, unknown, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn seed_trade(
+        state: &mut State<VectorMemory, VectorMemory>,
+        (order, user): (OrderId, UserId),
+        seq: FillSeq,
+    ) {
+        let counterparty_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1_000 + seq.get()));
+        let counterparty = UserId::new(u64::MAX);
+        state.trade_history.append(
+            leg(TradeId::new(order, seq), false),
+            user,
+            leg(TradeId::new(counterparty_order, seq), true),
+            counterparty,
+        );
+    }
+
+    fn leg(id: TradeId, is_maker: bool) -> TradeLeg {
+        (
+            id,
+            TradeRecord {
+                side: Side::Buy,
+                price: Price::new(10_000_000),
+                quantity: Quantity::from_u128(200_000_000),
+                notional: Quantity::from_u128(20_000_000),
+                fee: Quantity::from_u128(1),
+                fee_token: PairToken::Base,
+                is_maker,
+                timestamp: Timestamp::new(42),
+            },
+        )
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, TimeInForce};
     use crate::state::AddLimitOrderError;
