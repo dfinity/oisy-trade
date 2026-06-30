@@ -6,6 +6,7 @@ use proptest::strategy::Strategy;
 
 mod seq {
     use crate::ids::tests::{SeqTest, arb_seq_test, check_fixed_size, check_hex_roundtrip};
+    use crate::ids::{FixedWidthId, ParseFixedWithIdError};
     use crate::test_fixtures::arbitrary::check_minicbor_roundtrip;
     use proptest::proptest;
 
@@ -14,6 +15,47 @@ mod seq {
         let seq = SeqTest::new(42);
         let dbg = format!("{seq:?}");
         assert_eq!(dbg, "SeqTest(42)");
+    }
+
+    #[test]
+    fn should_reject_a_malformed_hex_id() {
+        let valid = format!("{:016x}", 42_u64);
+        assert_eq!(SeqTest::from_hex(&valid), Ok(SeqTest::new(42)));
+
+        let too_short = "000000000000000";
+        let too_long = "00000000000000000";
+        let non_hex = "z000000000000000";
+        let uppercase = "000000000000000A";
+        let leading_plus = "+000000000000000";
+        let non_ascii = "\u{00e9}".repeat(8);
+        assert_eq!(non_ascii.len(), 16);
+
+        for malformed in [
+            too_short,
+            too_long,
+            non_hex,
+            uppercase,
+            leading_plus,
+            non_ascii.as_str(),
+        ] {
+            assert_eq!(
+                SeqTest::from_hex(malformed),
+                Err(ParseFixedWithIdError {}),
+                "expected {malformed:?} to be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_be_bytes_of_the_wrong_length() {
+        assert_eq!(
+            SeqTest::from_be_bytes(&[0u8; 7]),
+            Err(ParseFixedWithIdError {})
+        );
+        assert_eq!(
+            SeqTest::from_be_bytes(&[0u8; 9]),
+            Err(ParseFixedWithIdError {})
+        );
     }
 
     proptest! {
@@ -35,32 +77,12 @@ mod seq {
 }
 
 mod composite {
-    use crate::ids::ParseFixedWithIdError;
     use crate::ids::tests::{
-        CompositeTest, arb_composite_test, check_fixed_size, check_hex_roundtrip,
+        CompositeTest, SeqTest, TestId, arb_composite_test, check_fixed_size, check_hex_roundtrip,
     };
+    use crate::ids::{FixedWidthId, ParseFixedWithIdError};
     use crate::test_fixtures::arbitrary::check_minicbor_roundtrip;
     use proptest::proptest;
-
-    #[test]
-    fn should_reject_a_malformed_hex_id() {
-        assert_eq!("".parse::<CompositeTest>(), Err(ParseFixedWithIdError {}));
-        assert_eq!(
-            "0".repeat(31).parse::<CompositeTest>(),
-            Err(ParseFixedWithIdError {}),
-            "too short"
-        );
-        assert_eq!(
-            "0".repeat(33).parse::<CompositeTest>(),
-            Err(ParseFixedWithIdError {}),
-            "too long"
-        );
-        assert_eq!(
-            "z".repeat(32).parse::<CompositeTest>(),
-            Err(ParseFixedWithIdError {}),
-            "non-hex"
-        );
-    }
 
     proptest! {
         #[test]
@@ -77,6 +99,50 @@ mod composite {
         fn should_roundtrip_hex(composite in arb_composite_test()) {
             check_hex_roundtrip::<_,32>(composite)?;
         }
+    }
+
+    #[test]
+    fn should_reject_a_malformed_hex_id() {
+        let valid = format!("{:016x}{:016x}", 7_u64, 42_u64);
+        assert_eq!(
+            CompositeTest::from_hex(&valid),
+            Ok(CompositeTest::new(TestId::new(7), SeqTest::new(42)))
+        );
+
+        let too_short = &valid[..31];
+        let too_long = format!("{valid}0");
+        let non_hex = format!("z{}", &valid[1..]);
+        let uppercase = format!("{}A", &valid[..31]);
+        let leading_plus = format!("+{}", &valid[1..]);
+        let non_ascii = "\u{00e9}".repeat(16);
+        assert_eq!(non_ascii.len(), 32);
+
+        for malformed in [
+            too_short,
+            too_long.as_str(),
+            non_hex.as_str(),
+            uppercase.as_str(),
+            leading_plus.as_str(),
+            non_ascii.as_str(),
+        ] {
+            assert_eq!(
+                CompositeTest::from_hex(malformed),
+                Err(ParseFixedWithIdError {}),
+                "expected {malformed:?} to be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_be_bytes_of_the_wrong_length() {
+        assert_eq!(
+            CompositeTest::from_be_bytes(&[0u8; 15]),
+            Err(ParseFixedWithIdError {})
+        );
+        assert_eq!(
+            CompositeTest::from_be_bytes(&[0u8; 17]),
+            Err(ParseFixedWithIdError {})
+        );
     }
 }
 
