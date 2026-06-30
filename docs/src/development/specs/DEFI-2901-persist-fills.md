@@ -389,9 +389,9 @@ A new module, `canister/src/order/trades`, mirroring `OrderHistory`. The model i
   `{ side, price, quantity, notional, fee, fee_token, is_maker, timestamp }`. The counterparty is
   never stored.
 - `TradeHistory<M>` (renamed from the store, aligned with `OrderHistory`) holds
-  `trades: StableBTreeMap<TradeId, SeqTrade>` and a `by_user: StableBTreeMap<(UserId, global_seq),
+  `trades: StableBTreeMap<TradeId, SeqTradeRecord>` and a `by_user: StableBTreeMap<(UserId, global_seq),
   TradeId>` in **two distinct memory regions** (`MemoryId`s 7 and 8). The stored value
-  `SeqTrade { global_seq, trade }` carries the record's global insertion seq alongside the `TradeRecord`
+  `SeqTradeRecord { global_seq, trade }` carries the record's global insertion seq alongside the `TradeRecord`
   (like `OrderHistory`'s `SeqOrderRecord`), so the account-feed cursor resolves to its index
   position via an O(log n) point lookup rather than a prefix scan. Because `trades` is keyed by
   an `OrderId`-prefixed `TradeId`, **`ByOrder` is a prefix range scan with no separate by-order
