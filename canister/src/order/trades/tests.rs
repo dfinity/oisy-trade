@@ -65,7 +65,10 @@ fn should_page_one_orders_trades_via_after_cursor() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..3 {
-        store.insert((TradeId::new(order_a, FillSeq::new(seq)), taker_leg()), USER);
+        store.insert(
+            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
+            USER,
+        );
         store.insert((trade_id(1, seq), maker_leg()), USER);
     }
     let first = store.trades_for_order(order_a, None, 2).unwrap();
@@ -124,7 +127,10 @@ fn should_clamp_one_orders_page_to_requested_length() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..5 {
-        store.insert((TradeId::new(order_a, FillSeq::new(seq)), taker_leg()), USER);
+        store.insert(
+            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
+            USER,
+        );
         store.insert((trade_id(1, seq), maker_leg()), USER);
     }
     assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);

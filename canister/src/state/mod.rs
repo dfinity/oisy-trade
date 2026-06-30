@@ -417,8 +417,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 for settlement in settlements {
                     let taker_user = user_cache[&settlement.taker_order_seq()];
                     let maker_user = user_cache[&settlement.maker_order_seq()];
-                    self.trade_history
-                        .append(settlement, event.book_id, now, taker_user, maker_user);
+                    self.trade_history.append(
+                        settlement,
+                        event.book_id,
+                        now,
+                        taker_user,
+                        maker_user,
+                    );
                 }
             }
             {

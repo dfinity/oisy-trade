@@ -2,11 +2,11 @@ mod book;
 mod fees;
 mod fill;
 mod history;
-mod trades;
 mod plan;
 mod queue;
 #[cfg(test)]
 mod tests;
+mod trades;
 
 pub use book::{
     MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,

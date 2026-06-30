@@ -185,8 +185,14 @@ pub fn replay_events<MH: Memory, MB: Memory, T: IntoIterator<Item = Event>>(
         Event {
             payload: EventType::Init(init_arg),
             ..
-        } => State::new(init_arg, order_history, trade_history, user_registry, balances)
-            .expect("BUG: state initialization should succeed"),
+        } => State::new(
+            init_arg,
+            order_history,
+            trade_history,
+            user_registry,
+            balances,
+        )
+        .expect("BUG: state initialization should succeed"),
         other => panic!("ERROR: the first event must be an Init event, got: {other:?}"),
     };
     for event in events_iter {
