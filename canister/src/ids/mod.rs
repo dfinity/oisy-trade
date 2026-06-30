@@ -85,6 +85,12 @@ impl<M> PartialEq for Seq<M> {
 
 impl<M> Eq for Seq<M> {}
 
+impl<M> std::hash::Hash for Seq<M> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
 impl<M> PartialOrd for Seq<M> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -108,6 +114,27 @@ impl<'b, C, M> minicbor::Decode<'b, C> for Seq<M> {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.u64().map(Self::new)
     }
+}
+
+impl<M> Storable for Seq<M> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Owned(self.0.to_be_bytes().to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.0.to_be_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Self::new(u64::from_be_bytes(
+            bytes.as_ref().try_into().expect("Seq decodes from 8 bytes"),
+        ))
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 8,
+        is_fixed_size: true,
+    };
 }
 
 /// An identifier represented by a fixed number of bytes.
