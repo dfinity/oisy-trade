@@ -27,7 +27,7 @@ fn should_project_and_append_both_legs_of_a_settlement() {
     let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
     let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
 
-    append_buy_taker(&mut store, 0, 1, 0, taker_user(), maker_user());
+    append(&mut store, Side::Buy, 0, 1, 0, taker_user(), maker_user());
 
     assert_eq!(store.len(), 2);
 
@@ -76,7 +76,7 @@ fn should_index_each_leg_under_its_own_owner() {
     let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
     let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
 
-    append_buy_taker(&mut store, 0, 1, 0, alice, bob);
+    append(&mut store, Side::Buy, 0, 1, 0, alice, bob);
 
     let alice_trades = store.trades_after(alice, None, 10).unwrap();
     assert_eq!(
@@ -101,7 +101,7 @@ fn should_swap_sides_for_a_sell_taker() {
     let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
     let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
 
-    append_sell_taker(&mut store, 0, 1, 0, taker_user(), maker_user());
+    append(&mut store, Side::Sell, 0, 1, 0, taker_user(), maker_user());
 
     let taker_page = store.trades_for_order(taker_order, None, 10).unwrap();
     let taker = &taker_page[0].1;
@@ -120,8 +120,8 @@ fn should_swap_sides_for_a_sell_taker() {
 fn should_return_one_orders_trades_newest_first_excluding_other_orders() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
-    append_buy_taker(&mut store, 0, 1, 0, USER, USER);
-    append_buy_taker(&mut store, 0, 2, 1, USER, USER);
+    append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
+    append(&mut store, Side::Buy, 0, 2, 1, USER, USER);
 
     let seqs: Vec<u64> = store
         .trades_for_order(order_a, None, 10)
@@ -137,7 +137,7 @@ fn should_page_one_orders_trades_via_after_cursor() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
     for seq in 0..3 {
-        append_buy_taker(&mut store, 0, 1, seq, USER, USER);
+        append(&mut store, Side::Buy, 0, 1, seq, USER, USER);
     }
     let first = store.trades_for_order(order_a, None, 2).unwrap();
     assert_eq!(
@@ -155,7 +155,7 @@ fn should_page_one_orders_trades_via_after_cursor() {
 #[test]
 fn should_return_empty_page_for_unknown_order() {
     let mut store = store();
-    append_buy_taker(&mut store, 0, 1, 0, USER, USER);
+    append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
     let unknown = OrderId::new(BOOK, OrderSeq::new(7));
     assert!(
         store
@@ -169,7 +169,7 @@ fn should_return_empty_page_for_unknown_order() {
 fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
-    append_buy_taker(&mut store, 0, 1, 0, USER, USER);
+    append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
     assert_eq!(
         store.trades_for_order(order_a, Some(FillSeq::new(99)), 10),
         Err(CursorNotFound)
@@ -180,7 +180,7 @@ fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
 fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
-    append_buy_taker(&mut store, 0, 1, 0, USER, USER);
+    append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
     let trades = store
         .trades_for_order(order_a, Some(FillSeq::ZERO), 10)
         .unwrap();
@@ -192,7 +192,7 @@ fn should_clamp_one_orders_page_to_requested_length() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
     for seq in 0..5 {
-        append_buy_taker(&mut store, 0, 1, seq, USER, USER);
+        append(&mut store, Side::Buy, 0, 1, seq, USER, USER);
     }
     assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);
 }
@@ -206,8 +206,8 @@ fn should_return_a_users_trades_across_orders_newest_first_scoped_to_owner() {
     let alice_b = OrderId::new(BOOK, OrderSeq::new(1));
     let bob_order = OrderId::new(BOOK, OrderSeq::new(2));
 
-    append_buy_taker(&mut store, 0, 2, 0, alice, bob);
-    append_buy_taker(&mut store, 1, 2, 1, alice, bob);
+    append(&mut store, Side::Buy, 0, 2, 0, alice, bob);
+    append(&mut store, Side::Buy, 1, 2, 1, alice, bob);
 
     let alice_orders: Vec<OrderId> = store
         .trades_after(alice, None, 10)
@@ -240,7 +240,7 @@ fn should_page_a_users_trades_via_after_cursor() {
     let alice = UserId::new(1);
     let other = UserId::new(2);
     for seq in 0..3 {
-        append_buy_taker(&mut store, 0, 1, seq, alice, other);
+        append(&mut store, Side::Buy, 0, 1, seq, alice, other);
     }
     let first = store.trades_after(alice, None, 2).unwrap();
     assert_eq!(
@@ -272,7 +272,15 @@ fn should_page_a_users_trades_via_after_cursor() {
 #[test]
 fn should_return_an_empty_account_page_for_an_unknown_user() {
     let mut store = store();
-    append_buy_taker(&mut store, 0, 1, 0, UserId::new(1), UserId::new(2));
+    append(
+        &mut store,
+        Side::Buy,
+        0,
+        1,
+        0,
+        UserId::new(1),
+        UserId::new(2),
+    );
     assert!(
         store
             .trades_after(UserId::new(7), None, 10)
@@ -286,7 +294,7 @@ fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
     let mut store = store();
     let alice = UserId::new(1);
     let bob = UserId::new(2);
-    append_buy_taker(&mut store, 0, 1, 0, alice, bob);
+    append(&mut store, Side::Buy, 0, 1, 0, alice, bob);
     let bob_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(1)), FillSeq::ZERO);
     assert_eq!(
         store.trades_after(alice, Some(bob_id), 10),
@@ -303,7 +311,7 @@ fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
 fn should_return_an_empty_account_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
     let alice = UserId::new(1);
-    append_buy_taker(&mut store, 0, 1, 0, alice, UserId::new(2));
+    append(&mut store, Side::Buy, 0, 1, 0, alice, UserId::new(2));
     let alice_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(0)), FillSeq::ZERO);
     assert!(
         store
@@ -318,7 +326,7 @@ fn should_clamp_an_account_page_to_requested_length() {
     let mut store = store();
     let alice = UserId::new(1);
     for seq in 0..5 {
-        append_buy_taker(&mut store, 0, 1, seq, alice, UserId::new(2));
+        append(&mut store, Side::Buy, 0, 1, seq, alice, UserId::new(2));
     }
     assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
 }
@@ -332,44 +340,6 @@ proptest! {
 
 fn store() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
-}
-
-fn append_buy_taker(
-    store: &mut TradeHistory<VectorMemory>,
-    taker_seq: u64,
-    maker_seq: u64,
-    fill_seq: u64,
-    taker_user: UserId,
-    maker_user: UserId,
-) {
-    append(
-        store,
-        Side::Buy,
-        taker_seq,
-        maker_seq,
-        fill_seq,
-        taker_user,
-        maker_user,
-    );
-}
-
-fn append_sell_taker(
-    store: &mut TradeHistory<VectorMemory>,
-    taker_seq: u64,
-    maker_seq: u64,
-    fill_seq: u64,
-    taker_user: UserId,
-    maker_user: UserId,
-) {
-    append(
-        store,
-        Side::Sell,
-        taker_seq,
-        maker_seq,
-        fill_seq,
-        taker_user,
-        maker_user,
-    );
 }
 
 fn append(
