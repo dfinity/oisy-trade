@@ -1,13 +1,15 @@
 use crate::ids::{CompositeId, FixedWidthId, Seq, SeqMarker};
+use minicbor::{Decode, Encode};
 use proptest::arbitrary::any;
 use proptest::prelude::TestCaseError;
 use proptest::prop_assert_eq;
 use proptest::strategy::Strategy;
 
 mod seq {
-    use crate::ids::tests::{SeqTest, arb_seq_test, check_fixed_size, check_hex_roundtrip};
+    use crate::ids::tests::{
+        SeqTest, arb_seq_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+    };
     use crate::ids::{FixedWidthId, ParseFixedWithIdError};
-    use crate::test_fixtures::arbitrary::check_minicbor_roundtrip;
     use proptest::proptest;
 
     #[test]
@@ -79,9 +81,9 @@ mod seq {
 mod composite {
     use crate::ids::tests::{
         CompositeTest, SeqTest, TestId, arb_composite_test, check_fixed_size, check_hex_roundtrip,
+        check_minicbor_roundtrip,
     };
     use crate::ids::{FixedWidthId, ParseFixedWithIdError};
-    use crate::test_fixtures::arbitrary::check_minicbor_roundtrip;
     use proptest::proptest;
 
     proptest! {
@@ -147,8 +149,9 @@ mod composite {
 }
 
 mod nested {
-    use crate::ids::tests::{arb_nested_test, check_fixed_size, check_hex_roundtrip};
-    use crate::test_fixtures::arbitrary::check_minicbor_roundtrip;
+    use crate::ids::tests::{
+        arb_nested_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+    };
     use proptest::proptest;
 
     proptest! {
@@ -167,6 +170,17 @@ mod nested {
             check_hex_roundtrip::<_,48>(nested)?;
         }
     }
+}
+
+pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
+where
+    for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
+{
+    let mut buf = vec![];
+    minicbor::encode(v, &mut buf).expect("encoding should succeed");
+    let decoded = minicbor::decode(&buf).expect("decoding should succeed");
+    prop_assert_eq!(v, &decoded);
+    Ok(())
 }
 
 pub fn check_fixed_size<T: FixedWidthId + PartialEq + std::fmt::Debug, const N: usize>(
