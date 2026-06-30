@@ -359,7 +359,7 @@ instantiation of the DEFI-2801 generic error envelope. `MAX_FILLS_PER_RESPONSE` 
 
 ### Internal trade store
 
-A new module, `canister/src/order/fills`, mirroring `OrderHistory`. The model is
+A new module, `canister/src/order/trades`, mirroring `OrderHistory`. The model is
 **denormalized** (option D): two identities, both mirroring `OrderId = (OrderBookId, OrderSeq)`.
 
 - **`Fill` = the match** between two orders, identified by **`FillId = (OrderBookId, FillSeq)`**
@@ -367,26 +367,26 @@ A new module, `canister/src/order/fills`, mirroring `OrderHistory`. The model is
   book's new `next_fill` counter, assigned EXACTLY the way the book mints `OrderSeq` for `OrderId`
   (same snapshot persistence, same replay handling). `Fill` is the matcher's struct, carrying its
   `fill_seq`; it is NOT stored as its own record.
-- **`Trade` = the per-side (maker/taker) projection** of a fill, identified by
+- **`TradeRecord` = the per-side (maker/taker) projection** of a fill, identified by
   **`TradeId = (OrderId, FillSeq)`** (24 bytes: 16 `OrderId` + 8 seq) — the primary store key,
   modelled on `OrderId` (opaque `text` on Candid, fixed-width big-endian `Storable`, bounded). The
   two trades of one match share `FillSeq` and differ by `OrderId` (→ side). `FillId` is derivable
   from any `TradeId` by dropping the `OrderSeq`.
-- `Trade` — the side-projected record, minicbor-encoded, `Bound::Unbounded`. Its `order_id` and
+- `TradeRecord` — the side-projected record, minicbor-encoded, `Bound::Unbounded`. Its `order_id` and
   the match's `fill_seq` live in the `TradeId` **key**, never in the value; the value is
   `{ side, price, quantity, notional, fee, fee_token, is_maker, timestamp }`. The counterparty is
   never stored.
 - `TradeHistory<M>` (renamed from the store, aligned with `OrderHistory`) holds
   `trades: StableBTreeMap<TradeId, SeqTrade>` and a `by_user: StableBTreeMap<(UserId, global_seq),
   TradeId>` in **two distinct memory regions** (`MemoryId`s 7 and 8). The stored value
-  `SeqTrade { global_seq, trade }` carries the record's global insertion seq alongside the `Trade`
+  `SeqTrade { global_seq, trade }` carries the record's global insertion seq alongside the `TradeRecord`
   (like `OrderHistory`'s `SeqOrderRecord`), so the account-feed cursor resolves to its index
   position via an O(log n) point lookup rather than a prefix scan. Because `trades` is keyed by
   an `OrderId`-prefixed `TradeId`, **`ByOrder` is a prefix range scan with no separate by-order
   index**. `global_seq` is a separate canister-global monotonic sequence **derived from
   `by_user.len()`** exactly like `OrderHistory::insert_once` — there is no `StableCell` counter
   (the former fill-seq cell and its memory region are dropped; `FillSeq` now comes from the book).
-- `append(taker_leg, maker_leg)` — each leg is a `(TradeId, Trade)` pair — writes both
+- `append(taker_leg, maker_leg)` — each leg is a `(TradeId, TradeRecord)` pair — writes both
   side-projected records and both `by_user` entries (denormalized; 2 + 2 inserts per match,
   i.e. 2 trade records: `(taker_order_id, fill_seq)` [side=taker] and `(maker_order_id, fill_seq)`
   [side=maker]). `trades_for_order(order, after, length)` is a reverse prefix range scan over
@@ -415,7 +415,7 @@ for each `fill`:
   `fee_delta += <maker-side fee>`. (`filled_delta` is already accumulated per DEFI-2852.) Both
   legs share the same `notional`; the `fee_delta` differs by side (R1, R2, R6).
 - Take the match's `fill_seq` (minted by the book on the `Fill`), build the two side-projected
-  `Trade`s keyed by their `TradeId` (taker leg, maker leg) — each with its own `side`, `fee`,
+  `TradeRecord`s keyed by their `TradeId` (taker leg, maker leg) — each with its own `side`, `fee`,
   `fee_token`, `is_maker` — resolve each leg's owning `UserId`, and call `TradeHistory::append`,
   stamped with the matching `Event`'s timestamp (R3, R6, R11).
 
@@ -448,7 +448,7 @@ Unit (`*/tests.rs`, helpers/fixtures per repo convention):
 - `order/history/tests.rs`: `OrderUpdate::apply` adds `quote_delta` / `fee_delta` in the same
   single write as `filled_delta` and `status` (R7); the monotonic invariant traps on overflow in
   **release config** (always-on, not a compiled-out `debug_assert!`) (R9).
-- `order/fills/tests.rs`: `append` writes two side-projected `Trade`s keyed by their `TradeId` +
+- `order/trades/tests.rs`: `append` writes two side-projected `TradeRecord`s keyed by their `TradeId` +
   two `by_user` entries per match, the two legs sharing the match's `FillSeq` (R3, R8);
   `FillId` is derivable from any `TradeId` (drops the `OrderSeq`); `trades_for_order` prefix range
   scan returns one order's trades newest-first and excludes another order's (R4 `ByOrder`);
@@ -500,12 +500,12 @@ Four stacked PRs, each independently mergeable / compilable / testable.
    the per-fill realized values once and feed the extended `OrderUpdate`. Ships order-level VWAP &
    fees through the existing `get_my_orders` immediately. **Acceptance: R1, R2, R6 (order-level),
    R7, R9, R11.**
-2. **Trade store (full engine, denormalized).** New `canister/src/order/fills` module
+2. **Trade store (full engine, denormalized).** New `canister/src/order/trades` module
    (`TradeHistory`) with the two identities — `Fill`/`FillId = (OrderBookId, FillSeq)` (the match,
-   book-minted) and `Trade`/`TradeId = (OrderId, FillSeq)` (the per-side projection, primary key);
+   book-minted) and `TradeRecord`/`TradeId = (OrderId, FillSeq)` (the per-side projection, primary key);
    the order book's `next_fill` counter on `Fill.fill_seq`; both `TRADES_MEMORY_ID` and
    `TRADES_BY_USER_MEMORY_ID` regions (`by_user` keyed by a `len()`-derived global seq, no counter
-   cell); settlement resolves each leg's owning `UserId` and writes the two side-projected `Trade`s
+   cell); settlement resolves each leg's owning `UserId` and writes the two side-projected `TradeRecord`s
    plus their two `by_user` index entries (Write-gated), durable across upgrade / snapshot /
    event-log replay; the `trades_for_order` and `trades_after` read primitives; and the canbench
    measurement of the +4-inserts/match cost. No public retrieval endpoint yet.
