@@ -1,14 +1,18 @@
 use super::{CursorNotFound, TradeHistory, TradeRecord};
 use crate::Timestamp;
 use crate::order::{
-    FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
+    BasisPoint, FeeRates, Fill, FillId, FillSeq, FillSettlement, OrderBookId, OrderId, OrderSeq,
+    PairToken, Price, Quantity, Side, TradeId,
 };
 use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
 use proptest::proptest;
+use std::num::NonZeroU64;
 
 const USER: UserId = UserId::new(0);
+const BOOK: OrderBookId = OrderBookId::ZERO;
+const TIMESTAMP: Timestamp = Timestamp::new(42);
 
 #[test]
 fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
@@ -20,36 +24,118 @@ fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
 }
 
 #[test]
-fn should_append_two_side_projected_records_keyed_by_trade_id() {
+fn should_project_and_append_both_legs_of_a_settlement() {
     let mut store = store();
-    let taker = trade_id(0, 0);
-    let maker = trade_id(1, 0);
+    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
+    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
 
-    store.insert((taker, taker_leg()), USER);
-    store.insert((maker, maker_leg()), USER);
+    store.append(
+        buy_taker_settlement(0, 1, 0),
+        BOOK,
+        TIMESTAMP,
+        taker_user(),
+        maker_user(),
+    );
 
     assert_eq!(store.len(), 2);
 
-    let taker_trades = store.trades_for_order(taker.order_id(), None, 10).unwrap();
+    let taker_trades = store.trades_for_order(taker_order, None, 10).unwrap();
     assert_eq!(taker_trades.len(), 1);
     assert_eq!(taker_trades[0].0, FillSeq::ZERO);
-    assert_eq!(taker_trades[0].1, taker_leg());
+    assert_eq!(
+        taker_trades[0].1,
+        TradeRecord {
+            side: Side::Buy,
+            price: maker_price(),
+            quantity: quantity(),
+            notional: notional(),
+            fee: taker_fee(),
+            fee_token: PairToken::Base,
+            is_maker: false,
+            timestamp: TIMESTAMP,
+        },
+        "taker leg projected from the settlement",
+    );
 
-    let maker_trades = store.trades_for_order(maker.order_id(), None, 10).unwrap();
+    let maker_trades = store.trades_for_order(maker_order, None, 10).unwrap();
     assert_eq!(maker_trades.len(), 1);
     assert_eq!(maker_trades[0].0, FillSeq::ZERO);
-    assert_eq!(maker_trades[0].1, maker_leg());
+    assert_eq!(
+        maker_trades[0].1,
+        TradeRecord {
+            side: Side::Sell,
+            price: maker_price(),
+            quantity: quantity(),
+            notional: notional(),
+            fee: maker_fee(),
+            fee_token: PairToken::Quote,
+            is_maker: true,
+            timestamp: TIMESTAMP,
+        },
+        "maker leg projected from the settlement",
+    );
+}
+
+#[test]
+fn should_index_each_leg_under_its_own_owner() {
+    let mut store = store();
+    let alice = UserId::new(1);
+    let bob = UserId::new(2);
+    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
+    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
+
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, alice, bob);
+
+    let alice_trades = store.trades_after(alice, None, 10).unwrap();
+    assert_eq!(
+        alice_trades.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![TradeId::new(taker_order, FillSeq::ZERO)],
+        "alice owns the taker leg",
+    );
+    assert!(!alice_trades[0].1.is_maker, "taker leg is not a maker");
+
+    let bob_trades = store.trades_after(bob, None, 10).unwrap();
+    assert_eq!(
+        bob_trades.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![TradeId::new(maker_order, FillSeq::ZERO)],
+        "bob owns the maker leg",
+    );
+    assert!(bob_trades[0].1.is_maker, "maker leg is a maker");
+}
+
+#[test]
+fn should_swap_sides_for_a_sell_taker() {
+    let mut store = store();
+    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
+    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
+
+    store.append(
+        sell_taker_settlement(0, 1, 0),
+        BOOK,
+        TIMESTAMP,
+        taker_user(),
+        maker_user(),
+    );
+
+    let taker_page = store.trades_for_order(taker_order, None, 10).unwrap();
+    let taker = &taker_page[0].1;
+    assert_eq!(taker.side, Side::Sell);
+    assert_eq!(taker.fee_token, PairToken::Quote);
+    assert!(!taker.is_maker);
+
+    let maker_page = store.trades_for_order(maker_order, None, 10).unwrap();
+    let maker = &maker_page[0].1;
+    assert_eq!(maker.side, Side::Buy);
+    assert_eq!(maker.fee_token, PairToken::Base);
+    assert!(maker.is_maker);
 }
 
 #[test]
 fn should_return_one_orders_trades_newest_first_excluding_other_orders() {
     let mut store = store();
-    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    // Two matches against order A (fill_seqs 0, 1) each paired with order B.
-    store.insert((TradeId::new(order_a, FillSeq::new(0)), taker_leg()), USER);
-    store.insert((trade_id(1, 0), maker_leg()), USER);
-    store.insert((TradeId::new(order_a, FillSeq::new(1)), taker_leg()), USER);
-    store.insert((trade_id(1, 1), maker_leg()), USER);
+    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, USER, USER);
+    store.append(buy_taker_settlement(0, 2, 1), BOOK, TIMESTAMP, USER, USER);
 
     let seqs: Vec<u64> = store
         .trades_for_order(order_a, None, 10)
@@ -63,13 +149,9 @@ fn should_return_one_orders_trades_newest_first_excluding_other_orders() {
 #[test]
 fn should_page_one_orders_trades_via_after_cursor() {
     let mut store = store();
-    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
     for seq in 0..3 {
-        store.insert(
-            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
-            USER,
-        );
-        store.insert((trade_id(1, seq), maker_leg()), USER);
+        store.append(buy_taker_settlement(0, 1, seq), BOOK, TIMESTAMP, USER, USER);
     }
     let first = store.trades_for_order(order_a, None, 2).unwrap();
     assert_eq!(
@@ -87,9 +169,8 @@ fn should_page_one_orders_trades_via_after_cursor() {
 #[test]
 fn should_return_empty_page_for_unknown_order() {
     let mut store = store();
-    store.insert((trade_id(0, 0), taker_leg()), USER);
-    store.insert((trade_id(1, 0), maker_leg()), USER);
-    let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(7));
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, USER, USER);
+    let unknown = OrderId::new(BOOK, OrderSeq::new(7));
     assert!(
         store
             .trades_for_order(unknown, None, 10)
@@ -101,9 +182,8 @@ fn should_return_empty_page_for_unknown_order() {
 #[test]
 fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
     let mut store = store();
-    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    store.insert((TradeId::new(order_a, FillSeq::ZERO), taker_leg()), USER);
-    store.insert((trade_id(1, 0), maker_leg()), USER);
+    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, USER, USER);
     assert_eq!(
         store.trades_for_order(order_a, Some(FillSeq::new(99)), 10),
         Err(CursorNotFound)
@@ -113,9 +193,8 @@ fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
 #[test]
 fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
-    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    store.insert((TradeId::new(order_a, FillSeq::ZERO), taker_leg()), USER);
-    store.insert((trade_id(1, 0), maker_leg()), USER);
+    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, USER, USER);
     let trades = store
         .trades_for_order(order_a, Some(FillSeq::ZERO), 10)
         .unwrap();
@@ -125,13 +204,9 @@ fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
 #[test]
 fn should_clamp_one_orders_page_to_requested_length() {
     let mut store = store();
-    let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
+    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
     for seq in 0..5 {
-        store.insert(
-            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
-            USER,
-        );
-        store.insert((trade_id(1, seq), maker_leg()), USER);
+        store.append(buy_taker_settlement(0, 1, seq), BOOK, TIMESTAMP, USER, USER);
     }
     assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);
 }
@@ -141,14 +216,12 @@ fn should_return_a_users_trades_across_orders_newest_first_scoped_to_owner() {
     let mut store = store();
     let alice = UserId::new(1);
     let bob = UserId::new(2);
-    let alice_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    let alice_b = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1));
-    let bob_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(2));
+    let alice_a = OrderId::new(BOOK, OrderSeq::new(0));
+    let alice_b = OrderId::new(BOOK, OrderSeq::new(1));
+    let bob_order = OrderId::new(BOOK, OrderSeq::new(2));
 
-    store.insert((TradeId::new(alice_a, FillSeq::new(0)), taker_leg()), alice);
-    store.insert((TradeId::new(bob_order, FillSeq::new(0)), maker_leg()), bob);
-    store.insert((TradeId::new(alice_b, FillSeq::new(1)), taker_leg()), alice);
-    store.insert((TradeId::new(bob_order, FillSeq::new(1)), maker_leg()), bob);
+    store.append(buy_taker_settlement(0, 2, 0), BOOK, TIMESTAMP, alice, bob);
+    store.append(buy_taker_settlement(1, 2, 1), BOOK, TIMESTAMP, alice, bob);
 
     let alice_orders: Vec<OrderId> = store
         .trades_after(alice, None, 10)
@@ -180,13 +253,14 @@ fn should_page_a_users_trades_via_after_cursor() {
     let mut store = store();
     let alice = UserId::new(1);
     let other = UserId::new(2);
-    let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..3 {
-        store.insert(
-            (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
+        store.append(
+            buy_taker_settlement(0, 1, seq),
+            BOOK,
+            TIMESTAMP,
             alice,
+            other,
         );
-        store.insert((trade_id(1, seq), maker_leg()), other);
     }
     let first = store.trades_after(alice, None, 2).unwrap();
     assert_eq!(
@@ -218,8 +292,13 @@ fn should_page_a_users_trades_via_after_cursor() {
 #[test]
 fn should_return_an_empty_account_page_for_an_unknown_user() {
     let mut store = store();
-    store.insert((trade_id(0, 0), taker_leg()), UserId::new(1));
-    store.insert((trade_id(1, 0), maker_leg()), UserId::new(2));
+    store.append(
+        buy_taker_settlement(0, 1, 0),
+        BOOK,
+        TIMESTAMP,
+        UserId::new(1),
+        UserId::new(2),
+    );
     assert!(
         store
             .trades_after(UserId::new(7), None, 10)
@@ -233,14 +312,13 @@ fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
     let mut store = store();
     let alice = UserId::new(1);
     let bob = UserId::new(2);
-    let bob_id = trade_id(1, 0);
-    store.insert((trade_id(0, 0), taker_leg()), alice);
-    store.insert((bob_id, maker_leg()), bob);
+    store.append(buy_taker_settlement(0, 1, 0), BOOK, TIMESTAMP, alice, bob);
+    let bob_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(1)), FillSeq::ZERO);
     assert_eq!(
         store.trades_after(alice, Some(bob_id), 10),
         Err(CursorNotFound)
     );
-    let unknown = trade_id(0, 99);
+    let unknown = TradeId::new(OrderId::new(BOOK, OrderSeq::new(0)), FillSeq::new(99));
     assert_eq!(
         store.trades_after(alice, Some(unknown), 10),
         Err(CursorNotFound)
@@ -251,9 +329,14 @@ fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
 fn should_return_an_empty_account_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
     let alice = UserId::new(1);
-    let alice_id = trade_id(0, 0);
-    store.insert((alice_id, taker_leg()), alice);
-    store.insert((trade_id(1, 0), maker_leg()), UserId::new(2));
+    store.append(
+        buy_taker_settlement(0, 1, 0),
+        BOOK,
+        TIMESTAMP,
+        alice,
+        UserId::new(2),
+    );
+    let alice_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(0)), FillSeq::ZERO);
     assert!(
         store
             .trades_after(alice, Some(alice_id), 10)
@@ -266,13 +349,14 @@ fn should_return_an_empty_account_page_for_a_valid_cursor_with_no_older_trades()
 fn should_clamp_an_account_page_to_requested_length() {
     let mut store = store();
     let alice = UserId::new(1);
-    let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..5 {
-        store.insert(
-            (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
+        store.append(
+            buy_taker_settlement(0, 1, seq),
+            BOOK,
+            TIMESTAMP,
             alice,
+            UserId::new(2),
         );
-        store.insert((trade_id(1, seq), maker_leg()), UserId::new(2));
     }
     assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
 }
@@ -288,35 +372,62 @@ fn store() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
-fn trade_id(order_seq: u64, fill_seq: u64) -> TradeId {
-    TradeId::new(
-        OrderId::new(OrderBookId::ZERO, OrderSeq::new(order_seq)),
-        FillSeq::new(fill_seq),
-    )
+fn buy_taker_settlement(taker_seq: u64, maker_seq: u64, fill_seq: u64) -> FillSettlement {
+    settlement(Side::Buy, taker_seq, maker_seq, fill_seq)
 }
 
-fn taker_leg() -> TradeRecord {
-    TradeRecord {
-        side: Side::Buy,
-        price: Price::new(10_000_000),
-        quantity: Quantity::from_u128(200_000_000),
-        notional: Quantity::from_u128(20_000_000),
-        fee: Quantity::from_u128(200_000),
-        fee_token: PairToken::Base,
-        is_maker: false,
-        timestamp: Timestamp::new(42),
+fn sell_taker_settlement(taker_seq: u64, maker_seq: u64, fill_seq: u64) -> FillSettlement {
+    settlement(Side::Sell, taker_seq, maker_seq, fill_seq)
+}
+
+fn settlement(taker_side: Side, taker_seq: u64, maker_seq: u64, fill_seq: u64) -> FillSettlement {
+    let fill = Fill {
+        fill_seq: FillSeq::new(fill_seq),
+        taker_order_seq: OrderSeq::new(taker_seq),
+        taker_side,
+        taker_price: maker_price(),
+        maker_order_seq: OrderSeq::new(maker_seq),
+        maker_price: maker_price(),
+        quantity: quantity(),
+    };
+    FillSettlement::new(fill, fee_rates(), base_scale())
+}
+
+fn fee_rates() -> FeeRates {
+    FeeRates {
+        maker: BasisPoint::new(5).unwrap(),
+        taker: BasisPoint::new(10).unwrap(),
     }
 }
 
-fn maker_leg() -> TradeRecord {
-    TradeRecord {
-        side: Side::Sell,
-        price: Price::new(10_000_000),
-        quantity: Quantity::from_u128(200_000_000),
-        notional: Quantity::from_u128(20_000_000),
-        fee: Quantity::from_u128(10_000),
-        fee_token: PairToken::Quote,
-        is_maker: true,
-        timestamp: Timestamp::new(42),
-    }
+fn base_scale() -> NonZeroU64 {
+    NonZeroU64::new(100_000_000).unwrap()
+}
+
+fn maker_price() -> Price {
+    Price::new(10_000_000)
+}
+
+fn quantity() -> Quantity {
+    Quantity::from_u128(200_000_000)
+}
+
+fn notional() -> Quantity {
+    Quantity::from_u128(20_000_000)
+}
+
+fn taker_fee() -> Quantity {
+    Quantity::from_u128(200_000)
+}
+
+fn maker_fee() -> Quantity {
+    Quantity::from_u128(10_000)
+}
+
+fn taker_user() -> UserId {
+    UserId::new(1)
+}
+
+fn maker_user() -> UserId {
+    UserId::new(2)
 }
