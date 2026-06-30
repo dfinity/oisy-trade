@@ -12,10 +12,9 @@ use proptest::prelude::*;
 
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
-    use crate::Timestamp;
     use crate::order::{
-        FeeRates, Fill, FillSeq, FillSettlement, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq,
-        PairToken, PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize,
+        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        PendingOrder, Price, PriceLevel, Quantity, RestingOrder, SettledFill, Side, TickSize,
         TimeInForce, TokenId, TokenMetadata, TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
@@ -130,21 +129,13 @@ mod schema_stability {
                         fee: None,
                     },
                 ],
-                fills: vec![FillSettlement::new(
-                    Fill {
-                        fill_seq: FillSeq::new(2),
-                        taker_order_seq: OrderSeq::new(5),
-                        taker_side: Side::Buy,
-                        taker_price: Price::new(100_000_000),
-                        maker_order_seq: OrderSeq::new(6),
-                        maker_price: Price::new(100_000_000),
-                        quantity: Quantity::from(1_000_000u64),
-                    },
-                    FeeRates::default(),
-                    NonZeroU64::new(100_000_000).unwrap(),
-                    book_id,
-                    Timestamp::new(42),
-                )],
+                fills: vec![SettledFill {
+                    fill_seq: FillSeq::new(2),
+                    taker_order_seq: OrderSeq::new(5),
+                    maker_order_seq: OrderSeq::new(6),
+                    quantity: Quantity::from(1_000_000u64),
+                    fee_rates: FeeRates::default(),
+                }],
             }]),
             // Non-default policy.
             max_orders_per_chunk: Some(200),
@@ -171,8 +162,8 @@ mod schema_stability {
         8982008008828281410182614108828141028261420681828281410181410207818c0703810a811a00\
         0f42408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281186e\
         8183021a0007a12082008081048281008100051923280281828141011a000186a08183078282008505\
-        068201801a05f5e1001a0003d09082008506058200801a000f4240f68187870205820080811a05f5e1\
-        0006811a05f5e1001a000f42401a000f42400000000781182a18c81b000000012a05f200";
+        068201801a05f5e1001a0003d09082008506058200801a000f4240f681850205061a000f4240828100\
+        810018c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {

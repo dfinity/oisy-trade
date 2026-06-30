@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
-    BasisPoint, FeeRates, Fill, FillSeq, FillSettlement, LotSize, OrderBookId, OrderId, OrderSeq,
-    PairToken, Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    BasisPoint, FeeRates, FillSeq, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price,
+    Quantity, SettledFill, Side, TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
@@ -138,7 +138,7 @@ impl WorstCaseEvent {
             Self::AddLimitOrder => 108,
             Self::CancelLimitOrder => 34,
             Self::Matching => 9_027,
-            Self::Settling => 323_050,
+            Self::Settling => 165_050,
             Self::SetHalt => 918,
         }
     }
@@ -265,7 +265,7 @@ fn settling(order_count: usize) -> EventType {
             fee: Some(max_quantity()),
         });
     }
-    let fills = (0..order_count as u64).map(max_fill_settlement).collect();
+    let fills = (0..order_count as u64).map(max_settled_fill).collect();
     EventType::Settling(SettlingEvent {
         book_id: OrderBookId::new(u64::MAX),
         balance_operations,
@@ -273,30 +273,19 @@ fn settling(order_count: usize) -> EventType {
     })
 }
 
-/// A [`FillSettlement`] whose every field encodes at its maximum CBOR width,
-/// matching the worst-case sizing of the [`settling`] fixture. Owners are left
-/// unresolved, as they are when a settling event is persisted to the log.
-fn max_fill_settlement(index: u64) -> FillSettlement {
-    let fill = Fill {
+/// A [`SettledFill`] whose every field encodes at its maximum CBOR width,
+/// matching the worst-case sizing of the [`settling`] fixture.
+fn max_settled_fill(index: u64) -> SettledFill {
+    SettledFill {
         fill_seq: FillSeq::new(u64::MAX),
         taker_order_seq: OrderSeq::new(2 * index),
-        taker_side: Side::Buy,
-        taker_price: Price::new(u128::MAX),
         maker_order_seq: OrderSeq::new(2 * index + 1),
-        maker_price: Price::new(u128::MAX - 1),
         quantity: max_quantity(),
-    };
-    let fee_rates = FeeRates {
-        maker: BasisPoint::MAX,
-        taker: BasisPoint::MAX,
-    };
-    FillSettlement::new(
-        fill,
-        fee_rates,
-        std::num::NonZeroU64::new(1).unwrap(),
-        OrderBookId::new(u64::MAX),
-        Timestamp::new(u64::MAX),
-    )
+        fee_rates: FeeRates {
+            maker: BasisPoint::MAX,
+            taker: BasisPoint::MAX,
+        },
+    }
 }
 
 fn max_principal(seed: u8) -> Principal {

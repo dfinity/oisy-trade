@@ -459,9 +459,10 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, FillSettlement, LotSize, MatchingOutput, Order,
-        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price,
-        Quantity, RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        RemovedOrder, SettledFill, Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+        TradeRecord,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -740,6 +741,10 @@ pub mod arbitrary {
         any::<u64>().prop_map(OrderSeq::new)
     }
 
+    pub fn arb_fill_seq() -> impl Strategy<Value = FillSeq> {
+        any::<u64>().prop_map(FillSeq::new)
+    }
+
     pub fn arb_token_id() -> impl Strategy<Value = TokenId> {
         arb_principal().prop_map(TokenId::new)
     }
@@ -1003,23 +1008,32 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
-    pub fn arb_fill_settlement() -> impl Strategy<Value = FillSettlement> {
-        ((0..1_000u64).prop_flat_map(arb_fill), arb_fee_rates()).prop_map(|(fill, fee_rates)| {
-            FillSettlement::new(
-                fill,
-                fee_rates,
-                NonZeroU64::new(100_000_000).unwrap(),
-                OrderBookId::ZERO,
-                Timestamp::EPOCH,
+    /// Strategy for an arbitrary [`SettledFill`], fuzzing every field
+    /// independently — the lean record persisted on a settling event.
+    pub fn arb_settled_fill() -> impl Strategy<Value = SettledFill> {
+        (
+            arb_fill_seq(),
+            arb_order_seq(),
+            arb_order_seq(),
+            arb_quantity(),
+            arb_fee_rates(),
+        )
+            .prop_map(
+                |(fill_seq, taker_order_seq, maker_order_seq, quantity, fee_rates)| SettledFill {
+                    fill_seq,
+                    taker_order_seq,
+                    maker_order_seq,
+                    quantity,
+                    fee_rates,
+                },
             )
-        })
     }
 
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
         (
             any::<u64>(),
             vec(arb_balance_operation(), 0..10),
-            vec(arb_fill_settlement(), 0..10),
+            vec(arb_settled_fill(), 0..10),
         )
             .prop_map(|(book_id, balance_operations, fills)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),

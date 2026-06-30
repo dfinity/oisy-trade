@@ -1843,7 +1843,7 @@ mod settle_fills {
         fn settlement_balance_ops_match_fill_shape(
             output in crate::test_fixtures::arbitrary::arb_matching_output()
         ) {
-            use crate::order::{self, FillSettlement, OrderBookId, PairToken, RemovedOrderSettlement};
+            use crate::order::{self, FillSettlement, PairToken, RemovedOrderSettlement};
             use crate::state::event::BalanceOperation;
 
             let base_scale = std::num::NonZeroU64::new(PRICE_SCALE as u64).unwrap();
@@ -1851,13 +1851,7 @@ mod settle_fills {
             let expired_len = output.expired_orders.len();
             let mut ops = Vec::new();
             for fill in &output.fills {
-                let settlement = FillSettlement::new(
-                    fill.clone(),
-                    FeeRates::default(),
-                    base_scale,
-                    OrderBookId::ZERO,
-                    crate::Timestamp::EPOCH,
-                );
+                let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
                 settlement.push_balance_operations(&mut ops);
             }
             for (seq, killed) in &output.expired_orders {

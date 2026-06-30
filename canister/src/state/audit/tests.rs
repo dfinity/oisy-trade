@@ -231,9 +231,9 @@ impl Scenario {
             .state
             .take_next_pending_settling_event()
             .expect("BUG: record_cancel_limit_order did not push a settling event");
-        self.state
-            .record_settling_event(&settling_event, StableMemoryOptions::Write);
         let settling_ts = self.timestamp();
+        self.state
+            .record_settling_event(&settling_event, settling_ts, StableMemoryOptions::Write);
         self.events.push(Event {
             timestamp: cancel_ts,
             payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }),
@@ -267,9 +267,9 @@ impl Scenario {
         let mut produced_balance_operations = Vec::new();
         while let Some(settling) = self.state.take_next_pending_settling_event() {
             produced_balance_operations.extend(settling.balance_operations.iter().cloned());
-            self.state
-                .record_settling_event(&settling, StableMemoryOptions::Write);
             let settling_ts = self.timestamp();
+            self.state
+                .record_settling_event(&settling, settling_ts, StableMemoryOptions::Write);
             self.events.push(Event {
                 timestamp: settling_ts,
                 payload: EventType::Settling(settling),

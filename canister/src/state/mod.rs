@@ -20,9 +20,9 @@ use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
-    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeCursorNotFound,
-    TradeHistory, TradeRecord, TradingPair,
+    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Price, Quantity, RemovedOrder,
+    RemovedOrderSettlement, SettledFill, Side, TickSize, TokenId, TokenMetadata,
+    TradeCursorNotFound, TradeHistory, TradeRecord, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -406,14 +406,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates, settlements) = settle(
-                fills,
-                &expired_orders,
-                fee_rates,
-                base_scale,
-                event.book_id,
-                now,
-            );
+            let (balance_operations, mut updates, settled_fills) =
+                settle(fills, &expired_orders, fee_rates, base_scale);
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
@@ -431,12 +425,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     self.order_history.apply_update(&order_id, update, now);
                 }
             }
-            if !balance_operations.is_empty() || !settlements.is_empty() {
+            if !balance_operations.is_empty() || !settled_fills.is_empty() {
                 self.pending_settling_events
                     .push_back(event::SettlingEvent {
                         book_id: event.book_id,
                         balance_operations,
-                        fills: settlements,
+                        fills: settled_fills,
                     });
             }
         }
@@ -449,6 +443,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
+        timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         if matches!(persistence, StableMemoryOptions::Skip) {
@@ -460,26 +455,35 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_pair(&event.book_id)
             .cloned()
             .expect("BUG: unknown trading pair in SettlingEvent");
+        let base_scale = self.base_scale_for_book(event.book_id);
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("settling");
         // Resolve each distinct `OrderSeq` referenced by the operations to its
-        // owner's `UserId` once (one `order_history` read + one registry lookup
-        // per seq), then reuse from the map in the loop. A 1000-fill round can
-        // reference ~2000 distinct seqs over ~3000 operations, so caching keeps
-        // both stable maps out of the per-op hot path.
-        let user_cache = resolve_op_users(
+        // owner's `UserId`, side, and price once (one `order_history` read + one
+        // registry lookup per seq), then reuse from the map in the loop. A
+        // 1000-fill round can reference ~2000 distinct seqs over ~3000
+        // operations, so caching keeps both stable maps out of the per-op hot
+        // path. Both legs of every fill are referenced by its balance ops, so
+        // each fill's side and execution price are already in the cache — no
+        // extra stable reads to rebuild the trade legs.
+        let resolved = resolve_op_users(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
             &self.user_registry,
         );
-        for settlement in &event.fills {
-            let mut settlement = settlement.clone();
-            settlement.resolve_owners(
-                user_cache[&settlement.taker_order_seq()],
-                user_cache[&settlement.maker_order_seq()],
+        for fill in &event.fills {
+            let taker = resolved[&fill.taker_order_seq];
+            let maker = resolved[&fill.maker_order_seq];
+            let [taker_leg, maker_leg] = fill.trade_legs(
+                event.book_id,
+                taker.side,
+                maker.price,
+                base_scale,
+                timestamp,
             );
-            self.trade_history.append(settlement);
+            self.trade_history
+                .append(taker_leg, taker.user, maker_leg, maker.user);
         }
         for op in &event.balance_operations {
             let token = pair.token(match op {
@@ -495,15 +499,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     ..
                 } => {
                     self.balances.transfer(
-                        user_cache[from_order],
-                        user_cache[to_order],
+                        resolved[from_order].user,
+                        resolved[to_order].user,
                         &token,
                         *amount,
                         fee.unwrap_or(Quantity::ZERO),
                     );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    self.balances.unreserve(user_cache[order], &token, *amount);
+                    self.balances
+                        .unreserve(resolved[order].user, &token, *amount);
                 }
             }
         }
@@ -912,15 +917,28 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 }
 
-/// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
-/// `ops`. Each `get` hits stable memory; callers can then look owners up in
-/// the returned `BTreeMap` in O(log n) heap-only time.
+/// An order, recovered from its [`OrderRecord`], as the settling phase needs it:
+/// the resolved `UserId`, the order `side`, and the immutable limit `price`. A
+/// fill's execution price is its maker order's `price`; a fill's taker side is its
+/// taker order's `side`.
+#[derive(Clone, Copy)]
+struct ResolvedOrder {
+    user: UserId,
+    side: Side,
+    price: Price,
+}
+
+/// Build a `OrderSeq -> ResolvedOrder` map for every distinct seq referenced by
+/// `ops`. Each `get` hits stable memory once and yields the owner, side, and
+/// price together; callers can then look the order up in the returned `BTreeMap`
+/// in O(log n) heap-only time, with no extra stable reads to recover a fill's
+/// side or execution price.
 fn resolve_op_users<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
     history: &OrderHistory<MH>,
     registry: &UserRegistry<MB>,
-) -> BTreeMap<OrderSeq, UserId> {
+) -> BTreeMap<OrderSeq, ResolvedOrder> {
     let mut seqs = BTreeSet::new();
     for op in ops {
         match op {
@@ -939,14 +957,20 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
     }
     seqs.into_iter()
         .map(|seq| {
-            let owner = history
+            let record = history
                 .get(&OrderId::new(*book_id, seq))
-                .expect("BUG: missing order_history entry for BalanceOperation")
-                .owner;
+                .expect("BUG: missing order_history entry for BalanceOperation");
             let user = registry
-                .lookup(owner)
+                .lookup(record.owner)
                 .expect("BUG: order owner not registered");
-            (seq, user)
+            (
+                seq,
+                ResolvedOrder {
+                    user,
+                    side: record.side,
+                    price: record.price,
+                },
+            )
         })
         .collect()
 }
@@ -956,26 +980,24 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
-    book_id: OrderBookId,
-    timestamp: Timestamp,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<FillSettlement>,
+    Vec<SettledFill>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
-    let mut settlements = Vec::with_capacity(fills.len());
+    let mut settled = Vec::with_capacity(fills.len());
     for fill in fills {
-        let settlement = FillSettlement::new(fill, fee_rates, base_scale, book_id, timestamp);
+        let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
-        settlements.push(settlement);
+        settled.push(settlement.settled_fill());
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    (ops, updates, settlements)
+    (ops, updates, settled)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

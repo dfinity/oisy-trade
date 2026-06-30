@@ -223,11 +223,23 @@ Order-level rollups (`OrderRecord` scalars), human (`stored`):
   (`OrderBook::match_order`) has the `fee_rates` but **not** the base-token scale: `OrderBook` is
   deliberately token-scale-agnostic, and `notional = maker_price × quantity / base_scale` needs
   that scale, which lives in `State`'s token registry (`base_scale_for_book`).
-  Settlement (`compute_balance_operations`) is the first point where both `fee_rates` and
-  `base_scale` are in scope; it already derives `notional`, `quote_fee`, `base_fee`, and the
-  maker/taker roles. Computing the fill values there reuses that single computation and avoids
-  threading token metadata into the matcher just to keep `Fill` self-describing. (Why not move it
-  into the matcher — see Discussed Alternatives.)
+  The matching phase is the first point where both `fee_rates` and `base_scale` are in scope; it
+  already derives `notional`, `quote_fee`, `base_fee`, and the maker/taker roles for the balance
+  operations. Computing the fill values there reuses that single computation and avoids threading
+  token metadata into the matcher just to keep `Fill` self-describing. (Why not move it into the
+  matcher — see Discussed Alternatives.)
+
+- **A lean, normalized `SettledFill` crosses the matching→settling event boundary; the persisted
+  `TradeRecord` still stores realized amounts.** Serializing the full settlement (the four
+  bignum-prone `Quantity` fields plus book/timestamp/owners) onto the event roughly tripled the
+  `write_events` / `read_events` cost and duplicated data already recoverable elsewhere. The event
+  now carries only `SettledFill = { fill_seq, taker_order_seq, maker_order_seq, quantity,
+  fee_rates }`; the settling phase recovers side/price from the order records and recomputes
+  notional/fees to rebuild the two trade legs. This shrinks the event boundary without weakening
+  the persisted feed: the durable `TradeRecord` still stores the **realized amounts** (never a
+  rate), so historical fills stay correct across any future rate change. The fee-rate **snapshot**
+  on `SettledFill` exists only to make the settling recompute independent of the live (mutable)
+  book rate; it never reaches a persisted trade.
 
 ## Cross-exchange comparison
 
@@ -386,8 +398,10 @@ A new module, `canister/src/order/trades`, mirroring `OrderHistory`. The model i
   index**. `global_seq` is a separate canister-global monotonic sequence **derived from
   `by_user.len()`** exactly like `OrderHistory::insert_once` — there is no `StableCell` counter
   (the former fill-seq cell and its memory region are dropped; `FillSeq` now comes from the book).
-- `append(taker_leg, maker_leg)` — each leg is a `(TradeId, TradeRecord)` pair — writes both
-  side-projected records and both `by_user` entries (denormalized; 2 + 2 inserts per match,
+- `append(taker_leg, taker_user, maker_leg, maker_user)` — each leg is a `(TradeId, TradeRecord)`
+  pair built by the settling handler from the recovered side/price and recomputed notional/fees —
+  writes both side-projected records and both `by_user` entries (denormalized; 2 + 2 inserts per
+  match,
   i.e. 2 trade records: `(taker_order_id, fill_seq)` [side=taker] and `(maker_order_id, fill_seq)`
   [side=maker]). `trades_for_order(order, after, length)` is a reverse prefix range scan over
   `trades` (no indirection). `trades_after(user, after, length)` reverse-scans `by_user` then
@@ -405,22 +419,45 @@ A new module, `canister/src/order/trades`, mirroring `OrderHistory`. The model i
 
 ### Matching write path — `canister/src/state` (`record_matching_event` / settlement)
 
-Under the existing `Write` gate, and reusing the per-fill computation already in
-`compute_balance_operations` (`notional`, `quote_fee`, `base_fee`, and the buyer/seller =
-maker/taker roles — all available there because `base_scale` and `fee_rates` are both in scope),
-for each `fill`:
+The matching phase stays pure heap (no stable-memory writes for trades). Under the existing
+`Write` gate, and reusing the per-fill computation already in `FillSettlement` (`notional`,
+`quote_fee`, `base_fee`, and the buyer/seller = maker/taker roles — all available there because
+`base_scale` and `fee_rates` are both in scope), for each `fill`:
 
 - Extend the per-order `OrderUpdate` map: the taker order gets `quote_delta += notional` and
   `fee_delta += <taker-side fee>`; the maker order gets `quote_delta += notional` and
   `fee_delta += <maker-side fee>`. (`filled_delta` is already accumulated per DEFI-2852.) Both
   legs share the same `notional`; the `fee_delta` differs by side (R1, R2, R6).
-- Take the match's `fill_seq` (minted by the book on the `Fill`), build the two side-projected
-  `TradeRecord`s keyed by their `TradeId` (taker leg, maker leg) — each with its own `side`, `fee`,
-  `fee_token`, `is_maker` — resolve each leg's owning `UserId`, and call `TradeHistory::append`,
-  stamped with the matching `Event`'s timestamp (R3, R6, R11).
+- Derive a **lean, normalized `SettledFill`** per fill — `{ fill_seq, taker_order_seq,
+  maker_order_seq, quantity, fee_rates }` — and carry `Vec<SettledFill>` on the paired
+  `SettlingEvent`. This is the only fill data persisted in the event log; it stores just what
+  cannot be recovered elsewhere.
 
-This keeps a single computation of the realized values feeding both balance ops and trades (R11).
-The matcher's `Fill` struct gains only its `fill_seq`.
+### Settling write path — recover, recompute, persist
+
+Trades are written in the **settling phase**, under the `Write` gate, from the lean
+`SettledFill`. For each fill the settling handler:
+
+- **Recovers** the execution price and taker side from the two referenced **order records**
+  (not from the event): the maker order's stored limit `price` is the fill's execution price;
+  the taker order's `side` is the taker side. The settling handler already reads each referenced
+  order once to resolve owners for the balance operations, so it returns the owner, side, and
+  price together from that single read — no extra stable reads.
+- **Recomputes** `notional = maker_price × quantity / base_scale` and the two fees off the
+  snapshotted `fee_rates`, with the same `mul_ceil` logic the matching phase used, so the
+  persisted trade legs can never diverge from the balance transfers.
+- **Builds the two side-projected `TradeRecord`s** keyed by their `TradeId` (taker leg, maker
+  leg) — each with its own `side`, `fee`, `fee_token`, `is_maker` — and appends them to
+  `TradeHistory`, stamped with the settling `Event`'s envelope timestamp (settle-time, same round
+  as the match) (R3, R6, R8, R11).
+
+Recovering side/price from the orders rather than re-persisting them on the fill is sound because
+an order's stored limit price is **immutable** for the life of its `OrderSeq` — a reprice must be
+modeled as cancel + a new order (a fresh seq), exactly as Binance, Kraken, and Coinbase treat one
+(the reprice loses queue priority, i.e. is a new resting order). `fee_rates` is snapshotted on the
+`SettledFill` rather than recovered because the rate lives on the (mutable) book and is the one
+fee input pinned by neither the fill nor the orders. The matcher's `Fill` struct gains only its
+`fill_seq`.
 
 ### Storage & lifecycle — `canister/src/storage`, `canister/src/lifecycle`
 
