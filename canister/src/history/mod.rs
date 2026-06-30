@@ -6,6 +6,9 @@ use std::borrow::Cow;
 use std::fmt;
 use std::ops::Bound as RangeBound;
 
+#[cfg(test)]
+mod tests;
+
 /// Marker for the canister-global insertion sequence shared by every history
 /// store: each inserted record gets the next dense, monotonic value.
 pub struct HistoryGlobalSeqMarker;
