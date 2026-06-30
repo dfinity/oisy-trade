@@ -75,14 +75,14 @@ pub struct TradeRecord {
 /// rather than as a field on the domain [`TradeRecord`]. Mirrors
 /// [`crate::order::OrderHistory`]'s `SeqOrderRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-struct SeqTrade {
+struct SeqTradeRecord {
     #[n(0)]
-    global_seq: u64,
+    global_seq: TradeGlobalSeq,
     #[n(1)]
     trade: TradeRecord,
 }
 
-impl Storable for SeqTrade {
+impl Storable for SeqTradeRecord {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         minicbor::encode(self, &mut buf).expect("seq trade encoding should always succeed");
@@ -119,7 +119,7 @@ pub struct CursorNotFound;
 /// the account-wide read. The two side-projected records of one match share the
 /// book-minted `FillSeq` in their [`TradeId`]s and differ by `OrderId`.
 pub struct TradeHistory<M: Memory> {
-    trades: StableBTreeMap<TradeId, SeqTrade, M>,
+    trades: StableBTreeMap<TradeId, SeqTradeRecord, M>,
     by_user: StableBTreeMap<TradeByUserKey, TradeId, M>,
 }
 
@@ -163,19 +163,17 @@ impl<M: Memory> TradeHistory<M> {
 
     fn insert(&mut self, leg: TradeLeg, user: UserId) {
         let (id, trade) = leg;
-        let global_seq = self.by_user.len();
+        let global_seq = TradeGlobalSeq::new(self.by_user.len());
         assert_eq!(
-            self.trades.insert(id, SeqTrade { global_seq, trade }),
+            self.trades.insert(id, SeqTradeRecord { global_seq, trade }),
             None,
             "BUG: duplicate trade id {id:?}"
         );
         assert_eq!(
-            self.by_user.insert(
-                TradeByUserKey::new(user, TradeGlobalSeq::new(global_seq)),
-                id
-            ),
+            self.by_user
+                .insert(TradeByUserKey::new(user, global_seq), id),
             None,
-            "BUG: duplicate user-trade index entry for {user:?} seq {global_seq}"
+            "BUG: duplicate user-trade index entry for {user:?} seq {global_seq:?}"
         );
     }
 
@@ -234,7 +232,7 @@ impl<M: Memory> TradeHistory<M> {
             None => Bound::Included(TradeByUserKey::last_of(user)),
             Some(cursor) => {
                 let entry = self.trades.get(&cursor).ok_or(CursorNotFound)?;
-                let key = TradeByUserKey::new(user, TradeGlobalSeq::new(entry.global_seq));
+                let key = TradeByUserKey::new(user, entry.global_seq);
                 if self.by_user.get(&key) != Some(cursor) {
                     return Err(CursorNotFound);
                 }
@@ -264,7 +262,7 @@ impl<M: Memory> TradeHistory<M> {
     }
 
     #[cfg(test)]
-    fn iter(&self) -> impl Iterator<Item = (TradeId, SeqTrade)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (TradeId, SeqTradeRecord)> + '_ {
         self.trades
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
