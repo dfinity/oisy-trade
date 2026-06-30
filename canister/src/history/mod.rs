@@ -153,6 +153,19 @@ where
         );
     }
 
+    /// Read-modify-write the record under `key`. `f` mutates the record in place
+    /// and returns whether it changed; only a changed record is written back.
+    /// Panics if `key` is absent.
+    pub fn modify(&mut self, key: &K, f: impl FnOnce(&mut V) -> bool) {
+        let mut entry = self
+            .primary
+            .get(key)
+            .unwrap_or_else(|| panic!("BUG: history key {key:?} missing"));
+        if f(&mut entry.record) {
+            self.primary.insert(*key, entry);
+        }
+    }
+
     /// Returns up to `length` of `user`'s primary keys in newest-first order.
     /// With `after: None` the page starts at the newest record; otherwise
     /// `after` is a cursor — the last key of the previous page — and the page

@@ -1,14 +1,12 @@
-use super::{CursorNotFound, SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
+use super::CursorNotFound;
 use crate::Timestamp;
 use crate::order::{
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, Price,
     Quantity, Side, TimeInForce,
 };
-use crate::test_fixtures::arbitrary::arb_order_record;
 use crate::user::UserId;
 use candid::Principal;
-use ic_stable_structures::{Storable, VectorMemory};
-use proptest::prelude::*;
+use ic_stable_structures::VectorMemory;
 
 fn history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
@@ -45,7 +43,7 @@ fn insert_once_and_get() {
 }
 
 #[test]
-#[should_panic(expected = "duplicate order ID")]
+#[should_panic(expected = "duplicate history key")]
 fn insert_once_panics_on_duplicate() {
     let mut history = history();
     let id = order_id(0);
@@ -388,49 +386,4 @@ fn orders_after_orders_across_books_by_global_seq() {
         history.orders_after(owner, None, 10),
         Ok(vec![book0_second, book1, book0_first])
     );
-}
-
-proptest! {
-    /// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
-    /// since `StableBTreeMap` relies on that consistency for range scans.
-    #[test]
-    fn user_order_key_ord_matches_storable_bytes(
-        keys in prop::collection::vec(arb_user_order_key(), 0..100),
-    ) {
-        for a in &keys {
-            for b in &keys {
-                prop_assert_eq!(
-                    a.cmp(b),
-                    a.to_bytes().cmp(&b.to_bytes()),
-                    "Ord disagrees with Storable bytes for {:?} vs {:?}",
-                    a,
-                    b
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn user_order_key_roundtrips_through_storable(key in arb_user_order_key()) {
-        prop_assert_eq!(UserOrderKey::from_bytes(key.to_bytes()), key);
-    }
-
-    #[test]
-    fn user_order_key_encodes_to_fixed_len(key in arb_user_order_key()) {
-        prop_assert_eq!(key.to_bytes().len(), USER_ORDER_KEY_LEN);
-    }
-
-    #[test]
-    fn seq_order_record_roundtrips_through_storable(entry in arb_seq_order_record()) {
-        prop_assert_eq!(SeqOrderRecord::from_bytes(entry.to_bytes()), entry);
-    }
-}
-
-fn arb_user_order_key() -> impl Strategy<Value = UserOrderKey> {
-    (any::<u64>(), any::<u64>())
-        .prop_map(|(user, seq)| UserOrderKey::from_seq(UserId::new(user), seq))
-}
-
-fn arb_seq_order_record() -> impl Strategy<Value = SeqOrderRecord> {
-    (any::<u64>(), arb_order_record()).prop_map(|(seq, record)| SeqOrderRecord { seq, record })
 }

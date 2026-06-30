@@ -8,6 +8,7 @@ mod queue;
 mod tests;
 mod trades;
 
+pub use crate::history::CursorNotFound;
 pub use crate::history::CursorNotFound as TradeCursorNotFound;
 pub use book::{
     MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,
@@ -15,7 +16,7 @@ pub use book::{
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
 pub use fill::{Fill, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, TradeId};
-pub use history::{CursorNotFound, OrderHistory, OrderUpdate};
+pub use history::{OrderHistory, OrderUpdate};
 pub use trades::{TradeHistory, TradeLeg, TradeRecord};
 
 use crate::ids::{CompositeId, Seq, SeqMarker};
