@@ -84,7 +84,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
-        fill_store(),
+        trade_history(),
         user_registry(),
         balances(),
     )
@@ -292,7 +292,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
-    let fill_store = crate::order::TradeHistory::new(
+    let trade_history = crate::order::TradeHistory::new(
         crate::storage::trades_memory(),
         crate::storage::trades_by_user_memory(),
     );
@@ -306,7 +306,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
-            fill_store,
+            trade_history,
             user_registry,
             balances,
         )
@@ -374,7 +374,7 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
-pub fn fill_store() -> TradeHistory<VectorMemory> {
+pub fn trade_history() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
@@ -454,12 +454,14 @@ pub fn transfer_from_response(
 
 #[cfg(test)]
 pub mod arbitrary {
+    use super::event::MAX_HALT_BOOKS;
+    use super::{LOT_SIZE, TICK_SIZE};
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
         OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
-        Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+        Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -467,17 +469,15 @@ pub mod arbitrary {
     };
     use crate::user::UserId;
     use candid::Principal;
+    use minicbor::{Decode, Encode};
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::{SizeRange, btree_set, vec};
-    use proptest::option;
-    use proptest::prelude::{Just, Strategy, any};
+    use proptest::prelude::{Just, Strategy, TestCaseError, any};
     use proptest::prop_oneof;
+    use proptest::{option, prop_assert_eq};
     use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
-
-    use super::event::MAX_HALT_BOOKS;
-    use super::{LOT_SIZE, TICK_SIZE};
 
     /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
     /// lot-aligned non-zero quantity.
@@ -582,6 +582,34 @@ pub mod arbitrary {
                     quantity: Quantity::from(qty_lots * lot),
                 }
             })
+    }
+
+    /// Strategy for an arbitrary [`TradeRecord`].
+    pub fn arb_trade_record() -> impl Strategy<Value = TradeRecord> {
+        (
+            arb_side(),
+            arb_price(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_pair_token(),
+            any::<bool>(),
+            arb_timestamp(),
+        )
+            .prop_map(
+                |(side, price, quantity, notional, fee, fee_token, is_maker, timestamp)| {
+                    TradeRecord {
+                        side,
+                        price,
+                        quantity,
+                        notional,
+                        fee,
+                        fee_token,
+                        is_maker,
+                        timestamp,
+                    }
+                },
+            )
     }
 
     /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
@@ -1046,6 +1074,17 @@ pub mod arbitrary {
     pub fn arb_event() -> impl Strategy<Value = Event> {
         (arb_timestamp(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
+    }
+
+    pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
+    where
+        for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
+    {
+        let mut buf = vec![];
+        minicbor::encode(v, &mut buf).expect("encoding should succeed");
+        let decoded = minicbor::decode(&buf).expect("decoding should succeed");
+        prop_assert_eq!(v, &decoded);
+        Ok(())
     }
 }
 

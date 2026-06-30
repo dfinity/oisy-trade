@@ -21,8 +21,8 @@ use crate::order::{
     CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
-    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, Trade, TradeCursorNotFound,
-    TradeHistory, TradeId, TradeLeg, TradingPair,
+    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeCursorNotFound,
+    TradeHistory, TradeId, TradeRecord, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -84,7 +84,7 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
-    fill_store: TradeHistory<MH>,
+    trade_history: TradeHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -105,7 +105,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
-        fill_store: TradeHistory<MH>,
+        trade_history: TradeHistory<MH>,
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
@@ -121,7 +121,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
-            fill_store,
+            trade_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -405,26 +405,25 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates, trades) = settle(
-                fills,
-                &expired_orders,
-                fee_rates,
-                base_scale,
-                event.book_id,
-                now,
-            );
-            if !trades.is_empty() {
+            let (balance_operations, mut updates, settlements) =
+                settle(fills, &expired_orders, fee_rates, base_scale);
+            if !settlements.is_empty() {
                 let user_cache = resolve_op_users(
                     &event.book_id,
                     &balance_operations,
                     &self.order_history,
                     &self.user_registry,
                 );
-                for [taker_leg, maker_leg] in trades {
-                    let taker_user = user_cache[&taker_leg.0.order_id().seq()];
-                    let maker_user = user_cache[&maker_leg.0.order_id().seq()];
-                    self.fill_store
-                        .append(taker_leg, taker_user, maker_leg, maker_user);
+                for settlement in settlements {
+                    let taker_user = user_cache[&settlement.taker_order_seq()];
+                    let maker_user = user_cache[&settlement.maker_order_seq()];
+                    self.trade_history.append(
+                        settlement,
+                        event.book_id,
+                        now,
+                        taker_user,
+                        maker_user,
+                    );
                 }
             }
             {
@@ -581,7 +580,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_id: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, Trade)>, TradeCursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, TradeCursorNotFound> {
         let owns = self
             .order_history
             .get(&order_id)
@@ -589,7 +588,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         if !owns {
             return Ok(Vec::new());
         }
-        self.fill_store.trades_for_order(order_id, after, length)
+        self.trade_history.trades_for_order(order_id, after, length)
     }
 
     /// Returns up to `length` of `owner`'s trades across **all** their orders,
@@ -603,11 +602,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         owner: &Principal,
         after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(TradeId, Trade)>, TradeCursorNotFound> {
+    ) -> Result<Vec<(TradeId, TradeRecord)>, TradeCursorNotFound> {
         let Some(user_id) = self.user_registry.lookup(*owner) else {
             return Ok(Vec::new());
         };
-        self.fill_store.trades_after(user_id, after, length)
+        self.trade_history.trades_after(user_id, after, length)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -978,26 +977,24 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
-    book_id: OrderBookId,
-    now: Timestamp,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<[TradeLeg; 2]>,
+    Vec<FillSettlement>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
-    let mut trades = Vec::with_capacity(fills.len());
+    let mut settlements = Vec::with_capacity(fills.len());
     for fill in fills {
         let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
-        trades.push(settlement.trades(book_id, now));
+        settlements.push(settlement);
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    (ops, updates, trades)
+    (ops, updates, settlements)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in
@@ -1026,7 +1023,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
-            fill_store,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1043,7 +1040,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
-            fill_store: fill_store.clone(),
+            trade_history: trade_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
             permissions: permissions.clone(),
@@ -1066,7 +1063,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
-            fill_store,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1083,7 +1080,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
-            fill_store: other_fill_store,
+            trade_history: other_trade_history,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
             permissions: other_permissions,
@@ -1099,7 +1096,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
-            && fill_store == other_fill_store
+            && trade_history == other_trade_history
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
             && permissions == other_permissions

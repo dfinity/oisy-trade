@@ -1,4 +1,6 @@
-use super::{FillSeq, OrderId, PairToken, Price, Quantity, Side, TradeId};
+use super::{
+    FillSeq, FillSettlement, OrderBookId, OrderId, PairToken, Price, Quantity, Side, TradeId,
+};
 use crate::Timestamp;
 use crate::ids::{CompositeId, Seq, SeqMarker};
 use crate::user::UserId;
@@ -28,16 +30,14 @@ pub type TradeGlobalSeq = Seq<TradeGlobalSeqMarker>;
 /// matches the byte order `StableBTreeMap` relies on.
 type TradeByUserKey = CompositeId<UserId, TradeGlobalSeq>;
 
-fn trade_by_user_key(user: UserId, seq: TradeGlobalSeq) -> TradeByUserKey {
-    TradeByUserKey::new(user, seq)
-}
+impl TradeByUserKey {
+    fn first_of(user: UserId) -> Self {
+        Self::new(user, TradeGlobalSeq::ZERO)
+    }
 
-fn trade_by_user_first(user: UserId) -> TradeByUserKey {
-    TradeByUserKey::new(user, TradeGlobalSeq::ZERO)
-}
-
-fn trade_by_user_last(user: UserId) -> TradeByUserKey {
-    TradeByUserKey::new(user, TradeGlobalSeq::new(u64::MAX))
+    fn last_of(user: UserId) -> Self {
+        Self::new(user, TradeGlobalSeq::new(u64::MAX))
+    }
 }
 
 /// One side-projected trade, holding everything needed to audit one of the two
@@ -48,7 +48,7 @@ fn trade_by_user_last(user: UserId) -> TradeByUserKey {
 /// Once the canister is launched its CBOR layout is an upgrade-durable schema;
 /// pre-launch there are no persisted records, so schema changes are acceptable.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct Trade {
+pub struct TradeRecord {
     #[n(0)]
     pub side: Side,
     #[n(1)]
@@ -67,28 +67,7 @@ pub struct Trade {
     pub timestamp: Timestamp,
 }
 
-impl Storable for Trade {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        minicbor::encode(self, &mut buf).expect("trade encoding should always succeed");
-        Cow::Owned(buf)
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        minicbor::encode(&self, &mut buf).expect("trade encoding should always succeed");
-        buf
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        minicbor::decode(bytes.as_ref())
-            .unwrap_or_else(|e| panic!("failed to decode trade bytes: {e}"))
-    }
-
-    const BOUND: Bound = Bound::Unbounded;
-}
-
-impl Trade {
+impl TradeRecord {
     /// Projects this trade to the public [`oisy_trade_types::Trade`], stamping it
     /// with `id` as its identity and pagination cursor — its [`TradeId`] in the
     /// same opaque text form `get_my_trades` decodes for `after`, so a returned
@@ -109,19 +88,19 @@ impl Trade {
     }
 }
 
-/// Stored value of [`TradeHistory`]'s primary map: a [`Trade`] paired with the
+/// Stored value of [`TradeHistory`]'s primary map: a [`TradeRecord`] paired with the
 /// canister-global insertion sequence assigned when it was inserted. That
 /// sequence keys the per-user index (scanned in reverse for newest-first) and
 /// lets `trades_after` resolve a [`TradeId`] cursor back to its index position
 /// in O(log n). It's an index bookkeeping concern, so it lives in this wrapper
-/// rather than as a field on the domain [`Trade`]. Mirrors
+/// rather than as a field on the domain [`TradeRecord`]. Mirrors
 /// [`crate::order::OrderHistory`]'s `SeqOrderRecord`.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 struct SeqTrade {
     #[n(0)]
     global_seq: u64,
     #[n(1)]
-    trade: Trade,
+    trade: TradeRecord,
 }
 
 impl Storable for SeqTrade {
@@ -147,7 +126,7 @@ impl Storable for SeqTrade {
 
 /// One side-projected trade together with its primary key — what settlement
 /// produces and [`TradeHistory::append`] consumes.
-pub type TradeLeg = (TradeId, Trade);
+pub type TradeLeg = (TradeId, TradeRecord);
 
 /// The `after` cursor passed to a reader names a trade that is unknown (no
 /// record with that sequence in the scanned prefix) or not owned by the caller.
@@ -183,19 +162,22 @@ impl<M: Memory> TradeHistory<M> {
         }
     }
 
-    /// Append the two side-projected records of one match — the taker leg owned
-    /// by `taker_user` and the maker leg owned by `maker_user`, both already
-    /// keyed by their [`TradeId`] (the match's shared `FillSeq` paired with each
-    /// owning `OrderId`). Each record is written to the primary map and indexed
-    /// under its owner in `by_user` (2 + 2 inserts per match).
+    /// Project `settlement` into its two side-projected records — the taker leg
+    /// owned by `taker_user` and the maker leg owned by `maker_user` — and append
+    /// them. Each leg is keyed by its [`TradeId`] (the match's shared `FillSeq`
+    /// paired with each owning `OrderId`, built from `book_id`) and stamped with
+    /// `timestamp`. Each record is written to the primary map and indexed under
+    /// its owner in `by_user` (2 + 2 inserts per match).
     pub fn append(
         &mut self,
-        taker_leg: TradeLeg,
+        settlement: FillSettlement,
+        book_id: OrderBookId,
+        timestamp: Timestamp,
         taker_user: UserId,
-        maker_leg: TradeLeg,
         maker_user: UserId,
     ) {
         bench_scopes!("fills", "fills::append");
+        let [taker_leg, maker_leg] = settlement.trade_legs(book_id, timestamp);
         self.insert(taker_leg, taker_user);
         self.insert(maker_leg, maker_user);
     }
@@ -209,8 +191,10 @@ impl<M: Memory> TradeHistory<M> {
             "BUG: duplicate trade id {id:?}"
         );
         assert_eq!(
-            self.by_user
-                .insert(trade_by_user_key(user, TradeGlobalSeq::new(global_seq)), id),
+            self.by_user.insert(
+                TradeByUserKey::new(user, TradeGlobalSeq::new(global_seq)),
+                id
+            ),
             None,
             "BUG: duplicate user-trade index entry for {user:?} seq {global_seq}"
         );
@@ -227,7 +211,7 @@ impl<M: Memory> TradeHistory<M> {
         order: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, Trade)>, CursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_for_order");
         use std::ops::Bound;
         let upper = match after {
@@ -264,14 +248,14 @@ impl<M: Memory> TradeHistory<M> {
         user: UserId,
         after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(TradeId, Trade)>, CursorNotFound> {
+    ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_after");
         use std::ops::Bound;
         let upper = match after {
-            None => Bound::Included(trade_by_user_last(user)),
+            None => Bound::Included(TradeByUserKey::last_of(user)),
             Some(cursor) => {
                 let entry = self.trades.get(&cursor).ok_or(CursorNotFound)?;
-                let key = trade_by_user_key(user, TradeGlobalSeq::new(entry.global_seq));
+                let key = TradeByUserKey::new(user, TradeGlobalSeq::new(entry.global_seq));
                 if self.by_user.get(&key) != Some(cursor) {
                     return Err(CursorNotFound);
                 }
@@ -280,7 +264,7 @@ impl<M: Memory> TradeHistory<M> {
         };
         Ok(self
             .by_user
-            .range((Bound::Included(trade_by_user_first(user)), upper))
+            .range((Bound::Included(TradeByUserKey::first_of(user)), upper))
             .rev()
             .take(length)
             .map(|entry| {
