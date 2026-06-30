@@ -153,9 +153,7 @@ pub trait FixedWidthId: Sized {
 pub struct ParseFixedWithIdError {}
 
 fn is_canonical_hex(s: &str, byte_width: usize) -> bool {
-    s.len() == 2 * byte_width
-        && s.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 2 * byte_width && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 impl<M> FixedWidthId for Seq<M> {
