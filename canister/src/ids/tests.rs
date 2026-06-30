@@ -37,10 +37,32 @@ mod seq {
 }
 
 mod composite {
+    use crate::ids::ParseFixedWithIdError;
     use crate::ids::tests::{
-        arb_composite_test, check_fixed_size, check_hex_roundtrip, check_minicbor_roundtrip,
+        CompositeTest, arb_composite_test, check_fixed_size, check_hex_roundtrip,
+        check_minicbor_roundtrip,
     };
     use proptest::proptest;
+
+    #[test]
+    fn should_reject_a_malformed_hex_id() {
+        assert_eq!("".parse::<CompositeTest>(), Err(ParseFixedWithIdError {}));
+        assert_eq!(
+            "0".repeat(31).parse::<CompositeTest>(),
+            Err(ParseFixedWithIdError {}),
+            "too short"
+        );
+        assert_eq!(
+            "0".repeat(33).parse::<CompositeTest>(),
+            Err(ParseFixedWithIdError {}),
+            "too long"
+        );
+        assert_eq!(
+            "z".repeat(32).parse::<CompositeTest>(),
+            Err(ParseFixedWithIdError {}),
+            "non-hex"
+        );
+    }
 
     proptest! {
         #[test]
