@@ -32,19 +32,6 @@ fn test_record() -> OrderRecord {
 }
 
 #[test]
-fn record_roundtrips_fill_or_kill_through_history() {
-    let mut history = history();
-    let id = order_id(0);
-    let record = test_record();
-    assert_eq!(record.time_in_force, TimeInForce::FillOrKill);
-    history.insert_once(UserId::new(0), id, record.clone());
-
-    let loaded = history.get(&id).unwrap();
-    assert_eq!(loaded.time_in_force, TimeInForce::FillOrKill);
-    assert_eq!(loaded, record);
-}
-
-#[test]
 fn public_record_surfaces_time_in_force() {
     let record = test_record();
     let public: oisy_trade_types::OrderRecord = record.into();

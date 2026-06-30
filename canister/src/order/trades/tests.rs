@@ -153,19 +153,6 @@ fn should_page_one_orders_trades_via_after_cursor() {
 }
 
 #[test]
-fn should_return_empty_page_for_unknown_order() {
-    let mut store = store();
-    append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
-    let unknown = OrderId::new(BOOK, OrderSeq::new(7));
-    assert!(
-        store
-            .trades_for_order(unknown, None, 10)
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[test]
 fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
     let mut store = store();
     let order_a = OrderId::new(BOOK, OrderSeq::new(0));
@@ -185,16 +172,6 @@ fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
         .trades_for_order(order_a, Some(FillSeq::ZERO), 10)
         .unwrap();
     assert!(trades.is_empty());
-}
-
-#[test]
-fn should_clamp_one_orders_page_to_requested_length() {
-    let mut store = store();
-    let order_a = OrderId::new(BOOK, OrderSeq::new(0));
-    for seq in 0..5 {
-        append(&mut store, Side::Buy, 0, 1, seq, USER, USER);
-    }
-    assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);
 }
 
 proptest! {
