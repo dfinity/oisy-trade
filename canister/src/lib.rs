@@ -470,7 +470,7 @@ pub fn get_my_trades(
                 .map_err(GetMyTradesError::InvalidCursor)?
                 .map(|id| id.seq());
             let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
-            state::with_state(|s| s.get_user_order_fills(&caller, order_id, after, length))
+            state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length))
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
