@@ -138,7 +138,7 @@ impl WorstCaseEvent {
             Self::AddLimitOrder => 108,
             Self::CancelLimitOrder => 34,
             Self::Matching => 9_027,
-            Self::Settling => 165_050,
+            Self::Settling => 208_030,
             Self::SetHalt => 918,
         }
     }
@@ -243,8 +243,8 @@ fn settling(order_count: usize) -> EventType {
     // buy-taker price improvement, base transfer) — the maximum per fill.
     let mut balance_operations = Vec::with_capacity(order_count * 3);
     for i in 0..order_count as u64 {
-        let taker = OrderSeq::new(2 * i);
-        let maker = OrderSeq::new(2 * i + 1);
+        let taker = OrderSeq::new(u64::MAX - 2 * i);
+        let maker = OrderSeq::new(u64::MAX - 2 * i - 1);
         balance_operations.push(BalanceOperation::Transfer {
             from_order: taker,
             to_order: maker,
@@ -278,8 +278,8 @@ fn settling(order_count: usize) -> EventType {
 fn max_settled_fill(index: u64) -> SettledFill {
     SettledFill {
         fill_seq: FillSeq::new(u64::MAX),
-        taker_order_seq: OrderSeq::new(2 * index),
-        maker_order_seq: OrderSeq::new(2 * index + 1),
+        taker_order_seq: OrderSeq::new(u64::MAX - 2 * index),
+        maker_order_seq: OrderSeq::new(u64::MAX - 2 * index - 1),
         quantity: max_quantity(),
         fee_rates: FeeRates {
             maker: BasisPoint::MAX,
