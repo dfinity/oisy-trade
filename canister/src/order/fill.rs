@@ -122,8 +122,7 @@ pub struct FillSettlement {
 impl FillSettlement {
     /// Compute the realized values of a single fill once.
     pub fn new(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> Self {
-        let (taker_fee, maker_fee) = fees(&fill, fee_rates, base_scale);
-        let notional = fill.quote_amount(base_scale);
+        let (notional, taker_fee, maker_fee) = fees(&fill, fee_rates, base_scale);
         let surplus = if fill.taker_side == Side::Buy
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !diff.is_zero()
@@ -265,8 +264,7 @@ impl SettledFill {
             maker_price,
             quantity: self.quantity,
         };
-        let notional = fill.quote_amount(base_scale);
-        let (taker_fee, maker_fee) = fees(&fill, self.fee_rates, base_scale);
+        let (notional, taker_fee, maker_fee) = fees(&fill, self.fee_rates, base_scale);
         let maker_side = match taker_side {
             Side::Buy => Side::Sell,
             Side::Sell => Side::Buy,
@@ -297,11 +295,17 @@ impl SettledFill {
     }
 }
 
-/// The `(taker_fee, maker_fee)` charged to a fill's two orders, each in its receive
-/// token. Shared by the matching-phase [`FillSettlement::new`] and the
-/// settling-phase [`SettledFill::trade_legs`] recompute, so the balance ops and the
-/// persisted trade legs can never diverge.
-fn fees(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> (Quantity, Quantity) {
+/// The fill's `(notional, taker_fee, maker_fee)`: the quote notional and the fee
+/// charged to each of the fill's two orders, each in its receive token. Shared by
+/// the matching-phase [`FillSettlement::new`] and the settling-phase
+/// [`SettledFill::trade_legs`] recompute, so the balance ops and the persisted trade
+/// legs can never diverge, and the notional (the costliest arithmetic) is computed
+/// once per fill at each call site.
+fn fees(
+    fill: &Fill,
+    fee_rates: FeeRates,
+    base_scale: NonZeroU64,
+) -> (Quantity, Quantity, Quantity) {
     let (buyer_rate, seller_rate) = match fill.taker_side {
         Side::Buy => (fee_rates.taker, fee_rates.maker),
         Side::Sell => (fee_rates.maker, fee_rates.taker),
@@ -309,10 +313,11 @@ fn fees(fill: &Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> (Quantity, 
     let notional = fill.quote_amount(base_scale);
     let quote_fee = seller_rate.mul_ceil(notional);
     let base_fee = buyer_rate.mul_ceil(fill.quantity);
-    match fill.taker_side {
+    let (taker_fee, maker_fee) = match fill.taker_side {
         Side::Buy => (base_fee, quote_fee),
         Side::Sell => (quote_fee, base_fee),
-    }
+    };
+    (notional, taker_fee, maker_fee)
 }
 
 /// The settlement of a removed order (canceled or killed): the placement
