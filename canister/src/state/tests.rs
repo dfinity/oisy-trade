@@ -2504,7 +2504,7 @@ mod settle_fills {
                 .lookup(owner)
                 .expect("owner should be registered after settlement");
             state
-                .fill_store
+                .trade_history
                 .trades_after(user, None, 100)
                 .expect("account-wide fill read should not error")
                 .into_iter()

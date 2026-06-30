@@ -84,7 +84,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
-        fill_store(),
+        trade_history(),
         user_registry(),
         balances(),
     )
@@ -292,7 +292,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
     );
-    let fill_store = crate::order::TradeHistory::new(
+    let trade_history = crate::order::TradeHistory::new(
         crate::storage::trades_memory(),
         crate::storage::trades_by_user_memory(),
     );
@@ -306,7 +306,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
-            fill_store,
+            trade_history,
             user_registry,
             balances,
         )
@@ -374,7 +374,7 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
-pub fn fill_store() -> TradeHistory<VectorMemory> {
+pub fn trade_history() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
