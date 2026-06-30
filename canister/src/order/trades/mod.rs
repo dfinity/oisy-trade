@@ -215,7 +215,7 @@ impl<M: Memory> TradeHistory<M> {
     /// resolved via an O(log n) point lookup of its stored `global_seq` in the
     /// primary map; each page then reverse-scans the `by_user` index and resolves
     /// each [`TradeId`] from the primary map — the exact shape of
-    /// `OrderHistory::orders_after` — so it is `O(length)`.
+    /// `OrderHistory::orders_after` — so it is `O(length * log n)`.
     pub fn trades_after(
         &self,
         user: UserId,
