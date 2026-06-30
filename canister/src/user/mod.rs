@@ -6,80 +6,23 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ids::{FixedWidthId, ParseFixedWithIdError};
+use crate::ids::{Seq, SeqMarker};
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
-use std::fmt;
+
+/// Marker distinguishing the user-id family of [`Seq`].
+#[derive(Debug, Clone, Copy)]
+pub struct UserIdMarker;
+
+impl SeqMarker for UserIdMarker {
+    const NAME: &'static str = "UserId";
+}
 
 /// Compact, stable handle for a user identity. Assigned densely (`0..n`) by
 /// [`UserRegistry`] and never reused — identities are never removed.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, minicbor::Encode, minicbor::Decode,
-)]
-pub struct UserId(#[n(0)] u64);
-
-impl UserId {
-    pub const fn new(id: u64) -> Self {
-        Self(id)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-}
-
-impl Storable for UserId {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(self.0.to_be_bytes().to_vec())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.0.to_be_bytes().to_vec()
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Self(u64::from_be_bytes(
-            bytes
-                .as_ref()
-                .try_into()
-                .expect("UserId decodes from 8 bytes"),
-        ))
-    }
-
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 8,
-        is_fixed_size: true,
-    };
-}
-
-impl FixedWidthId for UserId {
-    const WIDTH: usize = 8;
-
-    fn write_be_bytes(&self, bytes: &mut Vec<u8>) {
-        bytes.extend_from_slice(&self.0.to_be_bytes());
-    }
-
-    fn from_be_bytes(bytes: &[u8]) -> Result<Self, ParseFixedWithIdError> {
-        Ok(Self(u64::from_be_bytes(
-            bytes.try_into().map_err(|_e| ParseFixedWithIdError {})?,
-        )))
-    }
-
-    fn write_hex(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}", self.0)
-    }
-
-    fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
-        if s.len() != 2 * Self::WIDTH || !s.is_ascii() {
-            return Err(ParseFixedWithIdError {});
-        }
-        u64::from_str_radix(s, 16)
-            .map(Self)
-            .map_err(|_e| ParseFixedWithIdError {})
-    }
-}
+pub type UserId = Seq<UserIdMarker>;
 
 /// Point-lookup key wrapping a `Principal` (the registry never range-scans, so
 /// no order-preserving encoding is needed — CBOR like `BalanceKey`).
