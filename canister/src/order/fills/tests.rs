@@ -3,8 +3,10 @@ use crate::Timestamp;
 use crate::order::{
     FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
 };
+use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
+use proptest::proptest;
 
 const USER: UserId = UserId::new(0);
 
@@ -316,6 +318,13 @@ fn should_clamp_an_account_page_to_requested_length() {
         );
     }
     assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
+}
+
+proptest! {
+    #[test]
+    fn should_encode_decode_minicbor(record in arb_trade_record()) {
+        check_minicbor_roundtrip(&record)?;
+    }
 }
 
 fn store() -> TradeHistory<VectorMemory> {
