@@ -7,7 +7,7 @@ use crate::order::{
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent, MatchingEvent,
-    SettlingEvent, WithdrawEvent,
+    WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -231,9 +231,9 @@ impl Scenario {
             .state
             .take_next_pending_settling_event()
             .expect("BUG: record_cancel_limit_order did not push a settling event");
-        self.state
-            .record_settling_event(&settling_event, StableMemoryOptions::Write);
         let settling_ts = self.timestamp();
+        self.state
+            .record_settling_event(&settling_event, settling_ts, StableMemoryOptions::Write);
         self.events.push(Event {
             timestamp: cancel_ts,
             payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }),
@@ -245,26 +245,40 @@ impl Scenario {
         self
     }
 
-    /// Runs the matching timer on the primary path and records the
-    /// caller-supplied `MatchingEvent` + `SettlingEvent` as the expected
-    /// replay payload.
-    fn with_matching_round(mut self, matching: MatchingEvent, settling: SettlingEvent) -> Self {
-        // The executor's `MatchingEvent` is timestamped with the runtime's
-        // `time()`; pin the runtime to `matching_ts` so the primary path stamps
-        // `last_updated_at` with the same value the replayed event carries.
+    /// Drives one matching round on the primary path and records the resulting
+    /// `MatchingEvent` + `SettlingEvent` as the expected replay payload. The
+    /// caller passes the `MatchingEvent` and the expected `balance_operations`;
+    /// the harness drives matching directly (one chunk, mirroring the executor)
+    /// so it can capture the real `SettlingEvent` — including the per-fill
+    /// settlements — from the pending queue and assert its balance operations
+    /// match the expectation before recording it for replay.
+    fn with_matching_round(
+        mut self,
+        matching: MatchingEvent,
+        expected_balance_operations: Vec<BalanceOperation>,
+    ) -> Self {
         let matching_ts = self.timestamp();
-        let runtime =
-            crate::test_fixtures::mocks::mock_runtime_at(Principal::anonymous(), matching_ts);
-        crate::EXECUTOR.run_once(&mut self.state, &runtime);
-        let settling_ts = self.timestamp();
+        self.state
+            .record_matching_event(&matching, matching_ts, StableMemoryOptions::Write);
         self.events.push(Event {
             timestamp: matching_ts,
             payload: EventType::Matching(matching),
         });
-        self.events.push(Event {
-            timestamp: settling_ts,
-            payload: EventType::Settling(settling),
-        });
+        let mut produced_balance_operations = Vec::new();
+        while let Some(settling) = self.state.take_next_pending_settling_event() {
+            produced_balance_operations.extend(settling.balance_operations.iter().cloned());
+            let settling_ts = self.timestamp();
+            self.state
+                .record_settling_event(&settling, settling_ts, StableMemoryOptions::Write);
+            self.events.push(Event {
+                timestamp: settling_ts,
+                payload: EventType::Settling(settling),
+            });
+        }
+        assert_eq!(
+            produced_balance_operations, expected_balance_operations,
+            "matching round produced unexpected balance operations",
+        );
         self
     }
 
@@ -497,14 +511,11 @@ fn should_replay_killed_fill_or_kill_order_preserving_expired_state() {
                 book_id,
                 orders: vec![fok_id.seq()],
             },
-            SettlingEvent {
-                book_id,
-                balance_operations: vec![BalanceOperation::Unreserve {
-                    order: fok_id.seq(),
-                    token: PairToken::Quote,
-                    amount: Quantity::from(reserved),
-                }],
-            },
+            vec![BalanceOperation::Unreserve {
+                order: fok_id.seq(),
+                token: PairToken::Quote,
+                amount: Quantity::from(reserved),
+            }],
         )
         // The kill released the whole reservation back to free exactly once.
         .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
@@ -554,25 +565,22 @@ fn should_replay_matching() {
                 // FIFO order of pending seqs at round entry — buy then sell.
                 orders: vec![buy_id.seq(), sell_id.seq()],
             },
-            SettlingEvent {
-                book_id,
-                balance_operations: vec![
-                    BalanceOperation::Transfer {
-                        from_order: buy_id.seq(),
-                        to_order: sell_id.seq(),
-                        token: PairToken::Quote,
-                        amount: Quantity::from(price * quantity),
-                        fee: None,
-                    },
-                    BalanceOperation::Transfer {
-                        from_order: sell_id.seq(),
-                        to_order: buy_id.seq(),
-                        token: PairToken::Base,
-                        amount: Quantity::from(quantity),
-                        fee: None,
-                    },
-                ],
-            },
+            vec![
+                BalanceOperation::Transfer {
+                    from_order: buy_id.seq(),
+                    to_order: sell_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(price * quantity),
+                    fee: None,
+                },
+                BalanceOperation::Transfer {
+                    from_order: sell_id.seq(),
+                    to_order: buy_id.seq(),
+                    token: PairToken::Base,
+                    amount: Quantity::from(quantity),
+                    fee: None,
+                },
+            ],
         )
         // Post-fill balances: buyer holds `quantity` base free, seller holds
         // `price × quantity` quote free, everything else drained.
@@ -624,30 +632,27 @@ fn should_replay_matching_with_price_improvement() {
                 book_id,
                 orders: vec![sell_id.seq(), buy_id.seq()],
             },
-            SettlingEvent {
-                book_id,
-                balance_operations: vec![
-                    BalanceOperation::Transfer {
-                        from_order: buy_id.seq(),
-                        to_order: sell_id.seq(),
-                        token: PairToken::Quote,
-                        amount: Quantity::from(maker_price * quantity),
-                        fee: None,
-                    },
-                    BalanceOperation::Unreserve {
-                        order: buy_id.seq(),
-                        token: PairToken::Quote,
-                        amount: Quantity::from((taker_price - maker_price) * quantity),
-                    },
-                    BalanceOperation::Transfer {
-                        from_order: sell_id.seq(),
-                        to_order: buy_id.seq(),
-                        token: PairToken::Base,
-                        amount: Quantity::from(quantity),
-                        fee: None,
-                    },
-                ],
-            },
+            vec![
+                BalanceOperation::Transfer {
+                    from_order: buy_id.seq(),
+                    to_order: sell_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from(maker_price * quantity),
+                    fee: None,
+                },
+                BalanceOperation::Unreserve {
+                    order: buy_id.seq(),
+                    token: PairToken::Quote,
+                    amount: Quantity::from((taker_price - maker_price) * quantity),
+                },
+                BalanceOperation::Transfer {
+                    from_order: sell_id.seq(),
+                    to_order: buy_id.seq(),
+                    token: PairToken::Base,
+                    amount: Quantity::from(quantity),
+                    fee: None,
+                },
+            ],
         )
         // Post-fill balances: buyer gets `quantity` base, the `(taker-maker) ×
         // quantity` quote surplus refunded to free, seller gets
@@ -732,25 +737,22 @@ fn should_replay_cancel_partially_filled_order() {
             book_id,
             orders: vec![sell_id.seq(), buy_id.seq()],
         },
-        SettlingEvent {
-            book_id,
-            balance_operations: vec![
-                BalanceOperation::Transfer {
-                    from_order: buy_id.seq(),
-                    to_order: sell_id.seq(),
-                    token: PairToken::Quote,
-                    amount: Quantity::from(price * quantity),
-                    fee: None,
-                },
-                BalanceOperation::Transfer {
-                    from_order: sell_id.seq(),
-                    to_order: buy_id.seq(),
-                    token: PairToken::Base,
-                    amount: Quantity::from(quantity),
-                    fee: None,
-                },
-            ],
-        },
+        vec![
+            BalanceOperation::Transfer {
+                from_order: buy_id.seq(),
+                to_order: sell_id.seq(),
+                token: PairToken::Quote,
+                amount: Quantity::from(price * quantity),
+                fee: None,
+            },
+            BalanceOperation::Transfer {
+                from_order: sell_id.seq(),
+                to_order: buy_id.seq(),
+                token: PairToken::Base,
+                amount: Quantity::from(quantity),
+                fee: None,
+            },
+        ],
     );
 
     scenario

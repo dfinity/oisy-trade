@@ -2339,7 +2339,7 @@ mod settle_fills {
 
             // Taker's two fills, newest-first: Fill 2 (3 ICP @ 11) then Fill 1
             // (2 ICP @ 10) — each at the maker's price, never the taker's 12.
-            let taker_fills = fills_of(&state, BUYER, taker);
+            let taker_fills = order_trades_of(&state, BUYER, taker);
             assert_eq!(taker_fills.len(), 2);
             let fill2 = &taker_fills[0];
             assert_eq!(fill2.side, Side::Buy);
@@ -2357,7 +2357,7 @@ mod settle_fills {
             assert_eq!(fill1.fee_token, PairToken::Base);
 
             // Maker A's single fill: maker role, quote-denominated 0.01 fee.
-            let a_fills = fills_of(&state, SELLER, maker_a);
+            let a_fills = order_trades_of(&state, SELLER, maker_a);
             assert_eq!(a_fills.len(), 1);
             assert_eq!(a_fills[0].side, Side::Sell);
             assert!(a_fills[0].is_maker);
@@ -2367,7 +2367,7 @@ mod settle_fills {
             assert_eq!(a_fills[0].fee_token, PairToken::Quote);
 
             // Maker B's single fill: quote-denominated 0.0165 fee.
-            let b_fills = fills_of(&state, MAKER_B, maker_b);
+            let b_fills = order_trades_of(&state, MAKER_B, maker_b);
             assert_eq!(b_fills.len(), 1);
             assert!(b_fills[0].is_maker);
             assert_eq!(b_fills[0].notional, Quantity::from(33_000_000u128));
@@ -2389,7 +2389,7 @@ mod settle_fills {
             test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let fills = fills_of(&state, BUYER, pivot);
+            let fills = order_trades_of(&state, BUYER, pivot);
             assert_eq!(fills.len(), 2);
             // Newest-first: the maker leg (rested, then hit) followed by the
             // taker leg (crossed on entry).
@@ -2416,12 +2416,12 @@ mod settle_fills {
 
             assert_eq!(
                 state
-                    .get_user_order_fills(&BUYER, maker_a, None, 10)
+                    .get_user_order_trades(&BUYER, maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
                 "a non-owner sees no fills for the maker's order",
             );
-            assert_eq!(fills_of(&state, SELLER, maker_a).len(), 1);
+            assert_eq!(order_trades_of(&state, SELLER, maker_a).len(), 1);
         }
 
         /// `ByAccount` for a caller that never traded (and so is not a
@@ -2502,24 +2502,135 @@ mod settle_fills {
             state.record_matching_event(&event, Timestamp::EPOCH, StableMemoryOptions::Skip);
 
             assert_eq!(
-                state.get_user_order_fills(&BUYER, taker, None, 10).unwrap(),
+                state
+                    .get_user_order_trades(&BUYER, taker, None, 10)
+                    .unwrap(),
                 Vec::new(),
             );
             assert_eq!(
                 state
-                    .get_user_order_fills(&SELLER, maker_a, None, 10)
+                    .get_user_order_trades(&SELLER, maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
             );
         }
 
-        fn fills_of(
+        /// The `Skip` gate at the top of `record_settling_event` is the
+        /// load-bearing replay-safety mechanism for R8: a settling event that
+        /// carries real fills and balance operations must write trades and move
+        /// balances under `Write`, yet be a strict no-op under `Skip` so a
+        /// post-upgrade replay does not double-write the durable fills.
+        #[test]
+        fn settling_event_under_skip_writes_no_fills_and_no_balances() {
+            let pair = icp_ckusdt_trading_pair();
+
+            let settling_event = {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                state
+                    .take_next_pending_settling_event()
+                    .expect("matching a full cross must produce a settling event")
+            };
+            assert!(
+                !settling_event.fills.is_empty(),
+                "the settling event must carry fills for the gate to be exercised",
+            );
+            assert!(
+                !settling_event.balance_operations.is_empty(),
+                "the settling event must carry balance operations for the gate to be exercised",
+            );
+
+            let prepare = || {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                let _ = state.take_next_pending_settling_event();
+                (state, maker, taker)
+            };
+
+            let balances_of = |state: &TestState| {
+                [
+                    state.get_balance(&BUYER, &pair.base),
+                    state.get_balance(&BUYER, &pair.quote),
+                    state.get_balance(&SELLER, &pair.base),
+                    state.get_balance(&SELLER, &pair.quote),
+                ]
+            };
+
+            let (mut skip_state, skip_maker, skip_taker) = prepare();
+            let balances_before = balances_of(&skip_state);
+            skip_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Skip,
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, BUYER, skip_taker),
+                Vec::new(),
+                "Skip replay must not write the taker's fill",
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, SELLER, skip_maker),
+                Vec::new(),
+                "Skip replay must not write the maker's fill",
+            );
+            assert_eq!(
+                balances_of(&skip_state),
+                balances_before,
+                "Skip replay must not move any balances",
+            );
+
+            let (mut write_state, write_maker, write_taker) = prepare();
+            write_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+            assert_eq!(
+                order_trades_of(&write_state, BUYER, write_taker).len(),
+                1,
+                "Write must write the taker's fill exactly once",
+            );
+            assert_eq!(
+                order_trades_of(&write_state, SELLER, write_maker).len(),
+                1,
+                "Write must write the maker's fill exactly once",
+            );
+            assert_ne!(
+                balances_of(&write_state),
+                balances_before,
+                "Write must move balances, proving the Skip case is a real no-op",
+            );
+        }
+
+        fn order_trades_of(
             state: &TestState,
             owner: Principal,
             order_id: crate::order::OrderId,
         ) -> Vec<crate::order::TradeRecord> {
             state
-                .get_user_order_fills(&owner, order_id, None, 100)
+                .get_user_order_trades(&owner, order_id, None, 100)
                 .expect("owner-scoped fill read should not error")
                 .into_iter()
                 .map(|(_, record)| record)
