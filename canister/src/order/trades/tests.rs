@@ -25,7 +25,8 @@ fn should_append_two_side_projected_records_keyed_by_trade_id() {
     let taker = trade_id(0, 0);
     let maker = trade_id(1, 0);
 
-    store.append((taker, taker_leg()), USER, (maker, maker_leg()), USER);
+    store.insert((taker, taker_leg()), USER);
+    store.insert((maker, maker_leg()), USER);
 
     assert_eq!(store.len(), 2);
 
@@ -45,18 +46,10 @@ fn should_return_one_orders_trades_newest_first_excluding_other_orders() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     // Two matches against order A (fill_seqs 0, 1) each paired with order B.
-    store.append(
-        (TradeId::new(order_a, FillSeq::new(0)), taker_leg()),
-        USER,
-        (trade_id(1, 0), maker_leg()),
-        USER,
-    );
-    store.append(
-        (TradeId::new(order_a, FillSeq::new(1)), taker_leg()),
-        USER,
-        (trade_id(1, 1), maker_leg()),
-        USER,
-    );
+    store.insert((TradeId::new(order_a, FillSeq::new(0)), taker_leg()), USER);
+    store.insert((trade_id(1, 0), maker_leg()), USER);
+    store.insert((TradeId::new(order_a, FillSeq::new(1)), taker_leg()), USER);
+    store.insert((trade_id(1, 1), maker_leg()), USER);
 
     let seqs: Vec<u64> = store
         .trades_for_order(order_a, None, 10)
@@ -72,12 +65,8 @@ fn should_page_one_orders_trades_via_after_cursor() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..3 {
-        store.append(
-            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
-            USER,
-            (trade_id(1, seq), maker_leg()),
-            USER,
-        );
+        store.insert((TradeId::new(order_a, FillSeq::new(seq)), taker_leg()), USER);
+        store.insert((trade_id(1, seq), maker_leg()), USER);
     }
     let first = store.trades_for_order(order_a, None, 2).unwrap();
     assert_eq!(
@@ -95,12 +84,8 @@ fn should_page_one_orders_trades_via_after_cursor() {
 #[test]
 fn should_return_empty_page_for_unknown_order() {
     let mut store = store();
-    store.append(
-        (trade_id(0, 0), taker_leg()),
-        USER,
-        (trade_id(1, 0), maker_leg()),
-        USER,
-    );
+    store.insert((trade_id(0, 0), taker_leg()), USER);
+    store.insert((trade_id(1, 0), maker_leg()), USER);
     let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(7));
     assert!(
         store
@@ -114,12 +99,8 @@ fn should_return_empty_page_for_unknown_order() {
 fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    store.append(
-        (TradeId::new(order_a, FillSeq::ZERO), taker_leg()),
-        USER,
-        (trade_id(1, 0), maker_leg()),
-        USER,
-    );
+    store.insert((TradeId::new(order_a, FillSeq::ZERO), taker_leg()), USER);
+    store.insert((trade_id(1, 0), maker_leg()), USER);
     assert_eq!(
         store.trades_for_order(order_a, Some(FillSeq::new(99)), 10),
         Err(CursorNotFound)
@@ -130,12 +111,8 @@ fn should_reject_a_cursor_that_is_not_one_of_the_orders_trades() {
 fn should_return_empty_page_for_a_valid_cursor_with_no_older_trades() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
-    store.append(
-        (TradeId::new(order_a, FillSeq::ZERO), taker_leg()),
-        USER,
-        (trade_id(1, 0), maker_leg()),
-        USER,
-    );
+    store.insert((TradeId::new(order_a, FillSeq::ZERO), taker_leg()), USER);
+    store.insert((trade_id(1, 0), maker_leg()), USER);
     let trades = store
         .trades_for_order(order_a, Some(FillSeq::ZERO), 10)
         .unwrap();
@@ -147,12 +124,8 @@ fn should_clamp_one_orders_page_to_requested_length() {
     let mut store = store();
     let order_a = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..5 {
-        store.append(
-            (TradeId::new(order_a, FillSeq::new(seq)), taker_leg()),
-            USER,
-            (trade_id(1, seq), maker_leg()),
-            USER,
-        );
+        store.insert((TradeId::new(order_a, FillSeq::new(seq)), taker_leg()), USER);
+        store.insert((trade_id(1, seq), maker_leg()), USER);
     }
     assert_eq!(store.trades_for_order(order_a, None, 2).unwrap().len(), 2);
 }
@@ -166,18 +139,10 @@ fn should_return_a_users_trades_across_orders_newest_first_scoped_to_owner() {
     let alice_b = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1));
     let bob_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(2));
 
-    store.append(
-        (TradeId::new(alice_a, FillSeq::new(0)), taker_leg()),
-        alice,
-        (TradeId::new(bob_order, FillSeq::new(0)), maker_leg()),
-        bob,
-    );
-    store.append(
-        (TradeId::new(alice_b, FillSeq::new(1)), taker_leg()),
-        alice,
-        (TradeId::new(bob_order, FillSeq::new(1)), maker_leg()),
-        bob,
-    );
+    store.insert((TradeId::new(alice_a, FillSeq::new(0)), taker_leg()), alice);
+    store.insert((TradeId::new(bob_order, FillSeq::new(0)), maker_leg()), bob);
+    store.insert((TradeId::new(alice_b, FillSeq::new(1)), taker_leg()), alice);
+    store.insert((TradeId::new(bob_order, FillSeq::new(1)), maker_leg()), bob);
 
     let alice_orders: Vec<OrderId> = store
         .trades_after(alice, None, 10)
@@ -211,12 +176,11 @@ fn should_page_a_users_trades_via_after_cursor() {
     let other = UserId::new(2);
     let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..3 {
-        store.append(
+        store.insert(
             (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
             alice,
-            (trade_id(1, seq), maker_leg()),
-            other,
         );
+        store.insert((trade_id(1, seq), maker_leg()), other);
     }
     let first = store.trades_after(alice, None, 2).unwrap();
     assert_eq!(
@@ -248,12 +212,8 @@ fn should_page_a_users_trades_via_after_cursor() {
 #[test]
 fn should_return_an_empty_account_page_for_an_unknown_user() {
     let mut store = store();
-    store.append(
-        (trade_id(0, 0), taker_leg()),
-        UserId::new(1),
-        (trade_id(1, 0), maker_leg()),
-        UserId::new(2),
-    );
+    store.insert((trade_id(0, 0), taker_leg()), UserId::new(1));
+    store.insert((trade_id(1, 0), maker_leg()), UserId::new(2));
     assert!(
         store
             .trades_after(UserId::new(7), None, 10)
@@ -268,12 +228,8 @@ fn should_reject_an_account_cursor_that_is_not_one_of_the_users_trades() {
     let alice = UserId::new(1);
     let bob = UserId::new(2);
     let bob_id = trade_id(1, 0);
-    store.append(
-        (trade_id(0, 0), taker_leg()),
-        alice,
-        (bob_id, maker_leg()),
-        bob,
-    );
+    store.insert((trade_id(0, 0), taker_leg()), alice);
+    store.insert((bob_id, maker_leg()), bob);
     assert_eq!(
         store.trades_after(alice, Some(bob_id), 10),
         Err(CursorNotFound)
@@ -290,12 +246,8 @@ fn should_return_an_empty_account_page_for_a_valid_cursor_with_no_older_trades()
     let mut store = store();
     let alice = UserId::new(1);
     let alice_id = trade_id(0, 0);
-    store.append(
-        (alice_id, taker_leg()),
-        alice,
-        (trade_id(1, 0), maker_leg()),
-        UserId::new(2),
-    );
+    store.insert((alice_id, taker_leg()), alice);
+    store.insert((trade_id(1, 0), maker_leg()), UserId::new(2));
     assert!(
         store
             .trades_after(alice, Some(alice_id), 10)
@@ -310,12 +262,11 @@ fn should_clamp_an_account_page_to_requested_length() {
     let alice = UserId::new(1);
     let alice_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(0));
     for seq in 0..5 {
-        store.append(
+        store.insert(
             (TradeId::new(alice_order, FillSeq::new(seq)), taker_leg()),
             alice,
-            (trade_id(1, seq), maker_leg()),
-            UserId::new(2),
         );
+        store.insert((trade_id(1, seq), maker_leg()), UserId::new(2));
     }
     assert_eq!(store.trades_after(alice, None, 2).unwrap().len(), 2);
 }

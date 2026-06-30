@@ -22,7 +22,7 @@ use crate::order::{
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
     RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeCursorNotFound,
-    TradeHistory, TradeLeg, TradeRecord, TradingPair,
+    TradeHistory, TradeRecord, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -405,26 +405,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 filled_orders,
                 expired_orders,
             } = output;
-            let (balance_operations, mut updates, trades) = settle(
-                fills,
-                &expired_orders,
-                fee_rates,
-                base_scale,
-                event.book_id,
-                now,
-            );
-            if !trades.is_empty() {
+            let (balance_operations, mut updates, settlements) =
+                settle(fills, &expired_orders, fee_rates, base_scale);
+            if !settlements.is_empty() {
                 let user_cache = resolve_op_users(
                     &event.book_id,
                     &balance_operations,
                     &self.order_history,
                     &self.user_registry,
                 );
-                for [taker_leg, maker_leg] in trades {
-                    let taker_user = user_cache[&taker_leg.0.order_id().seq()];
-                    let maker_user = user_cache[&maker_leg.0.order_id().seq()];
-                    self.fill_store
-                        .append(taker_leg, taker_user, maker_leg, maker_user);
+                for settlement in settlements {
+                    let taker_user = user_cache[&settlement.taker_order_seq()];
+                    let maker_user = user_cache[&settlement.maker_order_seq()];
+                    self.trade_history
+                        .append(settlement, event.book_id, now, taker_user, maker_user);
                 }
             }
             {
@@ -960,26 +954,24 @@ fn settle(
     expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
-    book_id: OrderBookId,
-    now: Timestamp,
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<[TradeLeg; 2]>,
+    Vec<FillSettlement>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
-    let mut trades = Vec::with_capacity(fills.len());
+    let mut settlements = Vec::with_capacity(fills.len());
     for fill in fills {
         let settlement = FillSettlement::new(fill, fee_rates, base_scale);
         settlement.push_balance_operations(&mut ops);
         settlement.accrue_fill(&mut updates);
-        trades.push(settlement.trades(book_id, now));
+        settlements.push(settlement);
     }
     for (seq, removed) in expired_orders {
         RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
     }
-    (ops, updates, trades)
+    (ops, updates, settlements)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

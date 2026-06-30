@@ -202,13 +202,25 @@ impl FillSettlement {
         }
     }
 
+    /// The taker order's per-book sequence, used to resolve its owner before
+    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    pub fn taker_order_seq(&self) -> OrderSeq {
+        self.fill.taker_order_seq
+    }
+
+    /// The maker order's per-book sequence, used to resolve its owner before
+    /// the settlement is handed to [`crate::order::TradeHistory::append`].
+    pub fn maker_order_seq(&self) -> OrderSeq {
+        self.fill.maker_order_seq
+    }
+
     /// Build the two side-projected [`TradeRecord`]s — the taker leg and the maker
     /// leg — from this fill's single computed settlement, each keyed by its
     /// [`TradeId`] `(OrderId, FillSeq)` and stamped with the settling event's
     /// `timestamp`. The two legs share the match's `fill_seq`; each record
     /// self-describes one order's view of the execution and never references the
-    /// counterparty.
-    pub fn trades(&self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
+    /// counterparty. Consumed by [`crate::order::TradeHistory::append`].
+    pub(crate) fn trade_legs(self, book_id: OrderBookId, timestamp: Timestamp) -> [TradeLeg; 2] {
         let fill = &self.fill;
         let taker_side = fill.taker_side;
         let maker_side = match taker_side {
