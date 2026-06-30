@@ -152,6 +152,12 @@ pub trait FixedWidthId: Sized {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseFixedWithIdError {}
 
+fn is_canonical_hex(s: &str, byte_width: usize) -> bool {
+    s.len() == 2 * byte_width
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 impl<M> FixedWidthId for Seq<M> {
     const WIDTH: usize = 8;
 
@@ -170,11 +176,7 @@ impl<M> FixedWidthId for Seq<M> {
     }
 
     fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
-        if s.len() != 2 * Self::WIDTH
-            || !s
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        if !is_canonical_hex(s, Self::WIDTH) {
             return Err(ParseFixedWithIdError {});
         }
         u64::from_str_radix(s, 16)
@@ -231,11 +233,7 @@ impl<A: FixedWidthId, B: FixedWidthId> FixedWidthId for CompositeId<A, B> {
     }
 
     fn from_hex(s: &str) -> Result<Self, ParseFixedWithIdError> {
-        if s.len() != 2 * Self::WIDTH
-            || !s
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        if !is_canonical_hex(s, Self::WIDTH) {
             return Err(ParseFixedWithIdError {});
         }
         let split = A::WIDTH * 2;
