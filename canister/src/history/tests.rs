@@ -187,33 +187,64 @@ fn should_page_by_user() {
     }
 }
 
+/// A `range_primary` scenario over a fixed `[10, 20, 30, 40]` store: the lower
+/// bound, the upper bound, the requested length, and the expected keys (as raw
+/// `u64`s) newest-first.
+struct RangeCase {
+    desc: &'static str,
+    lower: u64,
+    upper: Bound<u64>,
+    length: usize,
+    expected: Vec<u64>,
+}
+
 #[test]
 fn should_range_primary_newest_first_within_bounds() {
-    let mut store = store();
-    for key in [10u64, 20, 30, 40] {
-        store.insert_once(ALICE, TestKey::new(key), key);
+    let cases = vec![
+        RangeCase {
+            desc: "inclusive upper bound",
+            lower: 20,
+            upper: Bound::Included(40),
+            length: 10,
+            expected: vec![40, 30, 20],
+        },
+        RangeCase {
+            desc: "excluded upper bound",
+            lower: 20,
+            upper: Bound::Excluded(40),
+            length: 10,
+            expected: vec![30, 20],
+        },
+        RangeCase {
+            desc: "length clamps the range",
+            lower: 10,
+            upper: Bound::Included(40),
+            length: 2,
+            expected: vec![40, 30],
+        },
+    ];
+
+    for case in cases {
+        let mut store = store();
+        for key in [10u64, 20, 30, 40] {
+            store.insert_once(ALICE, TestKey::new(key), key);
+        }
+
+        let got: Vec<u64> = store
+            .range_primary(
+                TestKey::new(case.lower),
+                case.upper.map(TestKey::new),
+                case.length,
+            )
+            .into_iter()
+            .map(|(key, _)| key.get())
+            .collect();
+        assert_eq!(
+            got, case.expected,
+            "BUG ({}): range differs from expected",
+            case.desc
+        );
     }
-
-    let inclusive: Vec<u64> = store
-        .range_primary(TestKey::new(20), Bound::Included(TestKey::new(40)), 10)
-        .into_iter()
-        .map(|(key, _)| key.get())
-        .collect();
-    assert_eq!(inclusive, vec![40, 30, 20]);
-
-    let excluded: Vec<u64> = store
-        .range_primary(TestKey::new(20), Bound::Excluded(TestKey::new(40)), 10)
-        .into_iter()
-        .map(|(key, _)| key.get())
-        .collect();
-    assert_eq!(excluded, vec![30, 20]);
-
-    let clamped: Vec<u64> = store
-        .range_primary(TestKey::new(10), Bound::Included(TestKey::new(40)), 2)
-        .into_iter()
-        .map(|(key, _)| key.get())
-        .collect();
-    assert_eq!(clamped, vec![40, 30]);
 }
 
 proptest! {
