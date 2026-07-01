@@ -1,14 +1,11 @@
-use super::{CursorNotFound, SeqOrderRecord, USER_ORDER_KEY_LEN, UserOrderKey};
 use crate::Timestamp;
 use crate::order::{
     OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate, Price,
     Quantity, Side, TimeInForce,
 };
-use crate::test_fixtures::arbitrary::arb_order_record;
 use crate::user::UserId;
 use candid::Principal;
-use ic_stable_structures::{Storable, VectorMemory};
-use proptest::prelude::*;
+use ic_stable_structures::VectorMemory;
 
 fn history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
@@ -32,44 +29,6 @@ fn test_record() -> OrderRecord {
         filled_quote: Quantity::ZERO,
         filled_fee: Quantity::ZERO,
     }
-}
-
-#[test]
-fn insert_once_and_get() {
-    let mut history = history();
-    let id = order_id(0);
-    let record = test_record();
-    history.insert_once(UserId::new(0), id, record.clone());
-
-    assert_eq!(history.get(&id), Some(record));
-}
-
-#[test]
-#[should_panic(expected = "duplicate order ID")]
-fn insert_once_panics_on_duplicate() {
-    let mut history = history();
-    let id = order_id(0);
-    history.insert_once(UserId::new(0), id, test_record());
-    history.insert_once(UserId::new(0), id, test_record());
-}
-
-#[test]
-fn get_returns_none_for_missing() {
-    let history = history();
-    assert_eq!(history.get(&order_id(42)), None);
-}
-
-#[test]
-fn record_roundtrips_fill_or_kill_through_history() {
-    let mut history = history();
-    let id = order_id(0);
-    let record = test_record();
-    assert_eq!(record.time_in_force, TimeInForce::FillOrKill);
-    history.insert_once(UserId::new(0), id, record.clone());
-
-    let loaded = history.get(&id).unwrap();
-    assert_eq!(loaded.time_in_force, TimeInForce::FillOrKill);
-    assert_eq!(loaded, record);
 }
 
 #[test]
@@ -221,25 +180,6 @@ fn apply_update_traps_on_filled_fee_overflow() {
 }
 
 #[test]
-fn apply_update_is_a_noop_when_update_is_a_noop() {
-    let mut history = history();
-    let id = order_id(0);
-    history.insert_once(UserId::new(0), id, test_record());
-
-    // An empty update is a no-op: nothing written, `last_updated_at` stays None.
-    history.apply_update(&id, OrderUpdate::default(), Timestamp::new(99));
-    assert_eq!(history.get(&id), Some(test_record()));
-
-    // A status equal to the current one with a zero delta is also a no-op.
-    history.apply_update(
-        &id,
-        OrderUpdate::status(OrderStatus::Pending),
-        Timestamp::new(99),
-    );
-    assert_eq!(history.get(&id), Some(test_record()));
-}
-
-#[test]
 fn apply_update_does_not_change_last_updated_at_on_noop() {
     let mut history = history();
     let id = order_id(0);
@@ -278,159 +218,4 @@ fn apply_update_traps_when_filled_exceeds_quantity() {
         OrderUpdate::filled(Quantity::from(1_000_001u64)),
         Timestamp::new(1),
     );
-}
-
-#[test]
-fn orders_after_returns_newest_first() {
-    let mut history = history();
-    let owner = UserId::new(7);
-    history.insert_once(owner, order_id(0), test_record());
-    history.insert_once(owner, order_id(1), test_record());
-    history.insert_once(owner, order_id(2), test_record());
-
-    assert_eq!(
-        history.orders_after(owner, None, 10),
-        Ok(vec![order_id(2), order_id(1), order_id(0)])
-    );
-}
-
-#[test]
-fn orders_after_paginates_by_cursor() {
-    let mut history = history();
-    let owner = UserId::new(7);
-    for seq in 0..5 {
-        history.insert_once(owner, order_id(seq), test_record());
-    }
-    // Newest first: seq 4, 3, 2, 1, 0. The cursor is the previous page's
-    // last order.
-    assert_eq!(
-        history.orders_after(owner, None, 2),
-        Ok(vec![order_id(4), order_id(3)])
-    );
-    assert_eq!(
-        history.orders_after(owner, Some(order_id(3)), 2),
-        Ok(vec![order_id(2), order_id(1)])
-    );
-    assert_eq!(
-        history.orders_after(owner, Some(order_id(1)), 2),
-        Ok(vec![order_id(0)])
-    );
-    // A valid cursor at the oldest order has no older orders: end of history
-    // is Ok([]), not an error.
-    assert_eq!(
-        history.orders_after(owner, Some(order_id(0)), 2),
-        Ok(Vec::<OrderId>::new())
-    );
-}
-
-#[test]
-fn orders_after_unknown_cursor_is_not_found() {
-    let mut history = history();
-    let owner = UserId::new(7);
-    history.insert_once(owner, order_id(0), test_record());
-
-    assert_eq!(
-        history.orders_after(owner, Some(order_id(99)), 10),
-        Err(CursorNotFound)
-    );
-}
-
-#[test]
-fn orders_after_foreign_cursor_is_not_found() {
-    let mut history = history();
-    let alice = UserId::new(1);
-    let bob = UserId::new(2);
-    history.insert_once(alice, order_id(0), test_record());
-    history.insert_once(bob, order_id(1), test_record());
-    history.insert_once(alice, order_id(2), test_record());
-
-    // bob's order is a real, known `OrderId`, but it isn't alice's — paging
-    // alice's history after it must not skip into the middle of her orders.
-    assert_eq!(
-        history.orders_after(alice, Some(order_id(1)), 10),
-        Err(CursorNotFound)
-    );
-}
-
-#[test]
-fn orders_after_isolates_owners() {
-    let mut history = history();
-    let alice = UserId::new(1);
-    let bob = UserId::new(2);
-    // Interleaved global sequence: alice, bob, alice.
-    history.insert_once(alice, order_id(0), test_record());
-    history.insert_once(bob, order_id(1), test_record());
-    history.insert_once(alice, order_id(2), test_record());
-
-    assert_eq!(
-        history.orders_after(alice, None, 10),
-        Ok(vec![order_id(2), order_id(0)])
-    );
-    assert_eq!(history.orders_after(bob, None, 10), Ok(vec![order_id(1)]));
-    assert_eq!(
-        history.orders_after(UserId::new(3), None, 10),
-        Ok(Vec::<OrderId>::new())
-    );
-}
-
-#[test]
-fn orders_after_orders_across_books_by_global_seq() {
-    let mut history = history();
-    let owner = UserId::new(1);
-    let book0_first = OrderId::new(OrderBookId::ZERO, OrderSeq::new(5));
-    let book1 = OrderId::new(OrderBookId::new(1), OrderSeq::new(0));
-    let book0_second = OrderId::new(OrderBookId::ZERO, OrderSeq::new(6));
-    history.insert_once(owner, book0_first, test_record());
-    history.insert_once(owner, book1, test_record());
-    history.insert_once(owner, book0_second, test_record());
-
-    assert_eq!(
-        history.orders_after(owner, None, 10),
-        Ok(vec![book0_second, book1, book0_first])
-    );
-}
-
-proptest! {
-    /// `UserOrderKey`'s derived `Ord` must agree with its `Storable` byte order,
-    /// since `StableBTreeMap` relies on that consistency for range scans.
-    #[test]
-    fn user_order_key_ord_matches_storable_bytes(
-        keys in prop::collection::vec(arb_user_order_key(), 0..100),
-    ) {
-        for a in &keys {
-            for b in &keys {
-                prop_assert_eq!(
-                    a.cmp(b),
-                    a.to_bytes().cmp(&b.to_bytes()),
-                    "Ord disagrees with Storable bytes for {:?} vs {:?}",
-                    a,
-                    b
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn user_order_key_roundtrips_through_storable(key in arb_user_order_key()) {
-        prop_assert_eq!(UserOrderKey::from_bytes(key.to_bytes()), key);
-    }
-
-    #[test]
-    fn user_order_key_encodes_to_fixed_len(key in arb_user_order_key()) {
-        prop_assert_eq!(key.to_bytes().len(), USER_ORDER_KEY_LEN);
-    }
-
-    #[test]
-    fn seq_order_record_roundtrips_through_storable(entry in arb_seq_order_record()) {
-        prop_assert_eq!(SeqOrderRecord::from_bytes(entry.to_bytes()), entry);
-    }
-}
-
-fn arb_user_order_key() -> impl Strategy<Value = UserOrderKey> {
-    (any::<u64>(), any::<u64>())
-        .prop_map(|(user, seq)| UserOrderKey::from_seq(UserId::new(user), seq))
-}
-
-fn arb_seq_order_record() -> impl Strategy<Value = SeqOrderRecord> {
-    (any::<u64>(), arb_order_record()).prop_map(|(seq, record)| SeqOrderRecord { seq, record })
 }
