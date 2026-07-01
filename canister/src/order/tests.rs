@@ -1499,7 +1499,7 @@ mod fee_rates {
 
 mod settled_fill {
     use crate::Timestamp;
-    use crate::order::{FeeRates, Fill, FillSettlement, OrderBookId, PairToken, Side};
+    use crate::order::{FeeRates, Fill, FillSettlement, OrderBookId, PairToken, Side, TradeRecord};
     use crate::state::event::BalanceOperation;
     use crate::test_fixtures::arbitrary::{arb_fee_rates, arb_fill};
     use proptest::prelude::*;
@@ -1555,26 +1555,39 @@ mod settled_fill {
             );
 
             let (_, taker) = taker_leg;
-            prop_assert_eq!(taker.side, fill.taker_side);
-            prop_assert!(!taker.is_maker);
-            prop_assert_eq!(taker.price, fill.maker_price);
-            prop_assert_eq!(taker.quantity, fill.quantity);
-            prop_assert_eq!(taker.notional, notional);
-            prop_assert_eq!(taker.fee, expected_taker_fee);
-            prop_assert_eq!(
-                taker.fee_token,
-                match fill.taker_side { Side::Buy => PairToken::Base, Side::Sell => PairToken::Quote }
-            );
+            let expected_taker = TradeRecord {
+                side: fill.taker_side,
+                price: fill.maker_price,
+                quantity: fill.quantity,
+                notional,
+                fee: expected_taker_fee,
+                fee_token: match fill.taker_side {
+                    Side::Buy => PairToken::Base,
+                    Side::Sell => PairToken::Quote,
+                },
+                is_maker: false,
+                timestamp: TIMESTAMP,
+            };
+            prop_assert_eq!(taker, expected_taker);
 
             let (_, maker) = maker_leg;
-            prop_assert_eq!(maker.side, match fill.taker_side {
-                Side::Buy => Side::Sell,
-                Side::Sell => Side::Buy,
-            });
-            prop_assert!(maker.is_maker);
-            prop_assert_eq!(maker.price, fill.maker_price);
-            prop_assert_eq!(maker.notional, notional);
-            prop_assert_eq!(maker.fee, expected_maker_fee);
+            let expected_maker = TradeRecord {
+                side: match fill.taker_side {
+                    Side::Buy => Side::Sell,
+                    Side::Sell => Side::Buy,
+                },
+                price: fill.maker_price,
+                quantity: fill.quantity,
+                notional,
+                fee: expected_maker_fee,
+                fee_token: match fill.taker_side {
+                    Side::Buy => PairToken::Quote,
+                    Side::Sell => PairToken::Base,
+                },
+                is_maker: true,
+                timestamp: TIMESTAMP,
+            };
+            prop_assert_eq!(maker, expected_maker);
         }
     }
 
