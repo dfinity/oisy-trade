@@ -465,7 +465,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // path. Both legs of every fill are referenced by its balance ops, so
         // each fill's side and execution price are already in the cache — no
         // extra stable reads to rebuild the trade legs.
-        let resolved = resolve_op_users(
+        let resolved = resolve_op_orders(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
@@ -909,7 +909,7 @@ struct ResolvedOrder {
 /// price together; callers can then look the order up in the returned `BTreeMap`
 /// in O(log n) heap-only time, with no extra stable reads to recover a fill's
 /// side or execution price.
-fn resolve_op_users<MH: Memory, MB: Memory>(
+fn resolve_op_orders<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
     history: &OrderHistory<MH>,
