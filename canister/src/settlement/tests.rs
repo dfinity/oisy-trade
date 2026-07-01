@@ -48,7 +48,7 @@ mod settled_fill {
                 Side::Sell => (quote_fee.unwrap(), base_fee.unwrap()),
             };
 
-            let [taker_leg, maker_leg] = settlement.settled_fill().trade_legs(
+            let [taker_leg, maker_leg] = settlement.fill_event().trade_legs(
                 BOOK,
                 fill.taker_side,
                 fill.maker_price,
@@ -108,7 +108,7 @@ mod settled_fill {
             quantity: crate::order::Quantity::from(100_000_000u64),
         };
         let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
-        let settled = FillSettlement::new(fill, FeeRates::default(), base_scale).settled_fill();
+        let settled = FillSettlement::new(fill, FeeRates::default(), base_scale).fill_event();
         let [(taker_id, _), (maker_id, _)] =
             settled.trade_legs(BOOK, Side::Buy, price, base_scale, TIMESTAMP);
         assert_eq!(taker_id.fill_id(), maker_id.fill_id());

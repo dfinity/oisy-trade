@@ -48,7 +48,7 @@ impl MatchSettlement {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(&mut order_updates);
-            settled_fills.push(settlement.settled_fill());
+            settled_fills.push(settlement.fill_event());
         }
         for (seq, removed) in &expired_orders {
             RemovedOrderSettlement::new(*seq, removed, base_scale)
@@ -188,7 +188,7 @@ impl FillSettlement {
     /// The lean, normalized record persisted on the settling event: the fill's
     /// identity, quantity, and the fee-rate snapshot — everything else is
     /// recovered or recomputed in the settling phase.
-    pub fn settled_fill(&self) -> FillEvent {
+    pub fn fill_event(&self) -> FillEvent {
         FillEvent {
             fill_seq: self.fill.fill_seq,
             taker_order_seq: self.fill.taker_order_seq,
