@@ -652,6 +652,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.order_books.get(id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_book_fee_rates(
+        &mut self,
+        id: OrderBookId,
+        fee_rates: crate::order::FeeRates,
+    ) {
+        self.order_books
+            .get_mut(&id)
+            .expect("BUG: order book missing")
+            .set_fee_rates(fee_rates);
+    }
+
     pub fn is_known_token(&self, token_id: &TokenId) -> bool {
         self.tokens.contains_key(token_id)
     }

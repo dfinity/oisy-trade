@@ -221,6 +221,30 @@ where
 }
 
 #[cfg(test)]
+impl<M, K, V> History<M, K, V>
+where
+    M: Memory,
+    K: Storable + Ord + Clone + fmt::Debug,
+    V: Record,
+{
+    /// Encoded stable-memory footprint of the record under `key`: the primary
+    /// entry `(K key, SeqRecord<V> value)` plus its per-user index entry
+    /// `(ByUserKey, K)`, each summed from its `Storable` byte length. Panics if
+    /// `key` is absent.
+    pub(crate) fn entry_encoded_len(&self, key: &K, user: UserId) -> usize {
+        let entry = self
+            .primary
+            .get(key)
+            .unwrap_or_else(|| panic!("BUG: history key {key:?} missing"));
+        let index_key = ByUserKey::new(user, entry.seq);
+        key.to_bytes().len()
+            + entry.to_bytes().len()
+            + index_key.to_bytes().len()
+            + key.to_bytes().len()
+    }
+}
+
+#[cfg(test)]
 impl<K, V> History<ic_stable_structures::VectorMemory, K, V>
 where
     K: Storable + Ord + Clone + fmt::Debug,

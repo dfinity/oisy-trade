@@ -144,6 +144,16 @@ impl<M: Memory> TradeHistory<M> {
 }
 
 #[cfg(test)]
+impl<M: Memory> TradeHistory<M> {
+    /// Encoded stable-memory footprint of the leg persisted under `id` for
+    /// `user`: its primary `(TradeId, SeqRecord<TradeRecord>)` entry plus its
+    /// `(ByUserKey, TradeId)` index entry.
+    pub(crate) fn leg_encoded_len(&self, id: &TradeId, user: UserId) -> usize {
+        self.0.entry_encoded_len(id, user)
+    }
+}
+
+#[cfg(test)]
 impl TradeHistory<ic_stable_structures::VectorMemory> {
     fn len(&self) -> u64 {
         self.0.len()

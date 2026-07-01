@@ -2609,6 +2609,192 @@ mod settle_fills {
             );
         }
 
+        use crate::order::{FeeRates, Quantity};
+        use crate::state::event::{BalanceOperation, SettlingEvent};
+        use crate::test_fixtures::arbitrary::{arb_fee_rates, arb_side};
+        use proptest::prelude::Strategy;
+        use proptest::{prop_assert_eq, proptest};
+
+        fn arb_tick_aligned_price_in_notional_bounds() -> impl Strategy<Value = u128> {
+            let tick = TICK_SIZE.get();
+            (1u128..=1_000_000u128).prop_map(move |ticks| ticks * tick)
+        }
+
+        proptest! {
+            /// Over arbitrary fills, each persisted `TradeRecord.fee`/`notional`
+            /// equals the fee/amount of the `BalanceOperation` produced from the
+            /// same settlement — the quote transfer's `amount` is the notional of
+            /// both legs, its `fee` is the quote-side leg's fee, and the base
+            /// transfer's `fee` is the base-side leg's fee. A future edit that
+            /// lets the settle-time recompute drift from the match-time balance
+            /// ops fails here.
+            #[test]
+            fn persisted_fee_and_notional_match_the_balance_operations(
+                taker_side in arb_side(),
+                price in arb_tick_aligned_price_in_notional_bounds(),
+                quantity in arb_lot_aligned_quantity_in_bounds(),
+                fee_rates in arb_fee_rates(),
+            ) {
+                let mut state = setup_ckusdt_with_fee_rates(fee_rates);
+                let pair = icp_ckusdt_trading_pair();
+                let (maker_side, maker_owner, taker_owner) = match taker_side {
+                    Side::Buy => (Side::Sell, SELLER, BUYER),
+                    Side::Sell => (Side::Buy, BUYER, SELLER),
+                };
+
+                let maker = test_fixtures::order(maker_owner, &pair, maker_side, price, quantity)
+                    .place(&mut state);
+                let taker = test_fixtures::order(taker_owner, &pair, taker_side, price, quantity)
+                    .place(&mut state);
+
+                let event = crate::state::event::MatchingEvent {
+                    book_id: OrderBookId::ZERO,
+                    orders: vec![maker.seq(), taker.seq()],
+                };
+                state.record_matching_event(&event, Timestamp::EPOCH, StableMemoryOptions::Write);
+                let settling = state
+                    .take_next_pending_settling_event()
+                    .expect("a full cross must produce a settling event");
+                state.record_settling_event(&settling, Timestamp::EPOCH, StableMemoryOptions::Write);
+
+                let (quote_transfer_amount, quote_fee, base_fee) =
+                    quote_and_base_transfer_fees(&settling);
+
+                for order_id in [taker, maker] {
+                    for leg in order_trades_of(&state, order_id) {
+                        prop_assert_eq!(
+                            leg.notional,
+                            quote_transfer_amount,
+                            "leg notional must equal the quote transfer amount",
+                        );
+                        let expected_fee = match leg.fee_token {
+                            PairToken::Quote => quote_fee,
+                            PairToken::Base => base_fee,
+                        };
+                        prop_assert_eq!(
+                            leg.fee,
+                            expected_fee,
+                            "leg fee must equal the matching balance-op fee",
+                        );
+                    }
+                }
+            }
+        }
+
+        /// A fill snapshots the book's `fee_rates` onto its `FillEvent` at match
+        /// time, so a fee-rate change between matching and settling must not move
+        /// the persisted trade legs' fee — this is the whole reason `fee_rates`
+        /// rides on the `FillEvent`.
+        #[test]
+        fn persisted_fee_reflects_match_time_rate_not_a_later_change() {
+            let match_time = FeeRates {
+                maker: BasisPoint::new(5).unwrap(),
+                taker: BasisPoint::new(10).unwrap(),
+            };
+            let mut state = setup_ckusdt_with_fee_rates(match_time);
+            let pair = icp_ckusdt_trading_pair();
+
+            let maker =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let taker =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+
+            state.record_matching_event(
+                &crate::state::event::MatchingEvent {
+                    book_id: OrderBookId::ZERO,
+                    orders: vec![maker.seq(), taker.seq()],
+                },
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+            let settling = state
+                .take_next_pending_settling_event()
+                .expect("a full cross must produce a settling event");
+
+            let settle_time = FeeRates {
+                maker: BasisPoint::new(200).unwrap(),
+                taker: BasisPoint::new(300).unwrap(),
+            };
+            assert_ne!(settle_time, match_time, "the rate must actually change");
+            state.set_book_fee_rates(OrderBookId::ZERO, settle_time);
+
+            state.record_settling_event(&settling, Timestamp::EPOCH, StableMemoryOptions::Write);
+
+            assert_eq!(
+                order_trades_of(&state, taker),
+                vec![TradeRecord {
+                    side: Side::Buy,
+                    price: Price::new(PRICE_10),
+                    quantity: Quantity::from(QTY_2),
+                    notional: Quantity::from(20_000_000u128),
+                    fee: Quantity::from(200_000u128),
+                    fee_token: PairToken::Base,
+                    is_maker: false,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "taker fee at the 10 bps match-time taker rate, not the 300 bps settle-time rate",
+            );
+            assert_eq!(
+                order_trades_of(&state, maker),
+                vec![TradeRecord {
+                    side: Side::Sell,
+                    price: Price::new(PRICE_10),
+                    quantity: Quantity::from(QTY_2),
+                    notional: Quantity::from(20_000_000u128),
+                    fee: Quantity::from(10_000u128),
+                    fee_token: PairToken::Quote,
+                    is_maker: true,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "maker fee at the 5 bps match-time maker rate, not the 200 bps settle-time rate",
+            );
+        }
+
+        fn setup_ckusdt_with_fee_rates(fee_rates: FeeRates) -> TestState {
+            let mut state = test_fixtures::state();
+            state.record_trading_pair(
+                OrderBookId::ZERO,
+                icp_ckusdt_trading_pair(),
+                icp_metadata(),
+                SupportedTokens::CKUSDT.token_metadata().into(),
+                TICK_SIZE,
+                LOT_SIZE,
+                MIN_NOTIONAL,
+                Some(MAX_NOTIONAL),
+                fee_rates,
+            );
+            state
+        }
+
+        fn arb_lot_aligned_quantity_in_bounds() -> impl Strategy<Value = u128> {
+            let lot = u128::from(LOT_SIZE.get());
+            (1u128..=1_000u128).prop_map(move |lots| lots * lot)
+        }
+
+        /// The `(quote_transfer_amount, quote_fee, base_fee)` of the single fill's
+        /// two `Transfer` operations: the quote-token transfer carries the
+        /// notional as its `amount` and the quote-side fee, the base-token
+        /// transfer carries the base-side fee.
+        fn quote_and_base_transfer_fees(event: &SettlingEvent) -> (Quantity, Quantity, Quantity) {
+            let mut quote = None;
+            let mut base = None;
+            for op in &event.balance_operations {
+                if let BalanceOperation::Transfer {
+                    token, amount, fee, ..
+                } = op
+                {
+                    let fee = fee.unwrap_or(Quantity::ZERO);
+                    match token {
+                        PairToken::Quote => quote = Some((*amount, fee)),
+                        PairToken::Base => base = Some(fee),
+                    }
+                }
+            }
+            let (amount, quote_fee) = quote.expect("a fill must produce a quote transfer");
+            let base_fee = base.expect("a fill must produce a base transfer");
+            (amount, quote_fee, base_fee)
+        }
+
         fn order_trades_of(
             state: &TestState,
             order_id: crate::order::OrderId,
