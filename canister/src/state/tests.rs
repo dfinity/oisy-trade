@@ -2468,11 +2468,6 @@ mod settle_fills {
             );
         }
 
-        /// The `Skip` gate at the top of `record_settling_event` is the
-        /// load-bearing replay-safety mechanism for R8: a settling event that
-        /// carries real fills and balance operations must write trades and move
-        /// balances under `Write`, yet be a strict no-op under `Skip` so a
-        /// post-upgrade replay does not double-write the durable fills.
         #[test]
         fn settling_event_under_skip_writes_no_fills_and_no_balances() {
             let pair = icp_ckusdt_trading_pair();
