@@ -1511,7 +1511,7 @@ mod settled_fill {
 
     proptest! {
         /// The two trade legs the settling phase rebuilds from the lean
-        /// `SettledFill` — with the side recovered from the taker order and the
+        /// `FillEvent` — with the side recovered from the taker order and the
         /// execution price from the maker order — carry exactly the realized
         /// notional and fees the matching phase computed for the balance
         /// operations, so persisted trades can never diverge from the transfers.

@@ -15,9 +15,7 @@ pub use book::{
     PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use fill::{
-    Fill, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, SettledFill, TradeId,
-};
+pub use fill::{Fill, FillEvent, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, TradeId};
 pub use history::{OrderHistory, OrderUpdate};
 pub use trades::{TradeHistory, TradeLeg, TradeRecord};
 

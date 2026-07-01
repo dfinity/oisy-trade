@@ -90,7 +90,7 @@ impl Fill {
 /// never diverge.
 ///
 /// This is a matching-phase, heap-only helper: it is never CBOR-encoded into the
-/// event log. The settling event carries the lean [`SettledFill`] instead, and the
+/// event log. The settling event carries the lean [`FillEvent`] instead, and the
 /// settling phase recovers side/price from the order records and recomputes the
 /// realized values to rebuild the two side-projected [`TradeRecord`]s.
 #[derive(Debug)]
@@ -108,7 +108,7 @@ pub struct FillSettlement {
     /// Zero for a sell taker or an exact-price fill.
     surplus: Quantity,
     /// Snapshot of the book's fee rates at match time, carried onto the lean
-    /// [`SettledFill`] so settling can recompute the fees off the pinned rates.
+    /// [`FillEvent`] so settling can recompute the fees off the pinned rates.
     fee_rates: FeeRates,
 }
 
@@ -194,8 +194,8 @@ impl FillSettlement {
     /// The lean, normalized record persisted on the settling event: the fill's
     /// identity, quantity, and the fee-rate snapshot — everything else is
     /// recovered or recomputed in the settling phase.
-    pub fn settled_fill(&self) -> SettledFill {
-        SettledFill {
+    pub fn settled_fill(&self) -> FillEvent {
+        FillEvent {
             fill_seq: self.fill.fill_seq,
             taker_order_seq: self.fill.taker_order_seq,
             maker_order_seq: self.fill.maker_order_seq,
@@ -216,7 +216,7 @@ impl FillSettlement {
 /// lives on the book and is mutable — it is the one fee input pinned by neither the
 /// fill identity nor the orders.
 #[derive(Clone, PartialEq, Eq, Debug, Encode, Decode)]
-pub struct SettledFill {
+pub struct FillEvent {
     #[n(0)]
     pub fill_seq: FillSeq,
     #[n(1)]
@@ -229,7 +229,7 @@ pub struct SettledFill {
     pub fee_rates: FeeRates,
 }
 
-impl SettledFill {
+impl FillEvent {
     /// Rebuild the two side-projected [`TradeRecord`]s — the taker leg and the
     /// maker leg — from this lean record, the side/price recovered from the order
     /// records, and the freshly recomputed `notional` and fees. Each leg is keyed
@@ -287,7 +287,7 @@ impl SettledFill {
 /// The fill's `(notional, taker_fee, maker_fee)`: the quote notional and the fee
 /// charged to each of the fill's two orders, each in its receive token. Shared by
 /// the matching-phase [`FillSettlement::new`] and the settling-phase
-/// [`SettledFill::trade_legs`] recompute, so the balance ops and the persisted trade
+/// [`FillEvent::trade_legs`] recompute, so the balance ops and the persisted trade
 /// legs can never diverge, and the notional (the costliest arithmetic) is computed
 /// once per fill at each call site.
 fn fees(

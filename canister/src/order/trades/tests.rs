@@ -1,8 +1,8 @@
 use super::{CursorNotFound, TradeHistory, TradeRecord};
 use crate::Timestamp;
 use crate::order::{
-    BasisPoint, FeeRates, FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price,
-    Quantity, SettledFill, Side, TradeId,
+    BasisPoint, FeeRates, FillEvent, FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken,
+    Price, Quantity, Side, TradeId,
 };
 use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
 use crate::user::UserId;
@@ -218,7 +218,7 @@ fn append(
     taker_user: UserId,
     maker_user: UserId,
 ) {
-    let settled = SettledFill {
+    let settled = FillEvent {
         fill_seq: FillSeq::new(fill_seq),
         taker_order_seq: OrderSeq::new(taker_seq),
         maker_order_seq: OrderSeq::new(maker_seq),

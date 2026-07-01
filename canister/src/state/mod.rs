@@ -18,10 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillSettlement, LotSize, MatchOrderError, MatchingOutput,
-    NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq,
-    OrderStatus, OrderUpdate, PendingOrder, Price, Quantity, RemovedOrder, RemovedOrderSettlement,
-    SettledFill, Side, TickSize, TokenId, TokenMetadata, TradeHistory, TradingPair,
+    CursorNotFound, FeeRates, Fill, FillEvent, FillSettlement, LotSize, MatchOrderError,
+    MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
+    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Price, Quantity, RemovedOrder,
+    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeHistory, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -959,7 +959,7 @@ fn settle(
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<SettledFill>,
+    Vec<FillEvent>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();

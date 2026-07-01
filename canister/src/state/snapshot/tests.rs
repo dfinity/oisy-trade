@@ -13,9 +13,9 @@ use proptest::prelude::*;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
-        PendingOrder, Price, PriceLevel, Quantity, RestingOrder, SettledFill, Side, TickSize,
-        TimeInForce, TokenId, TokenMetadata, TradingPair,
+        FeeRates, FillEvent, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce,
+        TokenId, TokenMetadata, TradingPair,
     };
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
@@ -129,7 +129,7 @@ mod schema_stability {
                         fee: None,
                     },
                 ],
-                fills: vec![SettledFill {
+                fills: vec![FillEvent {
                     fill_seq: FillSeq::new(2),
                     taker_order_seq: OrderSeq::new(5),
                     maker_order_seq: OrderSeq::new(6),

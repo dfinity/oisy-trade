@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
-    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, SettledFill,
-    Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+    FeeRates, FillEvent, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
+    TickSize, TimeInForce, TokenId, TokenMetadata,
 };
 use candid::Principal;
 use ic_stable_structures::Storable;
@@ -135,7 +135,7 @@ pub struct SettlingEvent {
     #[n(1)]
     pub balance_operations: Vec<BalanceOperation>,
     #[n(2)]
-    pub fills: Vec<SettledFill>,
+    pub fills: Vec<FillEvent>,
 }
 
 /// Participants are identified by `OrderSeq` — the apply path resolves each
