@@ -57,7 +57,7 @@ impl<T: minicbor::Encode<()> + for<'a> minicbor::Decode<'a, ()>> Record for T {}
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 struct SeqEnvelope<V> {
     #[n(0)]
-    seq: u64,
+    seq: HistoryGlobalSeq,
     #[n(1)]
     record: V,
 }
@@ -91,12 +91,12 @@ pub struct CursorNotFound;
 /// Append-and-index record store shared by [`crate::order::OrderHistory`] and
 /// [`crate::order::TradeHistory`]:
 /// - `primary`: the canonical store, keyed by `K`, values seq-stamped.
-/// - `by_user`: a per-user index keyed by `(UserId, global_seq)`, so a reverse
-///   prefix scan yields a user's records newest-first.
+/// - `by_user`: a per-user index keyed by `(UserId, per-store seq)`, so a
+///   reverse prefix scan yields a user's records newest-first.
 ///
-/// The two maps are kept in lockstep by [`History::insert`], which is the only
-/// way to add a record; the insertion sequence is the current record count, so
-/// it is a dense, monotonic sequence.
+/// The two maps are kept in lockstep by [`History::insert_once`], which is the
+/// only way to add a record; the insertion sequence is the current record
+/// count, so it is a dense, per-store monotonic sequence.
 pub struct History<M, K, V>
 where
     M: Memory,
@@ -141,8 +141,8 @@ where
     /// record's insertion sequence — which orders the per-user index, reverse
     /// scanned for newest-first — is the current record count. Panics if `key`
     /// is already present.
-    pub fn insert(&mut self, user: UserId, key: K, record: V) {
-        let seq = self.primary.len();
+    pub fn insert_once(&mut self, user: UserId, key: K, record: V) {
+        let seq = HistoryGlobalSeq::new(self.primary.len());
         assert!(
             self.primary
                 .insert(key, SeqEnvelope { seq, record })
@@ -151,9 +151,9 @@ where
         );
         assert!(
             self.by_user
-                .insert(ByUserKey::new(user, HistoryGlobalSeq::new(seq)), key)
+                .insert(ByUserKey::new(user, seq), key)
                 .is_none(),
-            "BUG: duplicate user index entry for {user:?} seq {seq}"
+            "BUG: duplicate user index entry for {user:?} seq {seq:?}"
         );
     }
 
@@ -187,7 +187,7 @@ where
             None => RangeBound::Included(ByUserKey::last_of(user)),
             Some(cursor) => {
                 let entry = self.primary.get(&cursor).ok_or(CursorNotFound)?;
-                let key = ByUserKey::new(user, HistoryGlobalSeq::new(entry.seq));
+                let key = ByUserKey::new(user, entry.seq);
                 // The cursor must be one of `user`'s own records: its key must
                 // map back to it in the index. A cursor from another user (or a
                 // forged key) resolves to a seq whose `(user, seq)` key isn't in

@@ -1,4 +1,4 @@
-use super::{CursorNotFound, History, SeqEnvelope};
+use super::{CursorNotFound, History, HistoryGlobalSeq, SeqEnvelope};
 use crate::ids::{Seq, SeqMarker};
 use crate::user::UserId;
 use ic_stable_structures::{Storable, VectorMemory};
@@ -25,7 +25,7 @@ const BOB: UserId = UserId::new(2);
 #[test]
 fn should_insert_and_get() {
     let mut store = store();
-    store.insert(ALICE, TestKey::new(10), 100);
+    store.insert_once(ALICE, TestKey::new(10), 100);
     assert_eq!(store.get(&TestKey::new(10)), Some(100));
     assert_eq!(store.len(), 1);
     assert!(store.contains_key(&TestKey::new(10)));
@@ -42,14 +42,14 @@ fn should_return_none_for_missing_key() {
 #[should_panic(expected = "duplicate history key")]
 fn should_panic_on_duplicate_key() {
     let mut store = store();
-    store.insert(ALICE, TestKey::new(10), 100);
-    store.insert(BOB, TestKey::new(10), 200);
+    store.insert_once(ALICE, TestKey::new(10), 100);
+    store.insert_once(BOB, TestKey::new(10), 200);
 }
 
 #[test]
 fn should_write_back_only_a_changed_record() {
     let mut store = store();
-    store.insert(ALICE, TestKey::new(10), 100);
+    store.insert_once(ALICE, TestKey::new(10), 100);
 
     store.modify(&TestKey::new(10), |record| {
         *record = 999;
@@ -163,7 +163,7 @@ fn should_page_by_user() {
     for case in cases {
         let mut store = store();
         for (i, (user, key)) in case.inserts.iter().enumerate() {
-            store.insert(*user, TestKey::new(*key), i as u64);
+            store.insert_once(*user, TestKey::new(*key), i as u64);
         }
 
         let result = store.page_by_user(case.user, case.after.map(TestKey::new), case.length);
@@ -191,7 +191,7 @@ fn should_page_by_user() {
 fn should_range_primary_newest_first_within_bounds() {
     let mut store = store();
     for key in [10u64, 20, 30, 40] {
-        store.insert(ALICE, TestKey::new(key), key);
+        store.insert_once(ALICE, TestKey::new(key), key);
     }
 
     let inclusive: Vec<u64> = store
@@ -219,7 +219,7 @@ fn should_range_primary_newest_first_within_bounds() {
 proptest! {
     #[test]
     fn should_roundtrip_seq_envelope_through_storable(seq in any::<u64>(), record in any::<u64>()) {
-        let envelope = SeqEnvelope { seq, record };
+        let envelope = SeqEnvelope { seq: HistoryGlobalSeq::new(seq), record };
         prop_assert_eq!(SeqEnvelope::<u64>::from_bytes(envelope.to_bytes()), envelope);
     }
 
@@ -230,7 +230,7 @@ proptest! {
         let unique: Vec<u64> = dedup_preserving_order(keys);
         let mut store = store();
         for key in &unique {
-            store.insert(ALICE, TestKey::new(*key), *key);
+            store.insert_once(ALICE, TestKey::new(*key), *key);
         }
 
         let paged: Vec<u64> = store
@@ -251,7 +251,7 @@ proptest! {
     fn should_walk_full_history_via_cursor(count in 0u64..30) {
         let mut store = store();
         for key in 0..count {
-            store.insert(ALICE, TestKey::new(key), key);
+            store.insert_once(ALICE, TestKey::new(key), key);
         }
 
         let mut walked = vec![];

@@ -191,7 +191,7 @@ impl<M: Memory> OrderHistory<M> {
     /// ID is present.
     pub fn insert_once(&mut self, user: UserId, id: OrderId, record: OrderRecord) {
         bench_scopes!("order_history", "order_history::insert_once");
-        self.0.insert(user, id, record);
+        self.0.insert_once(user, id, record);
     }
 
     /// Returns a copy of the record for the given order, or `None` if absent.

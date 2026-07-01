@@ -77,8 +77,8 @@ impl<M: Memory> TradeHistory<M> {
         bench_scopes!("fills", "fills::append");
         let (taker_id, taker_trade) = taker_leg;
         let (maker_id, maker_trade) = maker_leg;
-        self.0.insert(taker_user, taker_id, taker_trade);
-        self.0.insert(maker_user, maker_id, maker_trade);
+        self.0.insert_once(taker_user, taker_id, taker_trade);
+        self.0.insert_once(maker_user, maker_id, maker_trade);
     }
 
     /// Returns up to `length` of `order`'s trades, newest first. With
