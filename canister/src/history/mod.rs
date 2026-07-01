@@ -100,7 +100,7 @@ pub struct CursorNotFound;
 pub struct History<M, K, V>
 where
     M: Memory,
-    K: Storable + Ord + Copy,
+    K: Storable + Ord + Clone,
     V: Record,
 {
     primary: StableBTreeMap<K, SeqEnvelope<V>, M>,
@@ -110,7 +110,7 @@ where
 impl<M, K, V> History<M, K, V>
 where
     M: Memory,
-    K: Storable + Ord + Copy + fmt::Debug,
+    K: Storable + Ord + Clone + fmt::Debug,
     V: Record,
 {
     /// `primary_memory` and `by_user_memory` **must be distinct memory
@@ -145,7 +145,7 @@ where
         let seq = HistoryGlobalSeq::new(self.primary.len());
         assert!(
             self.primary
-                .insert(key, SeqEnvelope { seq, record })
+                .insert(key.clone(), SeqEnvelope { seq, record })
                 .is_none(),
             "BUG: duplicate history key {key:?}"
         );
@@ -166,7 +166,7 @@ where
             .get(key)
             .unwrap_or_else(|| panic!("BUG: history key {key:?} missing"));
         if f(&mut entry.record) {
-            self.primary.insert(*key, entry);
+            self.primary.insert(key.clone(), entry);
         }
     }
 
@@ -215,7 +215,7 @@ where
             .range((RangeBound::Included(lower), upper))
             .rev()
             .take(length)
-            .map(|entry| (*entry.key(), entry.value().record))
+            .map(|entry| (entry.key().clone(), entry.value().record))
             .collect()
     }
 }
@@ -223,13 +223,13 @@ where
 #[cfg(test)]
 impl<K, V> History<ic_stable_structures::VectorMemory, K, V>
 where
-    K: Storable + Ord + Copy + fmt::Debug,
+    K: Storable + Ord + Clone + fmt::Debug,
     V: Record + Clone,
 {
     fn iter(&self) -> impl Iterator<Item = (K, SeqEnvelope<V>)> + '_ {
         self.primary
             .iter()
-            .map(|entry| (*entry.key(), entry.value()))
+            .map(|entry| (entry.key().clone(), entry.value()))
     }
 
     fn user_index_iter(&self) -> impl Iterator<Item = (ByUserKey, K)> + '_ {
@@ -242,7 +242,7 @@ where
 #[cfg(test)]
 impl<K, V> Clone for History<ic_stable_structures::VectorMemory, K, V>
 where
-    K: Storable + Ord + Copy + fmt::Debug,
+    K: Storable + Ord + Clone + fmt::Debug,
     V: Record + Clone,
 {
     fn clone(&self) -> Self {
@@ -263,7 +263,7 @@ where
 #[cfg(test)]
 impl<K, V> PartialEq for History<ic_stable_structures::VectorMemory, K, V>
 where
-    K: Storable + Ord + Copy + fmt::Debug + PartialEq,
+    K: Storable + Ord + Clone + fmt::Debug + PartialEq,
     V: Record + Clone + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -274,7 +274,7 @@ where
 #[cfg(test)]
 impl<K, V> Eq for History<ic_stable_structures::VectorMemory, K, V>
 where
-    K: Storable + Ord + Copy + fmt::Debug + Eq,
+    K: Storable + Ord + Clone + fmt::Debug + Eq,
     V: Record + Clone + Eq,
 {
 }
