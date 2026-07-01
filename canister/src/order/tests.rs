@@ -1496,3 +1496,120 @@ mod fee_rates {
         }
     }
 }
+
+mod settled_fill {
+    use crate::Timestamp;
+    use crate::order::{FeeRates, Fill, FillSettlement, OrderBookId, PairToken, Side, TradeRecord};
+    use crate::state::event::BalanceOperation;
+    use crate::test_fixtures::arbitrary::{arb_fee_rates, arb_fill};
+    use proptest::prelude::*;
+    use std::num::NonZeroU64;
+
+    const BOOK: OrderBookId = OrderBookId::ZERO;
+    const BASE_SCALE: u64 = 100_000_000;
+    const TIMESTAMP: Timestamp = Timestamp::new(42);
+
+    proptest! {
+        /// The two trade legs the settling phase rebuilds from the lean
+        /// `FillEvent` — with the side recovered from the taker order and the
+        /// execution price from the maker order — carry exactly the realized
+        /// notional and fees the matching phase computed for the balance
+        /// operations, so persisted trades can never diverge from the transfers.
+        #[test]
+        fn rebuilds_legs_identical_to_the_matching_computation(
+            (fill, fee_rates) in (0..1_000u64).prop_flat_map(arb_fill).prop_flat_map(|fill| {
+                arb_fee_rates().prop_map(move |rates| (fill.clone(), rates))
+            }),
+        ) {
+            let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+            let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
+
+            let mut ops = Vec::new();
+            settlement.push_balance_operations(&mut ops);
+            let (mut quote_amount, mut quote_fee, mut base_fee) = (None, None, None);
+            for op in &ops {
+                if let BalanceOperation::Transfer { token, amount, fee, .. } = op {
+                    match token {
+                        PairToken::Quote => {
+                            quote_amount = Some(*amount);
+                            quote_fee = Some(fee.unwrap_or(crate::order::Quantity::ZERO));
+                        }
+                        PairToken::Base => {
+                            base_fee = Some(fee.unwrap_or(crate::order::Quantity::ZERO));
+                        }
+                    }
+                }
+            }
+            let notional = quote_amount.expect("a fill emits a quote transfer");
+            let (expected_taker_fee, expected_maker_fee) = match fill.taker_side {
+                Side::Buy => (base_fee.unwrap(), quote_fee.unwrap()),
+                Side::Sell => (quote_fee.unwrap(), base_fee.unwrap()),
+            };
+
+            let [taker_leg, maker_leg] = settlement.settled_fill().trade_legs(
+                BOOK,
+                fill.taker_side,
+                fill.maker_price,
+                base_scale,
+                TIMESTAMP,
+            );
+
+            let (_, taker) = taker_leg;
+            let expected_taker = TradeRecord {
+                side: fill.taker_side,
+                price: fill.maker_price,
+                quantity: fill.quantity,
+                notional,
+                fee: expected_taker_fee,
+                fee_token: match fill.taker_side {
+                    Side::Buy => PairToken::Base,
+                    Side::Sell => PairToken::Quote,
+                },
+                is_maker: false,
+                timestamp: TIMESTAMP,
+            };
+            prop_assert_eq!(taker, expected_taker);
+
+            let (_, maker) = maker_leg;
+            let expected_maker = TradeRecord {
+                side: match fill.taker_side {
+                    Side::Buy => Side::Sell,
+                    Side::Sell => Side::Buy,
+                },
+                price: fill.maker_price,
+                quantity: fill.quantity,
+                notional,
+                fee: expected_maker_fee,
+                fee_token: match fill.taker_side {
+                    Side::Buy => PairToken::Quote,
+                    Side::Sell => PairToken::Base,
+                },
+                is_maker: true,
+                timestamp: TIMESTAMP,
+            };
+            prop_assert_eq!(maker, expected_maker);
+        }
+    }
+
+    /// The two legs share the match's `FillSeq` and differ only by their owning
+    /// `OrderId`, so a `FillId` is derivable from either.
+    #[test]
+    fn both_legs_share_the_fill_seq() {
+        let price = crate::order::Price::new(10_000_000);
+        let fill = Fill {
+            fill_seq: crate::order::FillSeq::new(7),
+            taker_order_seq: crate::order::OrderSeq::new(2),
+            taker_side: Side::Buy,
+            taker_price: price,
+            maker_order_seq: crate::order::OrderSeq::new(5),
+            maker_price: price,
+            quantity: crate::order::Quantity::from(100_000_000u64),
+        };
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        let settled = FillSettlement::new(fill, FeeRates::default(), base_scale).settled_fill();
+        let [(taker_id, _), (maker_id, _)] =
+            settled.trade_legs(BOOK, Side::Buy, price, base_scale, TIMESTAMP);
+        assert_eq!(taker_id.fill_id(), maker_id.fill_id());
+        assert_ne!(taker_id.order_id(), maker_id.order_id());
+    }
+}

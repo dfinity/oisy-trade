@@ -695,6 +695,18 @@ type MatchingEvent = record {
 type SettlingEvent = record {
     book_id : nat64;
     balance_operations : vec BalanceOperation;
+    fills : vec FillEvent;
+};
+
+// Per-fill record carried on a settling event: the fill's identity, the matched
+// quantity, and the maker/taker fee rates in basis points.
+type FillEvent = record {
+    fill_seq : nat64;
+    taker_order_seq : nat64;
+    maker_order_seq : nat64;
+    quantity : nat;
+    maker_fee_bps : nat16;
+    taker_fee_bps : nat16;
 };
 
 // Balance movement recorded during settlement. `from_order` / `to_order` /

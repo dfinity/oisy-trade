@@ -104,16 +104,36 @@ fn should_swap_sides_for_a_sell_taker() {
     append(&mut store, Side::Sell, 0, 1, 0, taker_user(), maker_user());
 
     let taker_page = store.trades_for_order(taker_order, None, 10).unwrap();
-    let taker = &taker_page[0].1;
-    assert_eq!(taker.side, Side::Sell);
-    assert_eq!(taker.fee_token, PairToken::Quote);
-    assert!(!taker.is_maker);
+    assert_eq!(
+        taker_page[0].1,
+        TradeRecord {
+            side: Side::Sell,
+            price: maker_price(),
+            quantity: quantity(),
+            notional: notional(),
+            fee: taker_fee(),
+            fee_token: PairToken::Quote,
+            is_maker: false,
+            timestamp: TIMESTAMP,
+        },
+        "sell-taker leg",
+    );
 
     let maker_page = store.trades_for_order(maker_order, None, 10).unwrap();
-    let maker = &maker_page[0].1;
-    assert_eq!(maker.side, Side::Buy);
-    assert_eq!(maker.fee_token, PairToken::Base);
-    assert!(maker.is_maker);
+    assert_eq!(
+        maker_page[0].1,
+        TradeRecord {
+            side: Side::Buy,
+            price: maker_price(),
+            quantity: quantity(),
+            notional: notional(),
+            fee: maker_fee(),
+            fee_token: PairToken::Base,
+            is_maker: true,
+            timestamp: TIMESTAMP,
+        },
+        "buy-maker leg",
+    );
 }
 
 /// A `trades_for_order` scenario for order A (taker seq 0): the taker fill

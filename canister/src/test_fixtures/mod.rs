@@ -454,12 +454,14 @@ pub fn transfer_from_response(
 
 #[cfg(test)]
 pub mod arbitrary {
+    use super::event::MAX_HALT_BOOKS;
+    use super::{LOT_SIZE, TICK_SIZE};
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
-        Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        self, BasisPoint, FeeRates, Fill, FillEvent, FillSeq, LotSize, MatchingOutput, Order,
+        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price,
+        Quantity, RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
@@ -471,15 +473,11 @@ pub mod arbitrary {
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::{SizeRange, btree_set, vec};
-    use proptest::option;
     use proptest::prelude::{Just, Strategy, TestCaseError, any};
-    use proptest::prop_assert_eq;
     use proptest::prop_oneof;
+    use proptest::{option, prop_assert_eq};
     use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
-
-    use super::event::MAX_HALT_BOOKS;
-    use super::{LOT_SIZE, TICK_SIZE};
 
     /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
     /// lot-aligned non-zero quantity.
@@ -584,6 +582,34 @@ pub mod arbitrary {
                     quantity: Quantity::from(qty_lots * lot),
                 }
             })
+    }
+
+    /// Strategy for an arbitrary [`TradeRecord`].
+    pub fn arb_trade_record() -> impl Strategy<Value = TradeRecord> {
+        (
+            arb_side(),
+            arb_price(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_pair_token(),
+            any::<bool>(),
+            arb_timestamp(),
+        )
+            .prop_map(
+                |(side, price, quantity, notional, fee, fee_token, is_maker, timestamp)| {
+                    TradeRecord {
+                        side,
+                        price,
+                        quantity,
+                        notional,
+                        fee,
+                        fee_token,
+                        is_maker,
+                        timestamp,
+                    }
+                },
+            )
     }
 
     /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
@@ -706,40 +732,16 @@ pub mod arbitrary {
             )
     }
 
-    /// Strategy for an arbitrary [`TradeRecord`].
-    pub fn arb_trade_record() -> impl Strategy<Value = TradeRecord> {
-        (
-            arb_side(),
-            arb_price(),
-            arb_quantity(),
-            arb_quantity(),
-            arb_quantity(),
-            arb_pair_token(),
-            any::<bool>(),
-            arb_timestamp(),
-        )
-            .prop_map(
-                |(side, price, quantity, notional, fee, fee_token, is_maker, timestamp)| {
-                    TradeRecord {
-                        side,
-                        price,
-                        quantity,
-                        notional,
-                        fee,
-                        fee_token,
-                        is_maker,
-                        timestamp,
-                    }
-                },
-            )
-    }
-
     pub fn arb_price() -> impl Strategy<Value = Price> {
         any::<u64>().prop_map(|p| Price::new(p as u128))
     }
 
     pub fn arb_order_seq() -> impl Strategy<Value = OrderSeq> {
         any::<u64>().prop_map(OrderSeq::new)
+    }
+
+    pub fn arb_fill_seq() -> impl Strategy<Value = FillSeq> {
+        any::<u64>().prop_map(FillSeq::new)
     }
 
     pub fn arb_token_id() -> impl Strategy<Value = TokenId> {
@@ -1005,13 +1007,38 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
+    /// Strategy for an arbitrary [`FillEvent`], fuzzing every field
+    /// independently — the lean record persisted on a settling event.
+    pub fn arb_fill_event() -> impl Strategy<Value = FillEvent> {
+        (
+            arb_fill_seq(),
+            arb_order_seq(),
+            arb_order_seq(),
+            arb_quantity(),
+            arb_fee_rates(),
+        )
+            .prop_map(
+                |(fill_seq, taker_order_seq, maker_order_seq, quantity, fee_rates)| FillEvent {
+                    fill_seq,
+                    taker_order_seq,
+                    maker_order_seq,
+                    quantity,
+                    fee_rates,
+                },
+            )
+    }
+
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (any::<u64>(), vec(arb_balance_operation(), 0..10)).prop_map(
-            |(book_id, balance_operations)| SettlingEvent {
+        (
+            any::<u64>(),
+            vec(arb_balance_operation(), 0..10),
+            vec(arb_fill_event(), 0..10),
+        )
+            .prop_map(|(book_id, balance_operations, fills)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
                 balance_operations,
-            },
-        )
+                fills,
+            })
     }
 
     pub fn arb_permissions() -> impl Strategy<Value = crate::state::permissions::Permissions> {

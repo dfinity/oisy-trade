@@ -13,7 +13,7 @@ use proptest::prelude::*;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        FeeRates, FillEvent, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
         PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce,
         TokenId, TokenMetadata, TradingPair,
     };
@@ -129,6 +129,13 @@ mod schema_stability {
                         fee: None,
                     },
                 ],
+                fills: vec![FillEvent {
+                    fill_seq: FillSeq::new(2),
+                    taker_order_seq: OrderSeq::new(5),
+                    maker_order_seq: OrderSeq::new(6),
+                    quantity: Quantity::from(1_000_000u64),
+                    fee_rates: FeeRates::default(),
+                }],
             }]),
             // Non-default policy.
             max_orders_per_chunk: Some(200),
@@ -152,11 +159,11 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        8982008008828281410182614108828141028261420681828281410181410207818c0703810a811a\
-        000f42408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281\
-        186e8183021a0007a12082008081048281008100051923280281828141011a000186a08182078282\
-        008505068201801a05f5e1001a0003d09082008506058200801a000f4240f618c81b000000012a05\
-        f200";
+        8982008008828281410182614108828141028261420681828281410181410207818c0703810a811a00\
+        0f42408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281186e\
+        8183021a0007a12082008081048281008100051923280281828141011a000186a08183078282008505\
+        068201801a05f5e1001a0003d09082008506058200801a000f4240f681850205061a000f4240828100\
+        810018c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {

@@ -1896,7 +1896,11 @@ mod settle_fills {
 
     mod fees {
         use super::*;
-        use crate::order::{BasisPoint, OrderRecord, OrderStatus, TimeInForce};
+        use crate::Timestamp;
+        use crate::order::{
+            BasisPoint, OrderRecord, OrderStatus, PairToken, TimeInForce, TradeRecord,
+        };
+        use crate::state::StableMemoryOptions;
 
         /// Fill deducts fees on both sides at the role-specific rates.
         /// Parameterized over which side crosses (taker):
@@ -2316,6 +2320,320 @@ mod settle_fills {
             filled_quote: u128,
             filled_fee: u128,
             vwap: Option<u128>,
+        }
+
+        /// The two swept levels each persist a taker-leg and a maker-leg fill
+        /// record at the maker's own execution price, with per-fill notional and
+        /// the side-specific realized fee — the granular feed behind the
+        /// order-level rollups asserted above.
+        #[test]
+        fn buy_taker_sweeping_two_levels_persists_per_fill_records() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+
+            let maker_a =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let maker_b =
+                test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_11, QTY_3).place(&mut state);
+            let taker =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_12, QTY_5).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let taker_fills = order_trades_of(&state, taker);
+            assert_eq!(
+                taker_fills,
+                vec![
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_11),
+                        quantity: Quantity::from(QTY_3),
+                        notional: Quantity::from(33_000_000u128),
+                        fee: Quantity::from(300_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_2),
+                        notional: Quantity::from(20_000_000u128),
+                        fee: Quantity::from(200_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                ],
+                "taker fills newest-first at the maker prices, never the taker's 12",
+            );
+
+            assert_eq!(
+                order_trades_of(&state, maker_a),
+                vec![TradeRecord {
+                    side: Side::Sell,
+                    price: Price::new(PRICE_10),
+                    quantity: Quantity::from(QTY_2),
+                    notional: Quantity::from(20_000_000u128),
+                    fee: Quantity::from(10_000u128),
+                    fee_token: PairToken::Quote,
+                    is_maker: true,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "maker A leg",
+            );
+
+            assert_eq!(
+                order_trades_of(&state, maker_b),
+                vec![TradeRecord {
+                    side: Side::Sell,
+                    price: Price::new(PRICE_11),
+                    quantity: Quantity::from(QTY_3),
+                    notional: Quantity::from(33_000_000u128),
+                    fee: Quantity::from(16_500u128),
+                    fee_token: PairToken::Quote,
+                    is_maker: true,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "maker B leg",
+            );
+        }
+
+        /// A single order that crosses (taker leg) then rests and is hit (maker
+        /// leg) records two fills with their own per-fill role — `is_maker`
+        /// false then true — and side-specific rate.
+        #[test]
+        fn order_filling_both_ways_records_a_taker_and_a_maker_fill() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+
+            test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let pivot =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_5).place(&mut state);
+            test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            assert_eq!(
+                order_trades_of(&state, pivot),
+                vec![
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_3),
+                        notional: Quantity::from(30_000_000u128),
+                        fee: Quantity::from(150_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: true,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_2),
+                        notional: Quantity::from(20_000_000u128),
+                        fee: Quantity::from(200_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                ],
+                "maker leg (rested, then hit) newest-first, then the taker leg (crossed on entry)",
+            );
+        }
+
+        /// Settlement populates the account-wide `by_user` index: a user's fills
+        /// span all their orders, newest-first, and stay scoped to their owner.
+        #[test]
+        fn settlement_indexes_account_wide_fills_newest_first() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+            let maker_a =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let maker_b =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            let taker_2 =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+            let buyer_orders = account_trade_orders(&state, BUYER);
+            assert_eq!(
+                buyer_orders.len(),
+                2,
+                "buyer has one fill per taker order, newest-first",
+            );
+            assert_eq!(buyer_orders[0], taker_2, "newest taker fill first");
+
+            let seller_orders = account_trade_orders(&state, SELLER);
+            assert_eq!(
+                seller_orders,
+                vec![maker_b, maker_a],
+                "seller sees only their own maker fills",
+            );
+        }
+
+        /// Replay under `Skip` (post-upgrade) writes no fill records, so durable
+        /// fills are not double-written.
+        #[test]
+        fn replay_under_skip_writes_no_fills() {
+            let mut state = setup_ckusdt_with_fees(5, 10);
+            let pair = icp_ckusdt_trading_pair();
+            let maker_a =
+                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
+            let taker =
+                test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
+
+            let event = crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders: vec![maker_a.seq(), taker.seq()],
+            };
+            state.record_matching_event(&event, Timestamp::EPOCH, StableMemoryOptions::Skip);
+
+            assert_eq!(
+                state
+                    .trade_history
+                    .trades_for_order(taker, None, 10)
+                    .unwrap(),
+                Vec::new(),
+            );
+            assert_eq!(
+                state
+                    .trade_history
+                    .trades_for_order(maker_a, None, 10)
+                    .unwrap(),
+                Vec::new(),
+            );
+        }
+
+        #[test]
+        fn settling_event_under_skip_writes_no_fills_and_no_balances() {
+            let pair = icp_ckusdt_trading_pair();
+
+            let settling_event = {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                state
+                    .take_next_pending_settling_event()
+                    .expect("matching a full cross must produce a settling event")
+            };
+            assert!(
+                !settling_event.fills.is_empty(),
+                "the settling event must carry fills for the gate to be exercised",
+            );
+            assert!(
+                !settling_event.balance_operations.is_empty(),
+                "the settling event must carry balance operations for the gate to be exercised",
+            );
+
+            let prepare = || {
+                let mut state = setup_ckusdt_with_fees(5, 10);
+                let maker = test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2)
+                    .place(&mut state);
+                let taker = test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2)
+                    .place(&mut state);
+                state.record_matching_event(
+                    &crate::state::event::MatchingEvent {
+                        book_id: OrderBookId::ZERO,
+                        orders: vec![maker.seq(), taker.seq()],
+                    },
+                    Timestamp::EPOCH,
+                    StableMemoryOptions::Write,
+                );
+                let _ = state.take_next_pending_settling_event();
+                (state, maker, taker)
+            };
+
+            let balances_of = |state: &TestState| {
+                [
+                    state.get_balance(&BUYER, &pair.base),
+                    state.get_balance(&BUYER, &pair.quote),
+                    state.get_balance(&SELLER, &pair.base),
+                    state.get_balance(&SELLER, &pair.quote),
+                ]
+            };
+
+            let (mut skip_state, skip_maker, skip_taker) = prepare();
+            let balances_before = balances_of(&skip_state);
+            skip_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Skip,
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, skip_taker),
+                Vec::new(),
+                "Skip replay must not write the taker's fill",
+            );
+            assert_eq!(
+                order_trades_of(&skip_state, skip_maker),
+                Vec::new(),
+                "Skip replay must not write the maker's fill",
+            );
+            assert_eq!(
+                balances_of(&skip_state),
+                balances_before,
+                "Skip replay must not move any balances",
+            );
+
+            let (mut write_state, write_maker, write_taker) = prepare();
+            write_state.record_settling_event(
+                &settling_event,
+                Timestamp::EPOCH,
+                StableMemoryOptions::Write,
+            );
+            assert_eq!(
+                order_trades_of(&write_state, write_taker).len(),
+                1,
+                "Write must write the taker's fill exactly once",
+            );
+            assert_eq!(
+                order_trades_of(&write_state, write_maker).len(),
+                1,
+                "Write must write the maker's fill exactly once",
+            );
+            assert_ne!(
+                balances_of(&write_state),
+                balances_before,
+                "Write must move balances, proving the Skip case is a real no-op",
+            );
+        }
+
+        fn order_trades_of(
+            state: &TestState,
+            order_id: crate::order::OrderId,
+        ) -> Vec<crate::order::TradeRecord> {
+            state
+                .trade_history
+                .trades_for_order(order_id, None, 100)
+                .expect("per-order fill read should not error")
+                .into_iter()
+                .map(|(_, record)| record)
+                .collect()
+        }
+
+        fn account_trade_orders(state: &TestState, owner: Principal) -> Vec<crate::order::OrderId> {
+            let user = state
+                .user_registry
+                .lookup(owner)
+                .expect("owner should be registered after settlement");
+            state
+                .trade_history
+                .trades_after(user, None, 100)
+                .expect("account-wide fill read should not error")
+                .into_iter()
+                .map(|(id, _)| id.order_id())
+                .collect()
         }
     }
 
