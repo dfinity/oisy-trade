@@ -90,16 +90,17 @@ pub fn user_orders_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_ORDERS_MEMORY_ID))
 }
 
-/// Returns the virtual memory slice that backs the primary trade map
-/// (`TradeHistory::trades`). Used to construct the production
-/// `TradeHistory<VMem>` on canister `init` / `post_upgrade`.
+/// Returns the virtual memory slice that backs `TradeHistory`'s primary trade
+/// store (the generic `History`'s `primary` map, the first region passed to
+/// `TradeHistory::new`). Used to construct the production `TradeHistory<VMem>`
+/// on canister `init` / `post_upgrade`.
 pub fn trades_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(TRADES_MEMORY_ID))
 }
 
 /// Returns the virtual memory slice that backs `TradeHistory`'s account-wide
-/// per-user trade index (`TradeHistory::by_user`). Distinct from
-/// [`trades_memory`].
+/// per-user trade index (the generic `History`'s `by_user` map, the second
+/// region passed to `TradeHistory::new`). Distinct from [`trades_memory`].
 pub fn trades_by_user_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(TRADES_BY_USER_MEMORY_ID))
 }
