@@ -14,14 +14,14 @@ mod tests;
 /// monotonic value. It is not shared across stores — every [`History`] starts
 /// its sequence at zero — so the value is only per-store monotonic, not
 /// canister-wide.
-pub struct HistoryGlobalSeqMarker;
-impl SeqMarker for HistoryGlobalSeqMarker {
-    const NAME: &'static str = "HistoryGlobalSeq";
+pub struct InsertionSeqMarker;
+impl SeqMarker for InsertionSeqMarker {
+    const NAME: &'static str = "InsertionSeq";
 }
 
 /// Per-store insertion sequence assigned to each inserted record: monotonic
 /// within a single [`History`] instance, not across stores.
-type HistoryGlobalSeq = Seq<HistoryGlobalSeqMarker>;
+type InsertionSeq = Seq<InsertionSeqMarker>;
 
 /// Key into the per-user index: the interned [`UserId`] followed by the
 /// per-store insertion sequence, so a range scan over a user's prefix
@@ -29,17 +29,17 @@ type HistoryGlobalSeq = Seq<HistoryGlobalSeqMarker>;
 /// newest-first. The value is the primary key, pointing back into the primary
 /// map. Both components are fixed-width big-endian via [`CompositeId`], so the
 /// derived field-wise `Ord` matches the byte order `StableBTreeMap` relies on.
-type ByUserKey = CompositeId<UserId, HistoryGlobalSeq>;
+type ByUserKey = CompositeId<UserId, InsertionSeq>;
 
 impl ByUserKey {
     /// Lower bound of `user`'s range — the oldest possible record.
     fn first_of(user: UserId) -> Self {
-        Self::new(user, HistoryGlobalSeq::ZERO)
+        Self::new(user, InsertionSeq::ZERO)
     }
 
     /// Upper bound of `user`'s range — the newest possible record.
     fn last_of(user: UserId) -> Self {
-        Self::new(user, HistoryGlobalSeq::new(u64::MAX))
+        Self::new(user, InsertionSeq::new(u64::MAX))
     }
 }
 
@@ -57,7 +57,7 @@ impl<T: minicbor::Encode<()> + for<'a> minicbor::Decode<'a, ()>> Record for T {}
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 struct SeqEnvelope<V> {
     #[n(0)]
-    seq: HistoryGlobalSeq,
+    seq: InsertionSeq,
     #[n(1)]
     record: V,
 }
@@ -142,7 +142,7 @@ where
     /// scanned for newest-first — is the current record count. Panics if `key`
     /// is already present.
     pub fn insert_once(&mut self, user: UserId, key: K, record: V) {
-        let seq = HistoryGlobalSeq::new(self.primary.len());
+        let seq = InsertionSeq::new(self.primary.len());
         assert!(
             self.primary
                 .insert(key.clone(), SeqEnvelope { seq, record })

@@ -1,4 +1,4 @@
-use super::{CursorNotFound, History, HistoryGlobalSeq, SeqEnvelope};
+use super::{CursorNotFound, History, InsertionSeq, SeqEnvelope};
 use crate::ids::{Seq, SeqMarker};
 use crate::user::UserId;
 use ic_stable_structures::{Storable, VectorMemory};
@@ -219,7 +219,7 @@ fn should_range_primary_newest_first_within_bounds() {
 proptest! {
     #[test]
     fn should_roundtrip_seq_envelope_through_storable(seq in any::<u64>(), record in any::<u64>()) {
-        let envelope = SeqEnvelope { seq: HistoryGlobalSeq::new(seq), record };
+        let envelope = SeqEnvelope { seq: InsertionSeq::new(seq), record };
         prop_assert_eq!(SeqEnvelope::<u64>::from_bytes(envelope.to_bytes()), envelope);
     }
 
