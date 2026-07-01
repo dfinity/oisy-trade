@@ -1,4 +1,4 @@
-use super::{CursorNotFound, History, InsertionSeq, SeqEnvelope};
+use super::{CursorNotFound, History, InsertionSeq, SeqRecord};
 use crate::ids::{Seq, SeqMarker};
 use crate::user::UserId;
 use ic_stable_structures::{Storable, VectorMemory};
@@ -218,9 +218,9 @@ fn should_range_primary_newest_first_within_bounds() {
 
 proptest! {
     #[test]
-    fn should_roundtrip_seq_envelope_through_storable(seq in any::<u64>(), record in any::<u64>()) {
-        let envelope = SeqEnvelope { seq: InsertionSeq::new(seq), record };
-        prop_assert_eq!(SeqEnvelope::<u64>::from_bytes(envelope.to_bytes()), envelope);
+    fn should_roundtrip_seq_record_through_storable(seq in any::<u64>(), record in any::<u64>()) {
+        let seq_record = SeqRecord { seq: InsertionSeq::new(seq), record };
+        prop_assert_eq!(SeqRecord::<u64>::from_bytes(seq_record.to_bytes()), seq_record);
     }
 
     /// A single user's records page back in exact insertion order, newest-first,

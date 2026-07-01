@@ -55,14 +55,14 @@ impl<T: minicbor::Encode<()> + for<'a> minicbor::Decode<'a, ()>> Record for T {}
 /// position. It's an index-bookkeeping concern, so it lives in this wrapper
 /// rather than as a field on the domain record.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-struct SeqEnvelope<V> {
+struct SeqRecord<V> {
     #[n(0)]
     seq: InsertionSeq,
     #[n(1)]
     record: V,
 }
 
-impl<V: Record> Storable for SeqEnvelope<V> {
+impl<V: Record> Storable for SeqRecord<V> {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         minicbor::encode(self, &mut buf).expect("history record encoding should always succeed");
@@ -103,7 +103,7 @@ where
     K: Storable + Ord + Clone,
     V: Record,
 {
-    primary: StableBTreeMap<K, SeqEnvelope<V>, M>,
+    primary: StableBTreeMap<K, SeqRecord<V>, M>,
     by_user: StableBTreeMap<ByUserKey, K, M>,
 }
 
@@ -145,7 +145,7 @@ where
         let seq = InsertionSeq::new(self.primary.len());
         assert!(
             self.primary
-                .insert(key.clone(), SeqEnvelope { seq, record })
+                .insert(key.clone(), SeqRecord { seq, record })
                 .is_none(),
             "BUG: duplicate history key {key:?}"
         );
@@ -226,7 +226,7 @@ where
     K: Storable + Ord + Clone + fmt::Debug,
     V: Record + Clone,
 {
-    fn iter(&self) -> impl Iterator<Item = (K, SeqEnvelope<V>)> + '_ {
+    fn iter(&self) -> impl Iterator<Item = (K, SeqRecord<V>)> + '_ {
         self.primary
             .iter()
             .map(|entry| (entry.key().clone(), entry.value()))
