@@ -237,7 +237,7 @@ impl SettledFill {
     /// self-describes one order's view of the execution without ever referencing
     /// the counterparty. Consumed by [`crate::order::TradeHistory::append`].
     pub fn trade_legs(
-        &self,
+        self,
         book_id: OrderBookId,
         taker_side: Side,
         maker_price: Price,
