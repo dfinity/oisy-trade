@@ -1,14 +1,12 @@
 use super::{CursorNotFound, TradeHistory, TradeRecord};
 use crate::Timestamp;
 use crate::order::{
-    BasisPoint, FeeRates, FillEvent, FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken,
-    Price, Quantity, Side, TradeId,
+    FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
 };
 use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
 use proptest::proptest;
-use std::num::NonZeroU64;
 
 const USER: UserId = UserId::new(0);
 const BOOK: OrderBookId = OrderBookId::ZERO;
@@ -121,13 +119,13 @@ fn should_swap_sides_for_a_sell_taker() {
 /// A `trades_for_order` scenario for order A (taker seq 0): the taker fill
 /// sequences appended (each paired with a maker leg on `maker_seq`), the cursor
 /// and page length to query, and the expected fill sequences newest-first — or
-/// `None` when [`CursorNotFound`] is expected.
+/// `Err(CursorNotFound)` when the cursor is not found.
 struct TradesForOrderCase {
     desc: &'static str,
     inserts: Vec<(u64, u64)>,
     after: Option<u64>,
     length: usize,
-    expected: Option<Vec<u64>>,
+    expected: Result<Vec<u64>, CursorNotFound>,
 }
 
 #[test]
@@ -138,35 +136,35 @@ fn should_page_one_orders_trades() {
             inserts: vec![(1, 0), (2, 1)],
             after: None,
             length: 10,
-            expected: Some(vec![1, 0]),
+            expected: Ok(vec![1, 0]),
         },
         TradesForOrderCase {
             desc: "first page clamped by length",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
             after: None,
             length: 2,
-            expected: Some(vec![2, 1]),
+            expected: Ok(vec![2, 1]),
         },
         TradesForOrderCase {
             desc: "page continues after cursor with next-older",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
             after: Some(1),
             length: 2,
-            expected: Some(vec![0]),
+            expected: Ok(vec![0]),
         },
         TradesForOrderCase {
             desc: "cursor that is not one of the order's trades is not found",
             inserts: vec![(1, 0)],
             after: Some(99),
             length: 10,
-            expected: None,
+            expected: Err(CursorNotFound),
         },
         TradesForOrderCase {
             desc: "valid cursor with no older trades is an empty page",
             inserts: vec![(1, 0)],
             after: Some(0),
             length: 10,
-            expected: Some(vec![]),
+            expected: Ok(vec![]),
         },
     ];
 
@@ -177,24 +175,15 @@ fn should_page_one_orders_trades() {
             append(&mut store, Side::Buy, 0, *maker_seq, *fill_seq, USER, USER);
         }
 
-        let result = store.trades_for_order(order_a, case.after.map(FillSeq::new), case.length);
+        let got = store
+            .trades_for_order(order_a, case.after.map(FillSeq::new), case.length)
+            .map(|page| page.iter().map(|(s, _)| s.get()).collect::<Vec<u64>>());
 
-        match case.expected {
-            None => assert_eq!(
-                result,
-                Err(CursorNotFound),
-                "BUG ({}): expected cursor not found",
-                case.desc
-            ),
-            Some(seqs) => {
-                let got: Vec<u64> = result
-                    .unwrap_or_else(|_| panic!("BUG ({}): unexpected CursorNotFound", case.desc))
-                    .iter()
-                    .map(|(s, _)| s.get())
-                    .collect();
-                assert_eq!(got, seqs, "BUG ({}): page differs from expected", case.desc);
-            }
-        }
+        assert_eq!(
+            got, case.expected,
+            "BUG ({}): page differs from expected",
+            case.desc
+        );
     }
 }
 
@@ -218,27 +207,46 @@ fn append(
     taker_user: UserId,
     maker_user: UserId,
 ) {
-    let settled = FillEvent {
-        fill_seq: FillSeq::new(fill_seq),
-        taker_order_seq: OrderSeq::new(taker_seq),
-        maker_order_seq: OrderSeq::new(maker_seq),
-        quantity: quantity(),
-        fee_rates: fee_rates(),
+    let seq = FillSeq::new(fill_seq);
+    let maker_side = match taker_side {
+        Side::Buy => Side::Sell,
+        Side::Sell => Side::Buy,
     };
-    let [taker_leg, maker_leg] =
-        settled.trade_legs(BOOK, taker_side, maker_price(), base_scale(), TIMESTAMP);
-    store.append(taker_leg, taker_user, maker_leg, maker_user);
+    let taker_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(taker_seq)), seq);
+    let taker_leg = TradeRecord {
+        side: taker_side,
+        price: maker_price(),
+        quantity: quantity(),
+        notional: notional(),
+        fee: taker_fee(),
+        fee_token: fee_token(taker_side),
+        is_maker: false,
+        timestamp: TIMESTAMP,
+    };
+    let maker_id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(maker_seq)), seq);
+    let maker_leg = TradeRecord {
+        side: maker_side,
+        price: maker_price(),
+        quantity: quantity(),
+        notional: notional(),
+        fee: maker_fee(),
+        fee_token: fee_token(maker_side),
+        is_maker: true,
+        timestamp: TIMESTAMP,
+    };
+    store.append(
+        (taker_id, taker_leg),
+        taker_user,
+        (maker_id, maker_leg),
+        maker_user,
+    );
 }
 
-fn fee_rates() -> FeeRates {
-    FeeRates {
-        maker: BasisPoint::new(5).unwrap(),
-        taker: BasisPoint::new(10).unwrap(),
+fn fee_token(side: Side) -> PairToken {
+    match side {
+        Side::Buy => PairToken::Base,
+        Side::Sell => PairToken::Quote,
     }
-}
-
-fn base_scale() -> NonZeroU64 {
-    NonZeroU64::new(100_000_000).unwrap()
 }
 
 fn maker_price() -> Price {
