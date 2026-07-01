@@ -472,9 +472,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             &self.user_registry,
         );
         for fill in &event.fills {
-            let taker = resolved[&fill.taker_order_seq];
-            let maker = resolved[&fill.maker_order_seq];
-            let [taker_leg, maker_leg] = fill.clone().trade_legs(
+            let taker = *resolved.get(&fill.taker_order_seq).expect(
+                "BUG: a settling fill's taker order seq must be resolved from its balance operations",
+            );
+            let maker = *resolved.get(&fill.maker_order_seq).expect(
+                "BUG: a settling fill's maker order seq must be resolved from its balance operations",
+            );
+            let [taker_leg, maker_leg] = fill.trade_legs(
                 event.book_id,
                 taker.side,
                 maker.price,
