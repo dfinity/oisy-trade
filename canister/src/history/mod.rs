@@ -9,18 +9,22 @@ use std::ops::Bound as RangeBound;
 #[cfg(test)]
 mod tests;
 
-/// Marker for the canister-global insertion sequence shared by every history
-/// store: each inserted record gets the next dense, monotonic value.
+/// Marker for the per-store insertion sequence: within a single [`History`]
+/// instance (one memory region), each inserted record gets the next dense,
+/// monotonic value. It is not shared across stores — every [`History`] starts
+/// its sequence at zero — so the value is only per-store monotonic, not
+/// canister-wide.
 pub struct HistoryGlobalSeqMarker;
 impl SeqMarker for HistoryGlobalSeqMarker {
     const NAME: &'static str = "HistoryGlobalSeq";
 }
 
-/// Canister-global insertion sequence assigned to each inserted record.
+/// Per-store insertion sequence assigned to each inserted record: monotonic
+/// within a single [`History`] instance, not across stores.
 type HistoryGlobalSeq = Seq<HistoryGlobalSeqMarker>;
 
 /// Key into the per-user index: the interned [`UserId`] followed by the
-/// canister-global insertion sequence, so a range scan over a user's prefix
+/// per-store insertion sequence, so a range scan over a user's prefix
 /// yields their records oldest-first — [`History::page_by_user`] reverses it for
 /// newest-first. The value is the primary key, pointing back into the primary
 /// map. Both components are fixed-width big-endian via [`CompositeId`], so the
@@ -45,7 +49,7 @@ pub trait Record: minicbor::Encode<()> + for<'a> minicbor::Decode<'a, ()> {}
 impl<T: minicbor::Encode<()> + for<'a> minicbor::Decode<'a, ()>> Record for T {}
 
 /// Stored value of a [`History`]'s primary map: a record paired with the
-/// canister-global insertion sequence assigned when it was first inserted. The
+/// per-store insertion sequence assigned when it was first inserted. The
 /// sequence keys the per-user index (scanned in reverse for newest-first) and
 /// lets [`History::page_by_user`] resolve a primary-key cursor back to its index
 /// position. It's an index-bookkeeping concern, so it lives in this wrapper
