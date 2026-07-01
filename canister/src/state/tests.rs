@@ -677,6 +677,128 @@ mod get_user_orders {
     }
 }
 
+mod get_user_order_trades {
+    use crate::Timestamp;
+    use crate::order::{
+        FeeRates, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
+        TradeId, TradeLeg, TradeRecord,
+    };
+    use crate::state::State;
+    use crate::test_fixtures::{
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, order,
+    };
+    use crate::user::UserId;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+
+    #[test]
+    fn owner_sees_their_trades_newest_first_and_a_non_owner_sees_an_empty_page() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let owner_order = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
+        let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
+
+        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
+        seed_trade(&mut state, (stranger_order, stranger_id), FillSeq::new(2));
+
+        assert!(
+            state
+                .get_user_order_trades(&STRANGER, owner_order, None, 10)
+                .unwrap()
+                .is_empty(),
+            "a non-owner must not see another principal's trades"
+        );
+        assert!(
+            state
+                .get_user_order_trades(&OWNER, stranger_order, None, 10)
+                .unwrap()
+                .is_empty(),
+            "the owner of one order must not see another principal's order's trades"
+        );
+
+        let seqs: Vec<_> = state
+            .get_user_order_trades(&OWNER, owner_order, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|(seq, _)| seq)
+            .collect();
+        assert_eq!(
+            seqs,
+            vec![FillSeq::new(1), FillSeq::new(0)],
+            "the owner sees their order's trades newest first"
+        );
+    }
+
+    #[test]
+    fn an_unknown_order_yields_an_empty_page() {
+        let state = setup();
+        let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
+        assert!(
+            state
+                .get_user_order_trades(&OWNER, unknown, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn seed_trade(
+        state: &mut State<VectorMemory, VectorMemory>,
+        (order, user): (OrderId, UserId),
+        seq: FillSeq,
+    ) {
+        let counterparty_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1_000 + seq.get()));
+        let counterparty = UserId::new(u64::MAX);
+        state.trade_history.append(
+            leg(TradeId::new(order, seq), false),
+            user,
+            leg(TradeId::new(counterparty_order, seq), true),
+            counterparty,
+        );
+    }
+
+    fn leg(id: TradeId, is_maker: bool) -> TradeLeg {
+        (
+            id,
+            TradeRecord {
+                side: Side::Buy,
+                price: Price::new(10_000_000),
+                quantity: Quantity::from_u128(200_000_000),
+                notional: Quantity::from_u128(20_000_000),
+                fee: Quantity::from_u128(1),
+                fee_token: PairToken::Base,
+                is_maker,
+                timestamp: Timestamp::new(42),
+            },
+        )
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, TimeInForce};
     use crate::state::AddLimitOrderError;
@@ -2339,7 +2461,7 @@ mod settle_fills {
 
             // Taker's two fills, newest-first: Fill 2 (3 ICP @ 11) then Fill 1
             // (2 ICP @ 10) — each at the maker's price, never the taker's 12.
-            let taker_fills = order_trades_of(&state, BUYER, taker);
+            let taker_fills = order_trades_of(&state, taker);
             assert_eq!(taker_fills.len(), 2);
             let fill2 = &taker_fills[0];
             assert_eq!(fill2.side, Side::Buy);
@@ -2357,7 +2479,7 @@ mod settle_fills {
             assert_eq!(fill1.fee_token, PairToken::Base);
 
             // Maker A's single fill: maker role, quote-denominated 0.01 fee.
-            let a_fills = order_trades_of(&state, SELLER, maker_a);
+            let a_fills = order_trades_of(&state, maker_a);
             assert_eq!(a_fills.len(), 1);
             assert_eq!(a_fills[0].side, Side::Sell);
             assert!(a_fills[0].is_maker);
@@ -2367,7 +2489,7 @@ mod settle_fills {
             assert_eq!(a_fills[0].fee_token, PairToken::Quote);
 
             // Maker B's single fill: quote-denominated 0.0165 fee.
-            let b_fills = order_trades_of(&state, MAKER_B, maker_b);
+            let b_fills = order_trades_of(&state, maker_b);
             assert_eq!(b_fills.len(), 1);
             assert!(b_fills[0].is_maker);
             assert_eq!(b_fills[0].notional, Quantity::from(33_000_000u128));
@@ -2389,7 +2511,7 @@ mod settle_fills {
             test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let fills = order_trades_of(&state, BUYER, pivot);
+            let fills = order_trades_of(&state, pivot);
             assert_eq!(fills.len(), 2);
             // Newest-first: the maker leg (rested, then hit) followed by the
             // taker leg (crossed on entry).
@@ -2401,27 +2523,6 @@ mod settle_fills {
             assert!(!taker_leg.is_maker);
             assert_eq!(taker_leg.quantity, Quantity::from(QTY_2));
             assert_eq!(taker_leg.fee, Quantity::from(200_000u128));
-        }
-
-        /// `ByOrder` for an id owned by another principal returns an empty page;
-        /// the rightful owner sees the fills.
-        #[test]
-        fn fills_are_owner_scoped() {
-            let mut state = setup_ckusdt_with_fees(5, 10);
-            let pair = icp_ckusdt_trading_pair();
-            let maker_a =
-                test_fixtures::order(SELLER, &pair, Side::Sell, PRICE_10, QTY_2).place(&mut state);
-            test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_10, QTY_2).place(&mut state);
-            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
-
-            assert_eq!(
-                state
-                    .get_user_order_trades(&BUYER, maker_a, None, 10)
-                    .unwrap(),
-                Vec::new(),
-                "a non-owner sees no fills for the maker's order",
-            );
-            assert_eq!(order_trades_of(&state, SELLER, maker_a).len(), 1);
         }
 
         /// `ByAccount` for a caller that never traded (and so is not a
@@ -2503,13 +2604,15 @@ mod settle_fills {
 
             assert_eq!(
                 state
-                    .get_user_order_trades(&BUYER, taker, None, 10)
+                    .trade_history
+                    .trades_for_order(taker, None, 10)
                     .unwrap(),
                 Vec::new(),
             );
             assert_eq!(
                 state
-                    .get_user_order_trades(&SELLER, maker_a, None, 10)
+                    .trade_history
+                    .trades_for_order(maker_a, None, 10)
                     .unwrap(),
                 Vec::new(),
             );
@@ -2586,12 +2689,12 @@ mod settle_fills {
                 StableMemoryOptions::Skip,
             );
             assert_eq!(
-                order_trades_of(&skip_state, BUYER, skip_taker),
+                order_trades_of(&skip_state, skip_taker),
                 Vec::new(),
                 "Skip replay must not write the taker's fill",
             );
             assert_eq!(
-                order_trades_of(&skip_state, SELLER, skip_maker),
+                order_trades_of(&skip_state, skip_maker),
                 Vec::new(),
                 "Skip replay must not write the maker's fill",
             );
@@ -2608,12 +2711,12 @@ mod settle_fills {
                 StableMemoryOptions::Write,
             );
             assert_eq!(
-                order_trades_of(&write_state, BUYER, write_taker).len(),
+                order_trades_of(&write_state, write_taker).len(),
                 1,
                 "Write must write the taker's fill exactly once",
             );
             assert_eq!(
-                order_trades_of(&write_state, SELLER, write_maker).len(),
+                order_trades_of(&write_state, write_maker).len(),
                 1,
                 "Write must write the maker's fill exactly once",
             );
@@ -2626,12 +2729,12 @@ mod settle_fills {
 
         fn order_trades_of(
             state: &TestState,
-            owner: Principal,
             order_id: crate::order::OrderId,
         ) -> Vec<crate::order::TradeRecord> {
             state
-                .get_user_order_trades(&owner, order_id, None, 100)
-                .expect("owner-scoped fill read should not error")
+                .trade_history
+                .trades_for_order(order_id, None, 100)
+                .expect("per-order fill read should not error")
                 .into_iter()
                 .map(|(_, record)| record)
                 .collect()

@@ -42,6 +42,7 @@ pub mod user;
 
 #[cfg(feature = "canbench-rs")]
 mod benchmarks;
+mod history;
 mod ledger;
 #[cfg(any(test, feature = "canbench-rs"))]
 pub mod test_fixtures;
