@@ -119,13 +119,13 @@ fn should_swap_sides_for_a_sell_taker() {
 /// A `trades_for_order` scenario for order A (taker seq 0): the taker fill
 /// sequences appended (each paired with a maker leg on `maker_seq`), the cursor
 /// and page length to query, and the expected fill sequences newest-first — or
-/// `None` when [`CursorNotFound`] is expected.
+/// `Err(CursorNotFound)` when the cursor is not found.
 struct TradesForOrderCase {
     desc: &'static str,
     inserts: Vec<(u64, u64)>,
     after: Option<u64>,
     length: usize,
-    expected: Option<Vec<u64>>,
+    expected: Result<Vec<u64>, CursorNotFound>,
 }
 
 #[test]
@@ -136,35 +136,35 @@ fn should_page_one_orders_trades() {
             inserts: vec![(1, 0), (2, 1)],
             after: None,
             length: 10,
-            expected: Some(vec![1, 0]),
+            expected: Ok(vec![1, 0]),
         },
         TradesForOrderCase {
             desc: "first page clamped by length",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
             after: None,
             length: 2,
-            expected: Some(vec![2, 1]),
+            expected: Ok(vec![2, 1]),
         },
         TradesForOrderCase {
             desc: "page continues after cursor with next-older",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
             after: Some(1),
             length: 2,
-            expected: Some(vec![0]),
+            expected: Ok(vec![0]),
         },
         TradesForOrderCase {
             desc: "cursor that is not one of the order's trades is not found",
             inserts: vec![(1, 0)],
             after: Some(99),
             length: 10,
-            expected: None,
+            expected: Err(CursorNotFound),
         },
         TradesForOrderCase {
             desc: "valid cursor with no older trades is an empty page",
             inserts: vec![(1, 0)],
             after: Some(0),
             length: 10,
-            expected: Some(vec![]),
+            expected: Ok(vec![]),
         },
     ];
 
@@ -175,24 +175,15 @@ fn should_page_one_orders_trades() {
             append(&mut store, Side::Buy, 0, *maker_seq, *fill_seq, USER, USER);
         }
 
-        let result = store.trades_for_order(order_a, case.after.map(FillSeq::new), case.length);
+        let got = store
+            .trades_for_order(order_a, case.after.map(FillSeq::new), case.length)
+            .map(|page| page.iter().map(|(s, _)| s.get()).collect::<Vec<u64>>());
 
-        match case.expected {
-            None => assert_eq!(
-                result,
-                Err(CursorNotFound),
-                "BUG ({}): expected cursor not found",
-                case.desc
-            ),
-            Some(seqs) => {
-                let got: Vec<u64> = result
-                    .unwrap_or_else(|_| panic!("BUG ({}): unexpected CursorNotFound", case.desc))
-                    .iter()
-                    .map(|(s, _)| s.get())
-                    .collect();
-                assert_eq!(got, seqs, "BUG ({}): page differs from expected", case.desc);
-            }
-        }
+        assert_eq!(
+            got, case.expected,
+            "BUG ({}): page differs from expected",
+            case.desc
+        );
     }
 }
 
