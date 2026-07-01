@@ -69,14 +69,6 @@ pub struct Fill {
 }
 
 impl Fill {
-    /// The amount of quote tokens exchanged:
-    /// `maker_price × quantity / base_scale` (`base_scale = 10^base_decimals`).
-    pub fn quote_amount(&self, base_scale: NonZeroU64) -> Quantity {
-        self.maker_price
-            .checked_mul_quantity_scaled(&self.quantity, base_scale)
-            .expect("BUG: validation of order should prevent overflow")
-    }
-
     /// The amount of base tokens exchanged (same as quantity).
     pub fn base_amount(&self) -> &Quantity {
         &self.quantity
@@ -115,7 +107,13 @@ pub struct FillSettlement {
 impl FillSettlement {
     /// Compute the realized values of a single fill once.
     pub fn new(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> Self {
-        let (notional, taker_fee, maker_fee) = fees(&fill, fee_rates, base_scale);
+        let (notional, taker_fee, maker_fee) = fees(
+            fill.maker_price,
+            fill.quantity,
+            fill.taker_side,
+            fee_rates,
+            base_scale,
+        );
         let surplus = if fill.taker_side == Side::Buy
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !diff.is_zero()
@@ -237,23 +235,20 @@ impl FillEvent {
     /// self-describes one order's view of the execution without ever referencing
     /// the counterparty. Consumed by [`crate::order::TradeHistory::append`].
     pub fn trade_legs(
-        self,
+        &self,
         book_id: OrderBookId,
         taker_side: Side,
         maker_price: Price,
         base_scale: NonZeroU64,
         timestamp: Timestamp,
     ) -> [TradeLeg; 2] {
-        let fill = Fill {
-            fill_seq: self.fill_seq,
-            taker_order_seq: self.taker_order_seq,
-            taker_side,
-            taker_price: maker_price,
-            maker_order_seq: self.maker_order_seq,
+        let (notional, taker_fee, maker_fee) = fees(
             maker_price,
-            quantity: self.quantity,
-        };
-        let (notional, taker_fee, maker_fee) = fees(&fill, self.fee_rates, base_scale);
+            self.quantity,
+            taker_side,
+            self.fee_rates,
+            base_scale,
+        );
         let maker_side = match taker_side {
             Side::Buy => Side::Sell,
             Side::Sell => Side::Buy,
@@ -291,18 +286,22 @@ impl FillEvent {
 /// legs can never diverge, and the notional (the costliest arithmetic) is computed
 /// once per fill at each call site.
 fn fees(
-    fill: &Fill,
+    maker_price: Price,
+    quantity: Quantity,
+    taker_side: Side,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
 ) -> (Quantity, Quantity, Quantity) {
-    let (buyer_rate, seller_rate) = match fill.taker_side {
+    let (buyer_rate, seller_rate) = match taker_side {
         Side::Buy => (fee_rates.taker, fee_rates.maker),
         Side::Sell => (fee_rates.maker, fee_rates.taker),
     };
-    let notional = fill.quote_amount(base_scale);
+    let notional = maker_price
+        .checked_mul_quantity_scaled(&quantity, base_scale)
+        .expect("BUG: validation of order should prevent overflow");
     let quote_fee = seller_rate.mul_ceil(notional);
-    let base_fee = buyer_rate.mul_ceil(fill.quantity);
-    let (taker_fee, maker_fee) = match fill.taker_side {
+    let base_fee = buyer_rate.mul_ceil(quantity);
+    let (taker_fee, maker_fee) = match taker_side {
         Side::Buy => (base_fee, quote_fee),
         Side::Sell => (quote_fee, base_fee),
     };
