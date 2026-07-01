@@ -108,15 +108,17 @@ branches, or PR state beyond posting your review.
   not a one-line repeat; as a rule of thumb, roughly 10+ near-identical lines or the
   same multi-line block repeated at 2+ sites — is at least 🟠 Medium and gates the verdict;
   name the parameterization, helper, or proptest that removes it.
-- Flag structural duplication ACROSS modules/PRs, not just copy-paste within the diff.
-  When a new type closely mirrors an existing sibling — the same shape of fields/maps and
-  near-identical methods (e.g. a new store paralleling an existing history/index type, or a
-  new id/seq newtype paralleling existing ones) — treat the parallelism itself as the
-  finding. A faithful "mirror of X" is a signal to unify with X via a generic, not to
-  duplicate its structure: propose extracting a shared generic core (traits + a generic like
-  `Generic<M>` / `Composite<A,B>`), preferring generics over copy-paste AND over macros, even
-  though unifying means touching the pre-existing sibling. This is at least 🟠 Medium when the
-  mirrored structure is substantial; name the generic that would unify them.
+- Flag structural duplication against the repository codebase — including code outside the
+  current diff/PR, but never other open PRs — not just copy-paste within the diff. When a new
+  type closely mirrors an existing sibling — the same shape of fields/maps and near-identical
+  methods (e.g. a new store paralleling an existing history/index type, or a new id/seq newtype
+  paralleling existing ones) — treat the parallelism itself as the finding, and cite the
+  concrete sibling being mirrored (the actual type/module, no speculation). A faithful
+  "mirror of X" is a signal to unify with X via a generic, not to duplicate its structure:
+  propose extracting a shared generic core (traits + a generic like `Generic<M>` /
+  `Composite<A,B>`), preferring generics over copy-paste AND over macros, even though unifying
+  means touching the pre-existing sibling. This is at least 🟠 Medium when the mirrored
+  structure is substantial; name the generic that would unify them.
 - For new types, every derived trait (`Hash`, `Ord`, `PartialOrd`, `Default`, …)
   must be used somewhere. Unused derives are dead capability and can mislead future
   use (e.g. `Hash` on a clock reading implies hashmap-keying, rarely the right
