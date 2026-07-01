@@ -1772,6 +1772,14 @@ async fn should_replay_events_on_upgrade() {
                         fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
+                fills: vec![oisy_trade_types_internal::event::FillEvent {
+                    fill_seq: 0,
+                    taker_order_seq: 1,
+                    maker_order_seq: 0,
+                    quantity: Nat::from(deposit_amount),
+                    maker_fee_bps,
+                    taker_fee_bps,
+                }],
             });
         });
     });

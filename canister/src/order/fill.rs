@@ -50,40 +50,25 @@ impl TradeId {
 }
 
 /// A single fill produced when an incoming order matches a resting order.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fill {
     /// The per-book sequence of this match, minted by the order book.
-    #[n(0)]
     pub fill_seq: FillSeq,
     /// The sequence of the incoming (taker) order.
-    #[n(1)]
     pub taker_order_seq: OrderSeq,
     /// The side of the taker order.
-    #[n(2)]
     pub taker_side: Side,
     /// The limit price of the taker order.
-    #[n(3)]
     pub taker_price: Price,
     /// The sequence of the resting (maker) order that was matched.
-    #[n(4)]
     pub maker_order_seq: OrderSeq,
     /// The price at which the fill occurred (always the maker's price).
-    #[n(5)]
     pub maker_price: Price,
     /// The quantity filled.
-    #[n(6)]
     pub quantity: Quantity,
 }
 
 impl Fill {
-    /// The amount of quote tokens exchanged:
-    /// `maker_price × quantity / base_scale` (`base_scale = 10^base_decimals`).
-    pub fn quote_amount(&self, base_scale: NonZeroU64) -> Quantity {
-        self.maker_price
-            .checked_mul_quantity_scaled(&self.quantity, base_scale)
-            .expect("BUG: validation of order should prevent overflow")
-    }
-
     /// The amount of base tokens exchanged (same as quantity).
     pub fn base_amount(&self) -> &Quantity {
         &self.quantity
@@ -97,7 +82,7 @@ impl Fill {
 /// never diverge.
 ///
 /// This is a matching-phase, heap-only helper: it is never CBOR-encoded into the
-/// event log. The settling event carries the lean [`SettledFill`] instead, and the
+/// event log. The settling event carries the lean [`FillEvent`] instead, and the
 /// settling phase recovers side/price from the order records and recomputes the
 /// realized values to rebuild the two side-projected [`TradeRecord`]s.
 #[derive(Debug)]
@@ -115,14 +100,20 @@ pub struct FillSettlement {
     /// Zero for a sell taker or an exact-price fill.
     surplus: Quantity,
     /// Snapshot of the book's fee rates at match time, carried onto the lean
-    /// [`SettledFill`] so settling can recompute the fees off the pinned rates.
+    /// [`FillEvent`] so settling can recompute the fees off the pinned rates.
     fee_rates: FeeRates,
 }
 
 impl FillSettlement {
     /// Compute the realized values of a single fill once.
     pub fn new(fill: Fill, fee_rates: FeeRates, base_scale: NonZeroU64) -> Self {
-        let (notional, taker_fee, maker_fee) = fees(&fill, fee_rates, base_scale);
+        let (notional, taker_fee, maker_fee) = fees(
+            fill.maker_price,
+            fill.quantity,
+            fill.taker_side,
+            fee_rates,
+            base_scale,
+        );
         let surplus = if fill.taker_side == Side::Buy
             && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
             && !diff.is_zero()
@@ -201,8 +192,8 @@ impl FillSettlement {
     /// The lean, normalized record persisted on the settling event: the fill's
     /// identity, quantity, and the fee-rate snapshot — everything else is
     /// recovered or recomputed in the settling phase.
-    pub fn settled_fill(&self) -> SettledFill {
-        SettledFill {
+    pub fn settled_fill(&self) -> FillEvent {
+        FillEvent {
             fill_seq: self.fill.fill_seq,
             taker_order_seq: self.fill.taker_order_seq,
             maker_order_seq: self.fill.maker_order_seq,
@@ -219,15 +210,11 @@ impl FillSettlement {
 ///
 /// The fill's execution price (the maker price) and its taker `side` are NOT
 /// stored: they are recovered in the settling phase from the two referenced order
-/// records, which is sound because an order's stored limit price is **immutable**
-/// for the life of its [`OrderSeq`] — a reprice must be modeled as cancel + a new
-/// order (a fresh seq), exactly as Binance, Kraken, and Coinbase treat one (the
-/// reprice loses queue priority, i.e. is a new resting order). `fee_rates` is
-/// snapshotted here rather than recovered because the rate lives on the book and is
-/// mutable — it is the one fee input pinned by neither the fill identity nor the
-/// orders.
+/// records. `fee_rates` is snapshotted here rather than recovered because the rate
+/// lives on the book and is mutable — it is the one fee input pinned by neither the
+/// fill identity nor the orders.
 #[derive(Clone, PartialEq, Eq, Debug, Encode, Decode)]
-pub struct SettledFill {
+pub struct FillEvent {
     #[n(0)]
     pub fill_seq: FillSeq,
     #[n(1)]
@@ -240,7 +227,7 @@ pub struct SettledFill {
     pub fee_rates: FeeRates,
 }
 
-impl SettledFill {
+impl FillEvent {
     /// Rebuild the two side-projected [`TradeRecord`]s — the taker leg and the
     /// maker leg — from this lean record, the side/price recovered from the order
     /// records, and the freshly recomputed `notional` and fees. Each leg is keyed
@@ -255,16 +242,13 @@ impl SettledFill {
         base_scale: NonZeroU64,
         timestamp: Timestamp,
     ) -> [TradeLeg; 2] {
-        let fill = Fill {
-            fill_seq: self.fill_seq,
-            taker_order_seq: self.taker_order_seq,
-            taker_side,
-            taker_price: maker_price,
-            maker_order_seq: self.maker_order_seq,
+        let (notional, taker_fee, maker_fee) = fees(
             maker_price,
-            quantity: self.quantity,
-        };
-        let (notional, taker_fee, maker_fee) = fees(&fill, self.fee_rates, base_scale);
+            self.quantity,
+            taker_side,
+            self.fee_rates,
+            base_scale,
+        );
         let maker_side = match taker_side {
             Side::Buy => Side::Sell,
             Side::Sell => Side::Buy,
@@ -298,22 +282,26 @@ impl SettledFill {
 /// The fill's `(notional, taker_fee, maker_fee)`: the quote notional and the fee
 /// charged to each of the fill's two orders, each in its receive token. Shared by
 /// the matching-phase [`FillSettlement::new`] and the settling-phase
-/// [`SettledFill::trade_legs`] recompute, so the balance ops and the persisted trade
+/// [`FillEvent::trade_legs`] recompute, so the balance ops and the persisted trade
 /// legs can never diverge, and the notional (the costliest arithmetic) is computed
 /// once per fill at each call site.
 fn fees(
-    fill: &Fill,
+    maker_price: Price,
+    quantity: Quantity,
+    taker_side: Side,
     fee_rates: FeeRates,
     base_scale: NonZeroU64,
 ) -> (Quantity, Quantity, Quantity) {
-    let (buyer_rate, seller_rate) = match fill.taker_side {
+    let (buyer_rate, seller_rate) = match taker_side {
         Side::Buy => (fee_rates.taker, fee_rates.maker),
         Side::Sell => (fee_rates.maker, fee_rates.taker),
     };
-    let notional = fill.quote_amount(base_scale);
+    let notional = maker_price
+        .checked_mul_quantity_scaled(&quantity, base_scale)
+        .expect("BUG: validation of order should prevent overflow");
     let quote_fee = seller_rate.mul_ceil(notional);
-    let base_fee = buyer_rate.mul_ceil(fill.quantity);
-    let (taker_fee, maker_fee) = match fill.taker_side {
+    let base_fee = buyer_rate.mul_ceil(quantity);
+    let (taker_fee, maker_fee) = match taker_side {
         Side::Buy => (base_fee, quote_fee),
         Side::Sell => (quote_fee, base_fee),
     };

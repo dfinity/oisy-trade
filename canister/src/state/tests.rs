@@ -2019,7 +2019,9 @@ mod settle_fills {
     mod fees {
         use super::*;
         use crate::Timestamp;
-        use crate::order::{BasisPoint, OrderRecord, OrderStatus, PairToken, TimeInForce};
+        use crate::order::{
+            BasisPoint, OrderRecord, OrderStatus, PairToken, TimeInForce, TradeRecord,
+        };
         use crate::state::StableMemoryOptions;
 
         /// Fill deducts fees on both sides at the role-specific rates.
@@ -2459,42 +2461,63 @@ mod settle_fills {
                 test_fixtures::order(BUYER, &pair, Side::Buy, PRICE_12, QTY_5).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            // Taker's two fills, newest-first: Fill 2 (3 ICP @ 11) then Fill 1
-            // (2 ICP @ 10) — each at the maker's price, never the taker's 12.
             let taker_fills = order_trades_of(&state, taker);
-            assert_eq!(taker_fills.len(), 2);
-            let fill2 = &taker_fills[0];
-            assert_eq!(fill2.side, Side::Buy);
-            assert!(!fill2.is_maker);
-            assert_eq!(fill2.price, Price::new(PRICE_11));
-            assert_eq!(fill2.quantity, Quantity::from(QTY_3));
-            assert_eq!(fill2.notional, Quantity::from(33_000_000u128));
-            assert_eq!(fill2.fee, Quantity::from(300_000u128));
-            assert_eq!(fill2.fee_token, PairToken::Base);
-            let fill1 = &taker_fills[1];
-            assert_eq!(fill1.price, Price::new(PRICE_10));
-            assert_eq!(fill1.quantity, Quantity::from(QTY_2));
-            assert_eq!(fill1.notional, Quantity::from(20_000_000u128));
-            assert_eq!(fill1.fee, Quantity::from(200_000u128));
-            assert_eq!(fill1.fee_token, PairToken::Base);
+            assert_eq!(
+                taker_fills,
+                vec![
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_11),
+                        quantity: Quantity::from(QTY_3),
+                        notional: Quantity::from(33_000_000u128),
+                        fee: Quantity::from(300_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_2),
+                        notional: Quantity::from(20_000_000u128),
+                        fee: Quantity::from(200_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                ],
+                "taker fills newest-first at the maker prices, never the taker's 12",
+            );
 
-            // Maker A's single fill: maker role, quote-denominated 0.01 fee.
-            let a_fills = order_trades_of(&state, maker_a);
-            assert_eq!(a_fills.len(), 1);
-            assert_eq!(a_fills[0].side, Side::Sell);
-            assert!(a_fills[0].is_maker);
-            assert_eq!(a_fills[0].price, Price::new(PRICE_10));
-            assert_eq!(a_fills[0].notional, Quantity::from(20_000_000u128));
-            assert_eq!(a_fills[0].fee, Quantity::from(10_000u128));
-            assert_eq!(a_fills[0].fee_token, PairToken::Quote);
+            assert_eq!(
+                order_trades_of(&state, maker_a),
+                vec![TradeRecord {
+                    side: Side::Sell,
+                    price: Price::new(PRICE_10),
+                    quantity: Quantity::from(QTY_2),
+                    notional: Quantity::from(20_000_000u128),
+                    fee: Quantity::from(10_000u128),
+                    fee_token: PairToken::Quote,
+                    is_maker: true,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "maker A leg",
+            );
 
-            // Maker B's single fill: quote-denominated 0.0165 fee.
-            let b_fills = order_trades_of(&state, maker_b);
-            assert_eq!(b_fills.len(), 1);
-            assert!(b_fills[0].is_maker);
-            assert_eq!(b_fills[0].notional, Quantity::from(33_000_000u128));
-            assert_eq!(b_fills[0].fee, Quantity::from(16_500u128));
-            assert_eq!(b_fills[0].fee_token, PairToken::Quote);
+            assert_eq!(
+                order_trades_of(&state, maker_b),
+                vec![TradeRecord {
+                    side: Side::Sell,
+                    price: Price::new(PRICE_11),
+                    quantity: Quantity::from(QTY_3),
+                    notional: Quantity::from(33_000_000u128),
+                    fee: Quantity::from(16_500u128),
+                    fee_token: PairToken::Quote,
+                    is_maker: true,
+                    timestamp: Timestamp::EPOCH,
+                }],
+                "maker B leg",
+            );
         }
 
         /// A single order that crosses (taker leg) then rests and is hit (maker
@@ -2511,18 +2534,32 @@ mod settle_fills {
             test_fixtures::order(MAKER_B, &pair, Side::Sell, PRICE_10, QTY_3).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
-            let fills = order_trades_of(&state, pivot);
-            assert_eq!(fills.len(), 2);
-            // Newest-first: the maker leg (rested, then hit) followed by the
-            // taker leg (crossed on entry).
-            let maker_leg = &fills[0];
-            assert!(maker_leg.is_maker);
-            assert_eq!(maker_leg.quantity, Quantity::from(QTY_3));
-            assert_eq!(maker_leg.fee, Quantity::from(150_000u128));
-            let taker_leg = &fills[1];
-            assert!(!taker_leg.is_maker);
-            assert_eq!(taker_leg.quantity, Quantity::from(QTY_2));
-            assert_eq!(taker_leg.fee, Quantity::from(200_000u128));
+            assert_eq!(
+                order_trades_of(&state, pivot),
+                vec![
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_3),
+                        notional: Quantity::from(30_000_000u128),
+                        fee: Quantity::from(150_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: true,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    TradeRecord {
+                        side: Side::Buy,
+                        price: Price::new(PRICE_10),
+                        quantity: Quantity::from(QTY_2),
+                        notional: Quantity::from(20_000_000u128),
+                        fee: Quantity::from(200_000u128),
+                        fee_token: PairToken::Base,
+                        is_maker: false,
+                        timestamp: Timestamp::EPOCH,
+                    },
+                ],
+                "maker leg (rested, then hit) newest-first, then the taker leg (crossed on entry)",
+            );
         }
 
         /// Settlement populates the account-wide `by_user` index: a user's fills
@@ -2590,11 +2627,6 @@ mod settle_fills {
             );
         }
 
-        /// The `Skip` gate at the top of `record_settling_event` is the
-        /// load-bearing replay-safety mechanism for R8: a settling event that
-        /// carries real fills and balance operations must write trades and move
-        /// balances under `Write`, yet be a strict no-op under `Skip` so a
-        /// post-upgrade replay does not double-write the durable fills.
         #[test]
         fn settling_event_under_skip_writes_no_fills_and_no_balances() {
             let pair = icp_ckusdt_trading_pair();

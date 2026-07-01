@@ -73,14 +73,15 @@ fn should_panic_when_modifying_a_missing_key() {
 
 /// A `page_by_user` scenario: a list of `(user, key)` insertions in order, the
 /// user and cursor to page from, the requested length, and the expected keys
-/// (as raw `u64`s) newest-first — or `None` when [`CursorNotFound`] is expected.
+/// (as raw `u64`s) newest-first — or `Err(CursorNotFound)` when the cursor is
+/// not found.
 struct PageCase {
     desc: &'static str,
     inserts: Vec<(UserId, u64)>,
     user: UserId,
     after: Option<u64>,
     length: usize,
-    expected: Option<Vec<u64>>,
+    expected: Result<Vec<u64>, CursorNotFound>,
 }
 
 #[test]
@@ -92,7 +93,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: None,
             length: 10,
-            expected: Some(vec![30, 20, 10]),
+            expected: Ok(vec![30, 20, 10]),
         },
         PageCase {
             desc: "page continues after cursor with next-older",
@@ -100,7 +101,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: Some(20),
             length: 10,
-            expected: Some(vec![10]),
+            expected: Ok(vec![10]),
         },
         PageCase {
             desc: "length clamps the page",
@@ -108,7 +109,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: None,
             length: 2,
-            expected: Some(vec![30, 20]),
+            expected: Ok(vec![30, 20]),
         },
         PageCase {
             desc: "valid cursor with no older records is an empty page",
@@ -116,7 +117,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: Some(10),
             length: 10,
-            expected: Some(vec![]),
+            expected: Ok(vec![]),
         },
         PageCase {
             desc: "isolates owners: only the queried user's records",
@@ -124,7 +125,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: None,
             length: 10,
-            expected: Some(vec![30, 10]),
+            expected: Ok(vec![30, 10]),
         },
         PageCase {
             desc: "ordered by insertion sequence, not key value",
@@ -132,7 +133,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: None,
             length: 10,
-            expected: Some(vec![20, 10, 30]),
+            expected: Ok(vec![20, 10, 30]),
         },
         PageCase {
             desc: "unknown cursor is not found",
@@ -140,7 +141,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: Some(999),
             length: 10,
-            expected: None,
+            expected: Err(CursorNotFound),
         },
         PageCase {
             desc: "foreign cursor (another user's record) is not found",
@@ -148,7 +149,7 @@ fn should_page_by_user() {
             user: ALICE,
             after: Some(20),
             length: 10,
-            expected: None,
+            expected: Err(CursorNotFound),
         },
         PageCase {
             desc: "unknown user yields an empty page",
@@ -156,7 +157,7 @@ fn should_page_by_user() {
             user: BOB,
             after: None,
             length: 10,
-            expected: Some(vec![]),
+            expected: Ok(vec![]),
         },
     ];
 
@@ -166,24 +167,15 @@ fn should_page_by_user() {
             store.insert_once(*user, TestKey::new(*key), i as u64);
         }
 
-        let result = store.page_by_user(case.user, case.after.map(TestKey::new), case.length);
+        let got = store
+            .page_by_user(case.user, case.after.map(TestKey::new), case.length)
+            .map(|page| page.into_iter().map(TestKey::get).collect::<Vec<u64>>());
 
-        match case.expected {
-            None => assert_eq!(
-                result,
-                Err(CursorNotFound),
-                "BUG ({}): expected cursor not found",
-                case.desc
-            ),
-            Some(keys) => {
-                let got: Vec<u64> = result
-                    .unwrap_or_else(|_| panic!("BUG ({}): unexpected CursorNotFound", case.desc))
-                    .into_iter()
-                    .map(TestKey::get)
-                    .collect();
-                assert_eq!(got, keys, "BUG ({}): page differs from expected", case.desc);
-            }
-        }
+        assert_eq!(
+            got, case.expected,
+            "BUG ({}): page differs from expected",
+            case.desc
+        );
     }
 }
 
