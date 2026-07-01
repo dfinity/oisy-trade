@@ -459,10 +459,11 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, FillEvent, FillSeq, LotSize, MatchingOutput, Order,
-        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price,
-        Quantity, RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
+    use crate::settlement::FillEvent;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
         DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,

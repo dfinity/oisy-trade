@@ -18,11 +18,12 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillEvent, FillSettlement, LotSize, MatchOrderError,
-    MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Price, Quantity, RemovedOrder,
-    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeHistory, TradingPair,
+    CursorNotFound, FeeRates, LotSize, MatchOrderError, NotionalError, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
+    PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradeHistory,
+    TradingPair,
 };
+use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
@@ -399,37 +400,21 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let MatchingOutput {
-                fills,
-                resting_orders,
-                filled_orders,
-                expired_orders,
-            } = output;
-            let (balance_operations, mut updates, settled_fills) =
-                settle(fills, &expired_orders, fee_rates, base_scale);
+            let settlement = MatchSettlement::from_matching(output, fee_rates, base_scale);
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
-                for seq in &resting_orders {
-                    updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
-                }
-                for seq in &filled_orders {
-                    updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
-                }
-                for seq in expired_orders.keys() {
-                    updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
-                }
-                for (seq, update) in updates {
-                    let order_id = OrderId::new(event.book_id, seq);
-                    self.order_history.apply_update(&order_id, update, now);
+                for (seq, update) in settlement.order_updates {
+                    self.order_history
+                        .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            if !balance_operations.is_empty() || !settled_fills.is_empty() {
+            if !settlement.balance_operations.is_empty() || !settlement.fills.is_empty() {
                 self.pending_settling_events
                     .push_back(event::SettlingEvent {
                         book_id: event.book_id,
-                        balance_operations,
-                        fills: settled_fills,
+                        balance_operations: settlement.balance_operations,
+                        fills: settlement.fills,
                     });
             }
         }
@@ -966,31 +951,6 @@ fn resolve_op_orders<MH: Memory, MB: Memory>(
             )
         })
         .collect()
-}
-
-fn settle(
-    fills: Vec<Fill>,
-    expired_orders: &BTreeMap<OrderSeq, RemovedOrder>,
-    fee_rates: FeeRates,
-    base_scale: NonZeroU64,
-) -> (
-    Vec<event::BalanceOperation>,
-    BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<FillEvent>,
-) {
-    let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
-    let mut updates = BTreeMap::new();
-    let mut settled = Vec::with_capacity(fills.len());
-    for fill in fills {
-        let settlement = FillSettlement::new(fill, fee_rates, base_scale);
-        settlement.push_balance_operations(&mut ops);
-        settlement.accrue_fill(&mut updates);
-        settled.push(settlement.settled_fill());
-    }
-    for (seq, removed) in expired_orders {
-        RemovedOrderSettlement::new(*seq, removed, base_scale).push_balance_operations(&mut ops);
-    }
-    (ops, updates, settled)
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in

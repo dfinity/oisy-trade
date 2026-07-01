@@ -243,7 +243,7 @@ fn get_events(
         }
     }
 
-    fn map_fill_event(fill: oisy_trade_canister::order::FillEvent) -> event::FillEvent {
+    fn map_fill_event(fill: oisy_trade_canister::settlement::FillEvent) -> event::FillEvent {
         event::FillEvent {
             fill_seq: fill.fill_seq.get(),
             taker_order_seq: fill.taker_order_seq.get(),

@@ -36,6 +36,7 @@ pub mod lifecycle;
 pub mod metrics;
 pub mod order;
 pub mod runtime;
+pub mod settlement;
 pub mod state;
 pub mod storage;
 pub mod user;

@@ -1,8 +1,9 @@
 use crate::Timestamp;
 use crate::order::{
-    FeeRates, FillEvent, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
-    TickSize, TimeInForce, TokenId, TokenMetadata,
+    FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
+    TimeInForce, TokenId, TokenMetadata,
 };
+use crate::settlement::FillEvent;
 use candid::Principal;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
