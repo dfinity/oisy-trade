@@ -18,11 +18,10 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
-    MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
-    OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder,
-    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeCursorNotFound,
-    TradeHistory, TradeRecord, TradingPair,
+    CursorNotFound, FeeRates, Fill, FillSettlement, LotSize, MatchOrderError, MatchingOutput,
+    NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq,
+    OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side,
+    TickSize, TokenId, TokenMetadata, TradeHistory, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -84,6 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
+    #[allow(dead_code)]
     trade_history: TradeHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
@@ -547,29 +547,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: order references an unknown trading pair")
             .clone();
         Some((id, pair, record))
-    }
-
-    /// Returns up to `length` of `owner`'s trades for the single order
-    /// `order_id`, newest first, resuming strictly after the `after` cursor (a
-    /// cursor from a prior page). Returns an empty page when `order_id` is
-    /// unknown or owned by another principal. An `after` cursor that is not one
-    /// of the order's trades yields [`TradeCursorNotFound`]; a valid cursor with
-    /// no older trades is `Ok(vec![])`.
-    pub fn get_user_order_trades(
-        &self,
-        owner: &Principal,
-        order_id: OrderId,
-        after: Option<FillSeq>,
-        length: usize,
-    ) -> Result<Vec<(FillSeq, TradeRecord)>, TradeCursorNotFound> {
-        let owns = self
-            .order_history
-            .get(&order_id)
-            .is_some_and(|record| &record.owner == owner);
-        if !owns {
-            return Ok(Vec::new());
-        }
-        self.trade_history.trades_for_order(order_id, after, length)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
