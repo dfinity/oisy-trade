@@ -243,6 +243,17 @@ fn get_events(
         }
     }
 
+    fn map_fill_event(fill: oisy_trade_canister::order::FillEvent) -> event::FillEvent {
+        event::FillEvent {
+            fill_seq: fill.fill_seq.get(),
+            taker_order_seq: fill.taker_order_seq.get(),
+            maker_order_seq: fill.maker_order_seq.get(),
+            quantity: fill.quantity.into(),
+            maker_fee_bps: fill.fee_rates.maker.get(),
+            taker_fee_bps: fill.fee_rates.taker.get(),
+        }
+    }
+
     fn map_event(event: Event) -> event::Event {
         event::Event {
             timestamp: event.timestamp.as_nanos(),
@@ -333,13 +344,14 @@ fn get_events(
                 EventType::Settling(oisy_trade_canister::state::event::SettlingEvent {
                     book_id,
                     balance_operations,
-                    fills: _,
+                    fills,
                 }) => event::EventType::Settling(event::SettlingEvent {
                     book_id: book_id.get(),
                     balance_operations: balance_operations
                         .into_iter()
                         .map(map_balance_operation)
                         .collect(),
+                    fills: fills.into_iter().map(map_fill_event).collect(),
                 }),
                 EventType::SetHalt(e) => event::EventType::SetHalt(event::SetHaltEvent {
                     book_ids: e
