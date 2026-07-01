@@ -435,10 +435,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply a declarative list of balance operations to `self.balances`.
-    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
-    /// the function's only side effect is on stable-memory-backed
-    /// balances, which are preserved across upgrades.
+    /// Append each fill's two trade legs to `self.trade_history` and apply the
+    /// event's declarative balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay): both
+    /// side effects land in stable-memory-backed maps that are preserved
+    /// across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
