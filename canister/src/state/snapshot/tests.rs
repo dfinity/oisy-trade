@@ -274,6 +274,7 @@ fn should_roundtrip_state_through_snapshot() {
     // `into_state` to reconstruct a state that compares equal.
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -327,6 +328,7 @@ fn should_roundtrip_fee_pool_through_snapshot() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -363,6 +365,7 @@ fn should_roundtrip_notional_bounds_through_snapshot() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -391,6 +394,7 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -486,6 +490,7 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
     assert_eq!(decoded.permissions, None);
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );

@@ -61,6 +61,10 @@ mod assert_caller_is_allowed {
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
+            crate::state::TradeHistory::new(
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+            ),
             crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
@@ -2772,7 +2776,7 @@ mod settle_fills {
 
 mod execution_policy {
     use crate::balance::TokenBalance;
-    use crate::order::OrderHistory;
+    use crate::order::{OrderHistory, TradeHistory};
     use crate::state::{ExecutionPolicy, State};
     use ic_stable_structures::VectorMemory;
     use oisy_trade_types_internal::{InitArg, Mode};
@@ -2786,6 +2790,7 @@ mod execution_policy {
                 instruction_budget: 12_345,
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
+            TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
             crate::user::UserRegistry::new(VectorMemory::default()),
             TokenBalance::new(VectorMemory::default()),
         )

@@ -19,14 +19,34 @@ impl SeqMarker for FillSeqMarker {
 pub type FillSeq = Seq<FillSeqMarker>;
 
 /// Identity of a match in the order book.
-#[allow(dead_code)] // TODO DEFI-2901: use me!
 pub type FillId = CompositeId<OrderBookId, FillSeq>;
 
 /// Identity of a trade associated with a given order.
 ///
 /// One fill touches the maker and the taker orders.
-#[allow(dead_code)] // TODO DEFI-2901: use me!
 pub type TradeId = CompositeId<OrderId, FillSeq>;
+
+impl TradeId {
+    pub fn order_id(&self) -> OrderId {
+        *self.first()
+    }
+
+    pub fn seq(&self) -> FillSeq {
+        *self.second()
+    }
+
+    pub fn fill_id(&self) -> FillId {
+        FillId::new(self.first().book_id(), *self.second())
+    }
+
+    pub fn first_of(order: OrderId) -> Self {
+        Self::new(order, FillSeq::ZERO)
+    }
+
+    pub fn last_of(order: OrderId) -> Self {
+        Self::new(order, FillSeq::new(u64::MAX))
+    }
+}
 
 /// A single fill produced when an incoming order matches a resting order.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]

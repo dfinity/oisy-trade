@@ -21,7 +21,7 @@ use crate::order::{
     CursorNotFound, FeeRates, Fill, FillSettlement, LotSize, MatchOrderError, MatchingOutput,
     NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq,
     OrderStatus, OrderUpdate, PendingOrder, Quantity, RemovedOrder, RemovedOrderSettlement, Side,
-    TickSize, TokenId, TokenMetadata, TradingPair,
+    TickSize, TokenId, TokenMetadata, TradeHistory, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -83,6 +83,8 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
+    #[allow(dead_code)]
+    trade_history: TradeHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -103,6 +105,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
+        trade_history: TradeHistory<MH>,
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
@@ -118,6 +121,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
+            trade_history,
             active_tasks: BTreeSet::default(),
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -956,6 +960,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks,
             ledger_fee_cache,
             order_history,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -972,6 +977,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             active_tasks: active_tasks.clone(),
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
+            trade_history: trade_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
             permissions: permissions.clone(),
@@ -994,6 +1000,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks,
             ledger_fee_cache,
             order_history,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1010,6 +1017,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             active_tasks: other_active_tasks,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
+            trade_history: other_trade_history,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
             permissions: other_permissions,
@@ -1025,6 +1033,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && active_tasks == other_active_tasks
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
+            && trade_history == other_trade_history
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
             && permissions == other_permissions
