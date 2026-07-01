@@ -9,7 +9,6 @@ mod tests;
 mod trades;
 
 pub use crate::history::CursorNotFound;
-pub use crate::history::CursorNotFound as TradeCursorNotFound;
 pub use book::{
     MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,
     PriceLevel, RemovedOrder,
