@@ -219,13 +219,9 @@ impl FillSettlement {
 ///
 /// The fill's execution price (the maker price) and its taker `side` are NOT
 /// stored: they are recovered in the settling phase from the two referenced order
-/// records, which is sound because an order's stored limit price is **immutable**
-/// for the life of its [`OrderSeq`] — a reprice must be modeled as cancel + a new
-/// order (a fresh seq), exactly as Binance, Kraken, and Coinbase treat one (the
-/// reprice loses queue priority, i.e. is a new resting order). `fee_rates` is
-/// snapshotted here rather than recovered because the rate lives on the book and is
-/// mutable — it is the one fee input pinned by neither the fill identity nor the
-/// orders.
+/// records. `fee_rates` is snapshotted here rather than recovered because the rate
+/// lives on the book and is mutable — it is the one fee input pinned by neither the
+/// fill identity nor the orders.
 #[derive(Clone, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct SettledFill {
     #[n(0)]
