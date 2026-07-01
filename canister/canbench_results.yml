@@ -2,7 +2,7 @@ benches:
   bench_fok_fill_full_bid_side:
     total:
       calls: 1
-      instructions: 1000424672
+      instructions: 1000473808
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -53,12 +53,12 @@ benches:
         stable_memory_increase: 0
       fills:
         calls: 697
-        instructions: 207323444
+        instructions: 207330051
         heap_increase: 0
         stable_memory_increase: 0
       fills::append:
         calls: 697
-        instructions: 206187081
+        instructions: 206193688
         heap_increase: 0
         stable_memory_increase: 0
       matching:
@@ -113,7 +113,7 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 895820571
+        instructions: 895869707
         heap_increase: 0
         stable_memory_increase: 0
   bench_fok_killed_full_bid_side:
@@ -274,7 +274,7 @@ benches:
   bench_gtc_fill_full_bid_side:
     total:
       calls: 1
-      instructions: 1000424658
+      instructions: 1000473794
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -325,12 +325,12 @@ benches:
         stable_memory_increase: 0
       fills:
         calls: 697
-        instructions: 207323444
+        instructions: 207330051
         heap_increase: 0
         stable_memory_increase: 0
       fills::append:
         calls: 697
-        instructions: 206187081
+        instructions: 206193688
         heap_increase: 0
         stable_memory_increase: 0
       matching:
@@ -385,13 +385,13 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 895820573
+        instructions: 895869709
         heap_increase: 0
         stable_memory_increase: 0
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 1225214291
+      instructions: 1225265179
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -457,12 +457,12 @@ benches:
         stable_memory_increase: 0
       fills:
         calls: 769
-        instructions: 217297181
+        instructions: 217301148
         heap_increase: 0
         stable_memory_increase: 0
       fills::append:
         calls: 769
-        instructions: 215994411
+        instructions: 215998378
         heap_increase: 0
         stable_memory_increase: 0
       matching:
@@ -517,7 +517,7 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 1068148831
+        instructions: 1068199719
         heap_increase: 0
         stable_memory_increase: 0
   bench_process_pending_orders_1000_no_fills:
@@ -570,7 +570,7 @@ benches:
   bench_process_pending_orders_1000_with_fees:
     total:
       calls: 1
-      instructions: 1262995254
+      instructions: 1263046142
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -636,12 +636,12 @@ benches:
         stable_memory_increase: 0
       fills:
         calls: 769
-        instructions: 217490042
+        instructions: 217494009
         heap_increase: 0
         stable_memory_increase: 0
       fills::append:
         calls: 769
-        instructions: 216187281
+        instructions: 216191248
         heap_increase: 0
         stable_memory_increase: 0
       matching:
@@ -696,7 +696,7 @@ benches:
         stable_memory_increase: 0
       settling:
         calls: 1
-        instructions: 1087741315
+        instructions: 1087792203
         heap_increase: 0
         stable_memory_increase: 0
   bench_read_events:

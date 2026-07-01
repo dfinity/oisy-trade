@@ -1,7 +1,7 @@
 use crate::Timestamp;
 use crate::order::{
-    BasisPoint, FeeRates, FillSeq, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price,
-    Quantity, SettledFill, Side, TickSize, TokenId, TokenMetadata,
+    BasisPoint, FeeRates, FillEvent, FillSeq, LotSize, OrderBookId, OrderId, OrderSeq, PairToken,
+    Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
 };
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
@@ -273,10 +273,10 @@ fn settling(order_count: usize) -> EventType {
     })
 }
 
-/// A [`SettledFill`] whose every field encodes at its maximum CBOR width,
+/// A [`FillEvent`] whose every field encodes at its maximum CBOR width,
 /// matching the worst-case sizing of the [`settling`] fixture.
-fn max_settled_fill(index: u64) -> SettledFill {
-    SettledFill {
+fn max_settled_fill(index: u64) -> FillEvent {
+    FillEvent {
         fill_seq: FillSeq::new(u64::MAX),
         taker_order_seq: OrderSeq::new(u64::MAX - 2 * index),
         maker_order_seq: OrderSeq::new(u64::MAX - 2 * index - 1),

@@ -18,11 +18,11 @@ use crate::Task;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    CursorNotFound, FeeRates, Fill, FillSeq, FillSettlement, LotSize, MatchOrderError,
+    CursorNotFound, FeeRates, Fill, FillEvent, FillSeq, FillSettlement, LotSize, MatchOrderError,
     MatchingOutput, NotionalError, Order, OrderBook, OrderBookId, OrderHistory, OrderId,
     OrderRecord, OrderSeq, OrderStatus, OrderUpdate, PendingOrder, Price, Quantity, RemovedOrder,
-    RemovedOrderSettlement, SettledFill, Side, TickSize, TokenId, TokenMetadata,
-    TradeCursorNotFound, TradeHistory, TradeId, TradeRecord, TradingPair,
+    RemovedOrderSettlement, Side, TickSize, TokenId, TokenMetadata, TradeHistory, TradeId,
+    TradeRecord, TradingPair,
 };
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
@@ -436,10 +436,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Apply a declarative list of balance operations to `self.balances`.
-    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
-    /// the function's only side effect is on stable-memory-backed
-    /// balances, which are preserved across upgrades.
+    /// Append each fill's two trade legs to `self.trade_history` and apply the
+    /// event's declarative balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay): both
+    /// side effects land in stable-memory-backed maps that are preserved
+    /// across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
@@ -466,15 +467,19 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         // path. Both legs of every fill are referenced by its balance ops, so
         // each fill's side and execution price are already in the cache — no
         // extra stable reads to rebuild the trade legs.
-        let resolved = resolve_op_users(
+        let resolved = resolve_op_orders(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
             &self.user_registry,
         );
         for fill in &event.fills {
-            let taker = resolved[&fill.taker_order_seq];
-            let maker = resolved[&fill.maker_order_seq];
+            let taker = *resolved.get(&fill.taker_order_seq).expect(
+                "BUG: a settling fill's taker order seq must be resolved from its balance operations",
+            );
+            let maker = *resolved.get(&fill.maker_order_seq).expect(
+                "BUG: a settling fill's maker order seq must be resolved from its balance operations",
+            );
             let [taker_leg, maker_leg] = fill.trade_legs(
                 event.book_id,
                 taker.side,
@@ -574,7 +579,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// `order_id`, newest first, resuming strictly after the `after` cursor (a
     /// cursor from a prior page). Returns an empty page when `order_id` is
     /// unknown or owned by another principal. An `after` cursor that is not one
-    /// of the order's trades yields [`TradeCursorNotFound`]; a valid cursor with
+    /// of the order's trades yields [`CursorNotFound`]; a valid cursor with
     /// no older trades is `Ok(vec![])`.
     pub fn get_user_order_trades(
         &self,
@@ -582,7 +587,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_id: OrderId,
         after: Option<FillSeq>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, TradeRecord)>, TradeCursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, CursorNotFound> {
         let owns = self
             .order_history
             .get(&order_id)
@@ -597,14 +602,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// newest first, resuming strictly after the `after` cursor (a cursor from a
     /// prior page). Returns `Ok(vec![])` when `owner` is not a registered user.
     /// An `after` cursor that is not one of `owner`'s trades yields
-    /// [`TradeCursorNotFound`]; a valid cursor with no older trades is
+    /// [`CursorNotFound`]; a valid cursor with no older trades is
     /// `Ok(vec![])`.
     pub fn get_user_trades(
         &self,
         owner: &Principal,
         after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(TradeId, TradeRecord)>, TradeCursorNotFound> {
+    ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
         let Some(user_id) = self.user_registry.lookup(*owner) else {
             return Ok(Vec::new());
         };
@@ -951,7 +956,7 @@ struct ResolvedOrder {
 /// price together; callers can then look the order up in the returned `BTreeMap`
 /// in O(log n) heap-only time, with no extra stable reads to recover a fill's
 /// side or execution price.
-fn resolve_op_users<MH: Memory, MB: Memory>(
+fn resolve_op_orders<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
     history: &OrderHistory<MH>,
@@ -1001,7 +1006,7 @@ fn settle(
 ) -> (
     Vec<event::BalanceOperation>,
     BTreeMap<OrderSeq, OrderUpdate>,
-    Vec<SettledFill>,
+    Vec<FillEvent>,
 ) {
     let mut ops = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
     let mut updates = BTreeMap::new();
