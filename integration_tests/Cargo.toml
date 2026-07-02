@@ -16,7 +16,7 @@ ic-http-types = { workspace = true }
 ic-metrics-assert = { workspace = true }
 icrc-ledger-types = { workspace = true }
 oisy_trade_client = { path = "../libs/client", version = "0.2.0" }
-oisy_trade_types = { path = "../libs/types", version = "0.2.0" }
+oisy_trade_types = { path = "../libs/types", version = "0.3.0" }
 oisy_trade_types_internal = { path = "../libs/types-internal", version = "0.2.0", features = ["log"] }
 pocket-ic = { workspace = true }
 scopeguard = { workspace = true }

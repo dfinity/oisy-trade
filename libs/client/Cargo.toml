@@ -14,5 +14,5 @@ include = ["src", "Cargo.toml", "CHANGELOG.md", "LICENSE", "README.md"]
 async-trait = { workspace = true }
 candid = { workspace = true }
 ic-cdk = { workspace = true }
-oisy_trade_types = { path = "../types", version = "0.2.0" }
+oisy_trade_types = { path = "../types", version = "0.3.0" }
 serde = { workspace = true }

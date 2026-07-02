@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-02
+
+### Added
+
+- Add get_my_trades account-wide pagination benchmark ([#196](https://github.com/dfinity/oisy-trade/pull/196))
+- Add the trade store and its read API (2/5) ([#193](https://github.com/dfinity/oisy-trade/pull/193))
+- Add realized quote and fee onto OrderRecord ([#171](https://github.com/dfinity/oisy-trade/pull/171))
+
+### Changed
+
+- Extract a settlement module and harden fill-persistence tests ([#195](https://github.com/dfinity/oisy-trade/pull/195))
+- Expose the account-wide get_my_trades ByAccount filter (5/5) ([#180](https://github.com/dfinity/oisy-trade/pull/180))
+- Expose get_my_trades ByOrder feed (4/5) ([#186](https://github.com/dfinity/oisy-trade/pull/186))
+- Persist per-fill records in stable memory (3/5) ([#179](https://github.com/dfinity/oisy-trade/pull/179))
+- Shared id/seq machinery and composite ids (1/4) ([#192](https://github.com/dfinity/oisy-trade/pull/192))
+- Render prices and amounts as human-readable floats ([#182](https://github.com/dfinity/oisy-trade/pull/182))
+
+[0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
+
 ## [Unreleased]
 
 ## [0.2.0] - 2026-06-26
