@@ -485,8 +485,20 @@ pub fn get_my_trades(
                 Err(state::GetUserOrderTradesError::CursorNotFound) => Vec::new(),
             }
         }
-        TradesFilter::ByAccount(_) => {
-            todo!("account-wide trades feed is wired when the account index lands")
+        TradesFilter::ByAccount(by_account) => {
+            let after = by_account
+                .after
+                .map(|cursor| cursor.parse::<order::TradeId>())
+                .transpose()
+                .map_err(GetMyTradesError::InvalidTradeId)?;
+            let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
+            match state::with_state(|s| s.get_user_trades(&caller, after, length)) {
+                Ok(trades) => trades
+                    .into_iter()
+                    .map(|(id, trade)| trade.into_public(id))
+                    .collect(),
+                Err(order::CursorNotFound) => Vec::new(),
+            }
         }
     };
     Ok(trades)

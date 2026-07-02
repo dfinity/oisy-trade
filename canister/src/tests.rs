@@ -1954,7 +1954,7 @@ mod get_my_trades {
     use candid::{Nat, Principal};
     use oisy_trade_types::{
         GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, PairToken, Side,
-        Trade, TradesByOrder, TradesFilter,
+        Trade, TradesByAccount, TradesByOrder, TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -1968,6 +1968,21 @@ mod get_my_trades {
                 length,
             }),
         }
+    }
+
+    fn by_account(after: Option<String>, length: u32) -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount { after, length }),
+        }
+    }
+
+    /// Matches a fresh resting sell against a crossing buy and returns the buy
+    /// order's id, so a caller can build up several distinct fills for `BUYER`.
+    fn match_one_more() -> OrderId {
+        let _sell = place(SELLER, Side::Sell);
+        let buy = place(BUYER, Side::Buy);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        buy
     }
 
     /// Places a resting sell from `SELLER` and a crossing buy from `BUYER` at the
@@ -2190,6 +2205,109 @@ mod get_my_trades {
         let buy = place_buy_crossing_resting_sells(lots);
         let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
         assert_eq!(trades.len(), MAX_TRADES_PER_RESPONSE as usize);
+    }
+
+    #[test]
+    fn by_account_spans_orders_newest_first() {
+        init_state_with_order_book();
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let buy_1 = match_one_more();
+        let buy_2 = match_one_more();
+        let buy_3 = match_one_more();
+
+        let trades = get_my_trades(by_account(None, 10), BUYER).unwrap();
+        assert_eq!(
+            trades
+                .iter()
+                .map(|t| t.order_id.clone())
+                .collect::<Vec<_>>(),
+            vec![buy_3, buy_2, buy_1],
+            "buyer's fills across all three orders, newest-first",
+        );
+    }
+
+    #[test]
+    fn by_account_paginates_via_cursor_without_overlap_or_gap() {
+        init_state_with_order_book();
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let buy_1 = match_one_more();
+        let buy_2 = match_one_more();
+        let buy_3 = match_one_more();
+
+        let page_1 = get_my_trades(by_account(None, 2), BUYER).unwrap();
+        assert_eq!(
+            page_1
+                .iter()
+                .map(|t| t.order_id.clone())
+                .collect::<Vec<_>>(),
+            vec![buy_3, buy_2],
+        );
+
+        let cursor = page_1.last().unwrap().id.clone();
+        let page_2 = get_my_trades(by_account(Some(cursor), 2), BUYER).unwrap();
+        assert_eq!(
+            page_2
+                .iter()
+                .map(|t| t.order_id.clone())
+                .collect::<Vec<_>>(),
+            vec![buy_1],
+            "second page strictly older than the cursor, no overlap or gap",
+        );
+    }
+
+    #[test]
+    fn by_account_is_owner_scoped() {
+        init_state_with_order_book();
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let buy = match_one_more();
+
+        let buyer_trades = get_my_trades(by_account(None, 10), BUYER).unwrap();
+        assert_eq!(buyer_trades.len(), 1);
+        assert_eq!(buyer_trades[0].order_id, buy);
+        assert!(!buyer_trades[0].is_maker);
+
+        let seller_trades = get_my_trades(by_account(None, 10), SELLER).unwrap();
+        assert_eq!(seller_trades.len(), 1);
+        assert!(seller_trades[0].is_maker, "seller sees only its maker leg");
+        assert_ne!(seller_trades[0].order_id, buy);
+    }
+
+    #[test]
+    fn by_account_unknown_cursor_is_empty_page() {
+        init_state_with_order_book();
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let buy = match_one_more();
+        let cursor = format!("{buy}ffffffffffffffff");
+        let trades = get_my_trades(by_account(Some(cursor), 10), BUYER).unwrap();
+        assert!(trades.is_empty());
+    }
+
+    #[test]
+    fn by_account_malformed_cursor_is_err() {
+        init_state_with_order_book();
+        let result = get_my_trades(by_account(Some("xyz".to_string()), 10), BUYER);
+        assert!(matches!(result, Err(GetMyTradesError::InvalidTradeId(_))));
+    }
+
+    #[test]
+    fn by_account_length_is_clamped_to_max() {
+        init_state_with_order_book();
+        let lots = MAX_TRADES_PER_RESPONSE + 5;
+        place_buy_crossing_resting_sells(lots);
+        let trades = get_my_trades(by_account(None, u32::MAX), BUYER).unwrap();
+        assert_eq!(trades.len(), MAX_TRADES_PER_RESPONSE as usize);
+    }
+
+    #[test]
+    fn by_account_for_unregistered_caller_is_empty_page() {
+        init_state_with_order_book();
+        let stranger = Principal::from_slice(&[0x09]);
+        let trades = get_my_trades(by_account(None, 10), stranger).unwrap();
+        assert!(trades.is_empty());
     }
 }
 

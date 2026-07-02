@@ -2571,6 +2571,34 @@ mod settle_fills {
             );
         }
 
+        /// `ByAccount` for a caller that never traded (and so is not a
+        /// registered user) returns an empty page, with or without an `after`
+        /// cursor — mirroring `ByOrder`'s unknown-subject handling.
+        #[test]
+        fn account_trades_for_unregistered_caller_are_empty() {
+            let state = setup_ckusdt_with_fees(5, 10);
+            const NEVER_TRADED: Principal = Principal::from_slice(&[0xEE]);
+            assert!(
+                state.user_registry.lookup(NEVER_TRADED).is_none(),
+                "the principal must not be a registered user",
+            );
+
+            assert_eq!(
+                state.get_user_trades(&NEVER_TRADED, None, 10),
+                Ok(Vec::new()),
+                "no cursor yields an empty page",
+            );
+            let cursor = crate::order::TradeId::new(
+                crate::order::OrderId::new(OrderBookId::ZERO, crate::order::OrderSeq::ZERO),
+                crate::order::FillSeq::ZERO,
+            );
+            assert_eq!(
+                state.get_user_trades(&NEVER_TRADED, Some(cursor), 10),
+                Ok(Vec::new()),
+                "a cursor present still yields an empty page",
+            );
+        }
+
         /// Settlement populates the account-wide `by_user` index: a user's fills
         /// span all their orders, newest-first, and stay scoped to their owner.
         #[test]
