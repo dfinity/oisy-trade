@@ -12,6 +12,7 @@ use proptest::{prop_assert, proptest};
 const USER: UserId = UserId::new(0);
 const BOOK: OrderBookId = OrderBookId::ZERO;
 const TIMESTAMP: Timestamp = Timestamp::new(42);
+const MAX_TRADE_RECORD_BINARY_SIZE: usize = 142;
 
 #[test]
 fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
@@ -224,21 +225,6 @@ fn should_page_one_orders_trades() {
     }
 }
 
-pub const MAX_TRADE_RECORD_BINARY_SIZE: usize = 142;
-
-fn max_size_trade_record() -> TradeRecord {
-    TradeRecord {
-        side: Side::Buy,
-        price: Price::MAX,
-        quantity: Quantity::MAX,
-        notional: Quantity::MAX,
-        fee: Quantity::MAX,
-        fee_token: PairToken::Base,
-        is_maker: false,
-        timestamp: Timestamp::MAX,
-    }
-}
-
 /// A cursor-ownership scenario over a single match whose taker and maker legs
 /// share one `FillSeq` but belong to different orders: the order being paged, the
 /// order whose id the `after` cursor embeds, and whether the cursor is accepted.
@@ -348,14 +334,13 @@ proptest! {
     }
 }
 
-
 /// Stable memory grows one 64 KiB page at a time, and only when the current
 /// page can no longer fit another entry — writes land in the already-claimed
 /// page until then. This pins, for worst-case fills (both legs a maximum-size
 /// `TradeRecord`; the `TradeId`/`ByUserKey` index entries are fixed-width), how
 /// many the primary region's first page absorbs before it has to `grow`.
 #[test]
-fn a_page_absorbs_worst_case_fills_before_stable_memory_grows() {
+fn should_fill_a_stable_memory_page_with_exact_number_of_trades() {
     /// Number of worst-case fills a single 64 KiB page of the primary map absorbs
     /// before it must grow. Each fill writes two maximum-size `TradeRecord` legs.
     const WORST_CASE_FILLS_PER_PAGE: u64 = 152;
@@ -399,6 +384,19 @@ fn a_page_absorbs_worst_case_fills_before_stable_memory_grows() {
         one_page,
         "the fixed-width index entries stay within their first page",
     );
+}
+
+fn max_size_trade_record() -> TradeRecord {
+    TradeRecord {
+        side: Side::Buy,
+        price: Price::MAX,
+        quantity: Quantity::MAX,
+        notional: Quantity::MAX,
+        fee: Quantity::MAX,
+        fee_token: PairToken::Base,
+        is_maker: false,
+        timestamp: Timestamp::MAX,
+    }
 }
 
 fn store() -> TradeHistory<VectorMemory> {
