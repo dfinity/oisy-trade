@@ -393,6 +393,24 @@ pub enum GetOrderBookDepthRequestError {
     },
 }
 
+/// Error returned by the `get_my_trades` query.
+pub type GetMyTradesError = Error<GetMyTradesRequestError, Never, Never>;
+
+/// Caller-side reasons `get_my_trades` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum GetMyTradesRequestError {
+    /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
+    #[error("the supplied order id is not a well-formed order id")]
+    InvalidOrderId,
+    /// The `after` cursor was not a well-formed `TradeId`.
+    #[error("the supplied cursor is not a well-formed trade id")]
+    InvalidTradeId,
+    /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
+    /// caller.
+    #[error("no order with the given id exists for the caller")]
+    OrderNotFound,
+}
+
 /// Error returned by the `get_balances` / `get_fee_balances` queries.
 ///
 /// These are read endpoints, so a failure dooms the whole call: the response is

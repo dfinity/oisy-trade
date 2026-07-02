@@ -677,6 +677,137 @@ mod get_user_orders {
     }
 }
 
+mod get_user_order_trades {
+    use crate::Timestamp;
+    use crate::order::{
+        FeeRates, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
+        TradeId, TradeLeg, TradeRecord,
+    };
+    use crate::state::{GetUserOrderTradesError, State};
+    use crate::test_fixtures::{
+        self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
+        icp_ckbtc_trading_pair, icp_metadata, order,
+    };
+    use crate::user::UserId;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+
+    #[test]
+    fn enforces_order_ownership() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let owner_order = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
+        let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
+        let unknown_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
+
+        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
+        seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
+        seed_trade(&mut state, (stranger_order, stranger_id), FillSeq::new(2));
+
+        let cases = vec![
+            TestCase {
+                desc: "owner reads their own order's trades",
+                caller: OWNER,
+                order: owner_order,
+                expected: Ok(vec![FillSeq::new(0), FillSeq::new(1)]),
+            },
+            TestCase {
+                desc: "a non-owner must not see another principal's order's trades",
+                caller: STRANGER,
+                order: owner_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "the owner of one order must not see another principal's order's trades",
+                caller: OWNER,
+                order: stranger_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "an unknown order yields order not found",
+                caller: OWNER,
+                order: unknown_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+        ];
+
+        for case in cases {
+            let got = state
+                .get_user_order_trades(&case.caller, case.order, None, 10)
+                .map(|trades| {
+                    let mut seqs: Vec<_> = trades.into_iter().map(|(seq, _)| seq).collect();
+                    seqs.sort();
+                    seqs
+                });
+            assert_eq!(got, case.expected, "BUG ({}): outcome differs", case.desc);
+        }
+    }
+
+    /// An access-control scenario over `get_user_order_trades`: which principal
+    /// queries which order, and the outcome the ownership guard must produce.
+    struct TestCase {
+        desc: &'static str,
+        caller: Principal,
+        order: OrderId,
+        expected: Result<Vec<FillSeq>, GetUserOrderTradesError>,
+    }
+
+    fn setup() -> State<VectorMemory, VectorMemory> {
+        let mut state = test_fixtures::state();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            icp_ckbtc_trading_pair(),
+            icp_metadata(),
+            ckbtc_metadata(),
+            TICK_SIZE,
+            LOT_SIZE,
+            MIN_NOTIONAL,
+            Some(MAX_NOTIONAL),
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn seed_trade(
+        state: &mut State<VectorMemory, VectorMemory>,
+        (order, user): (OrderId, UserId),
+        seq: FillSeq,
+    ) {
+        let counterparty_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(1_000 + seq.get()));
+        let counterparty = UserId::new(u64::MAX);
+        state.trade_history.append(
+            leg(TradeId::new(order, seq), false),
+            user,
+            leg(TradeId::new(counterparty_order, seq), true),
+            counterparty,
+        );
+    }
+
+    fn leg(id: TradeId, is_maker: bool) -> TradeLeg {
+        (
+            id,
+            TradeRecord {
+                side: Side::Buy,
+                price: Price::new(10_000_000),
+                quantity: Quantity::from_u128(200_000_000),
+                notional: Quantity::from_u128(20_000_000),
+                fee: Quantity::from_u128(1),
+                fee_token: PairToken::Base,
+                is_maker,
+                timestamp: Timestamp::new(42),
+            },
+        )
+    }
+}
+
 mod validate_overflow_invariant {
     use crate::order::{FeeRates, OrderBookId, PendingOrder, Price, Quantity, TimeInForce};
     use crate::state::AddLimitOrderError;

@@ -12,9 +12,10 @@ pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
     DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
-    GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetOrderBookDepthError,
-    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
-    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
+    GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
+    GetOrderBookTickerError, GetOrderBookTickerRequestError, Never, WithdrawError,
+    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
@@ -289,6 +290,96 @@ pub struct UserOrder {
     /// orders, so `order.owner` is always the caller — reused as-is for shape
     /// parity with other order-returning endpoints.
     pub order: OrderRecord,
+}
+
+/// Selector for the base or quote token of a trading pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
+pub enum PairToken {
+    /// The base token of the pair.
+    Base,
+    /// The quote token of the pair.
+    Quote,
+}
+
+/// Unique identifier for a trade, encoded as a hex string. Opaque to callers
+/// (like [`OrderId`]): a client passes the last value it received back as the
+/// next page's `after` and never parses it. Treating it as opaque text lets the
+/// endpoint tell a malformed token (an error) from a well-formed-but-unknown one
+/// (an empty page).
+pub type TradeId = String;
+
+/// Maximum number of trades returned by a single `get_my_trades` call.
+/// Requests for more are silently capped to this many.
+pub const MAX_TRADES_PER_RESPONSE: u32 = 100;
+
+/// Caller's order's projected fill, as returned by `get_my_trades`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct Trade {
+    /// This trade's unique identifier.
+    pub id: TradeId,
+    /// The owning (caller's) order.
+    pub order_id: OrderId,
+    /// This order's side.
+    pub side: Side,
+    /// Execution price (the maker's price), in quote-token smallest units per
+    /// one whole base token.
+    pub price: Nat,
+    /// Base filled, in base-token smallest units.
+    pub quantity: Nat,
+    /// Quote transacted (`price × quantity / 10^base_decimals`, realized), in
+    /// quote-token smallest units. A buy taker's reservation surplus is excluded.
+    pub notional: Nat,
+    /// Realized fee charged to this side, in `fee_token` smallest units.
+    pub fee: Nat,
+    /// The token the fee is charged in — base for a buy, quote for a sell.
+    pub fee_token: PairToken,
+    /// This side's role on this fill.
+    pub is_maker: bool,
+    /// Settlement time in nanoseconds since the Unix epoch.
+    pub timestamp: u64,
+}
+
+/// Request for the `get_my_trades` query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyTradesArgs {
+    /// How to select the caller's trades.
+    pub filter: TradesFilter,
+}
+
+/// Selector for `get_my_trades`: the caller's fills for one order, or across all
+/// their orders. Both modes are owner-scoped, newest-first, and paginated by an
+/// `after` cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub enum TradesFilter {
+    /// The caller's fills for a single order.
+    ByOrder(TradesByOrder),
+    /// The caller's fills across all their orders.
+    ByAccount(TradesByAccount),
+}
+
+/// A page over the caller's fills for one order, newest first. `length` is
+/// capped at [`MAX_TRADES_PER_RESPONSE`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct TradesByOrder {
+    /// The order whose fills should be returned. Errors with `OrderNotFound` if
+    /// the caller does not own it.
+    pub order_id: OrderId,
+    /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's
+    /// last entry. `None` starts from the newest fill.
+    pub after: Option<TradeId>,
+    /// Maximum number of trades to return.
+    pub length: u32,
+}
+
+/// A page over the caller's fills across all their orders, newest first.
+/// `length` is capped at [`MAX_TRADES_PER_RESPONSE`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct TradesByAccount {
+    /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's
+    /// last entry. `None` starts from the newest fill.
+    pub after: Option<TradeId>,
+    /// Maximum number of trades to return.
+    pub length: u32,
 }
 
 /// A token identified by its ledger canister ID.

@@ -1944,6 +1944,255 @@ mod get_my_orders {
     }
 }
 
+mod get_my_trades {
+    use crate::ids::ParseFixedWithIdError;
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{
+        LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
+    };
+    use crate::{GetMyTradesError, add_limit_order, get_my_trades};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{
+        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, PairToken, Side,
+        Trade, TradesByOrder, TradesFilter,
+    };
+
+    const BUYER: Principal = Principal::from_slice(&[0x01]);
+    const SELLER: Principal = Principal::from_slice(&[0x02]);
+
+    fn by_order(order_id: OrderId, after: Option<String>, length: u32) -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after,
+                length,
+            }),
+        }
+    }
+
+    /// Places a resting sell from `SELLER` and a crossing buy from `BUYER` at the
+    /// same price, runs matching, and returns `(buy_id, sell_id)`.
+    fn place_and_match() -> (OrderId, OrderId) {
+        fund_user(BUYER);
+        fund_user(SELLER);
+        let sell = place(SELLER, Side::Sell);
+        let buy = place(BUYER, Side::Buy);
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        (buy, sell)
+    }
+
+    fn place(user: Principal, side: Side) -> OrderId {
+        add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side,
+                price: Nat::from(100u64),
+                quantity: Nat::from(u64::from(LOT_SIZE)),
+                time_in_force: None,
+            },
+            &mock_runtime_for(user),
+        )
+        .unwrap()
+    }
+
+    /// A [`Trade`] with a dummy id and the fields shared by every fill of the
+    /// single-lot match [`place_and_match`] builds: each case overrides only the
+    /// leg-specific `order_id`, `side`, `is_maker`, and `fee_token`. The opaque
+    /// `id` is stamped from the real result before the equality check.
+    fn default_trade() -> Trade {
+        Trade {
+            id: "dummy-trade-id".to_string(),
+            order_id: "dummy-order-id".to_string(),
+            side: Side::Buy,
+            price: Nat::from(100u64),
+            quantity: Nat::from(u64::from(LOT_SIZE)),
+            notional: Nat::from(1u64),
+            fee: Nat::from(0u64),
+            fee_token: PairToken::Base,
+            is_maker: false,
+            timestamp: 0,
+        }
+    }
+
+    const UNKNOWN_ORDER_ID: &str = "ffffffffffffffffffffffffffffffff";
+
+    /// A `get_my_trades` `ByOrder` scenario over the single buy/sell match built
+    /// by [`place_and_match`]: the `(caller, query)` and the expected outcome.
+    struct TestCase {
+        desc: &'static str,
+        query: (Principal, TradesByOrder),
+        expected: Result<Vec<Trade>, GetMyTradesError>,
+    }
+
+    #[test]
+    fn by_order_scenarios() {
+        init_state_with_order_book();
+        let (buy, sell) = place_and_match();
+
+        let cases = vec![
+            TestCase {
+                desc: "buyer querying their own order gets the taker leg",
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Ok(vec![Trade {
+                    order_id: buy.clone(),
+                    side: Side::Buy,
+                    is_maker: false,
+                    fee_token: PairToken::Base,
+                    ..default_trade()
+                }]),
+            },
+            TestCase {
+                desc: "seller querying their own order gets the maker leg",
+                query: (
+                    SELLER,
+                    TradesByOrder {
+                        order_id: sell.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Ok(vec![Trade {
+                    order_id: sell.clone(),
+                    side: Side::Sell,
+                    is_maker: true,
+                    fee_token: PairToken::Quote,
+                    ..default_trade()
+                }]),
+            },
+            TestCase {
+                desc: "malformed order id",
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: "not-an-order-id".to_string(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::InvalidOrderId(ParseFixedWithIdError {})),
+            },
+            TestCase {
+                desc: "malformed cursor",
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: Some("xyz".to_string()),
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::InvalidTradeId(ParseFixedWithIdError {})),
+            },
+            TestCase {
+                desc: "unknown but well-formed order id",
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: UNKNOWN_ORDER_ID.to_string(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "order owned by another principal",
+                query: (
+                    SELLER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "unknown but well-formed cursor yields an empty page",
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: Some(format!("{buy}ffffffffffffffff")),
+                        length: 10,
+                    },
+                ),
+                expected: Ok(vec![]),
+            },
+        ];
+
+        for case in cases {
+            let (caller, filter) = case.query;
+            let result = get_my_trades(
+                GetMyTradesArgs {
+                    filter: TradesFilter::ByOrder(filter),
+                },
+                caller,
+            );
+
+            // Each trade's `id` is an opaque, runtime-minted cursor; stamp it from
+            // the real result so the equality check covers every other field.
+            let expected = case.expected.map(|mut trades| {
+                for (trade, actual) in trades.iter_mut().zip(result.iter().flatten()) {
+                    trade.id = actual.id.clone();
+                }
+                trades
+            });
+
+            assert_eq!(result, expected, "BUG ({})", case.desc);
+        }
+    }
+
+    #[test]
+    fn paging_past_the_only_fill_is_empty() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        let trades = get_my_trades(by_order(buy.clone(), None, 10), BUYER).unwrap();
+        assert_eq!(trades.len(), 1);
+
+        let next_page =
+            get_my_trades(by_order(buy, Some(trades[0].id.clone()), 10), BUYER).unwrap();
+        assert!(next_page.is_empty());
+    }
+
+    fn place_buy_crossing_resting_sells(lots: u32) -> OrderId {
+        fund_user(BUYER);
+        fund_user(SELLER);
+        for _ in 0..lots {
+            place(SELLER, Side::Sell);
+        }
+        let buy = add_limit_order(
+            LimitOrderRequest {
+                pair: icp_ckbtc_trading_pair().into(),
+                side: Side::Buy,
+                price: Nat::from(100u64),
+                quantity: Nat::from(u64::from(LOT_SIZE) * u64::from(lots)),
+                time_in_force: None,
+            },
+            &mock_runtime_for(BUYER),
+        )
+        .unwrap();
+        crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+        buy
+    }
+
+    #[test]
+    fn length_is_clamped_to_max() {
+        init_state_with_order_book();
+        let lots = MAX_TRADES_PER_RESPONSE + 5;
+        let buy = place_buy_crossing_resting_sells(lots);
+        let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
+        assert_eq!(trades.len(), MAX_TRADES_PER_RESPONSE as usize);
+    }
+}
+
 mod get_trading_pairs {
     use crate::get_trading_pairs;
     use crate::order::{BasisPoint, FeeRates};

@@ -2,11 +2,11 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError,
-    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse, WithdrawTemporaryError,
+    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesArgs,
+    GetMyTradesError, GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, Token, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -172,6 +172,27 @@ fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Result<Vec<UserOrder>, GetMyO
 }
 
 #[ic_cdk::query]
+fn get_my_trades(args: GetMyTradesArgs) -> Result<Vec<Trade>, GetMyTradesError> {
+    use oisy_trade_canister::Runtime;
+    oisy_trade_canister::get_my_trades(args, oisy_trade_canister::IC_RUNTIME.msg_caller()).map_err(
+        |err| {
+            let leaf = match err {
+                oisy_trade_canister::GetMyTradesError::InvalidOrderId(_) => {
+                    GetMyTradesRequestError::InvalidOrderId
+                }
+                oisy_trade_canister::GetMyTradesError::InvalidTradeId(_) => {
+                    GetMyTradesRequestError::InvalidTradeId
+                }
+                oisy_trade_canister::GetMyTradesError::OrderNotFound => {
+                    GetMyTradesRequestError::OrderNotFound
+                }
+            };
+            GetMyTradesError::request(leaf)
+        },
+    )
+}
+
+#[ic_cdk::query]
 fn list_supported_tokens() -> Vec<Token> {
     oisy_trade_canister::list_supported_tokens()
 }
@@ -207,13 +228,6 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
-    fn map_pair_token(token: oisy_trade_canister::order::PairToken) -> event::PairToken {
-        match token {
-            oisy_trade_canister::order::PairToken::Base => event::PairToken::Base,
-            oisy_trade_canister::order::PairToken::Quote => event::PairToken::Quote,
-        }
-    }
-
     fn map_balance_operation(
         op: oisy_trade_canister::state::event::BalanceOperation,
     ) -> event::BalanceOperation {
@@ -227,7 +241,7 @@ fn get_events(
             } => event::BalanceOperation::Transfer {
                 from_order: from_order.get(),
                 to_order: to_order.get(),
-                token: map_pair_token(token),
+                token: token.into(),
                 amount: amount.into(),
                 fee: fee.map(Into::into),
             },
@@ -237,7 +251,7 @@ fn get_events(
                 amount,
             } => event::BalanceOperation::Unreserve {
                 order: order.get(),
-                token: map_pair_token(token),
+                token: token.into(),
                 amount: amount.into(),
             },
         }
