@@ -249,6 +249,7 @@ pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_via_quantity")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
+    pub const MAX: Self = Self(u128::MAX);
 
     pub fn new(value: u128) -> Self {
         Self(value)

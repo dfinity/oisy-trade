@@ -16,6 +16,7 @@ use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
 use candid::Principal;
 use ic_stable_structures::{Memory, VectorMemory};
+use minicbor::Encode;
 use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::{NonZeroU64, NonZeroU128};
@@ -450,6 +451,15 @@ pub fn transfer_from_response(
     result: Result<candid::Nat, icrc_ledger_types::icrc2::transfer_from::TransferFromError>,
 ) -> ic_cdk::call::Response {
     mock_response(candid::encode_args((result,)).unwrap())
+}
+
+pub fn minicbor_encode<T>(t: &T) -> Vec<u8>
+where
+    for<'a> T: Encode<()>,
+{
+    let mut buf = vec![];
+    minicbor::encode(t, &mut buf).expect("encoding should succeed");
+    buf
 }
 
 #[cfg(test)]

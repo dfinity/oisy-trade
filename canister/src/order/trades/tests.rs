@@ -4,9 +4,10 @@ use crate::order::{
     FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
 };
 use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
+use crate::test_fixtures::minicbor_encode;
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
-use proptest::proptest;
+use proptest::{prop_assert, proptest};
 
 const USER: UserId = UserId::new(0);
 const BOOK: OrderBookId = OrderBookId::ZERO;
@@ -234,10 +235,38 @@ fn pins_bytes_per_fill_and_per_order() {
     assert_eq!(taker_bytes + maker_bytes, 194, "bytes-per-fill (both legs)",);
 }
 
+pub const MAX_TRADE_RECORD_BINARY_SIZE: usize = 142;
+
+fn max_size_trade_record() -> TradeRecord {
+    TradeRecord {
+        side: Side::Buy,
+        price: Price::MAX,
+        quantity: Quantity::MAX,
+        notional: Quantity::MAX,
+        fee: Quantity::MAX,
+        fee_token: PairToken::Base,
+        is_maker: false,
+        timestamp: Timestamp::MAX,
+    }
+}
+
+#[test]
+fn should_have_correct_size_for_minicbor_encoded_trade_record() {
+    let encoded = minicbor_encode(&max_size_trade_record());
+    assert_eq!(encoded.len(), MAX_TRADE_RECORD_BINARY_SIZE);
+}
+
 proptest! {
     #[test]
     fn should_encode_decode_minicbor(record in arb_trade_record()) {
         check_minicbor_roundtrip(&record)?;
+    }
+
+    #[test]
+    fn should_be_less_than_max_traded_record_binary_size(record in arb_trade_record()) {
+        let encoded = minicbor_encode(&record);
+        prop_assert!(encoded.len() <= MAX_TRADE_RECORD_BINARY_SIZE)
+
     }
 }
 
