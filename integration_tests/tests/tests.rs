@@ -469,7 +469,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_expose_per_order_fills_via_get_my_trades() {
         use oisy_trade_types::{
-            GetMyTradesArgs, GetMyTradesRequestError, PairToken, TradesByOrder, TradesFilter,
+            GetMyTradesArgs, GetMyTradesRequestError, PairToken, Trade, TradesByOrder, TradesFilter,
         };
 
         const MAKER_FEE_BPS: u16 = 10;
@@ -538,15 +538,20 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(buy_trades.len(), 1);
         let buy_fill = &buy_trades[0];
-        assert_eq!(buy_fill.order_id, buy_id);
-        assert_eq!(buy_fill.side, Side::Buy);
-        assert!(!buy_fill.is_maker);
-        assert_eq!(buy_fill.price, Nat::from(maker_price));
-        assert_eq!(buy_fill.notional, Nat::from(notional));
-        assert_eq!(buy_fill.fee_token, PairToken::Base);
         assert_eq!(
-            buy_fill.fee,
-            Nat::from(quantity as u128 * TAKER_FEE_BPS as u128 / 10_000)
+            *buy_fill,
+            Trade {
+                id: buy_fill.id.clone(),
+                timestamp: buy_fill.timestamp,
+                order_id: buy_id.clone(),
+                side: Side::Buy,
+                is_maker: false,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(quantity as u128 * TAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Base,
+            },
         );
 
         // Seller's maker fill: same maker price, quote-denominated maker fee.
@@ -556,14 +561,20 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(sell_trades.len(), 1);
         let sell_fill = &sell_trades[0];
-        assert_eq!(sell_fill.order_id, sell_id);
-        assert_eq!(sell_fill.side, Side::Sell);
-        assert!(sell_fill.is_maker);
-        assert_eq!(sell_fill.notional, Nat::from(notional));
-        assert_eq!(sell_fill.fee_token, PairToken::Quote);
         assert_eq!(
-            sell_fill.fee,
-            Nat::from(notional * MAKER_FEE_BPS as u128 / 10_000)
+            *sell_fill,
+            Trade {
+                id: sell_fill.id.clone(),
+                timestamp: sell_fill.timestamp,
+                order_id: sell_id.clone(),
+                side: Side::Sell,
+                is_maker: true,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(notional * MAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Quote,
+            },
         );
 
         // get_my_orders rollups are consistent with the fills (VWAP derivable).
