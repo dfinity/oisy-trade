@@ -23,9 +23,12 @@ jobs:
         uses: release-plz/action@bbd1afc9813d25602e002b29e96e0aacebab1160 # v0.5.105
         with:
           command: release-pr
-          # Pin the release-plz binary: >= 0.3.142 creates the PR branch via the
+          # Pin the release-plz binary. >= 0.3.142 creates the PR branch via the
           # GitHub API (authenticated with the token) instead of `git push`,
-          # which otherwise fails with "could not read Username".
-          version: 0.3.142
+          # which otherwise fails with "could not read Username". >= 0.3.151
+          # adds the `git_only` config the canister package relies on, and the
+          # git-only-with-path-dependency fixes land through 0.3.157; pinned to
+          # the latest release.
+          version: 0.3.159
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
