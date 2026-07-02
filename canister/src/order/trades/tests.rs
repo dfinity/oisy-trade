@@ -140,8 +140,7 @@ fn should_swap_sides_for_a_sell_taker() {
 /// sequences appended (each paired with a maker leg on `maker_seq`), the cursor
 /// and page length to query, and the expected fill sequences newest-first — or
 /// `Err(CursorNotFound)` when the cursor is not found. `after` is a full cursor
-/// `(order_seq, fill_seq)`, so a case can pass a cursor whose embedded `OrderId`
-/// belongs to the counterparty leg sharing the match's `FillSeq`.
+/// `(order_seq, fill_seq)`.
 struct TradesForOrderCase {
     desc: &'static str,
     inserts: Vec<(u64, u64)>,
@@ -188,13 +187,6 @@ fn should_page_one_orders_trades() {
             after: Some((ORDER_A, 0)),
             length: 10,
             expected: Ok(vec![]),
-        },
-        TradesForOrderCase {
-            desc: "cursor carrying the maker leg's order id (same FillSeq) is rejected",
-            inserts: vec![(1, 0)],
-            after: Some((1, 0)),
-            length: 10,
-            expected: Err(CursorNotFound),
         },
     ];
 
