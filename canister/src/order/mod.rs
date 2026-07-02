@@ -35,6 +35,15 @@ pub enum PairToken {
     Quote,
 }
 
+impl From<PairToken> for oisy_trade_types::PairToken {
+    fn from(token: PairToken) -> Self {
+        match token {
+            PairToken::Base => oisy_trade_types::PairToken::Base,
+            PairToken::Quote => oisy_trade_types::PairToken::Quote,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
 pub enum Side {
     #[n(0)]

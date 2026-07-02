@@ -140,17 +140,19 @@ fn should_swap_sides_for_a_sell_taker() {
 /// A `trades_for_order` scenario for order A (taker seq 0): the taker fill
 /// sequences appended (each paired with a maker leg on `maker_seq`), the cursor
 /// and page length to query, and the expected fill sequences newest-first — or
-/// `Err(CursorNotFound)` when the cursor is not found.
+/// `Err(CursorNotFound)` when the cursor is not found. `after` is a full cursor
+/// `(order_seq, fill_seq)`.
 struct TradesForOrderCase {
     desc: &'static str,
     inserts: Vec<(u64, u64)>,
-    after: Option<u64>,
+    after: Option<(u64, u64)>,
     length: usize,
     expected: Result<Vec<u64>, CursorNotFound>,
 }
 
 #[test]
 fn should_page_one_orders_trades() {
+    const ORDER_A: u64 = 0;
     let cases = vec![
         TradesForOrderCase {
             desc: "newest-first, only order A's trades",
@@ -169,21 +171,21 @@ fn should_page_one_orders_trades() {
         TradesForOrderCase {
             desc: "page continues after cursor with next-older",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
-            after: Some(1),
+            after: Some((ORDER_A, 1)),
             length: 2,
             expected: Ok(vec![0]),
         },
         TradesForOrderCase {
             desc: "cursor that is not one of the order's trades is not found",
             inserts: vec![(1, 0)],
-            after: Some(99),
+            after: Some((ORDER_A, 99)),
             length: 10,
             expected: Err(CursorNotFound),
         },
         TradesForOrderCase {
             desc: "valid cursor with no older trades is an empty page",
             inserts: vec![(1, 0)],
-            after: Some(0),
+            after: Some((ORDER_A, 0)),
             length: 10,
             expected: Ok(vec![]),
         },
@@ -191,13 +193,27 @@ fn should_page_one_orders_trades() {
 
     for case in cases {
         let mut store = store();
-        let order_a = OrderId::new(BOOK, OrderSeq::new(0));
+        let order_a = OrderId::new(BOOK, OrderSeq::new(ORDER_A));
         for (maker_seq, fill_seq) in &case.inserts {
-            append(&mut store, Side::Buy, 0, *maker_seq, *fill_seq, USER, USER);
+            append(
+                &mut store,
+                Side::Buy,
+                ORDER_A,
+                *maker_seq,
+                *fill_seq,
+                USER,
+                USER,
+            );
         }
 
+        let after = case.after.map(|(order_seq, fill_seq)| {
+            TradeId::new(
+                OrderId::new(BOOK, OrderSeq::new(order_seq)),
+                FillSeq::new(fill_seq),
+            )
+        });
         let got = store
-            .trades_for_order(order_a, case.after.map(FillSeq::new), case.length)
+            .trades_for_order(order_a, after, case.length)
             .map(|page| page.iter().map(|(s, _)| s.get()).collect::<Vec<u64>>());
 
         assert_eq!(
@@ -250,10 +266,99 @@ fn max_size_trade_record() -> TradeRecord {
     }
 }
 
+/// A cursor-ownership scenario over a single match whose taker and maker legs
+/// share one `FillSeq` but belong to different orders: the order being paged, the
+/// order whose id the `after` cursor embeds, and whether the cursor is accepted.
+struct CursorOwnershipCase {
+    desc: &'static str,
+    queried_order: OrderId,
+    cursor_order: OrderId,
+    accepted: bool,
+}
+
+#[test]
+fn should_reject_a_cursor_from_the_other_leg_of_the_same_fill() {
+    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
+    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
+    let fill_seq = FillSeq::new(0);
+
+    let cases = vec![
+        CursorOwnershipCase {
+            desc: "paging the taker order with the maker leg's cursor (shared FillSeq)",
+            queried_order: taker_order,
+            cursor_order: maker_order,
+            accepted: false,
+        },
+        CursorOwnershipCase {
+            desc: "paging the maker order with the taker leg's cursor (shared FillSeq)",
+            queried_order: maker_order,
+            cursor_order: taker_order,
+            accepted: false,
+        },
+        CursorOwnershipCase {
+            desc: "control: the taker order's own cursor pages correctly",
+            queried_order: taker_order,
+            cursor_order: taker_order,
+            accepted: true,
+        },
+        CursorOwnershipCase {
+            desc: "control: the maker order's own cursor pages correctly",
+            queried_order: maker_order,
+            cursor_order: maker_order,
+            accepted: true,
+        },
+    ];
+
+    for case in cases {
+        let mut store = store();
+        append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
+
+        let cursor = TradeId::new(case.cursor_order, fill_seq);
+        let got = store.trades_for_order(case.queried_order, Some(cursor), 10);
+
+        if case.accepted {
+            assert_eq!(
+                got,
+                Ok(vec![]),
+                "BUG ({}): the order's own cursor must page (empty, no older trades)",
+                case.desc
+            );
+        } else {
+            assert_eq!(
+                got,
+                Err(CursorNotFound),
+                "BUG ({}): a cursor from the other leg must be rejected",
+                case.desc
+            );
+        }
+    }
+}
+
 #[test]
 fn should_have_correct_size_for_minicbor_encoded_trade_record() {
     let encoded = minicbor_encode(&max_size_trade_record());
     assert_eq!(encoded.len(), MAX_TRADE_RECORD_BINARY_SIZE);
+}
+
+#[test]
+fn should_round_trip_a_trade_id_back_through_its_public_cursor() {
+    let id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(3)), FillSeq::new(7));
+    let trade = TradeRecord {
+        side: Side::Buy,
+        price: maker_price(),
+        quantity: quantity(),
+        notional: notional(),
+        fee: taker_fee(),
+        fee_token: PairToken::Base,
+        is_maker: false,
+        timestamp: TIMESTAMP,
+    }
+    .into_public(id);
+    assert_eq!(
+        trade.id.parse::<TradeId>(),
+        Ok(id),
+        "a Trade.id must decode with the same encoding get_my_trades accepts for `after`"
+    );
 }
 
 proptest! {

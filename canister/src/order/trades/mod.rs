@@ -35,6 +35,27 @@ pub struct TradeRecord {
     pub timestamp: Timestamp,
 }
 
+impl TradeRecord {
+    /// Projects this trade to the public [`oisy_trade_types::Trade`], stamping it
+    /// with `id` as its identity and pagination cursor — its [`TradeId`] in the
+    /// same opaque text form `get_my_trades` decodes for `after`, so a returned
+    /// id round-trips.
+    pub fn into_public(self, id: TradeId) -> oisy_trade_types::Trade {
+        oisy_trade_types::Trade {
+            id: id.to_string(),
+            order_id: id.order_id().to_string(),
+            side: self.side.into(),
+            price: candid::Nat::from(self.price),
+            quantity: self.quantity.into(),
+            notional: self.notional.into(),
+            fee: self.fee.into(),
+            fee_token: self.fee_token.into(),
+            is_maker: self.is_maker,
+            timestamp: self.timestamp.as_nanos(),
+        }
+    }
+}
+
 /// One side-projected trade together with its primary key — what settlement
 /// produces and [`TradeHistory::append`] consumes.
 pub type TradeLeg = (TradeId, TradeRecord);
@@ -83,24 +104,25 @@ impl<M: Memory> TradeHistory<M> {
 
     /// Returns up to `length` of `order`'s trades, newest first. With
     /// `after: None` the page starts at the newest trade; otherwise `after` is a
-    /// cursor — the last trade of the previous page — and the page continues with
-    /// the next-older trade. An `after` whose sequence is not one of `order`'s
-    /// trades yields [`CursorNotFound`]; a valid cursor with no older trades is
-    /// `Ok(vec![])`. The per-order read is a prefix range scan over the primary
-    /// map, exploiting `TradeId`'s `OrderId` prefix.
+    /// cursor — the [`TradeId`] of the previous page's last trade — and the page
+    /// continues with the next-older trade. An `after` that is not one of
+    /// `order`'s trades — including one whose embedded `OrderId` names a different
+    /// order (e.g. the counterparty leg sharing the match's `FillSeq`) — yields
+    /// [`CursorNotFound`]; a valid cursor with no older trades is `Ok(vec![])`.
+    /// The per-order read is a prefix range scan over the primary map, exploiting
+    /// `TradeId`'s `OrderId` prefix.
     pub fn trades_for_order(
         &self,
         order: OrderId,
-        after: Option<FillSeq>,
+        after: Option<TradeId>,
         length: usize,
     ) -> Result<Vec<(FillSeq, TradeRecord)>, CursorNotFound> {
         bench_scopes!("fills", "fills::trades_for_order");
         use std::ops::Bound;
         let upper = match after {
             None => Bound::Included(TradeId::last_of(order)),
-            Some(seq) => {
-                let id = TradeId::new(order, seq);
-                if !self.0.contains_key(&id) {
+            Some(id) => {
+                if id.order_id() != order || !self.0.contains_key(&id) {
                     return Err(CursorNotFound);
                 }
                 Bound::Excluded(id)
