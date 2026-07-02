@@ -18,8 +18,8 @@ mod tests;
 /// matching phase; consumed to update `order_history` and enqueue the
 /// `SettlingEvent`.
 pub struct MatchSettlement {
-    pub balance_operations: Vec<crate::state::event::BalanceOperation>,
-    pub order_updates: std::collections::BTreeMap<OrderSeq, OrderUpdate>,
+    pub balance_operations: Vec<event::BalanceOperation>,
+    pub order_updates: BTreeMap<OrderSeq, OrderUpdate>,
     pub fills: Vec<FillEvent>,
 }
 

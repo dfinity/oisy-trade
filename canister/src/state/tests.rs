@@ -2719,8 +2719,14 @@ mod settle_fills {
                 {
                     let fee = fee.unwrap_or(Quantity::ZERO);
                     match token {
-                        PairToken::Quote => quote = Some((*amount, fee)),
-                        PairToken::Base => base = Some(fee),
+                        PairToken::Quote => assert!(
+                            quote.replace((*amount, fee)).is_none(),
+                            "a fill must produce exactly one quote transfer",
+                        ),
+                        PairToken::Base => assert!(
+                            base.replace(fee).is_none(),
+                            "a fill must produce exactly one base transfer",
+                        ),
                     }
                 }
             }
