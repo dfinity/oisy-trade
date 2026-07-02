@@ -362,7 +362,7 @@ fn bench_get_my_trades() -> canbench_rs::BenchResult {
         let mut after: Option<oisy_trade_types::TradeId> = None;
         let mut retrieved = 0usize;
         loop {
-            let trades = crate::get_my_trades(
+            let mut trades = crate::get_my_trades(
                 oisy_trade_types::GetMyTradesArgs {
                     filter: oisy_trade_types::TradesFilter::ByAccount(
                         oisy_trade_types::TradesByAccount {
@@ -384,7 +384,7 @@ fn bench_get_my_trades() -> canbench_rs::BenchResult {
             if retrieved >= total {
                 break;
             }
-            after = trades.last().map(|t| t.id.clone());
+            after = trades.pop().map(|t| t.id);
         }
         assert_eq!(retrieved, total);
     })
