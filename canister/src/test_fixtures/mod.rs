@@ -16,6 +16,7 @@ use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
 use candid::Principal;
 use ic_stable_structures::{Memory, VectorMemory};
+use minicbor::Encode;
 use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::{NonZeroU64, NonZeroU128};
@@ -452,6 +453,15 @@ pub fn transfer_from_response(
     mock_response(candid::encode_args((result,)).unwrap())
 }
 
+pub fn minicbor_encode<T>(t: &T) -> Vec<u8>
+where
+    T: Encode<()>,
+{
+    let mut buf = vec![];
+    minicbor::encode(t, &mut buf).expect("encoding should succeed");
+    buf
+}
+
 #[cfg(test)]
 pub mod arbitrary {
     use super::event::MAX_HALT_BOOKS;
@@ -459,10 +469,11 @@ pub mod arbitrary {
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, FillEvent, FillSeq, LotSize, MatchingOutput, Order,
-        OrderBookId, OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price,
-        Quantity, RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
+    use crate::settlement::FillEvent;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
         DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,

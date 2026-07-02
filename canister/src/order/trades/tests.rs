@@ -4,13 +4,15 @@ use crate::order::{
     FillId, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TradeId,
 };
 use crate::test_fixtures::arbitrary::{arb_trade_record, check_minicbor_roundtrip};
+use crate::test_fixtures::minicbor_encode;
 use crate::user::UserId;
 use ic_stable_structures::VectorMemory;
-use proptest::proptest;
+use proptest::{prop_assert, proptest};
 
 const USER: UserId = UserId::new(0);
 const BOOK: OrderBookId = OrderBookId::ZERO;
 const TIMESTAMP: Timestamp = Timestamp::new(42);
+const MAX_TRADE_RECORD_BINARY_SIZE: usize = 142;
 
 #[test]
 fn should_derive_fill_id_from_trade_id_dropping_the_order_seq() {
@@ -292,6 +294,12 @@ fn should_reject_a_cursor_from_the_other_leg_of_the_same_fill() {
 }
 
 #[test]
+fn should_have_correct_size_for_minicbor_encoded_trade_record() {
+    let encoded = minicbor_encode(&max_size_trade_record());
+    assert_eq!(encoded.len(), MAX_TRADE_RECORD_BINARY_SIZE);
+}
+
+#[test]
 fn should_round_trip_a_trade_id_back_through_its_public_cursor() {
     let id = TradeId::new(OrderId::new(BOOK, OrderSeq::new(3)), FillSeq::new(7));
     let trade = TradeRecord {
@@ -316,6 +324,77 @@ proptest! {
     #[test]
     fn should_encode_decode_minicbor(record in arb_trade_record()) {
         check_minicbor_roundtrip(&record)?;
+    }
+
+    #[test]
+    fn should_not_exceed_max_trade_record_binary_size(record in arb_trade_record()) {
+        let encoded = minicbor_encode(&record);
+        prop_assert!(encoded.len() <= MAX_TRADE_RECORD_BINARY_SIZE);
+    }
+}
+
+/// Stable memory grows one 64 KiB page at a time, and only when the current
+/// page can no longer fit another entry — writes land in the already-claimed
+/// page until then. This pins, for worst-case fills (both legs a maximum-size
+/// `TradeRecord`; the `TradeId`/`ByUserKey` index entries are fixed-width), how
+/// many the primary region's first page absorbs before it has to `grow`.
+#[test]
+fn should_fill_a_stable_memory_page_with_exact_number_of_trades() {
+    /// Number of worst-case fills a single 64 KiB page of the primary map absorbs
+    /// before it must grow. Each fill writes two maximum-size `TradeRecord` legs.
+    const WORST_CASE_FILLS_PER_PAGE: u64 = 152;
+
+    const WASM_PAGE_SIZE: usize = 65_536;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    // `VectorMemory` is `Rc<RefCell<Vec<u8>>>`: a byte vector standing in for a
+    // stable-memory region. The primary map and the per-user index need
+    // distinct regions; the large records fill the primary region first.
+    let primary: VectorMemory = Rc::new(RefCell::new(Vec::new()));
+    let by_user: VectorMemory = Rc::new(RefCell::new(Vec::new()));
+    let mut store = TradeHistory::new(primary.clone(), by_user.clone());
+
+    // `TradeHistory::new` claims the first page for the map header.
+    let one_page = primary.borrow().len();
+    assert_eq!(one_page, WASM_PAGE_SIZE, "the store starts at one page");
+
+    // Write worst-case fills until the primary region has to grow: the loop's
+    // last iteration is the "one more" fill that overflows the full page.
+    let mut fills = 0u64;
+    while primary.borrow().len() == one_page {
+        append_max_size_fill(&mut store, fills);
+        fills += 1;
+    }
+
+    assert_eq!(
+        fills - 1,
+        WORST_CASE_FILLS_PER_PAGE,
+        "worst-case fills the page absorbs before growing",
+    );
+    assert_eq!(
+        primary.borrow().len(),
+        2 * one_page,
+        "the next fill grew the primary region by exactly one page",
+    );
+    assert_eq!(
+        by_user.borrow().len(),
+        one_page,
+        "the fixed-width index entries stay within their first page",
+    );
+}
+
+fn max_size_trade_record() -> TradeRecord {
+    TradeRecord {
+        side: Side::Buy,
+        price: Price::MAX,
+        quantity: Quantity::MAX,
+        notional: Quantity::MAX,
+        fee: Quantity::MAX,
+        fee_token: PairToken::Base,
+        is_maker: false,
+        timestamp: Timestamp::MAX,
     }
 }
 
@@ -364,6 +443,21 @@ fn append(
         taker_user,
         (maker_id, maker_leg),
         maker_user,
+    );
+}
+
+/// Appends one fill whose two legs are both maximum-size `TradeRecord`s, under
+/// distinct ids, so every primary entry is as large as the schema allows.
+fn append_max_size_fill(store: &mut TradeHistory<VectorMemory>, i: u64) {
+    let fill_seq = FillSeq::new(u64::MAX - i);
+    let book = OrderBookId::new(u64::MAX);
+    let taker_id = TradeId::new(OrderId::new(book, OrderSeq::new(2 * i)), fill_seq);
+    let maker_id = TradeId::new(OrderId::new(book, OrderSeq::new(2 * i + 1)), fill_seq);
+    store.append(
+        (taker_id, max_size_trade_record()),
+        taker_user(),
+        (maker_id, max_size_trade_record()),
+        maker_user(),
     );
 }
 

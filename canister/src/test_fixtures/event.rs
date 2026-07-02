@@ -1,8 +1,9 @@
 use crate::Timestamp;
 use crate::order::{
-    BasisPoint, FeeRates, FillEvent, FillSeq, LotSize, OrderBookId, OrderId, OrderSeq, PairToken,
-    Price, Quantity, Side, TickSize, TokenId, TokenMetadata,
+    BasisPoint, FeeRates, FillSeq, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price,
+    Quantity, Side, TickSize, TokenId, TokenMetadata,
 };
+use crate::settlement::FillEvent;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
     Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,

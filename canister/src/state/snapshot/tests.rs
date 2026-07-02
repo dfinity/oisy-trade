@@ -13,10 +13,11 @@ use proptest::prelude::*;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        FeeRates, FillEvent, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
         PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce,
         TokenId, TokenMetadata, TradingPair,
     };
+    use crate::settlement::FillEvent;
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
     use oisy_trade_types_internal::Mode;

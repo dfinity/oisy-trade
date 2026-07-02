@@ -14,7 +14,7 @@ pub use book::{
     PriceLevel, RemovedOrder,
 };
 pub use fees::{BasisPoint, FeeRates, InvalidBasisPoint};
-pub use fill::{Fill, FillEvent, FillId, FillSeq, FillSettlement, RemovedOrderSettlement, TradeId};
+pub use fill::{Fill, FillId, FillSeq, TradeId};
 pub use history::{OrderHistory, OrderUpdate};
 pub use trades::{TradeHistory, TradeLeg, TradeRecord};
 
@@ -258,6 +258,9 @@ pub struct Price(#[cbor(n(0), with = "crate::cbor::u128_via_quantity")] u128);
 
 impl Price {
     pub const ZERO: Self = Self(0);
+    /// The maximum-representable `Price` sentinel, used to bound encoding size;
+    /// not necessarily tick-aligned or valid for any configured book.
+    pub const MAX: Self = Self(u128::MAX);
 
     pub fn new(value: u128) -> Self {
         Self(value)
