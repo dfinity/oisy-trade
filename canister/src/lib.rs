@@ -1,11 +1,12 @@
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILLS_PER_RESPONSE,
-    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord,
-    PriceLevel, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    MAX_FILLS_PER_RESPONSE, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -444,21 +445,24 @@ pub fn get_my_orders(
 
 /// Why a [`get_my_trades`] call could not be served.
 ///
-/// Both variants indicate malformed caller input.
+/// Typically those errors indicate a client bug.
 #[derive(Debug, PartialEq, Eq)]
 pub enum GetMyTradesError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     InvalidOrderId(ids::ParseFixedWithIdError),
     /// The `after` cursor was not a well-formed trade id.
     InvalidCursor(ids::ParseFixedWithIdError),
+    /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
+    /// caller.
+    OrderNotFound,
 }
 
 pub fn get_my_trades(
-    filter: oisy_trade_types::TradesFilter,
+    args: GetMyTradesArgs,
     caller: candid::Principal,
 ) -> Result<Vec<oisy_trade_types::Trade>, GetMyTradesError> {
     use oisy_trade_types::TradesFilter;
-    let trades = match filter {
+    let trades = match args.filter {
         TradesFilter::ByOrder(by_order) => {
             let order_id = by_order
                 .order_id
@@ -468,14 +472,18 @@ pub fn get_my_trades(
                 .after
                 .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
-                .map_err(GetMyTradesError::InvalidCursor)?
-                .map(|id| id.seq());
+                .map_err(GetMyTradesError::InvalidCursor)?;
             let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
-            state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
-                .collect()
+            match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
+                Ok(trades) => trades
+                    .into_iter()
+                    .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
+                    .collect(),
+                Err(state::GetUserOrderTradesError::OrderNotFound) => {
+                    return Err(GetMyTradesError::OrderNotFound);
+                }
+                Err(state::GetUserOrderTradesError::CursorNotFound) => Vec::new(),
+            }
         }
         TradesFilter::ByAccount(_) => Vec::new(),
     };

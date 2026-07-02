@@ -683,7 +683,7 @@ mod get_user_order_trades {
         FeeRates, FillSeq, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side,
         TradeId, TradeLeg, TradeRecord,
     };
-    use crate::state::State;
+    use crate::state::{GetUserOrderTradesError, State};
     use crate::test_fixtures::{
         self, LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, ckbtc_metadata,
         icp_ckbtc_trading_pair, icp_metadata, order,
@@ -696,7 +696,7 @@ mod get_user_order_trades {
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
 
     #[test]
-    fn owner_sees_their_trades_newest_first_and_a_non_owner_sees_an_empty_page() {
+    fn owner_sees_their_trades_newest_first_and_a_non_owner_gets_order_not_found() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
@@ -711,18 +711,14 @@ mod get_user_order_trades {
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
         seed_trade(&mut state, (stranger_order, stranger_id), FillSeq::new(2));
 
-        assert!(
-            state
-                .get_user_order_trades(&STRANGER, owner_order, None, 10)
-                .unwrap()
-                .is_empty(),
+        assert_eq!(
+            state.get_user_order_trades(&STRANGER, owner_order, None, 10),
+            Err(GetUserOrderTradesError::OrderNotFound),
             "a non-owner must not see another principal's trades"
         );
-        assert!(
-            state
-                .get_user_order_trades(&OWNER, stranger_order, None, 10)
-                .unwrap()
-                .is_empty(),
+        assert_eq!(
+            state.get_user_order_trades(&OWNER, stranger_order, None, 10),
+            Err(GetUserOrderTradesError::OrderNotFound),
             "the owner of one order must not see another principal's order's trades"
         );
 
@@ -740,14 +736,12 @@ mod get_user_order_trades {
     }
 
     #[test]
-    fn an_unknown_order_yields_an_empty_page() {
+    fn an_unknown_order_yields_order_not_found() {
         let state = setup();
         let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
-        assert!(
-            state
-                .get_user_order_trades(&OWNER, unknown, None, 10)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            state.get_user_order_trades(&OWNER, unknown, None, 10),
+            Err(GetUserOrderTradesError::OrderNotFound)
         );
     }
 

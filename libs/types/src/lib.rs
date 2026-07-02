@@ -312,14 +312,10 @@ pub type TradeId = String;
 /// Requests for more are silently capped to this many.
 pub const MAX_FILLS_PER_RESPONSE: u32 = 100;
 
-/// One side-projected fill, as returned by `get_my_trades`. Describes one of the
-/// caller's orders' executions; the counterparty is intentionally omitted.
+/// Caller's order's projected fill, as returned by `get_my_trades`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct Trade {
-    /// This trade's own identity, which doubles as its pagination cursor. Pass
-    /// the last entry's id back as the next page's `after`. Mirrors how a
-    /// `get_my_orders` `ByPage` entry exposes the [`OrderId`] that doubles as its
-    /// page cursor.
+    /// This trade's unique identifier.
     pub id: TradeId,
     /// The owning (caller's) order.
     pub order_id: OrderId,
@@ -343,6 +339,13 @@ pub struct Trade {
     pub timestamp: u64,
 }
 
+/// Request for the `get_my_trades` query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct GetMyTradesArgs {
+    /// How to select the caller's trades.
+    pub filter: TradesFilter,
+}
+
 /// Selector for `get_my_trades`: the caller's fills for one order, or across all
 /// their orders. Both modes are owner-scoped, newest-first, and paginated by an
 /// `after` cursor.
@@ -358,8 +361,8 @@ pub enum TradesFilter {
 /// capped at [`MAX_FILLS_PER_RESPONSE`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct TradesByOrder {
-    /// The order whose fills should be returned. Returns an empty page if the
-    /// caller does not own it.
+    /// The order whose fills should be returned. Errors with `OrderNotFound` if
+    /// the caller does not own it.
     pub order_id: OrderId,
     /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's
     /// last entry. `None` starts from the newest fill.
