@@ -180,8 +180,8 @@ fn get_my_trades(args: GetMyTradesArgs) -> Result<Vec<Trade>, GetMyTradesError> 
                 oisy_trade_canister::GetMyTradesError::InvalidOrderId(_) => {
                     GetMyTradesRequestError::InvalidOrderId
                 }
-                oisy_trade_canister::GetMyTradesError::InvalidCursor(_) => {
-                    GetMyTradesRequestError::InvalidCursor
+                oisy_trade_canister::GetMyTradesError::InvalidTradeId(_) => {
+                    GetMyTradesRequestError::InvalidTradeId
                 }
                 oisy_trade_canister::GetMyTradesError::OrderNotFound => {
                     GetMyTradesRequestError::OrderNotFound

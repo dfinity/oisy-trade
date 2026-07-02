@@ -2030,7 +2030,7 @@ mod get_my_trades {
         init_state_with_order_book();
         let (buy, _) = place_and_match();
         let result = get_my_trades(by_order(buy, Some("xyz".to_string()), 10), BUYER);
-        assert!(matches!(result, Err(GetMyTradesError::InvalidCursor(_))));
+        assert!(matches!(result, Err(GetMyTradesError::InvalidTradeId(_))));
     }
 
     #[test]

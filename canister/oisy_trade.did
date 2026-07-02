@@ -407,8 +407,8 @@ type GetMyTradesError = record {
         RequestError : opt variant {
             // The `order_id` in a `ByOrder` filter was not a well-formed order id.
             InvalidOrderId;
-            // The `after` cursor was not a well-formed trade-id cursor.
-            InvalidCursor;
+            // The `after` cursor was not a well-formed `TradeId`.
+            InvalidTradeId;
             // The `order_id` in a `ByOrder` filter is unknown or not owned by
             // the caller.
             OrderNotFound;
@@ -923,7 +923,7 @@ service : (OisyTradeArg) -> {
     // returns one order's fills (an empty page if the caller does not own the
     // order); `ByAccount` returns fills across all the caller's orders. Pages
     // via the `after` cursor; `length` is capped at 100. Returns
-    // `InvalidOrderId` / `InvalidCursor` for a malformed `order_id` / cursor; a
+    // `InvalidOrderId` / `InvalidTradeId` for a malformed `order_id` / cursor; a
     // well-formed but unknown cursor yields an empty page.
     get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 

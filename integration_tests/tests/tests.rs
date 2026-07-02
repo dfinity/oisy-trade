@@ -632,7 +632,7 @@ mod add_limit_order {
                 .await
                 .unwrap_err()
                 .kind,
-            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidCursor)),
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidTradeId)),
         );
 
         setup.drop().await;

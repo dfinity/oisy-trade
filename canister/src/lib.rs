@@ -450,8 +450,8 @@ pub fn get_my_orders(
 pub enum GetMyTradesError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     InvalidOrderId(ids::ParseFixedWithIdError),
-    /// The `after` cursor was not a well-formed trade-id cursor.
-    InvalidCursor(ids::ParseFixedWithIdError),
+    /// The `after` cursor was not a well-formed `TradeId`.
+    InvalidTradeId(ids::ParseFixedWithIdError),
     /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
     /// caller.
     OrderNotFound,
@@ -472,7 +472,7 @@ pub fn get_my_trades(
                 .after
                 .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
-                .map_err(GetMyTradesError::InvalidCursor)?;
+                .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
             match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
                 Ok(trades) => trades

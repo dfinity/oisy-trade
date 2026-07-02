@@ -402,9 +402,9 @@ pub enum GetMyTradesRequestError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     #[error("the supplied order id is not a well-formed order id")]
     InvalidOrderId,
-    /// The `after` cursor was not a well-formed trade-id cursor.
-    #[error("the supplied cursor is not a well-formed trade-id cursor")]
-    InvalidCursor,
+    /// The `after` cursor was not a well-formed `TradeId`.
+    #[error("the supplied cursor is not a well-formed trade id")]
+    InvalidTradeId,
     /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
     /// caller.
     #[error("no order with the given id exists for the caller")]
