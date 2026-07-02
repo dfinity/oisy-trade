@@ -220,6 +220,23 @@ benches:
         instructions: 3405423
         heap_increase: 0
         stable_memory_increase: 0
+  bench_get_my_trades:
+    total:
+      calls: 1
+      instructions: 48808644
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      fills:
+        calls: 10
+        instructions: 34101258
+        heap_increase: 0
+        stable_memory_increase: 0
+      fills::trades_after:
+        calls: 10
+        instructions: 34086726
+        heap_increase: 0
+        stable_memory_increase: 0
   bench_get_order_book_depth_default:
     total:
       calls: 1

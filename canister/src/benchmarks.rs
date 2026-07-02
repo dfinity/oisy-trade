@@ -307,6 +307,89 @@ fn bench_get_my_orders() -> canbench_rs::BenchResult {
     })
 }
 
+/// Benchmark paginating through *all* of one account's trades via
+/// `get_my_trades { ByAccount }`, for a trader that is a party to 1000 fills.
+/// Seeds the fills by having a single trader sweep 1000 resting 1-lot
+/// counterparty sells as the taker (one fill per resting order), then walks
+/// every page (capped at `MAX_TRADES_PER_RESPONSE`) until the account's trade
+/// history is exhausted.
+#[bench(raw)]
+fn bench_get_my_trades() -> canbench_rs::BenchResult {
+    const FILLS: u64 = 1_000;
+    let price = Price::new(200_000_000); // 2.000 USDT
+    let mut state = new_state();
+
+    for i in 0..FILLS {
+        let counterparty = user(i);
+        fund_user(&mut state, counterparty);
+        place_order(
+            &mut state,
+            counterparty,
+            PendingOrder {
+                side: Side::Sell,
+                price,
+                quantity: Quantity::from(LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
+            },
+        );
+    }
+
+    let trader = user(FILLS);
+    fund_user(&mut state, trader);
+    let buy_order = place_order(
+        &mut state,
+        trader,
+        PendingOrder {
+            side: Side::Buy,
+            price,
+            quantity: Quantity::from(FILLS * LOT_SIZE.get()),
+            time_in_force: TimeInForce::GoodTilCanceled,
+        },
+    );
+
+    state.set_execution_policy(ExecutionPolicy::MAX);
+    EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
+
+    let total = FILLS as usize;
+    let (_, _, buy_order_record) = state.get_user_order(&trader, buy_order).unwrap();
+    assert_eq!(buy_order_record.status, OrderStatus::Filled);
+
+    crate::state::reset_state();
+    crate::state::init_state(state);
+
+    let page = oisy_trade_types::MAX_TRADES_PER_RESPONSE;
+    canbench_rs::bench_fn(|| {
+        let mut after: Option<oisy_trade_types::TradeId> = None;
+        let mut retrieved = 0usize;
+        loop {
+            let mut trades = crate::get_my_trades(
+                oisy_trade_types::GetMyTradesArgs {
+                    filter: oisy_trade_types::TradesFilter::ByAccount(
+                        oisy_trade_types::TradesByAccount {
+                            after: after.take(),
+                            length: page,
+                        },
+                    ),
+                },
+                trader,
+            )
+            .expect("benchmark issues only well-formed, owned cursors");
+            retrieved += trades.len();
+            if trades.is_empty() {
+                break;
+            }
+            // Stop once the known total is reached; checking the count rather
+            // than waiting for a short page avoids one extra empty call when
+            // the total is an exact multiple of the page size.
+            if retrieved >= total {
+                break;
+            }
+            after = trades.pop().map(|t| t.id);
+        }
+        assert_eq!(retrieved, total);
+    })
+}
+
 /// Build a freshly populated state from the Binance snapshot and install it
 /// as the canister's thread-local state, so library dispatchers that read via
 /// `state::with_state` observe it. canbench's `init` populated the
