@@ -475,7 +475,7 @@ fee input pinned by neither the fill nor the orders. The matcher's `Fill` struct
 
 ### Endpoint — `canister/src/lib.rs`, `canister/src/main.rs`
 
-- `get_my_trades(filter)`: resolve the caller's `UserId`, then match `filter`. `ByOrder { order_id,
+- `get_my_trades(args: GetMyTradesArgs)`: resolve the caller's `UserId`, then match `args.filter`. `ByOrder { order_id,
   after, length }` → if `order_id` is the caller's (same ownership check as `get_my_orders {
   ById }`), return `trades_for_order`, else `OrderNotFound`. `ByAccount { after, length }` →
   `trades_after`.
