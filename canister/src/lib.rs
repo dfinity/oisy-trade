@@ -485,7 +485,9 @@ pub fn get_my_trades(
                 Err(state::GetUserOrderTradesError::CursorNotFound) => Vec::new(),
             }
         }
-        TradesFilter::ByAccount(_) => Vec::new(),
+        TradesFilter::ByAccount(_) => {
+            todo!("account-wide trades feed is wired when the account index lands")
+        }
     };
     Ok(trades)
 }

@@ -1952,8 +1952,8 @@ mod get_my_trades {
     use crate::{GetMyTradesError, add_limit_order, get_my_trades};
     use candid::{Nat, Principal};
     use oisy_trade_types::{
-        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, Side,
-        TradesByAccount, TradesByOrder, TradesFilter,
+        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, Side, TradesByOrder,
+        TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -2210,23 +2210,6 @@ mod get_my_trades {
         let buy = place_buy_crossing_resting_sells(lots);
         let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
         assert_eq!(trades.len(), MAX_TRADES_PER_RESPONSE as usize);
-    }
-
-    #[test]
-    fn by_account_is_empty_until_the_account_index_lands() {
-        init_state_with_order_book();
-        place_and_match();
-        let trades = get_my_trades(
-            GetMyTradesArgs {
-                filter: TradesFilter::ByAccount(TradesByAccount {
-                    after: None,
-                    length: 10,
-                }),
-            },
-            BUYER,
-        )
-        .unwrap();
-        assert!(trades.is_empty());
     }
 }
 
