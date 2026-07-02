@@ -336,7 +336,7 @@ fn bench_get_my_trades() -> canbench_rs::BenchResult {
 
     let trader = user(FILLS);
     fund_user(&mut state, trader);
-    place_order(
+    let buy_order = place_order(
         &mut state,
         trader,
         PendingOrder {
@@ -351,13 +351,8 @@ fn bench_get_my_trades() -> canbench_rs::BenchResult {
     EXECUTOR.run_once(&mut state, &crate::IC_RUNTIME);
 
     let total = FILLS as usize;
-    assert_eq!(
-        state
-            .get_user_trades(&trader, None, total * 2)
-            .unwrap()
-            .len(),
-        total
-    );
+    let (_, _, buy_order_record) = state.get_user_order(&trader, buy_order).unwrap();
+    assert_eq!(buy_order_record.status, OrderStatus::Filled);
 
     crate::state::reset_state();
     crate::state::init_state(state);
@@ -371,15 +366,18 @@ fn bench_get_my_trades() -> canbench_rs::BenchResult {
                 oisy_trade_types::GetMyTradesArgs {
                     filter: oisy_trade_types::TradesFilter::ByAccount(
                         oisy_trade_types::TradesByAccount {
-                            after: after.clone(),
+                            after: after.take(),
                             length: page,
                         },
                     ),
                 },
                 trader,
             )
-            .expect("benchmark cursor is always a valid trade id");
+            .expect("benchmark issues only well-formed, owned cursors");
             retrieved += trades.len();
+            if trades.is_empty() {
+                break;
+            }
             // Stop once the known total is reached; checking the count rather
             // than waiting for a short page avoids one extra empty call when
             // the total is an exact multiple of the page size.
