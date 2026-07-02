@@ -180,8 +180,8 @@ fn get_my_trades(args: GetMyTradesArgs) -> Result<Vec<Trade>, GetMyTradesError> 
                 oisy_trade_canister::GetMyTradesError::InvalidOrderId(_) => {
                     GetMyTradesRequestError::InvalidOrderId
                 }
-                oisy_trade_canister::GetMyTradesError::InvalidCursor(_) => {
-                    GetMyTradesRequestError::InvalidCursor
+                oisy_trade_canister::GetMyTradesError::InvalidTradeId(_) => {
+                    GetMyTradesRequestError::InvalidTradeId
                 }
                 oisy_trade_canister::GetMyTradesError::OrderNotFound => {
                     GetMyTradesRequestError::OrderNotFound
@@ -228,13 +228,6 @@ fn get_events(
 
     const MAX_EVENTS_PER_RESPONSE: u64 = 2_000;
 
-    fn map_pair_token(token: oisy_trade_canister::order::PairToken) -> event::PairToken {
-        match token {
-            oisy_trade_canister::order::PairToken::Base => event::PairToken::Base,
-            oisy_trade_canister::order::PairToken::Quote => event::PairToken::Quote,
-        }
-    }
-
     fn map_balance_operation(
         op: oisy_trade_canister::state::event::BalanceOperation,
     ) -> event::BalanceOperation {
@@ -248,7 +241,7 @@ fn get_events(
             } => event::BalanceOperation::Transfer {
                 from_order: from_order.get(),
                 to_order: to_order.get(),
-                token: map_pair_token(token),
+                token: token.into(),
                 amount: amount.into(),
                 fee: fee.map(Into::into),
             },
@@ -258,7 +251,7 @@ fn get_events(
                 amount,
             } => event::BalanceOperation::Unreserve {
                 order: order.get(),
-                token: map_pair_token(token),
+                token: token.into(),
                 amount: amount.into(),
             },
         }

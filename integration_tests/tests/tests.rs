@@ -66,28 +66,6 @@ mod add_limit_order {
         GetMyOrdersArgs::by_page(after, length)
     }
 
-    /// Mints, approves, and deposits `amount` base units for `who`.
-    async fn fund_base(setup: &Setup, who: Principal, amount: u64) {
-        setup
-            .deposit_flow(who, setup.base_token_id())
-            .mint(amount + 2 * BASE_LEDGER_FEE)
-            .approve(amount + BASE_LEDGER_FEE)
-            .deposit(amount)
-            .execute()
-            .await;
-    }
-
-    /// Mints, approves, and deposits `amount` quote units for `who`.
-    async fn fund_quote(setup: &Setup, who: Principal, amount: u64) {
-        setup
-            .deposit_flow(who, setup.quote_token_id())
-            .mint(amount + 2 * QUOTE_LEDGER_FEE)
-            .approve(amount + QUOTE_LEDGER_FEE)
-            .deposit(amount)
-            .execute()
-            .await;
-    }
-
     #[tokio::test]
     async fn should_add_limit_buy_order_and_query_status() {
         let setup = Setup::new().await.with_trading_pair().await;
@@ -491,7 +469,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_expose_per_order_fills_via_get_my_trades() {
         use oisy_trade_types::{
-            GetMyTradesArgs, GetMyTradesRequestError, PairToken, TradesByOrder, TradesFilter,
+            GetMyTradesArgs, GetMyTradesRequestError, PairToken, Trade, TradesByOrder, TradesFilter,
         };
 
         const MAKER_FEE_BPS: u16 = 10;
@@ -518,7 +496,7 @@ mod add_limit_order {
         let quantity = 1_000_000u64;
         let notional = maker_price as u128 * quantity as u128 / 1_000_000_000u128;
 
-        fund_base(&setup, seller, quantity).await;
+        setup.fund_base(seller, quantity).await;
         let sell_id = seller_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -532,7 +510,7 @@ mod add_limit_order {
         setup.env().tick().await;
 
         let buyer_deposit = taker_price as u128 * quantity as u128 / 1_000_000_000u128;
-        fund_quote(&setup, buyer, buyer_deposit as u64).await;
+        setup.fund_quote(buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -560,15 +538,20 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(buy_trades.len(), 1);
         let buy_fill = &buy_trades[0];
-        assert_eq!(buy_fill.order_id, buy_id);
-        assert_eq!(buy_fill.side, Side::Buy);
-        assert!(!buy_fill.is_maker);
-        assert_eq!(buy_fill.price, Nat::from(maker_price));
-        assert_eq!(buy_fill.notional, Nat::from(notional));
-        assert_eq!(buy_fill.fee_token, PairToken::Base);
         assert_eq!(
-            buy_fill.fee,
-            Nat::from(quantity as u128 * TAKER_FEE_BPS as u128 / 10_000)
+            *buy_fill,
+            Trade {
+                id: buy_fill.id.clone(),
+                timestamp: buy_fill.timestamp,
+                order_id: buy_id.clone(),
+                side: Side::Buy,
+                is_maker: false,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(quantity as u128 * TAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Base,
+            },
         );
 
         // Seller's maker fill: same maker price, quote-denominated maker fee.
@@ -578,14 +561,20 @@ mod add_limit_order {
             .unwrap();
         assert_eq!(sell_trades.len(), 1);
         let sell_fill = &sell_trades[0];
-        assert_eq!(sell_fill.order_id, sell_id);
-        assert_eq!(sell_fill.side, Side::Sell);
-        assert!(sell_fill.is_maker);
-        assert_eq!(sell_fill.notional, Nat::from(notional));
-        assert_eq!(sell_fill.fee_token, PairToken::Quote);
         assert_eq!(
-            sell_fill.fee,
-            Nat::from(notional * MAKER_FEE_BPS as u128 / 10_000)
+            *sell_fill,
+            Trade {
+                id: sell_fill.id.clone(),
+                timestamp: sell_fill.timestamp,
+                order_id: sell_id.clone(),
+                side: Side::Sell,
+                is_maker: true,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(notional * MAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Quote,
+            },
         );
 
         // get_my_orders rollups are consistent with the fills (VWAP derivable).
@@ -632,7 +621,7 @@ mod add_limit_order {
                 .await
                 .unwrap_err()
                 .kind,
-            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidCursor)),
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidTradeId)),
         );
 
         setup.drop().await;
@@ -659,7 +648,7 @@ mod add_limit_order {
         let high_price = 10_000 * PRICE_SCALE;
         let quantity = 1_000_000u64;
 
-        fund_base(&setup, seller, 2 * quantity).await;
+        setup.fund_base(seller, 2 * quantity).await;
         for price in [low_price, high_price] {
             seller_client
                 .add_limit_order(LimitOrderRequest {
@@ -676,7 +665,7 @@ mod add_limit_order {
 
         let taker_price = 11_000 * PRICE_SCALE;
         let buyer_deposit = taker_price as u128 * 2 * quantity as u128 / 1_000_000_000u128;
-        fund_quote(&setup, buyer, buyer_deposit as u64).await;
+        setup.fund_quote(buyer, buyer_deposit as u64).await;
         let buy_id = buyer_client
             .add_limit_order(LimitOrderRequest {
                 pair: setup.trading_pair(),
@@ -868,7 +857,7 @@ mod add_limit_order {
                 .await
                 .unwrap_err()
                 .kind,
-            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidCursor)),
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidTradeId)),
         );
 
         // Account and per-order feeds agree on the newest fill.
@@ -1920,14 +1909,14 @@ async fn should_replay_events_on_upgrade() {
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 1, // buyer seq
                         to_order: 0,   // seller seq
-                        token: oisy_trade_types_internal::event::PairToken::Quote,
+                        token: oisy_trade_types::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
                         fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
-                        token: oisy_trade_types_internal::event::PairToken::Base,
+                        token: oisy_trade_types::PairToken::Base,
                         amount: Nat::from(deposit_amount),
                         fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },

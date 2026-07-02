@@ -71,11 +71,14 @@ This spec separates two distinct deliverables, which must not be conflated:
   - `ByAccount { after, length }` — the caller's fills across **all** their orders.
   Both are owner-scoped, newest-first, paginated by an `after` cursor, and every entry carries
   its `order_id` so a client can group by order. `ByOrder` for an order owned by another
-  principal (or an unknown id) returns an empty page.
+  principal (or a well-formed but unknown id) returns `OrderNotFound`, mirroring
+  `get_my_orders { ById }`.
 - **R5 — Non-trapping, error-enveloped.** `get_my_trades` never traps; it returns the
   DEFI-2801 error envelope (`docs/src/development/specs/DEFI-2801-error-envelope.md`, R8). A malformed `order_id`
-  or `after` cursor returns `Err(RequestError(...))`; a well-formed but unknown / not-owned id,
-  or an unknown cursor, returns `Ok([])`; otherwise `Ok(<trades>)`.
+  or `after` cursor returns `Err(RequestError(...))`; a well-formed but unknown / not-owned
+  `order_id` returns `OrderNotFound` (mirroring `get_my_orders { ById }`); a well-formed but
+  unknown / foreign cursor, or an owned order with no older trades, returns `Ok([])`; otherwise
+  `Ok(<trades>)`.
 - **R6 — Correct values under price improvement, sweeping, and refund.** For a fill, `price`
   equals the maker's execution price (never the taker's limit); `notional` equals
   `maker_price × quantity / base_scale` — the executed price, so a buy taker's reservation
@@ -98,7 +101,7 @@ This spec separates two distinct deliverables, which must not be conflated:
   `BUG:` panic, matching the codebase convention — not a `debug_assert!`, which is compiled out
   of the release canister).
 - **R10 — Bounded pages.** `length` is mandatory in the filter; a value above
-  `MAX_FILLS_PER_RESPONSE` is clamped down to it. An unknown `after` cursor yields an empty page
+  `MAX_TRADES_PER_RESPONSE` is clamped down to it. An unknown `after` cursor yields an empty page
   (malformed cursors are rejected per R5).
 - **R11 — Fills and balance ops share one computed source.** The per-fill `notional`, `fee`, and
   role are computed **once** and feed both the existing `BalanceOperation`s and the new fill
@@ -354,9 +357,11 @@ type TradesFilter = variant {
     ByAccount : record { after : opt TradeId; length : nat32 };
 };
 
+type GetMyTradesArgs = record { filter : TradesFilter };
+
 // Owner-scoped, newest-first. Non-trapping: returns the DEFI-2801 error
-// envelope (R5). `length` is capped at MAX_FILLS_PER_RESPONSE.
-get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
+// envelope (R5). `length` is capped at MAX_TRADES_PER_RESPONSE.
+get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 ```
 
 `TradeId` is the opaque per-side trade identity and pagination cursor — an opaque `text` token
@@ -366,7 +371,7 @@ callers pass back the last value they received and never parse it. Each `Trade` 
 `get_my_orders { ByPage }`, where each `UserOrder` exposes the `OrderId` that doubles as the page
 cursor. The match-level `FillId = (OrderBookId, FillSeq)` is the id of the match itself and is
 derivable from any `TradeId`; it is not part of the candid surface. `GetMyTradesError` is an
-instantiation of the DEFI-2801 generic error envelope. `MAX_FILLS_PER_RESPONSE` mirrors
+instantiation of the DEFI-2801 generic error envelope. `MAX_TRADES_PER_RESPONSE` mirrors
 `MAX_ORDERS_PER_RESPONSE`.
 
 ### Internal trade store
@@ -470,12 +475,13 @@ fee input pinned by neither the fill nor the orders. The matcher's `Fill` struct
 
 ### Endpoint — `canister/src/lib.rs`, `canister/src/main.rs`
 
-- `get_my_trades(filter)`: resolve the caller's `UserId`, then match `filter`. `ByOrder { order_id,
+- `get_my_trades(args: GetMyTradesArgs)`: resolve the caller's `UserId`, then match `args.filter`. `ByOrder { order_id,
   after, length }` → if `order_id` is the caller's (same ownership check as `get_my_orders {
-  ById }`), return `trades_for_order`, else `Ok([])`. `ByAccount { after, length }` →
+  ById }`), return `trades_for_order`, else `OrderNotFound`. `ByAccount { after, length }` →
   `trades_after`.
-  `length` clamped to `MAX_FILLS_PER_RESPONSE` (R10). Malformed `order_id` / cursor → `Err`,
-  unknown → `Ok([])` (R5). A `#[ic_cdk::query]` wrapper in `main.rs` over a business fn in
+  `length` clamped to `MAX_TRADES_PER_RESPONSE` (R10). Malformed `order_id` / cursor → `Err`,
+  unknown / not-owned `order_id` → `OrderNotFound`, unknown cursor → `Ok([])` (R5). A
+  `#[ic_cdk::query]` wrapper in `main.rs` over a business fn in
   `lib.rs`, returning the DEFI-2801 envelope.
 
 ### Test plan
@@ -506,7 +512,7 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
   absent (R3, R4, R6). `get_my_orders` shows `filled_quote` / `filled_fee` consistent with the
   fills, and `filled_quote × base_scale / filled_quantity` is the expected VWAP (R1, R2).
 - `get_my_trades { ByOrder }` for an unknown id and for an id owned by another principal →
-  `Ok([])`; a malformed id / cursor → `Err` (R4, R5).
+  `OrderNotFound`; a malformed id / cursor → `Err` (R4, R5).
 - `get_my_trades { ByAccount }` returns fills across multiple orders newest-first, paginates by
   `after`, clamps `length` (R4, R10).
 

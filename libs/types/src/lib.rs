@@ -310,7 +310,7 @@ pub type TradeId = String;
 
 /// Maximum number of trades returned by a single `get_my_trades` call.
 /// Requests for more are silently capped to this many.
-pub const MAX_FILLS_PER_RESPONSE: u32 = 100;
+pub const MAX_TRADES_PER_RESPONSE: u32 = 100;
 
 /// Caller's order's projected fill, as returned by `get_my_trades`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -358,7 +358,7 @@ pub enum TradesFilter {
 }
 
 /// A page over the caller's fills for one order, newest first. `length` is
-/// capped at [`MAX_FILLS_PER_RESPONSE`].
+/// capped at [`MAX_TRADES_PER_RESPONSE`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct TradesByOrder {
     /// The order whose fills should be returned. Errors with `OrderNotFound` if
@@ -372,7 +372,7 @@ pub struct TradesByOrder {
 }
 
 /// A page over the caller's fills across all their orders, newest first.
-/// `length` is capped at [`MAX_FILLS_PER_RESPONSE`].
+/// `length` is capped at [`MAX_TRADES_PER_RESPONSE`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct TradesByAccount {
     /// Resume strictly after this cursor — the [`Trade::id`] of the prior page's

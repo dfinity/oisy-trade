@@ -577,10 +577,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns up to `length` of `owner`'s trades for the single order
     /// `order_id`, newest first, resuming strictly after the `after` cursor (a
-    /// cursor from a prior page). Yields [`CursorNotFound`] when `order_id` is
-    /// unknown or owned by another principal, or when `after` is not one of the
-    /// order's trades (including a cursor whose embedded `OrderId` names a
-    /// different order); a valid cursor with no older trades is `Ok(vec![])`.
+    /// cursor from a prior page). Yields [`OrderNotFound`] when `order_id` is
+    /// unknown or owned by another principal, and [`CursorNotFound`] when
+    /// `after` is not one of the order's trades (including a cursor whose
+    /// embedded `OrderId` names a different order); a valid cursor with no older
+    /// trades is `Ok(vec![])`.
     pub fn get_user_order_trades(
         &self,
         owner: &Principal,

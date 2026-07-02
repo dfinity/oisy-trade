@@ -696,13 +696,14 @@ mod get_user_order_trades {
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
 
     #[test]
-    fn owner_sees_their_trades_newest_first_and_a_non_owner_gets_order_not_found() {
+    fn enforces_order_ownership() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
 
         let owner_order = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
         let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
+        let unknown_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
 
         let owner_id = state.user_registry.lookup(OWNER).unwrap();
         let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
@@ -711,38 +712,52 @@ mod get_user_order_trades {
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
         seed_trade(&mut state, (stranger_order, stranger_id), FillSeq::new(2));
 
-        assert_eq!(
-            state.get_user_order_trades(&STRANGER, owner_order, None, 10),
-            Err(GetUserOrderTradesError::OrderNotFound),
-            "a non-owner must not see another principal's trades"
-        );
-        assert_eq!(
-            state.get_user_order_trades(&OWNER, stranger_order, None, 10),
-            Err(GetUserOrderTradesError::OrderNotFound),
-            "the owner of one order must not see another principal's order's trades"
-        );
+        let cases = vec![
+            TestCase {
+                desc: "owner reads their own order's trades",
+                caller: OWNER,
+                order: owner_order,
+                expected: Ok(vec![FillSeq::new(0), FillSeq::new(1)]),
+            },
+            TestCase {
+                desc: "a non-owner must not see another principal's order's trades",
+                caller: STRANGER,
+                order: owner_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "the owner of one order must not see another principal's order's trades",
+                caller: OWNER,
+                order: stranger_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+            TestCase {
+                desc: "an unknown order yields order not found",
+                caller: OWNER,
+                order: unknown_order,
+                expected: Err(GetUserOrderTradesError::OrderNotFound),
+            },
+        ];
 
-        let seqs: Vec<_> = state
-            .get_user_order_trades(&OWNER, owner_order, None, 10)
-            .unwrap()
-            .into_iter()
-            .map(|(seq, _)| seq)
-            .collect();
-        assert_eq!(
-            seqs,
-            vec![FillSeq::new(1), FillSeq::new(0)],
-            "the owner sees their order's trades newest first"
-        );
+        for case in cases {
+            let got = state
+                .get_user_order_trades(&case.caller, case.order, None, 10)
+                .map(|trades| {
+                    let mut seqs: Vec<_> = trades.into_iter().map(|(seq, _)| seq).collect();
+                    seqs.sort();
+                    seqs
+                });
+            assert_eq!(got, case.expected, "BUG ({}): outcome differs", case.desc);
+        }
     }
 
-    #[test]
-    fn an_unknown_order_yields_order_not_found() {
-        let state = setup();
-        let unknown = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
-        assert_eq!(
-            state.get_user_order_trades(&OWNER, unknown, None, 10),
-            Err(GetUserOrderTradesError::OrderNotFound)
-        );
+    /// An access-control scenario over `get_user_order_trades`: which principal
+    /// queries which order, and the outcome the ownership guard must produce.
+    struct TestCase {
+        desc: &'static str,
+        caller: Principal,
+        order: OrderId,
+        expected: Result<Vec<FillSeq>, GetUserOrderTradesError>,
     }
 
     fn setup() -> State<VectorMemory, VectorMemory> {

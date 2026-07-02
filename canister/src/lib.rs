@@ -3,7 +3,7 @@ use oisy_trade_types::{
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
     GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    MAX_FILLS_PER_RESPONSE, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE, OrderBookDepth,
     OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair, TradingPairInfo,
     UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
     WithdrawResponse,
@@ -450,8 +450,8 @@ pub fn get_my_orders(
 pub enum GetMyTradesError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     InvalidOrderId(ids::ParseFixedWithIdError),
-    /// The `after` cursor was not a well-formed trade-id cursor.
-    InvalidCursor(ids::ParseFixedWithIdError),
+    /// The `after` cursor was not a well-formed `TradeId`.
+    InvalidTradeId(ids::ParseFixedWithIdError),
     /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
     /// caller.
     OrderNotFound,
@@ -472,8 +472,8 @@ pub fn get_my_trades(
                 .after
                 .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
-                .map_err(GetMyTradesError::InvalidCursor)?;
-            let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
+                .map_err(GetMyTradesError::InvalidTradeId)?;
+            let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
             match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
                 Ok(trades) => trades
                     .into_iter()
@@ -490,8 +490,8 @@ pub fn get_my_trades(
                 .after
                 .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
-                .map_err(GetMyTradesError::InvalidCursor)?;
-            let length = by_account.length.min(MAX_FILLS_PER_RESPONSE) as usize;
+                .map_err(GetMyTradesError::InvalidTradeId)?;
+            let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
             state::with_state(|s| s.get_user_trades(&caller, after, length))
                 .unwrap_or_default()
                 .into_iter()
