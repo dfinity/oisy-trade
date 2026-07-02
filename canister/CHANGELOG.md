@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (pre-launch persisted state only):** the trade-history work changes the stable-memory / event-log encoding — order ids now encode as a bare CBOR `u64` instead of a 1-element array, `OrderBookSnapshot` gains a non-`Option` `next_fill` field, and the settling event carries a lean per-fill record — so a canister upgraded from state persisted before this release cannot decode it. Acceptable because the canister is pre-launch with no deployed state to migrate; the Candid/public API is unchanged ([#192](https://github.com/dfinity/oisy-trade/pull/192), [#179](https://github.com/dfinity/oisy-trade/pull/179))
 - Extract a dedicated settlement module and harden the fill-persistence tests, with a `get_my_trades` account-wide pagination benchmark ([#195](https://github.com/dfinity/oisy-trade/pull/195), [#196](https://github.com/dfinity/oisy-trade/pull/196))
 - Render prices and amounts as human-readable floats ([#182](https://github.com/dfinity/oisy-trade/pull/182))
 

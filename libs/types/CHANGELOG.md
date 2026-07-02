@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Public types for the trade feed: realized per-order quote/fee scalars on order records, the `get_my_trades` request/response types (`GetMyTradesArgs`, `Trade`, `TradeId`), and the shared composite-id/sequence machinery they build on ([#171](https://github.com/dfinity/oisy-trade/pull/171), [#192](https://github.com/dfinity/oisy-trade/pull/192), [#186](https://github.com/dfinity/oisy-trade/pull/186))
 
+### Changed
+
+- **BREAKING (encoding):** the id types (`OrderBookId` / `OrderSeq` and the composite/seq ids) now encode as a bare CBOR `u64` instead of a 1-element array, changing their serialized form. Pre-launch, no migration; the Candid interface is unchanged ([#192](https://github.com/dfinity/oisy-trade/pull/192))
+
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 
 ## [Unreleased]
