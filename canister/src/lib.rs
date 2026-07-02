@@ -492,11 +492,13 @@ pub fn get_my_trades(
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
-            state::with_state(|s| s.get_user_trades(&caller, after, length))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(id, trade)| trade.into_public(id))
-                .collect()
+            match state::with_state(|s| s.get_user_trades(&caller, after, length)) {
+                Ok(trades) => trades
+                    .into_iter()
+                    .map(|(id, trade)| trade.into_public(id))
+                    .collect(),
+                Err(order::CursorNotFound) => Vec::new(),
+            }
         }
     };
     Ok(trades)
