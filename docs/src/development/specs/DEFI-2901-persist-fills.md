@@ -357,9 +357,11 @@ type TradesFilter = variant {
     ByAccount : record { after : opt TradeId; length : nat32 };
 };
 
+type GetMyTradesArgs = record { filter : TradesFilter };
+
 // Owner-scoped, newest-first. Non-trapping: returns the DEFI-2801 error
 // envelope (R5). `length` is capped at MAX_TRADES_PER_RESPONSE.
-get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
+get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 ```
 
 `TradeId` is the opaque per-side trade identity and pagination cursor — an opaque `text` token
