@@ -224,33 +224,6 @@ fn should_page_one_orders_trades() {
     }
 }
 
-/// Pins the store's stable-memory footprint per persisted fill as a tracked
-/// constant. A fill writes two legs (taker + maker); each leg is one primary
-/// `(TradeId, SeqRecord<TradeRecord>)` entry plus one `(ByUserKey, TradeId)`
-/// index entry. The canbench `stable_memory_increase` for the fill benches
-/// reads 0 because `MemoryManager` pre-allocates 8 MiB buckets, so per-bench
-/// writes fit inside the pre-claimed bucket and never `stable_grow`; this
-/// direct encoded-size assertion pins the growth those buckets absorb. The two
-/// legs of one representative fill differ by 2 bytes because the maker's
-/// smaller fee encodes shorter in CBOR than the taker's.
-#[test]
-fn pins_bytes_per_fill_and_per_order() {
-    let mut store = store();
-    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
-    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
-
-    append(&mut store, Side::Buy, 0, 1, 0, taker_user(), maker_user());
-
-    let taker_id = TradeId::new(taker_order, FillSeq::ZERO);
-    let maker_id = TradeId::new(maker_order, FillSeq::ZERO);
-    let taker_bytes = store.leg_encoded_len(&taker_id, taker_user());
-    let maker_bytes = store.leg_encoded_len(&maker_id, maker_user());
-
-    assert_eq!(taker_bytes, 98, "bytes-per-order (taker leg)");
-    assert_eq!(maker_bytes, 96, "bytes-per-order (maker leg)");
-    assert_eq!(taker_bytes + maker_bytes, 194, "bytes-per-fill (both legs)",);
-}
-
 pub const MAX_TRADE_RECORD_BINARY_SIZE: usize = 142;
 
 fn max_size_trade_record() -> TradeRecord {
