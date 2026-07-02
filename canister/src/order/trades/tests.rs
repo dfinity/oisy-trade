@@ -375,6 +375,59 @@ proptest! {
     }
 }
 
+
+/// Stable memory grows one 64 KiB page at a time, and only when the current
+/// page can no longer fit another entry — writes land in the already-claimed
+/// page until then. This pins, for worst-case fills (both legs a maximum-size
+/// `TradeRecord`; the `TradeId`/`ByUserKey` index entries are fixed-width), how
+/// many the primary region's first page absorbs before it has to `grow`.
+#[test]
+fn a_page_absorbs_worst_case_fills_before_stable_memory_grows() {
+    /// Number of worst-case fills a single 64 KiB page of the primary map absorbs
+    /// before it must grow. Each fill writes two maximum-size `TradeRecord` legs.
+    const WORST_CASE_FILLS_PER_PAGE: u64 = 152;
+
+    const WASM_PAGE_SIZE: usize = 65_536;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    // `VectorMemory` is `Rc<RefCell<Vec<u8>>>`: a byte vector standing in for a
+    // stable-memory region. The primary map and the per-user index need
+    // distinct regions; the large records fill the primary region first.
+    let primary: VectorMemory = Rc::new(RefCell::new(Vec::new()));
+    let by_user: VectorMemory = Rc::new(RefCell::new(Vec::new()));
+    let mut store = TradeHistory::new(primary.clone(), by_user.clone());
+
+    // `TradeHistory::new` claims the first page for the map header.
+    let one_page = primary.borrow().len();
+    assert_eq!(one_page, WASM_PAGE_SIZE, "the store starts at one page");
+
+    // Write worst-case fills until the primary region has to grow: the loop's
+    // last iteration is the "one more" fill that overflows the full page.
+    let mut fills = 0u64;
+    while primary.borrow().len() == one_page {
+        append_max_size_fill(&mut store, fills);
+        fills += 1;
+    }
+
+    assert_eq!(
+        fills - 1,
+        WORST_CASE_FILLS_PER_PAGE,
+        "worst-case fills the page absorbs before growing",
+    );
+    assert_eq!(
+        primary.borrow().len(),
+        2 * one_page,
+        "the next fill grew the primary region by exactly one page",
+    );
+    assert_eq!(
+        by_user.borrow().len(),
+        one_page,
+        "the fixed-width index entries stay within their first page",
+    );
+}
+
 fn store() -> TradeHistory<VectorMemory> {
     TradeHistory::new(VectorMemory::default(), VectorMemory::default())
 }
@@ -420,6 +473,21 @@ fn append(
         taker_user,
         (maker_id, maker_leg),
         maker_user,
+    );
+}
+
+/// Appends one fill whose two legs are both maximum-size `TradeRecord`s, under
+/// distinct ids, so every primary entry is as large as the schema allows.
+fn append_max_size_fill(store: &mut TradeHistory<VectorMemory>, i: u64) {
+    let fill_seq = FillSeq::new(u64::MAX - i);
+    let book = OrderBookId::new(u64::MAX);
+    let taker_id = TradeId::new(OrderId::new(book, OrderSeq::new(2 * i)), fill_seq);
+    let maker_id = TradeId::new(OrderId::new(book, OrderSeq::new(2 * i + 1)), fill_seq);
+    store.append(
+        (taker_id, max_size_trade_record()),
+        taker_user(),
+        (maker_id, max_size_trade_record()),
+        maker_user(),
     );
 }
 
