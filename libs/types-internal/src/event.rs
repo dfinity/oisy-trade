@@ -1,6 +1,6 @@
 use crate::{InitArg, UpgradeArg};
 use candid::{CandidType, Nat, Principal};
-use oisy_trade_types::{TimeInForce, TokenId, TokenMetadata};
+use oisy_trade_types::{PairToken, TimeInForce, TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -118,12 +118,6 @@ pub enum BalanceOperation {
         token: PairToken,
         amount: Nat,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub enum PairToken {
-    Base,
-    Quote,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

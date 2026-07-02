@@ -1768,14 +1768,14 @@ async fn should_replay_events_on_upgrade() {
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 1, // buyer seq
                         to_order: 0,   // seller seq
-                        token: oisy_trade_types_internal::event::PairToken::Quote,
+                        token: oisy_trade_types::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
                         fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
-                        token: oisy_trade_types_internal::event::PairToken::Base,
+                        token: oisy_trade_types::PairToken::Base,
                         amount: Nat::from(deposit_amount),
                         fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
