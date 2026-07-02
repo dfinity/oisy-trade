@@ -1945,6 +1945,7 @@ mod get_my_orders {
 }
 
 mod get_my_trades {
+    use crate::ids::ParseFixedWithIdError;
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{
         LOT_SIZE, fund_user, icp_ckbtc_trading_pair, init_state_with_order_book,
@@ -1952,8 +1953,8 @@ mod get_my_trades {
     use crate::{GetMyTradesError, add_limit_order, get_my_trades};
     use candid::{Nat, Principal};
     use oisy_trade_types::{
-        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, Side, TradesByOrder,
-        TradesFilter,
+        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, PairToken, Side,
+        Trade, TradesByOrder, TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -1994,45 +1995,33 @@ mod get_my_trades {
         .unwrap()
     }
 
-    /// Which order the `ByOrder` filter targets, relative to the buy/sell pair
-    /// produced by `place_and_match`.
-    enum QueriedOrder {
-        Buy,
-        Sell,
-        Unknown,
-        Malformed,
+    /// A [`Trade`] with a dummy id and the fields shared by every fill of the
+    /// single-lot match [`place_and_match`] builds: each case overrides only the
+    /// leg-specific `order_id`, `side`, `is_maker`, and `fee_token`. The opaque
+    /// `id` is stamped from the real result before the equality check.
+    fn default_trade() -> Trade {
+        Trade {
+            id: "dummy-trade-id".to_string(),
+            order_id: "dummy-order-id".to_string(),
+            side: Side::Buy,
+            price: Nat::from(100u64),
+            quantity: Nat::from(u64::from(LOT_SIZE)),
+            notional: Nat::from(1u64),
+            fee: Nat::from(0u64),
+            fee_token: PairToken::Base,
+            is_maker: false,
+            timestamp: 0,
+        }
     }
 
-    /// Which cursor the `ByOrder` filter carries.
-    enum Cursor {
-        None,
-        Malformed,
-        UnknownWellFormed,
-    }
+    const UNKNOWN_ORDER_ID: &str = "ffffffffffffffffffffffffffffffff";
 
-    /// The trade a positive `ByOrder` retrieval must return.
-    struct ExpectedTrade {
-        order: QueriedOrder,
-        side: Side,
-        is_maker: bool,
-    }
-
-    #[derive(Debug, PartialEq)]
-    enum ErrKind {
-        InvalidOrderId,
-        InvalidTradeId,
-        OrderNotFound,
-    }
-
-    /// A `get_my_trades` `ByOrder` scenario over the single buy/sell match built by
-    /// `place_and_match`: the order queried, the caller, the cursor carried, and the
-    /// expected outcome — a page of trades or a mapped error kind.
+    /// A `get_my_trades` `ByOrder` scenario over the single buy/sell match built
+    /// by [`place_and_match`]: the `(caller, query)` and the expected outcome.
     struct TestCase {
         desc: &'static str,
-        queried: QueriedOrder,
-        caller: Principal,
-        cursor: Cursor,
-        expected: Result<Vec<ExpectedTrade>, ErrKind>,
+        query: (Principal, TradesByOrder),
+        expected: Result<Vec<Trade>, GetMyTradesError>,
     }
 
     #[test]
@@ -2043,130 +2032,121 @@ mod get_my_trades {
         let cases = vec![
             TestCase {
                 desc: "buyer querying their own order gets the taker leg",
-                queried: QueriedOrder::Buy,
-                caller: BUYER,
-                cursor: Cursor::None,
-                expected: Ok(vec![ExpectedTrade {
-                    order: QueriedOrder::Buy,
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Ok(vec![Trade {
+                    order_id: buy.clone(),
                     side: Side::Buy,
                     is_maker: false,
+                    fee_token: PairToken::Base,
+                    ..default_trade()
                 }]),
             },
             TestCase {
                 desc: "seller querying their own order gets the maker leg",
-                queried: QueriedOrder::Sell,
-                caller: SELLER,
-                cursor: Cursor::None,
-                expected: Ok(vec![ExpectedTrade {
-                    order: QueriedOrder::Sell,
+                query: (
+                    SELLER,
+                    TradesByOrder {
+                        order_id: sell.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Ok(vec![Trade {
+                    order_id: sell.clone(),
                     side: Side::Sell,
                     is_maker: true,
+                    fee_token: PairToken::Quote,
+                    ..default_trade()
                 }]),
             },
             TestCase {
                 desc: "malformed order id",
-                queried: QueriedOrder::Malformed,
-                caller: BUYER,
-                cursor: Cursor::None,
-                expected: Err(ErrKind::InvalidOrderId),
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: "not-an-order-id".to_string(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::InvalidOrderId(ParseFixedWithIdError {})),
             },
             TestCase {
                 desc: "malformed cursor",
-                queried: QueriedOrder::Buy,
-                caller: BUYER,
-                cursor: Cursor::Malformed,
-                expected: Err(ErrKind::InvalidTradeId),
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: Some("xyz".to_string()),
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::InvalidTradeId(ParseFixedWithIdError {})),
             },
             TestCase {
                 desc: "unknown but well-formed order id",
-                queried: QueriedOrder::Unknown,
-                caller: BUYER,
-                cursor: Cursor::None,
-                expected: Err(ErrKind::OrderNotFound),
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: UNKNOWN_ORDER_ID.to_string(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::OrderNotFound),
             },
             TestCase {
                 desc: "order owned by another principal",
-                queried: QueriedOrder::Buy,
-                caller: SELLER,
-                cursor: Cursor::None,
-                expected: Err(ErrKind::OrderNotFound),
+                query: (
+                    SELLER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: None,
+                        length: 10,
+                    },
+                ),
+                expected: Err(GetMyTradesError::OrderNotFound),
             },
             TestCase {
                 desc: "unknown but well-formed cursor yields an empty page",
-                queried: QueriedOrder::Buy,
-                caller: BUYER,
-                cursor: Cursor::UnknownWellFormed,
+                query: (
+                    BUYER,
+                    TradesByOrder {
+                        order_id: buy.clone(),
+                        after: Some(format!("{buy}ffffffffffffffff")),
+                        length: 10,
+                    },
+                ),
                 expected: Ok(vec![]),
             },
         ];
 
         for case in cases {
-            let order_id = match case.queried {
-                QueriedOrder::Buy => buy.clone(),
-                QueriedOrder::Sell => sell.clone(),
-                QueriedOrder::Unknown => "ffffffffffffffffffffffffffffffff".to_string(),
-                QueriedOrder::Malformed => "not-an-order-id".to_string(),
-            };
-            let after = match case.cursor {
-                Cursor::None => None,
-                Cursor::Malformed => Some("xyz".to_string()),
-                Cursor::UnknownWellFormed => Some(format!("{order_id}ffffffffffffffff")),
-            };
+            let (caller, filter) = case.query;
+            let result = get_my_trades(
+                GetMyTradesArgs {
+                    filter: TradesFilter::ByOrder(filter),
+                },
+                caller,
+            );
 
-            let result = get_my_trades(by_order(order_id, after, 10), case.caller);
+            // Each trade's `id` is an opaque, runtime-minted cursor; stamp it from
+            // the real result so the equality check covers every other field.
+            let expected = case.expected.map(|mut trades| {
+                for (trade, actual) in trades.iter_mut().zip(result.iter().flatten()) {
+                    trade.id = actual.id.clone();
+                }
+                trades
+            });
 
-            match (case.expected, result) {
-                (Ok(expected_trades), Ok(trades)) => {
-                    assert_eq!(
-                        trades.len(),
-                        expected_trades.len(),
-                        "BUG ({}): trade count differs",
-                        case.desc
-                    );
-                    for (expected, trade) in expected_trades.iter().zip(&trades) {
-                        let expected_order = match expected.order {
-                            QueriedOrder::Buy => &buy,
-                            QueriedOrder::Sell => &sell,
-                            QueriedOrder::Unknown | QueriedOrder::Malformed => {
-                                panic!(
-                                    "BUG ({}): expected trade must belong to a real order",
-                                    case.desc
-                                )
-                            }
-                        };
-                        assert_eq!(
-                            &trade.order_id, expected_order,
-                            "BUG ({}): order_id differs",
-                            case.desc
-                        );
-                        assert_eq!(
-                            trade.side, expected.side,
-                            "BUG ({}): side differs",
-                            case.desc
-                        );
-                        assert_eq!(
-                            trade.is_maker, expected.is_maker,
-                            "BUG ({}): is_maker differs",
-                            case.desc
-                        );
-                    }
-                }
-                (Err(expected_err), Err(err)) => {
-                    let got = match err {
-                        GetMyTradesError::InvalidOrderId(_) => ErrKind::InvalidOrderId,
-                        GetMyTradesError::InvalidTradeId(_) => ErrKind::InvalidTradeId,
-                        GetMyTradesError::OrderNotFound => ErrKind::OrderNotFound,
-                    };
-                    assert_eq!(got, expected_err, "BUG ({}): error kind differs", case.desc);
-                }
-                (Ok(_), Err(err)) => {
-                    panic!("BUG ({}): expected an Ok page, got Err({err:?})", case.desc)
-                }
-                (Err(expected_err), Ok(trades)) => panic!(
-                    "BUG ({}): expected Err({expected_err:?}), got Ok({trades:?})",
-                    case.desc
-                ),
-            }
+            assert_eq!(result, expected, "BUG ({})", case.desc);
         }
     }
 
