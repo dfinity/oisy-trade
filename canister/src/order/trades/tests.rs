@@ -327,10 +327,9 @@ proptest! {
     }
 
     #[test]
-    fn should_be_less_than_max_traded_record_binary_size(record in arb_trade_record()) {
+    fn should_not_exceed_max_trade_record_binary_size(record in arb_trade_record()) {
         let encoded = minicbor_encode(&record);
-        prop_assert!(encoded.len() <= MAX_TRADE_RECORD_BINARY_SIZE)
-
+        prop_assert!(encoded.len() <= MAX_TRADE_RECORD_BINARY_SIZE);
     }
 }
 
