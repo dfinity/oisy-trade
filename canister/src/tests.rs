@@ -1952,8 +1952,8 @@ mod get_my_trades {
     use crate::{GetMyTradesError, add_limit_order, get_my_trades};
     use candid::{Nat, Principal};
     use oisy_trade_types::{
-        GetMyTradesArgs, LimitOrderRequest, MAX_FILLS_PER_RESPONSE, OrderId, Side, TradesByAccount,
-        TradesByOrder, TradesFilter,
+        GetMyTradesArgs, LimitOrderRequest, MAX_TRADES_PER_RESPONSE, OrderId, Side,
+        TradesByAccount, TradesByOrder, TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
@@ -2083,10 +2083,10 @@ mod get_my_trades {
     #[test]
     fn length_is_clamped_to_max() {
         init_state_with_order_book();
-        let lots = MAX_FILLS_PER_RESPONSE + 5;
+        let lots = MAX_TRADES_PER_RESPONSE + 5;
         let buy = place_buy_crossing_resting_sells(lots);
         let trades = get_my_trades(by_order(buy, None, u32::MAX), BUYER).unwrap();
-        assert_eq!(trades.len(), MAX_FILLS_PER_RESPONSE as usize);
+        assert_eq!(trades.len(), MAX_TRADES_PER_RESPONSE as usize);
     }
 
     #[test]

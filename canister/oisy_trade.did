@@ -920,11 +920,11 @@ service : (OisyTradeArg) -> {
     get_my_orders : (opt GetMyOrdersArgs) -> (variant { Ok : vec UserOrder; Err : GetMyOrdersError }) query;
 
     // Return the caller's fills, owner-scoped and newest-first. `ByOrder`
-    // returns one order's fills (an empty page if the caller does not own the
-    // order); `ByAccount` returns fills across all the caller's orders. Pages
-    // via the `after` cursor; `length` is capped at 100. Returns
-    // `InvalidOrderId` / `InvalidTradeId` for a malformed `order_id` / cursor; a
-    // well-formed but unknown cursor yields an empty page.
+    // returns one order's fills (`OrderNotFound` if the `order_id` is well-formed
+    // but unknown or not owned by the caller); `ByAccount` returns fills across
+    // all the caller's orders. Pages via the `after` cursor; `length` is capped
+    // at 100. Returns `InvalidOrderId` / `InvalidTradeId` for a malformed
+    // `order_id` / cursor; a well-formed but unknown cursor yields an empty page.
     get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 
     // List every token registered with the canister. Intended as a primitive

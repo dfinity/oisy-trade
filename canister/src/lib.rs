@@ -3,7 +3,7 @@ use oisy_trade_types::{
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
     GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetOrderBookDepthError,
     GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    MAX_FILLS_PER_RESPONSE, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, OrderBookDepth,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE, OrderBookDepth,
     OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair, TradingPairInfo,
     UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
     WithdrawResponse,
@@ -473,7 +473,7 @@ pub fn get_my_trades(
                 .map(|cursor| cursor.parse::<order::TradeId>())
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
-            let length = by_order.length.min(MAX_FILLS_PER_RESPONSE) as usize;
+            let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
             match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
                 Ok(trades) => trades
                     .into_iter()

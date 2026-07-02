@@ -101,7 +101,7 @@ This spec separates two distinct deliverables, which must not be conflated:
   `BUG:` panic, matching the codebase convention — not a `debug_assert!`, which is compiled out
   of the release canister).
 - **R10 — Bounded pages.** `length` is mandatory in the filter; a value above
-  `MAX_FILLS_PER_RESPONSE` is clamped down to it. An unknown `after` cursor yields an empty page
+  `MAX_TRADES_PER_RESPONSE` is clamped down to it. An unknown `after` cursor yields an empty page
   (malformed cursors are rejected per R5).
 - **R11 — Fills and balance ops share one computed source.** The per-fill `notional`, `fee`, and
   role are computed **once** and feed both the existing `BalanceOperation`s and the new fill
@@ -358,7 +358,7 @@ type TradesFilter = variant {
 };
 
 // Owner-scoped, newest-first. Non-trapping: returns the DEFI-2801 error
-// envelope (R5). `length` is capped at MAX_FILLS_PER_RESPONSE.
+// envelope (R5). `length` is capped at MAX_TRADES_PER_RESPONSE.
 get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 ```
 
@@ -369,7 +369,7 @@ callers pass back the last value they received and never parse it. Each `Trade` 
 `get_my_orders { ByPage }`, where each `UserOrder` exposes the `OrderId` that doubles as the page
 cursor. The match-level `FillId = (OrderBookId, FillSeq)` is the id of the match itself and is
 derivable from any `TradeId`; it is not part of the candid surface. `GetMyTradesError` is an
-instantiation of the DEFI-2801 generic error envelope. `MAX_FILLS_PER_RESPONSE` mirrors
+instantiation of the DEFI-2801 generic error envelope. `MAX_TRADES_PER_RESPONSE` mirrors
 `MAX_ORDERS_PER_RESPONSE`.
 
 ### Internal trade store
@@ -477,7 +477,7 @@ fee input pinned by neither the fill nor the orders. The matcher's `Fill` struct
   after, length }` → if `order_id` is the caller's (same ownership check as `get_my_orders {
   ById }`), return `trades_for_order`, else `OrderNotFound`. `ByAccount { after, length }` →
   `trades_after`.
-  `length` clamped to `MAX_FILLS_PER_RESPONSE` (R10). Malformed `order_id` / cursor → `Err`,
+  `length` clamped to `MAX_TRADES_PER_RESPONSE` (R10). Malformed `order_id` / cursor → `Err`,
   unknown / not-owned `order_id` → `OrderNotFound`, unknown cursor → `Ok([])` (R5). A
   `#[ic_cdk::query]` wrapper in `main.rs` over a business fn in
   `lib.rs`, returning the DEFI-2801 envelope.
