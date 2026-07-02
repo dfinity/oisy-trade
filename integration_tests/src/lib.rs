@@ -219,12 +219,7 @@ impl Setup {
         price: impl Into<Nat>,
     ) -> OrderId {
         let client = self.oisy_trade_client_with_caller(seller);
-        self.deposit_flow(seller, self.base_token_id())
-            .mint(quantity + 2 * icrc_ledger::BASE_LEDGER_FEE)
-            .approve(quantity + icrc_ledger::BASE_LEDGER_FEE)
-            .deposit(quantity)
-            .execute()
-            .await;
+        self.fund_base(seller, quantity).await;
         let order_id = client
             .add_limit_order(LimitOrderRequest {
                 pair: self.trading_pair(),
@@ -237,6 +232,26 @@ impl Setup {
             .unwrap();
         self.env().tick().await;
         order_id
+    }
+
+    /// Mints, approves, and deposits `amount` base units for `who`.
+    pub async fn fund_base(&self, who: Principal, amount: u64) {
+        self.deposit_flow(who, self.base_token_id())
+            .mint(amount + 2 * icrc_ledger::BASE_LEDGER_FEE)
+            .approve(amount + icrc_ledger::BASE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
+    }
+
+    /// Mints, approves, and deposits `amount` quote units for `who`.
+    pub async fn fund_quote(&self, who: Principal, amount: u64) {
+        self.deposit_flow(who, self.quote_token_id())
+            .mint(amount + 2 * icrc_ledger::QUOTE_LEDGER_FEE)
+            .approve(amount + icrc_ledger::QUOTE_LEDGER_FEE)
+            .deposit(amount)
+            .execute()
+            .await;
     }
 
     /// Register a second, distinct trading pair reusing the two ledgers with
