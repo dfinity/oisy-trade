@@ -1994,69 +1994,192 @@ mod get_my_trades {
         .unwrap()
     }
 
+    /// Which order the `ByOrder` filter targets, relative to the buy/sell pair
+    /// produced by `place_and_match`.
+    enum QueriedOrder {
+        Buy,
+        Sell,
+        Unknown,
+        Malformed,
+    }
+
+    /// Which cursor the `ByOrder` filter carries.
+    enum Cursor {
+        None,
+        Malformed,
+        UnknownWellFormed,
+    }
+
+    /// The trade a positive `ByOrder` retrieval must return.
+    struct ExpectedTrade {
+        order: QueriedOrder,
+        side: Side,
+        is_maker: bool,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum ErrKind {
+        InvalidOrderId,
+        InvalidTradeId,
+        OrderNotFound,
+    }
+
+    /// A `get_my_trades` `ByOrder` scenario over the single buy/sell match built by
+    /// `place_and_match`: the order queried, the caller, the cursor carried, and the
+    /// expected outcome — a page of trades or a mapped error kind.
+    struct TestCase {
+        desc: &'static str,
+        queried: QueriedOrder,
+        caller: Principal,
+        cursor: Cursor,
+        expected: Result<Vec<ExpectedTrade>, ErrKind>,
+    }
+
     #[test]
-    fn returns_each_orders_fill_owner_scoped() {
+    fn by_order_scenarios() {
         init_state_with_order_book();
         let (buy, sell) = place_and_match();
 
-        let buy_trades = get_my_trades(by_order(buy.clone(), None, 10), BUYER).unwrap();
-        assert_eq!(buy_trades.len(), 1);
-        assert_eq!(buy_trades[0].order_id, buy);
-        assert_eq!(buy_trades[0].side, Side::Buy);
-        assert!(!buy_trades[0].is_maker);
+        let cases = vec![
+            TestCase {
+                desc: "buyer querying their own order gets the taker leg",
+                queried: QueriedOrder::Buy,
+                caller: BUYER,
+                cursor: Cursor::None,
+                expected: Ok(vec![ExpectedTrade {
+                    order: QueriedOrder::Buy,
+                    side: Side::Buy,
+                    is_maker: false,
+                }]),
+            },
+            TestCase {
+                desc: "seller querying their own order gets the maker leg",
+                queried: QueriedOrder::Sell,
+                caller: SELLER,
+                cursor: Cursor::None,
+                expected: Ok(vec![ExpectedTrade {
+                    order: QueriedOrder::Sell,
+                    side: Side::Sell,
+                    is_maker: true,
+                }]),
+            },
+            TestCase {
+                desc: "malformed order id",
+                queried: QueriedOrder::Malformed,
+                caller: BUYER,
+                cursor: Cursor::None,
+                expected: Err(ErrKind::InvalidOrderId),
+            },
+            TestCase {
+                desc: "malformed cursor",
+                queried: QueriedOrder::Buy,
+                caller: BUYER,
+                cursor: Cursor::Malformed,
+                expected: Err(ErrKind::InvalidTradeId),
+            },
+            TestCase {
+                desc: "unknown but well-formed order id",
+                queried: QueriedOrder::Unknown,
+                caller: BUYER,
+                cursor: Cursor::None,
+                expected: Err(ErrKind::OrderNotFound),
+            },
+            TestCase {
+                desc: "order owned by another principal",
+                queried: QueriedOrder::Buy,
+                caller: SELLER,
+                cursor: Cursor::None,
+                expected: Err(ErrKind::OrderNotFound),
+            },
+            TestCase {
+                desc: "unknown but well-formed cursor yields an empty page",
+                queried: QueriedOrder::Buy,
+                caller: BUYER,
+                cursor: Cursor::UnknownWellFormed,
+                expected: Ok(vec![]),
+            },
+        ];
 
-        let next_page = get_my_trades(
-            by_order(buy.clone(), Some(buy_trades[0].id.clone()), 10),
-            BUYER,
-        )
-        .unwrap();
+        for case in cases {
+            let order_id = match case.queried {
+                QueriedOrder::Buy => buy.clone(),
+                QueriedOrder::Sell => sell.clone(),
+                QueriedOrder::Unknown => "ffffffffffffffffffffffffffffffff".to_string(),
+                QueriedOrder::Malformed => "not-an-order-id".to_string(),
+            };
+            let after = match case.cursor {
+                Cursor::None => None,
+                Cursor::Malformed => Some("xyz".to_string()),
+                Cursor::UnknownWellFormed => Some(format!("{order_id}ffffffffffffffff")),
+            };
+
+            let result = get_my_trades(by_order(order_id, after, 10), case.caller);
+
+            match (case.expected, result) {
+                (Ok(expected_trades), Ok(trades)) => {
+                    assert_eq!(
+                        trades.len(),
+                        expected_trades.len(),
+                        "BUG ({}): trade count differs",
+                        case.desc
+                    );
+                    for (expected, trade) in expected_trades.iter().zip(&trades) {
+                        let expected_order = match expected.order {
+                            QueriedOrder::Buy => &buy,
+                            QueriedOrder::Sell => &sell,
+                            QueriedOrder::Unknown | QueriedOrder::Malformed => {
+                                panic!(
+                                    "BUG ({}): expected trade must belong to a real order",
+                                    case.desc
+                                )
+                            }
+                        };
+                        assert_eq!(
+                            &trade.order_id, expected_order,
+                            "BUG ({}): order_id differs",
+                            case.desc
+                        );
+                        assert_eq!(
+                            trade.side, expected.side,
+                            "BUG ({}): side differs",
+                            case.desc
+                        );
+                        assert_eq!(
+                            trade.is_maker, expected.is_maker,
+                            "BUG ({}): is_maker differs",
+                            case.desc
+                        );
+                    }
+                }
+                (Err(expected_err), Err(err)) => {
+                    let got = match err {
+                        GetMyTradesError::InvalidOrderId(_) => ErrKind::InvalidOrderId,
+                        GetMyTradesError::InvalidTradeId(_) => ErrKind::InvalidTradeId,
+                        GetMyTradesError::OrderNotFound => ErrKind::OrderNotFound,
+                    };
+                    assert_eq!(got, expected_err, "BUG ({}): error kind differs", case.desc);
+                }
+                (Ok(_), Err(err)) => {
+                    panic!("BUG ({}): expected an Ok page, got Err({err:?})", case.desc)
+                }
+                (Err(expected_err), Ok(trades)) => panic!(
+                    "BUG ({}): expected Err({expected_err:?}), got Ok({trades:?})",
+                    case.desc
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn paging_past_the_only_fill_is_empty() {
+        init_state_with_order_book();
+        let (buy, _) = place_and_match();
+        let trades = get_my_trades(by_order(buy.clone(), None, 10), BUYER).unwrap();
+        assert_eq!(trades.len(), 1);
+
+        let next_page =
+            get_my_trades(by_order(buy, Some(trades[0].id.clone()), 10), BUYER).unwrap();
         assert!(next_page.is_empty());
-
-        let sell_trades = get_my_trades(by_order(sell.clone(), None, 10), SELLER).unwrap();
-        assert_eq!(sell_trades.len(), 1);
-        assert_eq!(sell_trades[0].order_id, sell);
-        assert!(sell_trades[0].is_maker);
-    }
-
-    #[test]
-    fn malformed_order_id_is_err() {
-        init_state_with_order_book();
-        let result = get_my_trades(by_order("not-an-order-id".to_string(), None, 10), BUYER);
-        assert!(matches!(result, Err(GetMyTradesError::InvalidOrderId(_))));
-    }
-
-    #[test]
-    fn malformed_cursor_is_err() {
-        init_state_with_order_book();
-        let (buy, _) = place_and_match();
-        let result = get_my_trades(by_order(buy, Some("xyz".to_string()), 10), BUYER);
-        assert!(matches!(result, Err(GetMyTradesError::InvalidTradeId(_))));
-    }
-
-    #[test]
-    fn unknown_order_is_order_not_found() {
-        init_state_with_order_book();
-        place_and_match();
-        let unknown = "ffffffffffffffffffffffffffffffff".to_string();
-        let result = get_my_trades(by_order(unknown, None, 10), BUYER);
-        assert_eq!(result, Err(GetMyTradesError::OrderNotFound));
-    }
-
-    #[test]
-    fn order_owned_by_another_principal_is_order_not_found() {
-        init_state_with_order_book();
-        let (buy, _) = place_and_match();
-        let result = get_my_trades(by_order(buy, None, 10), SELLER);
-        assert_eq!(result, Err(GetMyTradesError::OrderNotFound));
-    }
-
-    #[test]
-    fn unknown_cursor_is_empty_page() {
-        init_state_with_order_book();
-        let (buy, _) = place_and_match();
-        let cursor = format!("{buy}ffffffffffffffff");
-        let trades = get_my_trades(by_order(buy, Some(cursor), 10), BUYER).unwrap();
-        assert!(trades.is_empty());
     }
 
     fn place_buy_crossing_resting_sells(lots: u32) -> OrderId {
