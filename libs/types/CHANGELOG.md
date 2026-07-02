@@ -9,12 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add realized quote and fee onto OrderRecord ([#171](https://github.com/dfinity/oisy-trade/pull/171))
-
-### Changed
-
-- Expose get_my_trades ByOrder feed (4/5) ([#186](https://github.com/dfinity/oisy-trade/pull/186))
-- Shared id/seq machinery and composite ids (1/4) ([#192](https://github.com/dfinity/oisy-trade/pull/192))
+- Public types for the trade feed: realized per-order quote/fee scalars on order records, the `get_my_trades` request/response types (`GetMyTradesArgs`, `Trade`, `TradeId`), and the shared composite-id/sequence machinery they build on ([#171](https://github.com/dfinity/oisy-trade/pull/171), [#192](https://github.com/dfinity/oisy-trade/pull/192), [#186](https://github.com/dfinity/oisy-trade/pull/186))
 
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 

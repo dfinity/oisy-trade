@@ -9,17 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add get_my_trades account-wide pagination benchmark ([#196](https://github.com/dfinity/oisy-trade/pull/196))
-- Add the trade store and its read API (2/5) ([#193](https://github.com/dfinity/oisy-trade/pull/193))
-- Add realized quote and fee onto OrderRecord ([#171](https://github.com/dfinity/oisy-trade/pull/171))
+- Per-fill trade history and the `get_my_trades` query: persist each fill individually in stable memory and expose a caller's trades newest-first — a per-order `ByOrder` feed and an account-wide `ByAccount` feed — built on realized per-order quote/fee scalars, shared composite-id/sequence machinery, and a dedicated trade store ([#171](https://github.com/dfinity/oisy-trade/pull/171), [#192](https://github.com/dfinity/oisy-trade/pull/192), [#193](https://github.com/dfinity/oisy-trade/pull/193), [#179](https://github.com/dfinity/oisy-trade/pull/179), [#186](https://github.com/dfinity/oisy-trade/pull/186), [#180](https://github.com/dfinity/oisy-trade/pull/180))
 
 ### Changed
 
-- Extract a settlement module and harden fill-persistence tests ([#195](https://github.com/dfinity/oisy-trade/pull/195))
-- Expose the account-wide get_my_trades ByAccount filter (5/5) ([#180](https://github.com/dfinity/oisy-trade/pull/180))
-- Expose get_my_trades ByOrder feed (4/5) ([#186](https://github.com/dfinity/oisy-trade/pull/186))
-- Persist per-fill records in stable memory (3/5) ([#179](https://github.com/dfinity/oisy-trade/pull/179))
-- Shared id/seq machinery and composite ids (1/4) ([#192](https://github.com/dfinity/oisy-trade/pull/192))
+- Extract a dedicated settlement module and harden the fill-persistence tests, with a `get_my_trades` account-wide pagination benchmark ([#195](https://github.com/dfinity/oisy-trade/pull/195), [#196](https://github.com/dfinity/oisy-trade/pull/196))
 - Render prices and amounts as human-readable floats ([#182](https://github.com/dfinity/oisy-trade/pull/182))
 
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
