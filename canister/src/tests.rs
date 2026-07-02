@@ -1952,23 +1952,27 @@ mod get_my_trades {
     use crate::{GetMyTradesError, add_limit_order, get_my_trades};
     use candid::{Nat, Principal};
     use oisy_trade_types::{
-        LimitOrderRequest, MAX_FILLS_PER_RESPONSE, OrderId, Side, TradesByAccount, TradesByOrder,
-        TradesFilter,
+        GetMyTradesArgs, LimitOrderRequest, MAX_FILLS_PER_RESPONSE, OrderId, Side, TradesByAccount,
+        TradesByOrder, TradesFilter,
     };
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
 
-    fn by_order(order_id: OrderId, after: Option<String>, length: u32) -> TradesFilter {
-        TradesFilter::ByOrder(TradesByOrder {
-            order_id,
-            after,
-            length,
-        })
+    fn by_order(order_id: OrderId, after: Option<String>, length: u32) -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after,
+                length,
+            }),
+        }
     }
 
-    fn by_account(after: Option<String>, length: u32) -> TradesFilter {
-        TradesFilter::ByAccount(TradesByAccount { after, length })
+    fn by_account(after: Option<String>, length: u32) -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount { after, length }),
+        }
     }
 
     /// Matches a fresh resting sell against a crossing buy and returns the buy
@@ -2045,20 +2049,20 @@ mod get_my_trades {
     }
 
     #[test]
-    fn unknown_order_is_empty_page() {
+    fn unknown_order_is_order_not_found() {
         init_state_with_order_book();
         place_and_match();
         let unknown = "ffffffffffffffffffffffffffffffff".to_string();
-        let trades = get_my_trades(by_order(unknown, None, 10), BUYER).unwrap();
-        assert!(trades.is_empty());
+        let result = get_my_trades(by_order(unknown, None, 10), BUYER);
+        assert_eq!(result, Err(GetMyTradesError::OrderNotFound));
     }
 
     #[test]
-    fn order_owned_by_another_principal_is_empty_page() {
+    fn order_owned_by_another_principal_is_order_not_found() {
         init_state_with_order_book();
         let (buy, _) = place_and_match();
-        let trades = get_my_trades(by_order(buy, None, 10), SELLER).unwrap();
-        assert!(trades.is_empty());
+        let result = get_my_trades(by_order(buy, None, 10), SELLER);
+        assert_eq!(result, Err(GetMyTradesError::OrderNotFound));
     }
 
     #[test]

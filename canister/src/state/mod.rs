@@ -577,25 +577,27 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     /// Returns up to `length` of `owner`'s trades for the single order
     /// `order_id`, newest first, resuming strictly after the `after` cursor (a
-    /// cursor from a prior page). Returns an empty page when `order_id` is
-    /// unknown or owned by another principal. An `after` cursor that is not one
-    /// of the order's trades yields [`CursorNotFound`]; a valid cursor with
-    /// no older trades is `Ok(vec![])`.
+    /// cursor from a prior page). Yields [`CursorNotFound`] when `order_id` is
+    /// unknown or owned by another principal, or when `after` is not one of the
+    /// order's trades (including a cursor whose embedded `OrderId` names a
+    /// different order); a valid cursor with no older trades is `Ok(vec![])`.
     pub fn get_user_order_trades(
         &self,
         owner: &Principal,
         order_id: OrderId,
-        after: Option<FillSeq>,
+        after: Option<TradeId>,
         length: usize,
-    ) -> Result<Vec<(FillSeq, TradeRecord)>, CursorNotFound> {
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, GetUserOrderTradesError> {
         let owns = self
             .order_history
             .get(&order_id)
             .is_some_and(|record| &record.owner == owner);
         if !owns {
-            return Ok(Vec::new());
+            return Err(GetUserOrderTradesError::OrderNotFound);
         }
-        self.trade_history.trades_for_order(order_id, after, length)
+        self.trade_history
+            .trades_for_order(order_id, after, length)
+            .map_err(|CursorNotFound| GetUserOrderTradesError::CursorNotFound)
     }
 
     /// Returns up to `length` of `owner`'s trades across **all** their orders,
@@ -1148,6 +1150,12 @@ pub enum AddLimitOrderError {
         max: Option<Quantity>,
     },
     TradingHalted,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetUserOrderTradesError {
+    OrderNotFound,
+    CursorNotFound,
 }
 
 #[derive(Debug, PartialEq, Eq)]

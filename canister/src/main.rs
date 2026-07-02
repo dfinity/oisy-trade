@@ -2,12 +2,11 @@ use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
-    GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesArgs,
+    GetMyTradesError, GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, Token, Trade, TradesFilter, TradingPair, TradingPairInfo, UnauthorizedError,
-    UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
-    WithdrawTemporaryError,
+    OrderRecord, Token, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -173,10 +172,10 @@ fn get_my_orders(args: Option<GetMyOrdersArgs>) -> Result<Vec<UserOrder>, GetMyO
 }
 
 #[ic_cdk::query]
-fn get_my_trades(filter: TradesFilter) -> Result<Vec<Trade>, GetMyTradesError> {
+fn get_my_trades(args: GetMyTradesArgs) -> Result<Vec<Trade>, GetMyTradesError> {
     use oisy_trade_canister::Runtime;
-    oisy_trade_canister::get_my_trades(filter, oisy_trade_canister::IC_RUNTIME.msg_caller())
-        .map_err(|err| {
+    oisy_trade_canister::get_my_trades(args, oisy_trade_canister::IC_RUNTIME.msg_caller()).map_err(
+        |err| {
             let leaf = match err {
                 oisy_trade_canister::GetMyTradesError::InvalidOrderId(_) => {
                     GetMyTradesRequestError::InvalidOrderId
@@ -184,9 +183,13 @@ fn get_my_trades(filter: TradesFilter) -> Result<Vec<Trade>, GetMyTradesError> {
                 oisy_trade_canister::GetMyTradesError::InvalidCursor(_) => {
                     GetMyTradesRequestError::InvalidCursor
                 }
+                oisy_trade_canister::GetMyTradesError::OrderNotFound => {
+                    GetMyTradesRequestError::OrderNotFound
+                }
             };
             GetMyTradesError::request(leaf)
-        })
+        },
+    )
 }
 
 #[ic_cdk::query]

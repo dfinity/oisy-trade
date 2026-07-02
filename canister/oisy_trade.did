@@ -356,14 +356,9 @@ type GetMyOrdersError = record {
 // `after` and never parse it.
 type TradeId = text;
 
-// One side-projected fill, as returned by `get_my_trades`. Describes one of the
-// caller's orders' executions; the counterparty is intentionally omitted.
-// `fee_token` reuses the `PairToken` type { Base; Quote }.
+// Caller's order's projected fill, as returned by `get_my_trades`.
 type Trade = record {
-    // This trade's own identity, which doubles as its pagination cursor. Pass
-    // the last entry's id back as the next page's `after`, mirroring how a
-    // `get_my_orders` `ByPage` entry exposes the `OrderId` that doubles as its
-    // page cursor.
+    // This trade's unique identifier.
     id : TradeId;
     // The owning (caller's) order.
     order_id : OrderId;
@@ -387,11 +382,17 @@ type Trade = record {
     timestamp : nat64;
 };
 
+// Request for the `get_my_trades` query.
+type GetMyTradesArgs = record {
+    // How to select the caller's trades.
+    filter : TradesFilter;
+};
+
 // Selector for `get_my_trades`: the caller's fills for one order, or across all
 // their orders. Both modes are owner-scoped, newest-first, and paginated by an
 // `after` cursor. `length` is capped at 100.
 type TradesFilter = variant {
-    // The caller's fills for a single order. Returns an empty page if the
+    // The caller's fills for a single order. Errors with `OrderNotFound` if the
     // caller does not own `order_id`. Pages via a cursor: pass the previous
     // page's last `Trade.id` as `after`; null starts from the newest fill.
     ByOrder : record { order_id : OrderId; after : opt TradeId; length : nat32 };
@@ -406,8 +407,11 @@ type GetMyTradesError = record {
         RequestError : opt variant {
             // The `order_id` in a `ByOrder` filter was not a well-formed order id.
             InvalidOrderId;
-            // The `after` cursor was not a well-formed trade id.
+            // The `after` cursor was not a well-formed trade-id cursor.
             InvalidCursor;
+            // The `order_id` in a `ByOrder` filter is unknown or not owned by
+            // the caller.
+            OrderNotFound;
         };
         TemporaryError : opt variant {};
         InternalError : opt variant {};
@@ -921,7 +925,7 @@ service : (OisyTradeArg) -> {
     // via the `after` cursor; `length` is capped at 100. Returns
     // `InvalidOrderId` / `InvalidCursor` for a malformed `order_id` / cursor; a
     // well-formed but unknown cursor yields an empty page.
-    get_my_trades : (TradesFilter) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
+    get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 
     // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

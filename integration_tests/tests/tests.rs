@@ -490,7 +490,9 @@ mod add_limit_order {
 
     #[tokio::test]
     async fn should_expose_per_order_fills_via_get_my_trades() {
-        use oisy_trade_types::{GetMyTradesRequestError, PairToken, TradesByOrder, TradesFilter};
+        use oisy_trade_types::{
+            GetMyTradesArgs, GetMyTradesRequestError, PairToken, TradesByOrder, TradesFilter,
+        };
 
         const MAKER_FEE_BPS: u16 = 10;
         const TAKER_FEE_BPS: u16 = 23;
@@ -543,12 +545,12 @@ mod add_limit_order {
             .unwrap();
         setup.env().tick().await;
 
-        let by_order = |order_id: OrderId| {
-            TradesFilter::ByOrder(TradesByOrder {
+        let by_order = |order_id: OrderId| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
                 order_id,
                 after: None,
                 length: 10,
-            })
+            }),
         };
 
         // Buyer's taker fill: maker price, base-denominated taker fee, counterparty absent.
@@ -591,22 +593,24 @@ mod add_limit_order {
         assert_eq!(buy_record.order.filled_quote, Nat::from(notional));
         assert_eq!(buy_record.order.filled_quantity, Nat::from(quantity));
 
-        // Owner-scoping and error/empty-page paths.
-        assert!(
+        // Owner-scoping and error paths.
+        assert_eq!(
             buyer_client
                 .get_my_trades(by_order(sell_id.clone()))
                 .await
-                .unwrap()
-                .is_empty(),
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::OrderNotFound)),
             "buyer does not own the seller's order",
         );
         let unknown = "ffffffffffffffffffffffffffffffff".to_string();
-        assert!(
+        assert_eq!(
             buyer_client
                 .get_my_trades(by_order(unknown))
                 .await
-                .unwrap()
-                .is_empty(),
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::OrderNotFound)),
         );
         assert_eq!(
             buyer_client
@@ -618,11 +622,13 @@ mod add_limit_order {
         );
         assert_eq!(
             buyer_client
-                .get_my_trades(TradesFilter::ByOrder(TradesByOrder {
-                    order_id: buy_id,
-                    after: Some("bad-cursor".to_string()),
-                    length: 10,
-                }))
+                .get_my_trades(GetMyTradesArgs {
+                    filter: TradesFilter::ByOrder(TradesByOrder {
+                        order_id: buy_id,
+                        after: Some("bad-cursor".to_string()),
+                        length: 10,
+                    }),
+                })
                 .await
                 .unwrap_err()
                 .kind,
@@ -634,7 +640,7 @@ mod add_limit_order {
 
     #[tokio::test]
     async fn should_paginate_per_order_fills_via_trade_cursor() {
-        use oisy_trade_types::{TradesByOrder, TradesFilter};
+        use oisy_trade_types::{GetMyTradesArgs, TradesByOrder, TradesFilter};
 
         let setup = Setup::new().await;
         setup
@@ -683,21 +689,23 @@ mod add_limit_order {
             .unwrap();
         setup.env().tick().await;
 
-        let page = |after: Option<String>| {
-            TradesFilter::ByOrder(TradesByOrder {
+        let page = |after: Option<String>| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
                 order_id: buy_id.clone(),
                 after,
                 length: 1,
-            })
+            }),
         };
 
         // A full unpaginated read establishes the expected newest-first order.
         let all = buyer_client
-            .get_my_trades(TradesFilter::ByOrder(TradesByOrder {
-                order_id: buy_id.clone(),
-                after: None,
-                length: 10,
-            }))
+            .get_my_trades(GetMyTradesArgs {
+                filter: TradesFilter::ByOrder(TradesByOrder {
+                    order_id: buy_id.clone(),
+                    after: None,
+                    length: 10,
+                }),
+            })
             .await
             .unwrap();
         assert_eq!(all.len(), 2, "the buy order swept two maker levels");
@@ -732,7 +740,7 @@ mod add_limit_order {
     #[tokio::test]
     async fn should_expose_account_wide_fills_via_get_my_trades_by_account() {
         use oisy_trade_types::{
-            GetMyTradesRequestError, TradesByAccount, TradesByOrder, TradesFilter,
+            GetMyTradesArgs, GetMyTradesRequestError, TradesByAccount, TradesByOrder, TradesFilter,
         };
 
         let setup = Setup::new().await;
@@ -798,8 +806,8 @@ mod add_limit_order {
             buy_ids.push(buy_id);
         }
 
-        let by_account = |after: Option<String>, length: u32| {
-            TradesFilter::ByAccount(TradesByAccount { after, length })
+        let by_account = |after: Option<String>, length: u32| GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount { after, length }),
         };
 
         // The full account-wide page spans all three orders, newest-first.
@@ -866,11 +874,13 @@ mod add_limit_order {
         // Account and per-order feeds agree on the newest fill.
         let newest_order = newest_first[0].clone();
         let by_order = buyer_client
-            .get_my_trades(TradesFilter::ByOrder(TradesByOrder {
-                order_id: newest_order,
-                after: None,
-                length: 10,
-            }))
+            .get_my_trades(GetMyTradesArgs {
+                filter: TradesFilter::ByOrder(TradesByOrder {
+                    order_id: newest_order,
+                    after: None,
+                    length: 10,
+                }),
+            })
             .await
             .unwrap();
         assert_eq!(by_order.len(), 1);
