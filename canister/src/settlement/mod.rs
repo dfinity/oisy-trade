@@ -352,10 +352,11 @@ fn fee_token(side: Side) -> PairToken {
     }
 }
 
-/// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for
-/// "fee was actually charged" so callers (audit log, apply path,
-/// `/metrics`) can distinguish "no fee on this fill" from "fee of zero
-/// charged".
+/// Collapse a zero-quantity fee to `None`. Returns `Some(_)` only when a
+/// positive fee was charged; a zero fee maps to `None`, so callers (audit
+/// log, apply path, `/metrics`) see "no fee on this fill" and "fee of zero
+/// charged" as one and the same — the two are deliberately not
+/// distinguished.
 fn nonzero(q: Quantity) -> Option<Quantity> {
     if q.is_zero() { None } else { Some(q) }
 }
