@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.3.0] - 2026-07-02
 
 ### Added
@@ -16,10 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING (pre-launch persisted state only):** the trade-history work changes the stable-memory / event-log encoding — order ids now encode as a bare CBOR `u64` instead of a 1-element array, `OrderBookSnapshot` gains a non-`Option` `next_fill` field, and the settling event carries a lean per-fill record — so a canister upgraded from state persisted before this release cannot decode it. Acceptable because the canister is pre-launch with no deployed state to migrate; the Candid/public API is unchanged ([#192](https://github.com/dfinity/oisy-trade/pull/192), [#179](https://github.com/dfinity/oisy-trade/pull/179))
 - Extract a dedicated settlement module and harden the fill-persistence tests, with a `get_my_trades` account-wide pagination benchmark ([#195](https://github.com/dfinity/oisy-trade/pull/195), [#196](https://github.com/dfinity/oisy-trade/pull/196))
 - Render prices and amounts as human-readable floats ([#182](https://github.com/dfinity/oisy-trade/pull/182))
-
-[0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
-
-## [Unreleased]
 
 ## [0.2.0] - 2026-06-26
 
@@ -60,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 - Surface trading-pair fee rates in `get_events` ([#134](https://github.com/dfinity/oisy-trade/pull/134))
 
+[0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.1.0..oisy_trade_canister-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.0.0..oisy_trade_canister-v0.1.0
