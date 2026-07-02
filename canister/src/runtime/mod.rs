@@ -15,6 +15,8 @@ pub struct Timestamp(#[n(0)] u64);
 impl Timestamp {
     /// The Unix epoch (zero nanoseconds).
     pub const EPOCH: Self = Self(0);
+    /// The maximum-representable `Timestamp` sentinel (max encoded width);
+    /// not a meaningful IC time.
     pub const MAX: Self = Self(u64::MAX);
 
     pub const fn new(nanos: u64) -> Self {

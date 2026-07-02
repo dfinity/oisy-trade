@@ -455,7 +455,7 @@ pub fn transfer_from_response(
 
 pub fn minicbor_encode<T>(t: &T) -> Vec<u8>
 where
-    for<'a> T: Encode<()>,
+    T: Encode<()>,
 {
     let mut buf = vec![];
     minicbor::encode(t, &mut buf).expect("encoding should succeed");
