@@ -107,11 +107,6 @@ impl OrderBook {
         self.fee_rates
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_fee_rates(&mut self, fee_rates: FeeRates) {
-        self.fee_rates = fee_rates;
-    }
-
     fn bids_iter(&self) -> OrderQueueIter<'_, Reverse<Price>, RestingOrder> {
         self.bids.iter()
     }
