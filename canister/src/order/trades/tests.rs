@@ -139,17 +139,20 @@ fn should_swap_sides_for_a_sell_taker() {
 /// A `trades_for_order` scenario for order A (taker seq 0): the taker fill
 /// sequences appended (each paired with a maker leg on `maker_seq`), the cursor
 /// and page length to query, and the expected fill sequences newest-first — or
-/// `Err(CursorNotFound)` when the cursor is not found.
+/// `Err(CursorNotFound)` when the cursor is not found. `after` is a full cursor
+/// `(order_seq, fill_seq)`, so a case can pass a cursor whose embedded `OrderId`
+/// belongs to the counterparty leg sharing the match's `FillSeq`.
 struct TradesForOrderCase {
     desc: &'static str,
     inserts: Vec<(u64, u64)>,
-    after: Option<u64>,
+    after: Option<(u64, u64)>,
     length: usize,
     expected: Result<Vec<u64>, CursorNotFound>,
 }
 
 #[test]
 fn should_page_one_orders_trades() {
+    const ORDER_A: u64 = 0;
     let cases = vec![
         TradesForOrderCase {
             desc: "newest-first, only order A's trades",
@@ -168,35 +171,56 @@ fn should_page_one_orders_trades() {
         TradesForOrderCase {
             desc: "page continues after cursor with next-older",
             inserts: vec![(1, 0), (1, 1), (1, 2)],
-            after: Some(1),
+            after: Some((ORDER_A, 1)),
             length: 2,
             expected: Ok(vec![0]),
         },
         TradesForOrderCase {
             desc: "cursor that is not one of the order's trades is not found",
             inserts: vec![(1, 0)],
-            after: Some(99),
+            after: Some((ORDER_A, 99)),
             length: 10,
             expected: Err(CursorNotFound),
         },
         TradesForOrderCase {
             desc: "valid cursor with no older trades is an empty page",
             inserts: vec![(1, 0)],
-            after: Some(0),
+            after: Some((ORDER_A, 0)),
             length: 10,
             expected: Ok(vec![]),
+        },
+        TradesForOrderCase {
+            desc: "cursor carrying the maker leg's order id (same FillSeq) is rejected",
+            inserts: vec![(1, 0)],
+            after: Some((1, 0)),
+            length: 10,
+            expected: Err(CursorNotFound),
         },
     ];
 
     for case in cases {
         let mut store = store();
-        let order_a = OrderId::new(BOOK, OrderSeq::new(0));
+        let order_a = OrderId::new(BOOK, OrderSeq::new(ORDER_A));
         for (maker_seq, fill_seq) in &case.inserts {
-            append(&mut store, Side::Buy, 0, *maker_seq, *fill_seq, USER, USER);
+            append(
+                &mut store,
+                Side::Buy,
+                ORDER_A,
+                *maker_seq,
+                *fill_seq,
+                USER,
+                USER,
+            );
         }
 
+        let after = case.after.map(|(order_seq, fill_seq)| {
+            TradeId::new(
+                OrderId::new(BOOK, OrderSeq::new(order_seq)),
+                FillSeq::new(fill_seq),
+            )
+        });
         let got = store
-            .trades_for_order(order_a, case.after.map(FillSeq::new), case.length)
+            .trades_for_order(order_a, after, case.length)
             .map(|page| page.iter().map(|(s, _)| s.get()).collect::<Vec<u64>>());
 
         assert_eq!(
@@ -204,6 +228,74 @@ fn should_page_one_orders_trades() {
             "BUG ({}): page differs from expected",
             case.desc
         );
+    }
+}
+
+/// A cursor-ownership scenario over a single match whose taker and maker legs
+/// share one `FillSeq` but belong to different orders: the order being paged, the
+/// order whose id the `after` cursor embeds, and whether the cursor is accepted.
+struct CursorOwnershipCase {
+    desc: &'static str,
+    queried_order: OrderId,
+    cursor_order: OrderId,
+    accepted: bool,
+}
+
+#[test]
+fn should_reject_a_cursor_from_the_other_leg_of_the_same_fill() {
+    let taker_order = OrderId::new(BOOK, OrderSeq::new(0));
+    let maker_order = OrderId::new(BOOK, OrderSeq::new(1));
+    let fill_seq = FillSeq::new(0);
+
+    let cases = vec![
+        CursorOwnershipCase {
+            desc: "paging the taker order with the maker leg's cursor (shared FillSeq)",
+            queried_order: taker_order,
+            cursor_order: maker_order,
+            accepted: false,
+        },
+        CursorOwnershipCase {
+            desc: "paging the maker order with the taker leg's cursor (shared FillSeq)",
+            queried_order: maker_order,
+            cursor_order: taker_order,
+            accepted: false,
+        },
+        CursorOwnershipCase {
+            desc: "control: the taker order's own cursor pages correctly",
+            queried_order: taker_order,
+            cursor_order: taker_order,
+            accepted: true,
+        },
+        CursorOwnershipCase {
+            desc: "control: the maker order's own cursor pages correctly",
+            queried_order: maker_order,
+            cursor_order: maker_order,
+            accepted: true,
+        },
+    ];
+
+    for case in cases {
+        let mut store = store();
+        append(&mut store, Side::Buy, 0, 1, 0, USER, USER);
+
+        let cursor = TradeId::new(case.cursor_order, fill_seq);
+        let got = store.trades_for_order(case.queried_order, Some(cursor), 10);
+
+        if case.accepted {
+            assert_eq!(
+                got,
+                Ok(vec![]),
+                "BUG ({}): the order's own cursor must page (empty, no older trades)",
+                case.desc
+            );
+        } else {
+            assert_eq!(
+                got,
+                Err(CursorNotFound),
+                "BUG ({}): a cursor from the other leg must be rejected",
+                case.desc
+            );
+        }
     }
 }
 
