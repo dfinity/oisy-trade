@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-02
+
+### Added
+
+- Public types for the trade feed: realized per-order quote/fee scalars on order records, the `get_my_trades` request/response types (`GetMyTradesArgs`, `Trade`, `TradeId`), and the shared composite-id/sequence machinery they build on ([#171](https://github.com/dfinity/oisy-trade/pull/171), [#192](https://github.com/dfinity/oisy-trade/pull/192), [#186](https://github.com/dfinity/oisy-trade/pull/186))
+
 ## [0.2.0] - 2026-06-26
 
 ### Added
@@ -41,5 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add an `OperationInProgress` error to guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 
+[0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.0.0..oisy_trade_types-v0.1.0

@@ -1,6 +1,6 @@
 [package]
 name = "oisy_trade_canister"
-version = "0.2.0"
+version = "0.3.0"
 description = "OISY TRADE canister on the Internet Computer."
 authors.workspace = true
 edition.workspace = true
@@ -31,7 +31,7 @@ icrc-cbor = { workspace = true }
 icrc-ledger-types = { workspace = true }
 minicbor = { workspace = true, features = ["derive"] }
 num-bigint = { workspace = true }
-oisy_trade_types = { path = "../libs/types", version = "0.2.0" }
+oisy_trade_types = { path = "../libs/types", version = "0.3.0" }
 oisy_trade_types_internal = { path = "../libs/types-internal", version = "0.2.0", features = ["event", "log"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
