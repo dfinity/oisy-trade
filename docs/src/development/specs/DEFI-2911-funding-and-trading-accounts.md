@@ -288,7 +288,8 @@ candid backward-compat expected diff accordingly.
 
 `MAX_TRADING_ACCOUNTS_PER_USER = 4` (Hyperliquid grants 1 unnamed + 3 named agents; no known
 integrator needs more — trivially raisable later). `TRADING_ACCOUNT_GRANT_COOLDOWN = 1 hour`
-(a code constant — key rotation is a per-weeks operation).
+(a code constant — key rotation happens on a timescale of weeks, so an hour between grants
+costs legitimate users nothing).
 
 For attribution (R13), `OrderRecord` gains `placed_by : opt principal` (absent = placed by the
 owner itself), surfaced by `get_my_orders`. Adding an `opt` field to a returned record is a
@@ -412,7 +413,7 @@ endpoint resolves.
   clients must thread the argument, and the common case (one funder) pays per-call
   disambiguation for a flexibility nobody asked for — the requester's ask is exactly the
   Hyperliquid shape, and extra keys are free. Rejected; the registry chosen here does not preclude adding an
-  explicit-argument path later if a one-key-many-funders need materializes.
+  explicit-argument path later if a one-key-many-funders use case materializes.
 - **Alias in `UserRegistry` — register `T` under `F`'s `UserId`.** Seductively small: resolution
   would fall out of the existing `lookup`. The obvious objection — revocation requires removal,
   which the `len()`-derived id assignment forbids — is fixable (store the next id in a
