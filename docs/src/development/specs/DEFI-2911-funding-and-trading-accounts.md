@@ -358,50 +358,6 @@ Thin `#[ic_cdk::update]` / `#[ic_cdk::query]` wrappers in `main.rs` over busines
 `lib.rs`, as for every existing endpoint. The management endpoints act on the raw caller (R9)
 and assert restricted mode like other updates (R12).
 
-### Test plan
-
-Unit (`*/tests.rs`, fixtures per repo convention):
-
-- `user` (registry): grant / revoke round-trip; `resolve_account` resolution; every R7
-  precondition rejected (unregistered granter, self-grant, double-grant across funding
-  accounts, registered user, granting by a trading account, cap); a second grant inside
-  `TRADING_ACCOUNT_GRANT_COOLDOWN` rejected, allowed once elapsed, and revoke unaffected by the
-  cooldown (R14); listing isolated between funding accounts (R9); registry survives reload of
-  the stable structures (R10).
-- `state`: order placed by `T` reserves `F`'s balance and records `owner = F`; the order event
-  carries `F` (R2); cancel by `T` succeeds — including of an order placed by a *sibling* trading
-  key — while another funding account's trading key fails with `NotOrderOwner` (R4); reads
-  resolve (R5); after revoke, `T`'s calls act as a stranger and `F`'s open orders stay open
-  (R6); `permit_deposit` / `permit_withdraw` deny a trading account (R3); `F` itself still
-  passes all admissions (R8); replay with stable writes skipped does not double-apply grants
-  (R10); restricted mode checks the raw caller (R12); a rejected grant appends no event (R14);
-  an order placed by `T` records and
-  exposes `placed_by = T`, one placed by `F` records none, a cancel by `T` records
-  `canceled_by = T`, and an `OrderRecord` persisted without the attribution field still decodes
-  (R13).
-
-Integration (`integration_tests/tests/tests.rs`, PocketIC):
-
-- Lifecycle: `F` deposits and whitelists `T`; `T` places an order that draws `F`'s balance; a
-  fill settles into `F`'s balances; `T` reads `F`'s balances / orders / trades and
-  `get_my_orders` shows `placed_by = T` on `T`'s order (R13); `T`'s `deposit`
-  and `withdraw` are rejected with the dedicated error; `T` cancels an order of `F`; `F` revokes
-  `T`; `T`'s next call is rejected as a stranger while `F`'s remaining open orders are intact
-  (R1–R8).
-- `get_my_trading_accounts` before / after grant and revoke (R9); each grant error surfaced
-  through the envelope, the cooldown as a `TemporaryError` (R7, R11, R14); whitelist and
-  enforcement survive a canister upgrade (R10).
-
-Verification:
-
-```
-cargo fmt --all
-just lint
-cargo test -p oisy_trade_canister
-cargo test -p oisy_trade_int_tests
-# + the repo's candid backward-compat check (see justfile / CI)
-```
-
 ### Delivery / PR sequence
 
 Six stacked PRs, each independently mergeable / compilable / testable. Funding-operation denial
