@@ -32,17 +32,21 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
 - **R1 — Grant.** A funding account `F` can whitelist a principal `T` via
   `add_trading_account`. From then on `T` may place and cancel orders acting on `F`'s account.
   `F` can revoke via `remove_trading_account`.
-- **R2 — Orders act on the funding account.** An order placed by `T` is in every respect `F`'s
+- **R2 — Orders act on the funding account.** An order placed by `T` is economically `F`'s
   order: validated against and reserved from `F`'s free balance, recorded with `owner = F`,
-  visible in `F`'s `get_my_orders`, and its fills settle into `F`'s balances. After admission it
-  is indistinguishable from an order `F` placed itself (order events carry `F`, so event-log
-  replay is unaffected).
+  visible in `F`'s `get_my_orders`, and its fills settle into `F`'s balances. For matching and
+  settlement it behaves exactly as if `F` had placed it (order events carry `F` as the owner, so
+  event-log replay is unaffected); the acting key stays visible for audit (R13).
 - **R3 — Funding operations denied.** `deposit` and `withdraw` called by a currently whitelisted
   `T` fail synchronously with a dedicated error, before any ledger interaction. Combined with the
   grant preconditions (R7), a trading account can never hold DEX balances.
 - **R4 — Cancel authority.** `F` and any of `F`'s trading accounts may cancel `F`'s open orders.
   Any other principal — including a trading account of a *different* funding account — gets
-  `NotOrderOwner`, exactly as today.
+  `NotOrderOwner`, exactly as today. Cancel authority is deliberately shared across `F`'s keys
+  regardless of which key placed the order — matching every surveyed venue (keys over one
+  balance share order authority; see the comparison) and keeping key rotation safe: a revoked
+  key's open orders stay cancellable by the remaining keys. Interference between sibling keys is
+  visible through attribution (R13).
 - **R5 — Reads resolve.** `get_balances`, `get_my_orders`, and `get_my_trades` called by `T`
   return `F`'s data, exactly as if `F` had called.
 - **R6 — Revocation is immediate.** After `remove_trading_account(T)`, calls by `T` are treated
@@ -71,14 +75,27 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
 - **R12 — Restricted-mode interplay.** Under `Mode::RestrictedTo`, the **raw caller** must be
   allowlisted; delegation does not bypass the mode check. A trading account needs its own entry
   in the restricted-mode allowlist to call anything.
+- **R13 — Attribution.** Every caller-initiated order action records the acting key:
+  `OrderRecord` and the order-placement event gain `placed_by` (optional principal; absent =
+  placed by the funding account itself), and the cancel event records `canceled_by` likewise.
+  `placed_by` is exposed through `get_my_orders`, so after a key compromise `F` can list — and
+  cancel — exactly the orders that key placed; the events preserve the same trail durably.
+  Attribution is forensic only: it grants no authority and does not restrict cancel (R4).
 
 ## Non-goals
 
 - **Expiry / TTL on grants.** Hyperliquid caps agent validity at 180 days; we ship
   revocation-only and note expiry as a follow-up if operational experience warrants it.
-- **Scoped grants** — per-pair restrictions, notional caps, read-only keys (dYdX's
-  `ClobPairIdFilter` / `MessageFilter` analogues). A trading account has all-or-nothing trading
-  authority over the funding account.
+- **Scoped grants** — per-pair restrictions, notional caps (e.g. "T may trade only these pairs,
+  at most X per 24 h"), expiry, read-only keys — the dYdX authenticator-filter and MetaMask
+  delegation-caveat analogues, and the natural shape for an AI-managed (agentic) trading key.
+  Out of scope now, but the design leaves a deliberate evolution path: the registry value grows
+  from the funding principal into a grant/policy object (additive CBOR fields, decoding absent
+  as "unrestricted"), `add_trading_account` gains an optional policy argument (additive Candid),
+  and enforcement slots into the existing admission point (`permit_trading` /
+  `validate_limit_order`). Volume caps additionally need per-key consumption accounting, which
+  is why order attribution (R13) ships now: a rolling per-key window has `placed_by` to hang off
+  when caps arrive, instead of a migration.
 - **Many funding accounts per trading key.** The mapping is 1:1 by design (see Design
   Decisions). Principals are free — a service trading for several funders creates one key per
   funder.
@@ -88,9 +105,6 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   power over `F`'s own funds); a principal claimed against its will simply cannot deposit while
   whitelisted and its owner would use a different principal. R7's registered-user check ensures
   no principal with existing funds or history can ever be claimed.
-- **Attributing individual orders to the specific trading key** in events or order records
-  (forensics after a key compromise). Possible additive follow-up; today the event carries the
-  resolved owner only (R2).
 - **Subaccounts.** They partition *funds* under one key; this feature separates *keys* over one
   fund. Orthogonal (the `UserRegistry` doc already anticipates subaccounts as a key-type
   change).
@@ -124,6 +138,13 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   order events, settlement, and the trades feed are untouched and keep operating on the funding
   principal. Replay needs no delegation state for orders because events already carry the
   resolved owner (R2).
+- **Attribute, don't restrict.** Order authority is account-scoped (any of `F`'s keys can place
+  and cancel `F`'s orders, R4) exactly as on every surveyed venue, but — going one step beyond
+  the venues, none of which expose which API key placed an order — each action records the
+  acting key (R13). This serves the compromise-forensics story that motivates the ticket (list
+  and cancel precisely the rogue key's orders) and is the prerequisite for future per-key
+  volume caps (see the scoped-grants non-goal), while keeping rotation simple: authority never
+  fragments per key, so revoking a key strands nothing.
 - **Reuse the `Permissions` permit layer for admission; keep the whitelist data beside
   `UserRegistry` in stable memory.** `permit_deposit` / `permit_withdraw` already thread the
   caller and today grant unconditionally — they become caller-aware and denying, so the existing
@@ -151,6 +172,8 @@ structural guarantees; expiry is the one Hyperliquid feature deliberately deferr
 | Cap on credentials | ~30 keys | 1 + 3 named agents | unbounded | `MAX_TRADING_ACCOUNTS_PER_USER` |
 | Expiry | 90-day auto-downgrade (Binance) | mandatory ≤ 180 d | none | none (non-goal) |
 | Reads by trading credential | with read scope | no (query by master address) | n/a | yes, resolve to `F` (R5) |
+| Cross-key cancel on one balance | yes (any trade-scope key) | yes (any agent) | yes (same subaccount) | yes (R4) |
+| Orders attributed to the acting credential | no | no | not exposed | yes, `placed_by` (R13) |
 
 Sources:
 
@@ -231,6 +254,12 @@ candid backward-compat expected diff accordingly.
 `MAX_TRADING_ACCOUNTS_PER_USER = 4` (Hyperliquid grants 1 unnamed + 3 named agents; no known
 integrator needs more — trivially raisable later).
 
+For attribution (R13), `OrderRecord` gains `placed_by : opt principal` (absent = placed by the
+owner itself), surfaced by `get_my_orders`. Adding an `opt` field to a returned record is a
+backward-compatible Candid evolution; on the stable-memory side it is a new trailing minicbor
+field decoding absent as `None` (`Option` + `#[cbor(default)]`), so records written before this
+feature still decode — the post-launch requirement.
+
 ### Whitelist registry — `canister/src/user`
 
 A `TradingAccounts<M>` registry beside `UserRegistry`, in two new stable regions
@@ -264,6 +293,12 @@ Option<Principal>`, `list(funding_id: UserId) -> Vec<Principal>`, `count(funding
   `RemoveTradingAccountEvent { funding, trading }`, handled in `state/audit` like `SetHalt`:
   the endpoint validates the R7 preconditions synchronously, records the event, and the handler
   applies it to `TradingAccounts` under the `Write` gate (R10).
+- **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
+  owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
+  the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel event gains
+  `canceled_by: Option<Principal>` likewise. Optional trailing fields with `#[cbor(default)]`
+  keep the event log and order history decoding pre-existing entries (post-launch
+  compatibility); replay is byte-faithful since the events carry the attribution themselves.
 
 ### Endpoints — `canister/src/lib.rs`, `canister/src/main.rs`
 
@@ -280,16 +315,21 @@ Unit (`*/tests.rs`, fixtures per repo convention):
   trading account, cap); listing isolated between funding accounts (R9); registry survives
   reload of the stable structures (R10).
 - `state`: order placed by `T` reserves `F`'s balance and records `owner = F`; the order event
-  carries `F` (R2); cancel by `T` succeeds, by another funding account's trading key fails with
-  `NotOrderOwner` (R4); reads resolve (R5); after revoke, `T`'s calls act as a stranger and
-  `F`'s open orders stay open (R6); `permit_deposit` / `permit_withdraw` deny a trading account
-  (R3); `F` itself still passes all admissions (R8); replay with stable writes skipped does not
-  double-apply grants (R10); restricted mode checks the raw caller (R12).
+  carries `F` (R2); cancel by `T` succeeds — including of an order placed by a *sibling* trading
+  key — while another funding account's trading key fails with `NotOrderOwner` (R4); reads
+  resolve (R5); after revoke, `T`'s calls act as a stranger and `F`'s open orders stay open
+  (R6); `permit_deposit` / `permit_withdraw` deny a trading account (R3); `F` itself still
+  passes all admissions (R8); replay with stable writes skipped does not double-apply grants
+  (R10); restricted mode checks the raw caller (R12); an order placed by `T` records and
+  exposes `placed_by = T`, one placed by `F` records none, a cancel by `T` records
+  `canceled_by = T`, and an `OrderRecord` persisted without the attribution field still decodes
+  (R13).
 
 Integration (`integration_tests/tests/tests.rs`, PocketIC):
 
 - Lifecycle: `F` deposits and whitelists `T`; `T` places an order that draws `F`'s balance; a
-  fill settles into `F`'s balances; `T` reads `F`'s balances / orders / trades; `T`'s `deposit`
+  fill settles into `F`'s balances; `T` reads `F`'s balances / orders / trades and
+  `get_my_orders` shows `placed_by = T` on `T`'s order (R13); `T`'s `deposit`
   and `withdraw` are rejected with the dedicated error; `T` cancels an order of `F`; `F` revokes
   `T`; `T`'s next call is rejected as a stranger while `F`'s remaining open orders are intact
   (R1–R8).
@@ -320,8 +360,9 @@ Three stacked PRs, each independently mergeable / compilable / testable.
    resolution so a whitelisted principal can never acquire a balance of its own that resolution
    would later strand. **Acceptance: R3.**
 3. **Caller resolution on trading and read paths.** `add_limit_order` / `cancel_limit_order` /
-   `get_balances` / `get_my_orders` / `get_my_trades` resolve the effective account; end-to-end
-   integration lifecycle. **Acceptance: R2, R4, R5, R6, R8, R12.**
+   `get_balances` / `get_my_orders` / `get_my_trades` resolve the effective account; attribution
+   (`placed_by` on the record, event and `get_my_orders`; `canceled_by` on the cancel event);
+   end-to-end integration lifecycle. **Acceptance: R2, R4, R5, R6, R8, R12, R13.**
 
 ## Discussed Alternatives
 
