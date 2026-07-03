@@ -221,9 +221,12 @@ All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries one va
 precondition (self-grant, already a trading account, already a registered user, caller is a
 trading account, too many trading accounts); `RemoveTradingAccountError` covers "not your
 trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
-to trading accounts (R3). Adding variants to returned error types is a Candid-breaking change —
-acceptable pre-launch; the implementation PR that introduces the new variants also updates the
-repo's candid backward-compat expected diff.
+to trading accounts (R3), added *inside* the envelope's `opt variant` request-error class —
+the extension point DEFI-2801 built in exactly for this: a client compiled against the old
+interface decodes the unknown variant as `null` and falls back to the envelope's `message`,
+so the addition is backward compatible (the system is launched; no Candid-breaking change is
+acceptable). The new endpoints are purely additive. The implementation PR updates the repo's
+candid backward-compat expected diff accordingly.
 
 `MAX_TRADING_ACCOUNTS_PER_USER = 4` (Hyperliquid grants 1 unnamed + 3 named agents; no known
 integrator needs more — trivially raisable later).
