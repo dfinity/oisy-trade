@@ -52,8 +52,8 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   - `T == F` (self-grant);
   - `T` is already a trading account, of `F` or of anyone else — a trading account maps to
     **exactly one** funding account;
-  - `T` is already a registered user (has a `UserId`, i.e. has ever deposited) — a trading key
-    must be a fresh principal;
+  - `T` is already a registered user (has a `UserId` — acquired on first deposit or first
+    grant, see [Constraints](#constraints)) — a trading key must be a fresh principal;
   - `F` is itself a trading account (no delegation chains);
   - `F` already has `MAX_TRADING_ACCOUNTS_PER_USER` trading accounts.
   `remove_trading_account(T)` fails if `T` is not currently `F`'s trading account.
@@ -114,8 +114,9 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   (IP allowlists, address allowlists, consensus approvals); with exactly one scope to express,
   the structural rule is smaller and safer.
 - **A principal is either a funding account or a trading account, never both.** Funding accounts
-  are exactly the registered users (they acquire a `UserId` on first deposit); trading accounts
-  can never deposit (R3) and must be unregistered at grant time (R7), so they never acquire one.
+  are exactly the registered users (they acquire a `UserId` when they first act as one — first
+  deposit or first grant); trading accounts can never deposit (R3), can never grant (R7), and
+  must be unregistered at grant time (R7), so they never acquire one.
   This exclusivity is what makes *implicit* resolution unambiguous — "whose balance does `T`'s
   order draw?" always has exactly one answer.
 - **Resolution at the endpoint boundary; `owner = F` everywhere downstream.** The trading /
@@ -198,9 +199,12 @@ Sources:
   (`permit_deposit(_caller)` / `permit_withdraw(_caller)` currently ignore the caller and always
   grant — this feature makes them caller-aware).
 - Per-user state is keyed by the compact `UserId` minted by `UserRegistry`
-  (`canister/src/user`); registration (`get_or_register`) happens only on deposit, reads use the
-  non-registering `lookup`. This gives the invariant R3/R7 rely on: *registered ⇔ can hold
-  funds*.
+  (`canister/src/user`); registration (`get_or_register`) happens only when a principal first
+  acts as a funding account — today on first deposit, and with this feature also on its first
+  grant; reads use the non-registering `lookup`. This gives the invariant R3/R7 rely on:
+  *registered ⇔ funding account*. `add_trading_account` validates its preconditions — notably
+  "the caller is not a trading account" — *before* registering the caller, so a trading account
+  can never acquire a `UserId` through the grant path either.
 - Update endpoints assert `Mode::RestrictedTo` on the raw caller (`assert_caller_is_allowed`);
   this check stays raw (R12).
 - `MemoryId`s 0–8 are in use (`canister/src/storage`); the whitelist takes the next free ids.
@@ -218,8 +222,8 @@ precondition (self-grant, already a trading account, already a registered user, 
 trading account, too many trading accounts); `RemoveTradingAccountError` covers "not your
 trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
 to trading accounts (R3). Adding variants to returned error types is a Candid-breaking change —
-acceptable pre-launch; the repo's candid backward-compat check gets its expected-diff updated in
-the same PR.
+acceptable pre-launch; the implementation PR that introduces the new variants also updates the
+repo's candid backward-compat expected diff.
 
 `MAX_TRADING_ACCOUNTS_PER_USER = 4` (Hyperliquid grants 1 unnamed + 3 named agents; no known
 integrator needs more — trivially raisable later).
