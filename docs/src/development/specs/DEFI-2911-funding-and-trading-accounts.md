@@ -151,6 +151,42 @@ structural guarantees; expiry is the one Hyperliquid feature deliberately deferr
 | Expiry | 90-day auto-downgrade (Binance) | mandatory ≤ 180 d | none | none (non-goal) |
 | Reads by trading credential | with read scope | no (query by master address) | n/a | yes, resolve to `F` (R5) |
 
+Sources:
+
+- Hyperliquid:
+  [Nonces and API wallets](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets)
+  (agents hold no funds, master-signed `approveAgent`, 1 + 3 cap, ≤ 180-day validity,
+  deregistration) ·
+  [Exchange endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint)
+  (the agent-signable vs user-signed action split that makes withdrawals structurally
+  unsignable) ·
+  [Privy recipe](https://docs.privy.io/recipes/hyperliquid/agents-and-subaccounts)
+- dYdX v4:
+  [Permissioned keys](https://docs.dydx.xyz/interaction/permissioned-keys)
+  (authenticators: signature check composed with message / subaccount / market filters) ·
+  [How-to guide](https://docs.dydx.exchange/api_integration-guides/how_to_permissioned_keys) ·
+  [Foundation blog](https://www.dydx.foundation/blog/permissioned-keys)
+- Binance:
+  [API key permissions](https://developers.binance.com/docs/wallet/account/api-key-permission)
+  (trade / withdraw / internal-transfer as separate flags) ·
+  [2021 permission rule update](https://www.binance.com/en/support/announcement/updates-to-api-key-permission-rules-2021-07-26-11e4c2f44e7a47b9b5fc0e479c0b256f)
+  (withdrawals require an IP allowlist; 90-day auto-downgrade) ·
+  [Sub-account FAQ](https://www.binance.com/en/support/faq/binance-sub-account-functions-and-frequently-asked-questions-360020632811) ·
+  [Universal Transfer](https://developers.binance.com/docs/sub_account/asset-management/Universal-Transfer)
+- Kraken:
+  [API key permissions](https://docs.kraken.com/exchange/guides/rest/api-keys)
+  (deposit / withdraw / create / cancel as independent grants) ·
+  [Creating an API key](https://support.kraken.com/articles/360000919966-how-to-create-an-api-key)
+  (optional expiry, IP allowlist, withdrawals only to pre-approved addresses)
+- Coinbase:
+  [Advanced Trade key permissions](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/data-api/get-api-key-permissions)
+  (`can_view` / `can_trade` / `can_transfer`) ·
+  [Portfolios](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/portfolios)
+  (keys bound to one portfolio) ·
+  [Prime API overview](https://help.coinbase.com/en/prime/coinbase-prime-api/coinbase-prime-api) ·
+  [Prime transfers](https://docs.cdp.coinbase.com/prime/concepts/transactions/transfers)
+  (consensus approval on transfers)
+
 ## Implementation
 
 ### Constraints
