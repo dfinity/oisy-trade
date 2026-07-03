@@ -145,15 +145,19 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   and cancel precisely the rogue key's orders) and is the prerequisite for future per-key
   volume caps (see the scoped-grants non-goal), while keeping rotation simple: authority never
   fragments per key, so revoking a key strands nothing.
-- **Reuse the `Permissions` permit layer for admission; keep the whitelist data beside
-  `UserRegistry` in stable memory.** `permit_deposit` / `permit_withdraw` already thread the
+- **Reuse the `Permissions` permit layer for admission; keep the whitelist data inside
+  `UserRegistry`.** `permit_deposit` / `permit_withdraw` already thread the
   caller and today grant unconditionally — they become caller-aware and denying, so the existing
   capability-token discipline (a state change proves its admission check ran) extends to this
   feature at its natural seam. Grant / revoke follow the `SetHalt` event pattern (controller-side
-  admin ops recorded as events). The whitelist itself does **not** live in the snapshot-persisted
-  `Permissions` struct: that struct holds a handful of global flags, while the whitelist grows
-  with the user count — it belongs in its own stable-memory region like every other per-user
-  structure (see Discussed Alternatives).
+  admin ops recorded as events). The whitelist maps live as new fields **on `UserRegistry`**
+  (each in its own stable-memory region), not as a separate struct: the grant invariant spans
+  both the `users` map ("`T` is unregistered", registering `F`) and the whitelist ("`T` is not
+  already a delegate"), so one type enforces *registered ⇔ funding account* where the data
+  lives — and a multi-map domain struct is the repo idiom (`OrderHistory`, `TokenBalance`). The
+  whitelist does **not** live in the snapshot-persisted `Permissions` struct: that struct holds
+  a handful of global flags, while the whitelist grows with the user count (see Discussed
+  Alternatives).
 
 ## Cross-exchange comparison
 
@@ -262,26 +266,38 @@ feature still decode — the post-launch requirement.
 
 ### Whitelist registry — `canister/src/user`
 
-A `TradingAccounts<M>` registry beside `UserRegistry`, in two new stable regions
-(`MemoryId` 9 and 10):
+`UserRegistry<M>` gains two fields, each in its own new stable region (`MemoryId` 9 and 10),
+following the repo's multi-map domain-struct idiom (`OrderHistory`, `TokenBalance`):
 
-- `by_trading: StableBTreeMap<PrincipalKey, Principal, M>` — trading principal → **funding
-  principal**. The hot lookup: one `get` per order / read call. The value is the principal (not
-  the `UserId`) because everything downstream — ownership checks, order records, events —
-  compares principals; the funding principal's `UserId` is then resolved exactly as today.
-- a per-funding index (funding `UserId`-prefixed key → trading principal) for `get_my_trading_accounts`
-  and the R7 cap check, mirroring the `by_user` index pattern of `OrderHistory` /
-  `TradeHistory`. The funding account is registered (`get_or_register`) at its first grant, so
-  it always has a `UserId` to key by.
+- `trading_accounts: StableBTreeMap<PrincipalKey, TradingGrant, M>` — trading principal →
+  grant. The hot lookup: one `get` per order / read call. `TradingGrant` is a one-field minicbor
+  struct holding the **funding principal** (a struct, not a bare principal, so the scoped-grants
+  evolution adds `#[cbor(default)]` fields instead of migrating the value type; a principal
+  rather than a `UserId` because everything downstream — ownership checks, order records,
+  events — compares principals, and the funding `UserId` is then resolved exactly as today).
+- `trading_accounts_by_funding: StableBTreeMap<UserId, TradingAccountList, M>` — funding
+  `UserId` → the bounded list (≤ `MAX_TRADING_ACCOUNTS_PER_USER`) of its trading principals,
+  serving `get_my_trading_accounts` and the R7 cap check. A bounded inline list, not a
+  `(UserId, principal)` range-scan index: the `CompositeId` machinery assumes fixed-width
+  components (a `Principal` is variable-length), and a cardinality of at most 4 does not earn a
+  scan index. The funding account is registered (`get_or_register`) at its first grant, so it
+  always has a `UserId` to key by.
 
-API: `grant(funding: Principal, funding_id: UserId, trading: Principal)`,
-`revoke(funding_id: UserId, trading: Principal)`, `funding_of(trading: &Principal) ->
-Option<Principal>`, `list(funding_id: UserId) -> Vec<Principal>`, `count(funding_id: UserId)`.
+The whitelist lives on `UserRegistry` (not in a separate struct) because the grant invariant
+spans both maps and `users`: `grant` checks "`T` is unregistered" and "`T` / `F` are not
+delegates" and registers `F` in one place, keeping *registered ⇔ funding account* enforced by
+the type that owns the data.
+
+API on `UserRegistry`: `grant(funding: Principal, trading: Principal) -> Result<(), GrantError>`
+(all R7 checks inside), `revoke(funding: Principal, trading: Principal) -> Result<(), RevokeError>`,
+`resolve_account(caller: Principal) -> Principal` (delegate → funding principal, else the caller),
+`is_trading_account(&Principal) -> bool` (the R3 deny check),
+`trading_accounts_of(funding: Principal) -> Vec<Principal>` (R9).
 
 ### State wiring — `canister/src/state`
 
-- **Resolution.** `State::resolve_account(caller: Principal) -> Principal`:
-  `trading_accounts.funding_of(&caller).unwrap_or(caller)`. Applied once, at the entry of:
+- **Resolution.** `State` delegates to `user_registry.resolve_account(caller)`. Applied once,
+  at the entry of:
   `validate_limit_order` / `record_limit_order` (order owner, balance reservation — R2),
   `validate_cancel_limit_order` (ownership check — R4), `get_balances`, `get_user_order(s)`,
   `get_user_trades` / `get_user_order_trades` (R5). Everything downstream is unchanged.
@@ -292,7 +308,7 @@ Option<Principal>`, `list(funding_id: UserId) -> Vec<Principal>`, `count(funding
 - **Grant / revoke.** New event types `AddTradingAccountEvent { funding, trading }` and
   `RemoveTradingAccountEvent { funding, trading }`, handled in `state/audit` like `SetHalt`:
   the endpoint validates the R7 preconditions synchronously, records the event, and the handler
-  applies it to `TradingAccounts` under the `Write` gate (R10).
+  applies it to the `UserRegistry` whitelist maps under the `Write` gate (R10).
 - **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
   owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
   the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel event gains
@@ -350,8 +366,8 @@ cargo test -p oisy_trade_int_tests
 
 Three stacked PRs, each independently mergeable / compilable / testable.
 
-1. **Whitelist registry + management endpoints.** `TradingAccounts` stable registry (two new
-   memory regions), `add_trading_account` / `remove_trading_account` /
+1. **Whitelist registry + management endpoints.** The `UserRegistry` whitelist extension (two
+   new memory regions), `add_trading_account` / `remove_trading_account` /
    `get_my_trading_accounts` with all grant preconditions, the two event types with replay
    handling, envelope errors. The whitelist is recorded but not yet enforced anywhere.
    **Acceptance: R1 (mechanics), R7, R9, R10, R11.**
@@ -385,7 +401,7 @@ Three stacked PRs, each independently mergeable / compilable / testable.
   place, but `Permissions` is heap state serialized into the snapshot and sized for a handful of
   global flags; a per-user whitelist grows with the user count and belongs in stable memory like
   balances and order history. The *admission decision* still flows through `Permissions`
-  permits — only the data lives beside `UserRegistry`.
+  permits — only the data lives on `UserRegistry`.
 - **Per-key permission mask (CEX-style `can_withdraw` flag).** More general (arbitrary scope
   combinations later), but one misconfiguration away from fund loss — which is why every CEX
   layers compensating gates on top (IP allowlists, withdrawal-address allowlists, Coinbase
