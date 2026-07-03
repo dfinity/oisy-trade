@@ -8,7 +8,7 @@ tags: [accounts, permissions, security, api]
 
 ## Motivation
 
-Programmatic traders (feedback from G20, a market maker integrating with the DEX) must keep a
+Programmatic traders (feedback from a market maker integrating with the DEX) must keep a
 private key available at runtime to sign orders. Today the same principal both holds funds
 (deposit / withdraw) and trades, so a leak of that hot key exposes the entire balance sitting on
 the account — a growing concern as balances scale to hundreds of thousands and beyond.
@@ -100,9 +100,9 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
 - **Implicit caller resolution via a 1:1 registry (Hyperliquid model), not an explicit
   `on_behalf_of` argument (dYdX model).** The canister keeps a `trading → funding` map; order
   and read endpoints resolve the effective account from the caller alone.
-  *Pros*: zero API churn — every existing endpoint keeps its signature, and G20 integrates by
-  simply swapping the key its bot signs with; no per-call disambiguation; the hot path costs one
-  map lookup. *Cons*: one key cannot serve two funding accounts — mitigated by minting another
+  *Pros*: zero API churn — every existing endpoint keeps its signature, and an integrator
+  switches over by simply swapping the key its bot signs with; no per-call disambiguation; the
+  hot path costs one map lookup. *Cons*: one key cannot serve two funding accounts — mitigated by minting another
   principal, which is free. The explicit-argument alternative and its trade-offs are in
   [Discussed Alternatives](#discussed-alternatives).
 - **Structural denial, not a permission mask.** There is no per-key "can withdraw" flag that
@@ -288,8 +288,8 @@ Three stacked PRs, each independently mergeable / compilable / testable.
   account; no claim-a-principal grief (acting for `F` requires `F`'s grant *and* naming `F`).
   *Cons*: every order and read endpoint changes signature (or grows an optional field), all
   clients must thread the argument, and the common case (one funder) pays per-call
-  disambiguation for a flexibility nobody asked for — G20's ask is exactly the Hyperliquid
-  shape, and extra keys are free. Rejected; the registry chosen here does not preclude adding an
+  disambiguation for a flexibility nobody asked for — the requester's ask is exactly the
+  Hyperliquid shape, and extra keys are free. Rejected; the registry chosen here does not preclude adding an
   explicit-argument path later if a one-key-many-funders need materializes.
 - **Alias in `UserRegistry` — register `T` under `F`'s `UserId`.** Seductively small: resolution
   would fall out of the existing `lookup`. Rejected: revocation requires *removing* a registry
