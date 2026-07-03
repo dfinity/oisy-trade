@@ -467,6 +467,418 @@ mod add_limit_order {
     }
 
     #[tokio::test]
+    async fn should_expose_per_order_fills_via_get_my_trades() {
+        use oisy_trade_types::{
+            GetMyTradesArgs, GetMyTradesRequestError, PairToken, Trade, TradesByOrder, TradesFilter,
+        };
+
+        const MAKER_FEE_BPS: u16 = 10;
+        const TAKER_FEE_BPS: u16 = 23;
+        let setup = Setup::new().await;
+        setup
+            .oisy_trade_client_with_caller(setup.controller())
+            .add_trading_pair(AddTradingPairRequest {
+                maker_fee_bps: MAKER_FEE_BPS,
+                taker_fee_bps: TAKER_FEE_BPS,
+                ..setup.add_trading_pair_request()
+            })
+            .await
+            .unwrap();
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+
+        // A resting sell at 9_000, hit by a price-improving buy at 10_000: the
+        // fill executes at the maker's 9_000, not the taker's 10_000.
+        let maker_price = 9_000 * PRICE_SCALE;
+        let taker_price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+        let notional = maker_price as u128 * quantity as u128 / 1_000_000_000u128;
+
+        setup.fund_base(seller, quantity).await;
+        let sell_id = seller_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(maker_price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let buyer_deposit = taker_price as u128 * quantity as u128 / 1_000_000_000u128;
+        setup.fund_quote(buyer, buyer_deposit as u64).await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(taker_price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let by_order = |order_id: OrderId| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after: None,
+                length: 10,
+            }),
+        };
+
+        // Buyer's taker fill: maker price, base-denominated taker fee, counterparty absent.
+        let buy_trades = buyer_client
+            .get_my_trades(by_order(buy_id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(buy_trades.len(), 1);
+        let buy_fill = &buy_trades[0];
+        assert_eq!(
+            *buy_fill,
+            Trade {
+                id: buy_fill.id.clone(),
+                timestamp: buy_fill.timestamp,
+                order_id: buy_id.clone(),
+                side: Side::Buy,
+                is_maker: false,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(quantity as u128 * TAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Base,
+            },
+        );
+
+        // Seller's maker fill: same maker price, quote-denominated maker fee.
+        let sell_trades = seller_client
+            .get_my_trades(by_order(sell_id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(sell_trades.len(), 1);
+        let sell_fill = &sell_trades[0];
+        assert_eq!(
+            *sell_fill,
+            Trade {
+                id: sell_fill.id.clone(),
+                timestamp: sell_fill.timestamp,
+                order_id: sell_id.clone(),
+                side: Side::Sell,
+                is_maker: true,
+                price: Nat::from(maker_price),
+                quantity: Nat::from(quantity),
+                notional: Nat::from(notional),
+                fee: Nat::from(notional * MAKER_FEE_BPS as u128 / 10_000),
+                fee_token: PairToken::Quote,
+            },
+        );
+
+        // get_my_orders rollups are consistent with the fills (VWAP derivable).
+        let buy_record = buyer_client.get_my_order(buy_id.clone()).await.unwrap();
+        assert_eq!(buy_record.order.filled_quote, Nat::from(notional));
+        assert_eq!(buy_record.order.filled_quantity, Nat::from(quantity));
+
+        // Owner-scoping and error paths.
+        assert_eq!(
+            buyer_client
+                .get_my_trades(by_order(sell_id.clone()))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::OrderNotFound)),
+            "buyer does not own the seller's order",
+        );
+        let unknown = "ffffffffffffffffffffffffffffffff".to_string();
+        assert_eq!(
+            buyer_client
+                .get_my_trades(by_order(unknown))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::OrderNotFound)),
+        );
+        assert_eq!(
+            buyer_client
+                .get_my_trades(by_order("not-an-order-id".to_string()))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidOrderId)),
+        );
+        assert_eq!(
+            buyer_client
+                .get_my_trades(GetMyTradesArgs {
+                    filter: TradesFilter::ByOrder(TradesByOrder {
+                        order_id: buy_id,
+                        after: Some("bad-cursor".to_string()),
+                        length: 10,
+                    }),
+                })
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidTradeId)),
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_paginate_per_order_fills_via_trade_cursor() {
+        use oisy_trade_types::{GetMyTradesArgs, TradesByOrder, TradesFilter};
+
+        let setup = Setup::new().await;
+        setup
+            .oisy_trade_client_with_caller(setup.controller())
+            .add_trading_pair(setup.add_trading_pair_request())
+            .await
+            .unwrap();
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+
+        // Two resting sells at distinct prices; a single buy sweeps both, so the
+        // buy order accumulates two fills (two distinct Trade.id values).
+        let low_price = 9_000 * PRICE_SCALE;
+        let high_price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+
+        setup.fund_base(seller, 2 * quantity).await;
+        for price in [low_price, high_price] {
+            seller_client
+                .add_limit_order(LimitOrderRequest {
+                    pair: setup.trading_pair(),
+                    side: Side::Sell,
+                    price: Nat::from(price),
+                    quantity: quantity.into(),
+                    time_in_force: None,
+                })
+                .await
+                .unwrap();
+            setup.env().tick().await;
+        }
+
+        let taker_price = 11_000 * PRICE_SCALE;
+        let buyer_deposit = taker_price as u128 * 2 * quantity as u128 / 1_000_000_000u128;
+        setup.fund_quote(buyer, buyer_deposit as u64).await;
+        let buy_id = buyer_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(taker_price),
+                quantity: (2 * quantity).into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let page = |after: Option<String>| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id: buy_id.clone(),
+                after,
+                length: 1,
+            }),
+        };
+
+        // A full unpaginated read establishes the expected newest-first order.
+        let all = buyer_client
+            .get_my_trades(GetMyTradesArgs {
+                filter: TradesFilter::ByOrder(TradesByOrder {
+                    order_id: buy_id.clone(),
+                    after: None,
+                    length: 10,
+                }),
+            })
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2, "the buy order swept two maker levels");
+
+        // Page 1: the newest fill, carrying its own id.
+        let page1 = buyer_client.get_my_trades(page(None)).await.unwrap();
+        assert_eq!(page1.len(), 1);
+        assert_eq!(page1[0], all[0]);
+
+        // Page 2: feeding page 1's last id back as `after` continues strictly
+        // after it — the next-older fill, with no overlap or gap.
+        let cursor = page1.last().unwrap().id.clone();
+        let page2 = buyer_client
+            .get_my_trades(page(Some(cursor)))
+            .await
+            .unwrap();
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0], all[1]);
+        assert_ne!(page1[0].id, page2[0].id);
+
+        // Page 3: nothing older remains.
+        let cursor = page2.last().unwrap().id.clone();
+        let page3 = buyer_client
+            .get_my_trades(page(Some(cursor)))
+            .await
+            .unwrap();
+        assert!(page3.is_empty());
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_expose_account_wide_fills_via_get_my_trades_by_account() {
+        use oisy_trade_types::{
+            GetMyTradesArgs, GetMyTradesRequestError, TradesByAccount, TradesByOrder, TradesFilter,
+        };
+
+        let setup = Setup::new().await;
+        setup
+            .oisy_trade_client_with_caller(setup.controller())
+            .add_trading_pair(setup.add_trading_pair_request())
+            .await
+            .unwrap();
+        let buyer = Principal::from_slice(&[0x01]);
+        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
+        let seller = Principal::from_slice(&[0x02]);
+        let seller_client = setup.oisy_trade_client_with_caller(seller);
+
+        let price = 10_000 * PRICE_SCALE;
+        let quantity = 1_000_000u64;
+        const ORDERS: u64 = 3;
+
+        // The seller funds all its resting sells up front; the buyer funds all
+        // its crossing buys up front.
+        let seller_deposit = ORDERS * quantity;
+        setup
+            .deposit_flow(seller, setup.base_token_id())
+            .mint(seller_deposit + 2 * BASE_LEDGER_FEE)
+            .approve(seller_deposit + BASE_LEDGER_FEE)
+            .deposit(seller_deposit)
+            .execute()
+            .await;
+        let buyer_deposit = price as u128 * ORDERS as u128 * quantity as u128 / 1_000_000_000u128;
+        setup
+            .deposit_flow(buyer, setup.quote_token_id())
+            .mint(buyer_deposit as u64 + 2 * QUOTE_LEDGER_FEE)
+            .approve(buyer_deposit as u64 + QUOTE_LEDGER_FEE)
+            .deposit(buyer_deposit as u64)
+            .execute()
+            .await;
+
+        // Each round rests one sell, then a buy that fully crosses it, so the
+        // buyer ends up with three fills spread over three distinct buy orders.
+        let mut buy_ids = Vec::new();
+        for _ in 0..ORDERS {
+            seller_client
+                .add_limit_order(LimitOrderRequest {
+                    pair: setup.trading_pair(),
+                    side: Side::Sell,
+                    price: Nat::from(price),
+                    quantity: quantity.into(),
+                    time_in_force: None,
+                })
+                .await
+                .unwrap();
+            setup.env().tick().await;
+            let buy_id = buyer_client
+                .add_limit_order(LimitOrderRequest {
+                    pair: setup.trading_pair(),
+                    side: Side::Buy,
+                    price: Nat::from(price),
+                    quantity: quantity.into(),
+                    time_in_force: None,
+                })
+                .await
+                .unwrap();
+            setup.env().tick().await;
+            buy_ids.push(buy_id);
+        }
+
+        let by_account = |after: Option<String>, length: u32| GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount { after, length }),
+        };
+
+        // The full account-wide page spans all three orders, newest-first.
+        let all = buyer_client
+            .get_my_trades(by_account(None, 10))
+            .await
+            .unwrap();
+        let newest_first: Vec<OrderId> = buy_ids.iter().rev().cloned().collect();
+        assert_eq!(
+            all.iter().map(|t| t.order_id.clone()).collect::<Vec<_>>(),
+            newest_first,
+            "account-wide feed returns the buyer's fills across all orders, newest-first",
+        );
+
+        // Paginate: page 1 (length 2) then resume from its last cursor — page 2
+        // is strictly older, with no overlap or gap.
+        let page1 = buyer_client
+            .get_my_trades(by_account(None, 2))
+            .await
+            .unwrap();
+        assert_eq!(page1, all[..2].to_vec());
+        let cursor = page1.last().unwrap().id.clone();
+        let page2 = buyer_client
+            .get_my_trades(by_account(Some(cursor.clone()), 2))
+            .await
+            .unwrap();
+        assert_eq!(page2, all[2..].to_vec());
+        assert!(
+            page2.iter().all(|t| t.id != cursor),
+            "the resumed page never repeats the cursor it resumed from",
+        );
+
+        // Owner-scoped: the seller's account-wide feed is its three maker fills,
+        // disjoint from the buyer's taker fills.
+        let seller_trades = seller_client
+            .get_my_trades(by_account(None, 10))
+            .await
+            .unwrap();
+        assert_eq!(seller_trades.len(), ORDERS as usize);
+        assert!(seller_trades.iter().all(|t| t.is_maker));
+        assert!(
+            seller_trades.iter().all(|t| !buy_ids.contains(&t.order_id)),
+            "the seller never sees the buyer's orders",
+        );
+
+        // An unknown cursor is an empty page; a malformed one is an error.
+        let unknown = "f".repeat(48);
+        assert!(
+            buyer_client
+                .get_my_trades(by_account(Some(unknown), 10))
+                .await
+                .unwrap()
+                .is_empty(),
+        );
+        assert_eq!(
+            buyer_client
+                .get_my_trades(by_account(Some("bad-cursor".to_string()), 10))
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(GetMyTradesRequestError::InvalidTradeId)),
+        );
+
+        // Account and per-order feeds agree on the newest fill.
+        let newest_order = newest_first[0].clone();
+        let by_order = buyer_client
+            .get_my_trades(GetMyTradesArgs {
+                filter: TradesFilter::ByOrder(TradesByOrder {
+                    order_id: newest_order,
+                    after: None,
+                    length: 10,
+                }),
+            })
+            .await
+            .unwrap();
+        assert_eq!(by_order.len(), 1);
+        assert_eq!(by_order[0], all[0]);
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_enforce_notional_bounds_at_placement() {
         let setup = Setup::new().await;
         let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
@@ -725,13 +1137,27 @@ mod cancel_limit_order {
     use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, QUOTE_LEDGER_FEE};
     use oisy_trade_int_tests::{PRICE_SCALE, Setup};
     use oisy_trade_types::{
-        Balance, CancelLimitOrderRequestError, ErrorKind, LimitOrderRequest, OrderRecord,
-        OrderStatus, Side, TimeInForce,
+        AddTradingPairRequest, Balance, CancelLimitOrderRequestError, ErrorKind, LimitOrderRequest,
+        OrderRecord, OrderStatus, Side, TimeInForce,
     };
 
     #[tokio::test]
     async fn should_cancel_partially_filled_buy_and_refund_residual() {
-        let setup = Setup::new().await.with_trading_pair().await;
+        // Non-zero maker/taker fees so the partially filled buy accrues a
+        // non-trivial `filled_fee` and a `filled_quote` consistent with the
+        // realized notional.
+        const MAKER_FEE_BPS: u16 = 10;
+        const TAKER_FEE_BPS: u16 = 23;
+        let setup = Setup::new().await;
+        setup
+            .oisy_trade_client_with_caller(setup.controller())
+            .add_trading_pair(AddTradingPairRequest {
+                maker_fee_bps: MAKER_FEE_BPS,
+                taker_fee_bps: TAKER_FEE_BPS,
+                ..setup.add_trading_pair_request()
+            })
+            .await
+            .unwrap();
         let buyer = Principal::from_slice(&[0x01]);
         let buyer_client = setup.oisy_trade_client_with_caller(buyer);
         let seller = Principal::from_slice(&[0x02]);
@@ -844,6 +1270,10 @@ mod cancel_limit_order {
                 created_at: canceled.created_at,
                 last_updated_at: canceled.last_updated_at,
                 time_in_force: TimeInForce::GoodTilCanceled,
+                filled_quote: Nat::from(1_000_000_000u64),
+                // Buyer rested first, so it is the maker: a base-token fee at the
+                // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
+                filled_fee: Nat::from(1_000u64),
             }
         );
 
@@ -872,7 +1302,9 @@ mod cancel_limit_order {
                 .await
                 .unwrap(),
             Balance {
-                free: 1_000_000u64.into(),
+                // 1M base received minus the 1_000 maker fee withheld on the
+                // base side.
+                free: 999_000u64.into(),
                 reserved: 0u64.into(),
             }
         );
@@ -1477,18 +1909,26 @@ async fn should_replay_events_on_upgrade() {
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 1, // buyer seq
                         to_order: 0,   // seller seq
-                        token: oisy_trade_types_internal::event::PairToken::Quote,
+                        token: oisy_trade_types::PairToken::Quote,
                         amount: Nat::from(quote_reserved),
                         fee: Some(Nat::from((quote_reserved * maker_fee_bps as u64).div_ceil(10_000))),
                     },
                     oisy_trade_types_internal::event::BalanceOperation::Transfer {
                         from_order: 0,
                         to_order: 1,
-                        token: oisy_trade_types_internal::event::PairToken::Base,
+                        token: oisy_trade_types::PairToken::Base,
                         amount: Nat::from(deposit_amount),
                         fee: Some(Nat::from((deposit_amount * taker_fee_bps as u64).div_ceil(10_000))),
                     },
                 ],
+                fills: vec![oisy_trade_types_internal::event::FillEvent {
+                    fill_seq: 0,
+                    taker_order_seq: 1,
+                    maker_order_seq: 0,
+                    quantity: Nat::from(deposit_amount),
+                    maker_fee_bps,
+                    taker_fee_bps,
+                }],
             });
         });
     });

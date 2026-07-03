@@ -13,10 +13,11 @@ use proptest::prelude::*;
 mod schema_stability {
     use super::super::{LedgerFeeEntry, StateSnapshot, TokenEntry, TradingPairEntry};
     use crate::order::{
-        FeeRates, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken, PendingOrder,
-        Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce, TokenId,
-        TokenMetadata, TradingPair,
+        FeeRates, FillSeq, LotSize, OrderBookId, OrderBookSnapshot, OrderSeq, PairToken,
+        PendingOrder, Price, PriceLevel, Quantity, RestingOrder, Side, TickSize, TimeInForce,
+        TokenId, TokenMetadata, TradingPair,
     };
+    use crate::settlement::FillEvent;
     use crate::state::event::{BalanceOperation, SettlingEvent};
     use candid::{Nat, Principal};
     use oisy_trade_types_internal::Mode;
@@ -103,6 +104,7 @@ mod schema_stability {
                 fee_rates: FeeRates::default(),
                 min_notional: Quantity::from_u128(5),
                 max_notional: Some(Quantity::from_u128(9_000)),
+                next_fill: FillSeq::new(2),
             }],
             ledger_fee_cache: vec![LedgerFeeEntry {
                 token: token_a,
@@ -128,6 +130,13 @@ mod schema_stability {
                         fee: None,
                     },
                 ],
+                fills: vec![FillEvent {
+                    fill_seq: FillSeq::new(2),
+                    taker_order_seq: OrderSeq::new(5),
+                    maker_order_seq: OrderSeq::new(6),
+                    quantity: Quantity::from(1_000_000u64),
+                    fee_rates: FeeRates::default(),
+                }],
             }]),
             // Non-default policy.
             max_orders_per_chunk: Some(200),
@@ -151,11 +160,11 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        89820080810882828141018261410882814102826142068182828141018141028107818b81078103\
-        810a811a000f4240818581008200808118641a000f4240820180818281185a818381011a0007a120\
-        820080818281186e818381021a0007a12082008081810482810081000519232881828141011a0001\
-        86a08182810782820085810581068201801a05f5e1001a0003d090820085810681058200801a000f\
-        4240f618c81b000000012a05f200";
+        8982008008828281410182614108828141028261420681828281410181410207818c0703810a811a00\
+        0f42408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281186e\
+        8183021a0007a12082008081048281008100051923280281828141011a000186a08183078282008505\
+        068201801a05f5e1001a0003d09082008506058200801a000f4240f681850205061a000f4240828100\
+        810018c81b000000012a05f200";
 
     #[test]
     fn should_match_golden_encoding() {
@@ -273,6 +282,7 @@ fn should_roundtrip_state_through_snapshot() {
     // `into_state` to reconstruct a state that compares equal.
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -326,6 +336,7 @@ fn should_roundtrip_fee_pool_through_snapshot() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -362,6 +373,7 @@ fn should_roundtrip_notional_bounds_through_snapshot() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -388,6 +400,7 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );
@@ -483,6 +496,7 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
     assert_eq!(decoded.permissions, None);
     let restored = decoded.into_state(
         state.order_history.clone(),
+        state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
     );

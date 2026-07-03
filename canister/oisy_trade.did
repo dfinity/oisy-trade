@@ -297,6 +297,14 @@ type OrderRecord = record {
     last_updated_at : opt nat64;
     /// Time-in-force policy the order was placed with.
     time_in_force : TimeInForce;
+    /// Cumulative realized quote notional transacted across the order's fills,
+    /// in quote-token smallest units. The average execution price is
+    /// `filled_quote / filled_quantity` (VWAP), a ratio of the two tokens'
+    /// smallest units.
+    filled_quote : nat;
+    /// Cumulative realized fee charged across the order's fills, in the order's
+    /// receive token — base for a buy, quote for a sell.
+    filled_fee : nat;
 };
 
 /// Request for `get_my_orders`.
@@ -335,6 +343,74 @@ type GetMyOrdersError = record {
             InvalidOrderId;
             // A well-formed order id in the filter (`ById` target or
             // `ByPage.after` cursor) is unknown or not owned by the caller.
+            OrderNotFound;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Unique identifier for a trade, a text token opaque to callers (like
+// `OrderId`). Clients pass the last value they received back as the next page's
+// `after` and never parse it.
+type TradeId = text;
+
+// Caller's order's projected fill, as returned by `get_my_trades`.
+type Trade = record {
+    // This trade's unique identifier.
+    id : TradeId;
+    // The owning (caller's) order.
+    order_id : OrderId;
+    // This order's side.
+    side : Side;
+    // Execution (maker) price, in quote-token smallest units per one whole base
+    // token.
+    price : nat;
+    // Base filled, in base-token smallest units.
+    quantity : nat;
+    // Quote transacted (`price × quantity / 10^base_decimals`, realized), in
+    // quote-token smallest units. A buy taker's reservation surplus is excluded.
+    notional : nat;
+    // Realized fee charged to this side, in `fee_token` smallest units.
+    fee : nat;
+    // The token the fee is charged in — base for a buy, quote for a sell.
+    fee_token : PairToken;
+    // This side's role on this fill.
+    is_maker : bool;
+    // Settlement time in nanoseconds since the Unix epoch.
+    timestamp : nat64;
+};
+
+// Request for the `get_my_trades` query.
+type GetMyTradesArgs = record {
+    // How to select the caller's trades.
+    filter : TradesFilter;
+};
+
+// Selector for `get_my_trades`: the caller's fills for one order, or across all
+// their orders. Both modes are owner-scoped, newest-first, and paginated by an
+// `after` cursor. `length` is capped at 100.
+type TradesFilter = variant {
+    // The caller's fills for a single order. Errors with `OrderNotFound` if the
+    // caller does not own `order_id`. Pages via a cursor: pass the previous
+    // page's last `Trade.id` as `after`; null starts from the newest fill.
+    ByOrder : record { order_id : OrderId; after : opt TradeId; length : nat32 };
+    // The caller's fills across all their orders.
+    ByAccount : record { after : opt TradeId; length : nat32 };
+};
+
+// Error returned by the `get_my_trades` query. See the disposition contract at
+// the top of this file.
+type GetMyTradesError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The `order_id` in a `ByOrder` filter was not a well-formed order id.
+            InvalidOrderId;
+            // The `after` cursor was not a well-formed `TradeId`.
+            InvalidTradeId;
+            // The `order_id` in a `ByOrder` filter is unknown or not owned by
+            // the caller.
             OrderNotFound;
         };
         TemporaryError : opt variant {};
@@ -687,6 +763,18 @@ type MatchingEvent = record {
 type SettlingEvent = record {
     book_id : nat64;
     balance_operations : vec BalanceOperation;
+    fills : vec FillEvent;
+};
+
+// Per-fill record carried on a settling event: the fill's identity, the matched
+// quantity, and the maker/taker fee rates in basis points.
+type FillEvent = record {
+    fill_seq : nat64;
+    taker_order_seq : nat64;
+    maker_order_seq : nat64;
+    quantity : nat;
+    maker_fee_bps : nat16;
+    taker_fee_bps : nat16;
 };
 
 // Balance movement recorded during settlement. `from_order` / `to_order` /
@@ -830,6 +918,14 @@ service : (OisyTradeArg) -> {
     // `ByPage` cursor) is malformed, and `OrderNotFound` if it is well-formed
     // but unknown or not owned by the caller.
     get_my_orders : (opt GetMyOrdersArgs) -> (variant { Ok : vec UserOrder; Err : GetMyOrdersError }) query;
+
+    // Return the caller's fills, owner-scoped and newest-first. `ByOrder`
+    // returns one order's fills (`OrderNotFound` if the `order_id` is well-formed
+    // but unknown or not owned by the caller); `ByAccount` returns fills across
+    // all the caller's orders. Pages via the `after` cursor; `length` is capped
+    // at 100. Returns `InvalidOrderId` / `InvalidTradeId` for a malformed
+    // `order_id` / cursor; a well-formed but unknown cursor yields an empty page.
+    get_my_trades : (GetMyTradesArgs) -> (variant { Ok : vec Trade; Err : GetMyTradesError }) query;
 
     // List every token registered with the canister. Intended as a primitive
     // for clients that need to discover which tokens a user might hold

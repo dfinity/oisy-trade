@@ -1,16 +1,22 @@
 pub mod event;
+mod order;
 pub mod tokens;
+
+pub use order::{PlaceOrder, order};
 
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
     FeeRates, Fill, LotSize, Order, OrderBook, OrderBookId, OrderHistory, OrderSeq, PendingOrder,
-    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+    Price, Quantity, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeHistory,
+    TradingPair,
 };
+use crate::state;
 use crate::state::StableMemoryOptions;
+use crate::test_fixtures::tokens::SupportedTokens;
 use crate::user::{UserId, UserRegistry};
-use crate::{Timestamp, order, state};
 use candid::Principal;
 use ic_stable_structures::{Memory, VectorMemory};
+use minicbor::Encode;
 use oisy_trade_types::{AddTradingPairRequest, LimitOrderRequest, Token};
 use std::iter::once;
 use std::num::{NonZeroU64, NonZeroU128};
@@ -79,6 +85,7 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
         order_history(),
+        trade_history(),
         user_registry(),
         balances(),
     )
@@ -94,9 +101,13 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
         },
-        order::OrderHistory::new(
+        crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
             crate::storage::user_orders_memory(),
+        ),
+        crate::order::TradeHistory::new(
+            crate::storage::trades_memory(),
+            crate::storage::trades_by_user_memory(),
         ),
         UserRegistry::new(crate::storage::user_registry_memory()),
         TokenBalance::new(crate::storage::balances_memory()),
@@ -156,15 +167,29 @@ pub fn icp_ckbtc_trading_pair() -> TradingPair {
     }
 }
 
+/// ICP (base, 8 decimals) / ckUSDT (quote, 6 decimals) pair for the DEFI-2901
+/// worked example. Base stays ICP, so `base_scale = 10^8` is unchanged from the
+/// ckBTC pair; only the quote token's decimals differ.
+pub fn icp_ckusdt_trading_pair() -> TradingPair {
+    TradingPair {
+        base: icp_token_id(),
+        quote: ckusdt_token_id(),
+    }
+}
+
 pub fn ckbtc_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap())
+    SupportedTokens::CKBTC.token_id().into()
+}
+
+pub fn ckusdt_token_id() -> TokenId {
+    SupportedTokens::CKUSDT.token_id().into()
 }
 
 pub fn icp_token_id() -> TokenId {
-    TokenId::new(Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap())
+    SupportedTokens::ICP.token_id().into()
 }
 
-fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
+fn gtc_order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
     PendingOrder {
         side,
         price: Price::new(price.into()),
@@ -175,24 +200,27 @@ fn order(id: u64, side: Side, price: impl Into<u128>, quantity: impl Into<u64>) 
 }
 
 pub fn buy(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    order(id, Side::Buy, price, quantity)
+    gtc_order(id, Side::Buy, price, quantity)
 }
 
 pub fn sell(id: u64, price: impl Into<u128>, quantity: impl Into<u64>) -> Order {
-    order(id, Side::Sell, price, quantity)
+    gtc_order(id, Side::Sell, price, quantity)
 }
 
 /// Construct a [`Fill`] for use in test assertions.
 ///
-/// `taker` provides the taker context (seq, side, price).
+/// `fill_seq` is the per-book sequence the order book is expected to have minted
+/// for this match. `taker` provides the taker context (seq, side, price).
 /// `maker_order_seq`, `maker_price`, and `quantity` describe the fill itself.
 pub fn fill(
+    fill_seq: u64,
     taker: &Order,
     maker_order_seq: OrderSeq,
     maker_price: impl Into<u128>,
     quantity: impl Into<u64>,
 ) -> Fill {
     Fill {
+        fill_seq: crate::order::FillSeq::new(fill_seq),
         taker_order_seq: taker.id(),
         taker_side: taker.side(),
         taker_price: taker.price(),
@@ -261,9 +289,13 @@ pub fn init_state_with_order_book() {
 }
 
 pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
-    let order_history = order::OrderHistory::new(
+    let order_history = crate::order::OrderHistory::new(
         crate::storage::order_history_memory(),
         crate::storage::user_orders_memory(),
+    );
+    let trade_history = crate::order::TradeHistory::new(
+        crate::storage::trades_memory(),
+        crate::storage::trades_by_user_memory(),
     );
     let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
     let balances = TokenBalance::new(crate::storage::balances_memory());
@@ -275,6 +307,7 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
             },
             order_history,
+            trade_history,
             user_registry,
             balances,
         )
@@ -318,101 +351,6 @@ pub fn fund_user(user: Principal) {
     });
 }
 
-/// Deposit just enough of the appropriate token to cover `side`'s reservation,
-/// validate the resulting limit order, and record it. Returns the assigned
-/// `OrderId`. Each call funds the user from zero, so distinct users get
-/// distinct, isolated balances.
-pub fn place_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::GoodTilCanceled,
-    )
-}
-
-/// Like [`place_order`] but for a fill-or-kill order.
-pub fn place_fok_order<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    place_order_with_tif(
-        state,
-        user,
-        pair,
-        side,
-        price,
-        quantity,
-        TimeInForce::FillOrKill,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn place_order_with_tif<MH, MB>(
-    state: &mut state::State<MH, MB>,
-    user: Principal,
-    pair: &TradingPair,
-    side: Side,
-    price: u128,
-    quantity: impl Into<Quantity>,
-    time_in_force: TimeInForce,
-) -> order::OrderId
-where
-    MH: ic_stable_structures::Memory,
-    MB: ic_stable_structures::Memory,
-{
-    let pending = PendingOrder {
-        side,
-        price: Price::new(price),
-        quantity: quantity.into(),
-        time_in_force,
-    };
-    let (token, amount) = match side {
-        Side::Buy => (
-            pair.quote,
-            pending
-                .price
-                .checked_mul_quantity_scaled(&pending.quantity, state.base_scale(&pair.base))
-                .expect("place_order: price × quantity overflow"),
-        ),
-        Side::Sell => (pair.base, pending.quantity),
-    };
-    state.deposit(user, token, amount, StableMemoryOptions::Write);
-    let (order_id, order) = state
-        .validate_limit_order(user, pair.clone(), pending)
-        .expect("place_order: validate_limit_order failed");
-    state.record_limit_order(
-        user,
-        order_id.book_id(),
-        order,
-        Timestamp::EPOCH,
-        StableMemoryOptions::Write,
-    );
-    order_id
-}
-
 #[cfg(test)]
 pub fn place_limit_order(
     user: Principal,
@@ -437,16 +375,40 @@ pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
 
+pub fn trade_history() -> TradeHistory<VectorMemory> {
+    TradeHistory::new(VectorMemory::default(), VectorMemory::default())
+}
+
 /// Asserts two [`OrderRecord`]s are equal on every field except the
 /// `created_at` / `last_updated_at` timestamps, which tests assert separately.
 #[track_caller]
-pub fn assert_eq_ignoring_timestamp(actual: &order::OrderRecord, expected: &order::OrderRecord) {
-    let normalized = order::OrderRecord {
+pub fn assert_eq_ignoring_timestamp(
+    actual: &crate::order::OrderRecord,
+    expected: &crate::order::OrderRecord,
+) {
+    let normalized = crate::order::OrderRecord {
         created_at: expected.created_at,
         last_updated_at: expected.last_updated_at,
         ..actual.clone()
     };
     assert_eq!(&normalized, expected);
+}
+
+/// The persisted record for `order_id` as `owner` sees it via
+/// `get_user_order`.
+pub fn record_of<MH, MB>(
+    state: &state::State<MH, MB>,
+    owner: Principal,
+    order_id: crate::order::OrderId,
+) -> crate::order::OrderRecord
+where
+    MH: ic_stable_structures::Memory,
+    MB: ic_stable_structures::Memory,
+{
+    state
+        .get_user_order(&owner, order_id)
+        .map(|(_, _, record)| record)
+        .expect("order record present")
 }
 
 pub fn balances() -> TokenBalance<VectorMemory> {
@@ -491,32 +453,42 @@ pub fn transfer_from_response(
     mock_response(candid::encode_args((result,)).unwrap())
 }
 
+pub fn minicbor_encode<T>(t: &T) -> Vec<u8>
+where
+    T: Encode<()>,
+{
+    let mut buf = vec![];
+    minicbor::encode(t, &mut buf).expect("encoding should succeed");
+    buf
+}
+
 #[cfg(test)]
 pub mod arbitrary {
+    use super::event::MAX_HALT_BOOKS;
+    use super::{LOT_SIZE, TICK_SIZE};
     use crate::Timestamp;
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
-        self, BasisPoint, FeeRates, Fill, LotSize, MatchingOutput, Order, OrderBookId, OrderId,
-        OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity, RemovedOrder,
-        Side, TickSize, TimeInForce, TokenId, TokenMetadata,
+        self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
+        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
+        RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
+    use crate::settlement::FillEvent;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
         DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
+    use minicbor::{Decode, Encode};
     use oisy_trade_types::FilterToken;
     use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
     use proptest::collection::{SizeRange, btree_set, vec};
-    use proptest::option;
-    use proptest::prelude::{Just, Strategy, any};
+    use proptest::prelude::{Just, Strategy, TestCaseError, any};
     use proptest::prop_oneof;
+    use proptest::{option, prop_assert_eq};
     use std::collections::BTreeSet;
     use std::num::{NonZeroU64, NonZeroU128};
-
-    use super::event::MAX_HALT_BOOKS;
-    use super::{LOT_SIZE, TICK_SIZE};
 
     /// Strategy for a valid [`PendingOrder`] with a tick-aligned price and a
     /// lot-aligned non-zero quantity.
@@ -612,6 +584,7 @@ pub mod arbitrary {
                     (Side::Sell, Price::new(lo), Price::new(hi))
                 };
                 Fill {
+                    fill_seq: crate::order::FillSeq::new(index),
                     taker_order_seq: OrderSeq::new(2 * index),
                     taker_side,
                     taker_price,
@@ -620,6 +593,34 @@ pub mod arbitrary {
                     quantity: Quantity::from(qty_lots * lot),
                 }
             })
+    }
+
+    /// Strategy for an arbitrary [`TradeRecord`].
+    pub fn arb_trade_record() -> impl Strategy<Value = TradeRecord> {
+        (
+            arb_side(),
+            arb_price(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_quantity(),
+            arb_pair_token(),
+            any::<bool>(),
+            arb_timestamp(),
+        )
+            .prop_map(
+                |(side, price, quantity, notional, fee, fee_token, is_maker, timestamp)| {
+                    TradeRecord {
+                        side,
+                        price,
+                        quantity,
+                        notional,
+                        fee,
+                        fee_token,
+                        is_maker,
+                        timestamp,
+                    }
+                },
+            )
     }
 
     /// Strategy for an arbitrary [`Principal`] built from a self-authenticating
@@ -711,16 +712,32 @@ pub mod arbitrary {
                     last_updated_at,
                     time_in_force,
                 )| {
-                    (0..=qty_lots).prop_map(move |filled_lots| OrderRecord {
-                        owner,
-                        side,
-                        price: Price::new(price_ticks as u128 * tick),
-                        quantity: Quantity::from(qty_lots * lot),
-                        filled_quantity: Quantity::from(filled_lots * lot),
-                        status,
-                        created_at,
-                        last_updated_at,
-                        time_in_force,
+                    (0..=qty_lots).prop_map(move |filled_lots| {
+                        let price = Price::new(price_ticks as u128 * tick);
+                        let filled_quantity = Quantity::from(filled_lots * lot);
+                        // Realized quote notional, derived exactly as the engine
+                        // does: `maker_price × filled_quantity / base_scale`
+                        // (cf. `Fill::quote_amount`), with `base_scale = 10^8`
+                        // for this fixture.
+                        let filled_quote = price
+                            .checked_mul_quantity_scaled(
+                                &filled_quantity,
+                                NonZeroU64::new(100_000_000).unwrap(),
+                            )
+                            .expect("fixture notional fits in 256 bits");
+                        OrderRecord {
+                            owner,
+                            side,
+                            price,
+                            quantity: Quantity::from(qty_lots * lot),
+                            filled_quantity,
+                            status,
+                            created_at,
+                            last_updated_at,
+                            time_in_force,
+                            filled_quote,
+                            filled_fee: Quantity::from(u128::from(filled_lots)),
+                        }
                     })
                 },
             )
@@ -732,6 +749,10 @@ pub mod arbitrary {
 
     pub fn arb_order_seq() -> impl Strategy<Value = OrderSeq> {
         any::<u64>().prop_map(OrderSeq::new)
+    }
+
+    pub fn arb_fill_seq() -> impl Strategy<Value = FillSeq> {
+        any::<u64>().prop_map(FillSeq::new)
     }
 
     pub fn arb_token_id() -> impl Strategy<Value = TokenId> {
@@ -997,13 +1018,38 @@ pub mod arbitrary {
         prop_oneof![transfer, unreserve]
     }
 
+    /// Strategy for an arbitrary [`FillEvent`], fuzzing every field
+    /// independently — the lean record persisted on a settling event.
+    pub fn arb_fill_event() -> impl Strategy<Value = FillEvent> {
+        (
+            arb_fill_seq(),
+            arb_order_seq(),
+            arb_order_seq(),
+            arb_quantity(),
+            arb_fee_rates(),
+        )
+            .prop_map(
+                |(fill_seq, taker_order_seq, maker_order_seq, quantity, fee_rates)| FillEvent {
+                    fill_seq,
+                    taker_order_seq,
+                    maker_order_seq,
+                    quantity,
+                    fee_rates,
+                },
+            )
+    }
+
     pub fn arb_settling_event() -> impl Strategy<Value = SettlingEvent> {
-        (any::<u64>(), vec(arb_balance_operation(), 0..10)).prop_map(
-            |(book_id, balance_operations)| SettlingEvent {
+        (
+            any::<u64>(),
+            vec(arb_balance_operation(), 0..10),
+            vec(arb_fill_event(), 0..10),
+        )
+            .prop_map(|(book_id, balance_operations, fills)| SettlingEvent {
                 book_id: order::OrderBookId::new(book_id),
                 balance_operations,
-            },
-        )
+                fills,
+            })
     }
 
     pub fn arb_permissions() -> impl Strategy<Value = crate::state::permissions::Permissions> {
@@ -1068,6 +1114,17 @@ pub mod arbitrary {
     pub fn arb_event() -> impl Strategy<Value = Event> {
         (arb_timestamp(), arb_event_type())
             .prop_map(|(timestamp, payload)| Event { timestamp, payload })
+    }
+
+    pub fn check_minicbor_roundtrip<T>(v: &T) -> Result<(), TestCaseError>
+    where
+        for<'a> T: PartialEq + std::fmt::Debug + Encode<()> + Decode<'a, ()>,
+    {
+        let mut buf = vec![];
+        minicbor::encode(v, &mut buf).expect("encoding should succeed");
+        let decoded = minicbor::decode(&buf).expect("decoding should succeed");
+        prop_assert_eq!(v, &decoded);
+        Ok(())
     }
 }
 

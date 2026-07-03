@@ -3,6 +3,7 @@ use crate::order::{
     FeeRates, LotSize, OrderBookId, OrderId, OrderSeq, PairToken, Price, Quantity, Side, TickSize,
     TimeInForce, TokenId, TokenMetadata,
 };
+use crate::settlement::FillEvent;
 use candid::Principal;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -121,14 +122,21 @@ pub struct MatchingEvent {
     pub orders: Vec<OrderSeq>,
 }
 
-/// Outcome of the matching engine:
-/// * balance transitions between maker/taker
+/// Outcome of the matching engine, drained in the settling phase:
+/// * `balance_operations`: balance transitions between maker/taker;
+/// * `fills`: the lean per-fill records whose two side-projected trade records
+///   are rebuilt and persisted to `TradeHistory` in the settling phase — the
+///   side and execution price are recovered from the order records and the
+///   notional/fees recomputed. Empty for cancel-driven settling events, which
+///   carry only an unreserve operation.
 #[derive(Clone, PartialEq, Eq, Debug, Decode, Encode)]
 pub struct SettlingEvent {
     #[n(0)]
     pub book_id: OrderBookId,
     #[n(1)]
     pub balance_operations: Vec<BalanceOperation>,
+    #[n(2)]
+    pub fills: Vec<FillEvent>,
 }
 
 /// Participants are identified by `OrderSeq` — the apply path resolves each

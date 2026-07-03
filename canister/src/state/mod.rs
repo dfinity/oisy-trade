@@ -17,11 +17,12 @@ use crate::Runtime;
 use crate::Timestamp;
 use crate::balance::{Balance, TokenBalance};
 use crate::order::{
-    self, CursorNotFound, FeeRates, LotSize, MatchOrderError, MatchingOutput, NotionalError, Order,
-    OrderBook, OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
-    PairToken, PendingOrder, Quantity, RemovedOrder, Side, TickSize, TokenId, TokenMetadata,
-    TradingPair,
+    CursorNotFound, FeeRates, FillSeq, LotSize, MatchOrderError, NotionalError, Order, OrderBook,
+    OrderBookId, OrderHistory, OrderId, OrderRecord, OrderSeq, OrderStatus, OrderUpdate,
+    PendingOrder, Price, Quantity, Side, TickSize, TokenId, TokenMetadata, TradeHistory, TradeId,
+    TradeRecord, TradingPair,
 };
+use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
 use crate::user::{UserId, UserRegistry};
 use candid::{Nat, Principal};
@@ -82,6 +83,7 @@ pub struct State<MH: Memory, MB: Memory> {
     user_registry: UserRegistry<MB>,
     balances: TokenBalance<MB>,
     order_history: OrderHistory<MH>,
+    trade_history: TradeHistory<MH>,
     /// Cached ledger transfer fees, learned from `BadFee` responses.
     /// Starts at 0 for unknown tokens; updated on the first withdrawal attempt.
     ledger_fee_cache: BTreeMap<TokenId, Nat>,
@@ -102,6 +104,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn new(
         init_arg: InitArg,
         order_history: OrderHistory<MH>,
+        trade_history: TradeHistory<MH>,
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
@@ -117,6 +120,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             user_registry,
             balances,
             order_history,
+            trade_history,
             matching_timer_scheduled: false,
             ledger_fee_cache: BTreeMap::default(),
             pending_settling_events: VecDeque::default(),
@@ -269,6 +273,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     created_at: timestamp,
                     last_updated_at: None,
                     time_in_force: order.time_in_force(),
+                    filled_quote: Quantity::ZERO,
+                    filled_fee: Quantity::ZERO,
                 },
             );
         }
@@ -349,30 +355,25 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .order_books
             .get_mut(&book_id)
             .expect("BUG: order book missing for canceled order");
-        let RemovedOrder {
-            side,
-            price,
-            remaining_quantity,
-        } = book.remove_order(seq).expect(
+        let removed = book.remove_order(seq).expect(
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
-        let (refund_token, refund_amount) = refund_for(side, price, remaining_quantity, base_scale);
         if matches!(persistence, StableMemoryOptions::Write) {
             self.order_history.apply_update(
                 &order_id,
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
+            let mut balance_operations = Vec::with_capacity(1);
+            RemovedOrderSettlement::new(seq, &removed, base_scale)
+                .push_balance_operations(&mut balance_operations);
+            self.pending_settling_events
+                .push_back(event::SettlingEvent {
+                    book_id,
+                    balance_operations,
+                    fills: Vec::new(),
+                });
         }
-        self.pending_settling_events
-            .push_back(event::SettlingEvent {
-                book_id,
-                balance_operations: vec![event::BalanceOperation::Unreserve {
-                    order: seq,
-                    token: refund_token,
-                    amount: refund_amount,
-                }],
-            });
     }
 
     /// Drive engine matching for the given book; when `persistence` is
@@ -396,54 +397,37 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: trading pair registered but order book missing");
         let fee_rates = book.fee_rates();
         let output = book.process_pending_orders(&event.orders);
+
         if matches!(persistence, StableMemoryOptions::Write) {
-            #[cfg(feature = "canbench-rs")]
-            let _p = canbench_rs::bench_scope("status");
-            // Fold the batch into one update per touched order, then write each
-            // once: a single batch can fill one order across many `Fill`s (a
-            // taker sweeping several makers, or a maker hit repeatedly) and an
-            // order can both change status and accrue fills in the same batch.
-            let mut updates: BTreeMap<OrderSeq, OrderUpdate> = BTreeMap::new();
-            for fill in &output.fills {
-                for seq in [fill.taker_order_seq, fill.maker_order_seq] {
-                    let entry = updates.entry(seq).or_default();
-                    entry.filled_delta = entry
-                        .filled_delta
-                        .checked_add(fill.quantity)
-                        .expect("BUG: filled_delta overflow");
+            let settlement = MatchSettlement::from_matching(output, fee_rates, base_scale);
+            {
+                #[cfg(feature = "canbench-rs")]
+                let _p = canbench_rs::bench_scope("apply_order_updates");
+                for (seq, update) in settlement.order_updates {
+                    self.order_history
+                        .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            for seq in &output.resting_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
+            if !settlement.balance_operations.is_empty() || !settlement.fills.is_empty() {
+                self.pending_settling_events
+                    .push_back(event::SettlingEvent {
+                        book_id: event.book_id,
+                        balance_operations: settlement.balance_operations,
+                        fills: settlement.fills,
+                    });
             }
-            for seq in &output.filled_orders {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Filled);
-            }
-            for seq in output.expired_orders.keys() {
-                updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
-            }
-            for (seq, update) in updates {
-                let order_id = OrderId::new(event.book_id, seq);
-                self.order_history.apply_update(&order_id, update, now);
-            }
-        }
-        let balance_operations = compute_balance_operations(&output, fee_rates, base_scale);
-        if !balance_operations.is_empty() {
-            self.pending_settling_events
-                .push_back(event::SettlingEvent {
-                    book_id: event.book_id,
-                    balance_operations,
-                });
         }
     }
 
-    /// Apply a declarative list of balance operations to `self.balances`.
-    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay):
-    /// the function's only side effect is on stable-memory-backed
-    /// balances, which are preserved across upgrades.
+    /// Append each fill's two trade legs to `self.trade_history` and apply the
+    /// event's declarative balance operations to `self.balances`.
+    /// No-op under [`StableMemoryOptions::Skip`] (post-upgrade replay): both
+    /// side effects land in stable-memory-backed maps that are preserved
+    /// across upgrades.
     pub fn record_settling_event(
         &mut self,
         event: &event::SettlingEvent,
+        timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         if matches!(persistence, StableMemoryOptions::Skip) {
@@ -455,19 +439,40 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .get_pair(&event.book_id)
             .cloned()
             .expect("BUG: unknown trading pair in SettlingEvent");
+        let base_scale = self.base_scale_for_book(event.book_id);
         #[cfg(feature = "canbench-rs")]
         let _p = canbench_rs::bench_scope("settling");
         // Resolve each distinct `OrderSeq` referenced by the operations to its
-        // owner's `UserId` once (one `order_history` read + one registry lookup
-        // per seq), then reuse from the map in the loop. A 1000-fill round can
-        // reference ~2000 distinct seqs over ~3000 operations, so caching keeps
-        // both stable maps out of the per-op hot path.
-        let user_cache = resolve_op_users(
+        // owner's `UserId`, side, and price once (one `order_history` read + one
+        // registry lookup per seq), then reuse from the map in the loop. A
+        // 1000-fill round can reference ~2000 distinct seqs over ~3000
+        // operations, so caching keeps both stable maps out of the per-op hot
+        // path. Both legs of every fill are referenced by its balance ops, so
+        // each fill's side and execution price are already in the cache — no
+        // extra stable reads to rebuild the trade legs.
+        let resolved = resolve_op_orders(
             &event.book_id,
             &event.balance_operations,
             &self.order_history,
             &self.user_registry,
         );
+        for fill in &event.fills {
+            let taker = *resolved.get(&fill.taker_order_seq).expect(
+                "BUG: a settling fill's taker order seq must be resolved from its balance operations",
+            );
+            let maker = *resolved.get(&fill.maker_order_seq).expect(
+                "BUG: a settling fill's maker order seq must be resolved from its balance operations",
+            );
+            let [taker_leg, maker_leg] = fill.trade_legs(
+                event.book_id,
+                taker.side,
+                maker.price,
+                base_scale,
+                timestamp,
+            );
+            self.trade_history
+                .append(taker_leg, taker.user, maker_leg, maker.user);
+        }
         for op in &event.balance_operations {
             let token = pair.token(match op {
                 event::BalanceOperation::Transfer { token, .. }
@@ -482,15 +487,16 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     ..
                 } => {
                     self.balances.transfer(
-                        user_cache[from_order],
-                        user_cache[to_order],
+                        resolved[from_order].user,
+                        resolved[to_order].user,
                         &token,
                         *amount,
                         fee.unwrap_or(Quantity::ZERO),
                     );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    self.balances.unreserve(user_cache[order], &token, *amount);
+                    self.balances
+                        .unreserve(resolved[order].user, &token, *amount);
                 }
             }
         }
@@ -550,6 +556,50 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .expect("BUG: order references an unknown trading pair")
             .clone();
         Some((id, pair, record))
+    }
+
+    /// Returns up to `length` of `owner`'s trades for the single order
+    /// `order_id`, newest first, resuming strictly after the `after` cursor (a
+    /// cursor from a prior page). Yields [`OrderNotFound`] when `order_id` is
+    /// unknown or owned by another principal, and [`CursorNotFound`] when
+    /// `after` is not one of the order's trades (including a cursor whose
+    /// embedded `OrderId` names a different order); a valid cursor with no older
+    /// trades is `Ok(vec![])`.
+    pub fn get_user_order_trades(
+        &self,
+        owner: &Principal,
+        order_id: OrderId,
+        after: Option<TradeId>,
+        length: usize,
+    ) -> Result<Vec<(FillSeq, TradeRecord)>, GetUserOrderTradesError> {
+        let owns = self
+            .order_history
+            .get(&order_id)
+            .is_some_and(|record| &record.owner == owner);
+        if !owns {
+            return Err(GetUserOrderTradesError::OrderNotFound);
+        }
+        self.trade_history
+            .trades_for_order(order_id, after, length)
+            .map_err(|CursorNotFound| GetUserOrderTradesError::CursorNotFound)
+    }
+
+    /// Returns up to `length` of `owner`'s trades across **all** their orders,
+    /// newest first, resuming strictly after the `after` cursor (a cursor from a
+    /// prior page). Returns `Ok(vec![])` when `owner` is not a registered user.
+    /// An `after` cursor that is not one of `owner`'s trades yields
+    /// [`CursorNotFound`]; a valid cursor with no older trades is
+    /// `Ok(vec![])`.
+    pub fn get_user_trades(
+        &self,
+        owner: &Principal,
+        after: Option<TradeId>,
+        length: usize,
+    ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
+        let Some(user_id) = self.user_registry.lookup(*owner) else {
+            return Ok(Vec::new());
+        };
+        self.trade_history.trades_after(user_id, after, length)
     }
 
     pub fn next_book_id(&self) -> OrderBookId {
@@ -884,15 +934,28 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 }
 
-/// Build a `OrderSeq -> Principal` map for every distinct seq referenced by
-/// `ops`. Each `get` hits stable memory; callers can then look owners up in
-/// the returned `BTreeMap` in O(log n) heap-only time.
-fn resolve_op_users<MH: Memory, MB: Memory>(
+/// An order, recovered from its [`OrderRecord`], as the settling phase needs it:
+/// the resolved `UserId`, the order `side`, and the immutable limit `price`. A
+/// fill's execution price is its maker order's `price`; a fill's taker side is its
+/// taker order's `side`.
+#[derive(Clone, Copy)]
+struct ResolvedOrder {
+    user: UserId,
+    side: Side,
+    price: Price,
+}
+
+/// Build a `OrderSeq -> ResolvedOrder` map for every distinct seq referenced by
+/// `ops`. Each `get` hits stable memory once and yields the owner, side, and
+/// price together; callers can then look the order up in the returned `BTreeMap`
+/// in O(log n) heap-only time, with no extra stable reads to recover a fill's
+/// side or execution price.
+fn resolve_op_orders<MH: Memory, MB: Memory>(
     book_id: &OrderBookId,
     ops: &[event::BalanceOperation],
     history: &OrderHistory<MH>,
     registry: &UserRegistry<MB>,
-) -> BTreeMap<OrderSeq, UserId> {
+) -> BTreeMap<OrderSeq, ResolvedOrder> {
     let mut seqs = BTreeSet::new();
     for op in ops {
         match op {
@@ -911,109 +974,22 @@ fn resolve_op_users<MH: Memory, MB: Memory>(
     }
     seqs.into_iter()
         .map(|seq| {
-            let owner = history
+            let record = history
                 .get(&OrderId::new(*book_id, seq))
-                .expect("BUG: missing order_history entry for BalanceOperation")
-                .owner;
+                .expect("BUG: missing order_history entry for BalanceOperation");
             let user = registry
-                .lookup(owner)
+                .lookup(record.owner)
                 .expect("BUG: order owner not registered");
-            (seq, user)
+            (
+                seq,
+                ResolvedOrder {
+                    user,
+                    side: record.side,
+                    price: record.price,
+                },
+            )
         })
         .collect()
-}
-
-fn compute_balance_operations(
-    output: &MatchingOutput,
-    fee_rates: FeeRates,
-    base_scale: NonZeroU64,
-) -> Vec<event::BalanceOperation> {
-    let mut ops = Vec::with_capacity(output.fills.len() * 3 + output.expired_orders.len());
-    for fill in &output.fills {
-        let (buyer_seq, seller_seq) = match fill.taker_side {
-            Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
-            Side::Sell => (fill.maker_order_seq, fill.taker_order_seq),
-        };
-        // Receive-side convention: buyer pays fee in base (the asset they
-        // receive), seller in quote. Each side's rate is `taker` if they
-        // were the taker, else `maker`.
-        let (buyer_rate, seller_rate) = match fill.taker_side {
-            Side::Buy => (fee_rates.taker, fee_rates.maker),
-            Side::Sell => (fee_rates.maker, fee_rates.taker),
-        };
-        let notional = fill.quote_amount(base_scale);
-        let quote_fee = seller_rate.mul_ceil(notional);
-        let base_fee = buyer_rate.mul_ceil(fill.quantity);
-
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: buyer_seq,
-            to_order: seller_seq,
-            token: order::PairToken::Quote,
-            amount: notional,
-            fee: nonzero(quote_fee),
-        });
-        if fill.taker_side == Side::Buy
-            && let Some(diff) = fill.taker_price.checked_sub(fill.maker_price)
-            && !diff.is_zero()
-        {
-            let surplus = diff
-                .checked_mul_quantity_scaled(&fill.quantity, base_scale)
-                .expect("BUG: price_diff * quantity overflow — validated in validate_limit_order");
-            ops.push(event::BalanceOperation::Unreserve {
-                order: fill.taker_order_seq,
-                token: order::PairToken::Quote,
-                amount: surplus,
-            });
-        }
-        ops.push(event::BalanceOperation::Transfer {
-            from_order: seller_seq,
-            to_order: buyer_seq,
-            token: order::PairToken::Base,
-            amount: fill.quantity,
-            fee: nonzero(base_fee),
-        });
-    }
-    // A killed fill-or-kill order never touched the book, so its full placement
-    // reservation must be released.
-    for (seq, killed) in &output.expired_orders {
-        let (refund_token, refund_amount) = refund_for(
-            killed.side,
-            killed.price,
-            killed.remaining_quantity,
-            base_scale,
-        );
-        ops.push(event::BalanceOperation::Unreserve {
-            order: *seq,
-            token: refund_token,
-            amount: refund_amount,
-        });
-    }
-    ops
-}
-
-fn refund_for(
-    side: Side,
-    price: order::Price,
-    remaining_quantity: Quantity,
-    base_scale: NonZeroU64,
-) -> (PairToken, Quantity) {
-    match side {
-        Side::Buy => (
-            PairToken::Quote,
-            price
-                .checked_mul_quantity_scaled(&remaining_quantity, base_scale)
-                .expect("BUG: price * remaining overflow — validated at placement"),
-        ),
-        Side::Sell => (PairToken::Base, remaining_quantity),
-    }
-}
-
-/// Collapse a zero-quantity fee to `None`. Keeps `Some(_)` reserved for
-/// "fee was actually charged" so callers (audit log, apply path,
-/// `/metrics`) can distinguish "no fee on this fill" from "fee of zero
-/// charged".
-fn nonzero(q: Quantity) -> Option<Quantity> {
-    if q.is_zero() { None } else { Some(q) }
 }
 
 /// `oisy_trade_types::Balance` carrying a fee amount in `free` and zero in
@@ -1042,6 +1018,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             matching_timer_scheduled,
             ledger_fee_cache,
             order_history,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1058,6 +1035,7 @@ impl Clone for State<ic_stable_structures::VectorMemory, ic_stable_structures::V
             matching_timer_scheduled: *matching_timer_scheduled,
             ledger_fee_cache: ledger_fee_cache.clone(),
             order_history: order_history.clone(),
+            trade_history: trade_history.clone(),
             pending_settling_events: pending_settling_events.clone(),
             in_flight_user_ops: in_flight_user_ops.clone(),
             permissions: permissions.clone(),
@@ -1080,6 +1058,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             matching_timer_scheduled,
             ledger_fee_cache,
             order_history,
+            trade_history,
             pending_settling_events,
             in_flight_user_ops,
             permissions,
@@ -1096,6 +1075,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             matching_timer_scheduled: other_matching_timer_scheduled,
             ledger_fee_cache: other_ledger_fee_cache,
             order_history: other_order_history,
+            trade_history: other_trade_history,
             pending_settling_events: other_pending_settling_events,
             in_flight_user_ops: other_in_flight_user_ops,
             permissions: other_permissions,
@@ -1111,6 +1091,7 @@ impl PartialEq for State<ic_stable_structures::VectorMemory, ic_stable_structure
             && matching_timer_scheduled == other_matching_timer_scheduled
             && ledger_fee_cache == other_ledger_fee_cache
             && order_history == other_order_history
+            && trade_history == other_trade_history
             && pending_settling_events == other_pending_settling_events
             && in_flight_user_ops == other_in_flight_user_ops
             && permissions == other_permissions
@@ -1136,6 +1117,12 @@ pub enum AddLimitOrderError {
         max: Option<Quantity>,
     },
     TradingHalted,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetUserOrderTradesError {
+    OrderNotFound,
+    CursorNotFound,
 }
 
 #[derive(Debug, PartialEq, Eq)]

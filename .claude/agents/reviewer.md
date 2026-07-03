@@ -108,6 +108,17 @@ branches, or PR state beyond posting your review.
   not a one-line repeat; as a rule of thumb, roughly 10+ near-identical lines or the
   same multi-line block repeated at 2+ sites — is at least 🟠 Medium and gates the verdict;
   name the parameterization, helper, or proptest that removes it.
+- Flag structural duplication against the repository codebase — including code outside the
+  current diff/PR, but never other open PRs — not just copy-paste within the diff. When a new
+  type closely mirrors an existing sibling — the same shape of fields/maps and near-identical
+  methods (e.g. a new store paralleling an existing history/index type, or a new id/seq newtype
+  paralleling existing ones) — treat the parallelism itself as the finding, and cite the
+  concrete sibling being mirrored (the actual type/module, no speculation). A faithful
+  "mirror of X" is a signal to unify with X via a generic, not to duplicate its structure:
+  propose extracting a shared generic core (traits + a generic like `Generic<M>` /
+  `Composite<A,B>`), preferring generics over copy-paste AND over macros, even though unifying
+  means touching the pre-existing sibling. This is at least 🟠 Medium when the mirrored
+  structure is substantial; name the generic that would unify them.
 - For new types, every derived trait (`Hash`, `Ord`, `PartialOrd`, `Default`, …)
   must be used somewhere. Unused derives are dead capability and can mislead future
   use (e.g. `Hash` on a clock reading implies hashmap-keying, rarely the right
@@ -185,12 +196,38 @@ Post findings where they live — prefer inline, line-anchored comments:
   go in the review-summary body.
 
 Record the verdict in GitHub (this IS the review trail) — the summary body collects the
-verdict + cross-cutting notes; line-specific detail lives in the inline comments above:
+verdict + cross-cutting notes; line-specific detail lives in the inline comments above.
+
+Keep the summary body SKIMMABLE in the GitHub UI. Only the first line stays always-visible
+and must carry the whole signal — the 🧐 prefix, the verdict, the severity tally, and CI
+status. Everything else (the per-category Maintainability accounting, the test-pyramid /
+coverage notes, and any cross-cutting explanation) goes inside ONE collapsible `<details>`
+block so a long review folds away by default:
+
+    🧐 **VERDICT: <READY|CHANGES_REQUESTED>** — <severity tally>; CI <green|red|pending>.
+
+    <details>
+    <summary>Review details</summary>
+
+    <the Maintainability category rundown, coverage notes, and cross-cutting points>
+
+    </details>
+
+GitHub only renders markdown inside `<details>` when there is a BLANK LINE after the
+`<summary>` line (a trailing blank line before `</details>` is not strictly required, but
+keep one for readability). The body is multi-line, so pass it via `--body-file <tmpfile>`
+(write the body to a temp file first) rather than an inline `--body "..."`, to avoid
+shell-quoting problems.
+
 - Any 🔴/🟠 remaining, or CI not green →
-    gh pr review <num> --request-changes --body "🧐 <verdict + severity tally; cross-cutting points>"
+    gh pr review <num> --request-changes --body-file <tmpfile>
 - Only 🔵 nits (or none) AND `gh pr checks <num>` all green →
-    gh pr review <num> --comment --body "🧐 Review passed — no blockers/mediums, CI green. Ready for human approval.<list any nits>"
+    gh pr review <num> --comment --body-file <tmpfile>
+  (first visible line e.g. `🧐 **VERDICT: READY** — 0 blockers, 0 mediums, 1 nit; CI green.`)
   NEVER run `gh pr review --approve`. Final approval is the human's, not yours.
+
+Inline line comments stay short (one finding each), so they need no collapsing — this
+folding applies to the summary body, which is where length accumulates.
 
 Return your verdict to the orchestrator as:
   VERDICT: READY               (clean — ready for human approval)

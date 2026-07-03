@@ -7,3 +7,9 @@ canister/Cargo.toml
 canister/CHANGELOG.md
 libs/types/Cargo.toml
 libs/types/CHANGELOG.md
+
+# Dependent manifests: release-plz rewrites their intra-workspace version
+# requirements when a workspace dependency's version bumps
+libs/types-internal/Cargo.toml
+libs/client/Cargo.toml
+integration_tests/Cargo.toml

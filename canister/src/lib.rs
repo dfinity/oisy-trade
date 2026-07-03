@@ -1,11 +1,12 @@
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
     DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT, MAX_FILTER_LEN,
-    MAX_ORDERS_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel,
-    Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
+    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -31,16 +32,19 @@ pub mod cbor;
 pub mod dashboard;
 pub mod execute;
 pub mod guard;
+pub mod ids;
 pub mod lifecycle;
 pub mod metrics;
 pub mod order;
 pub mod runtime;
+pub mod settlement;
 pub mod state;
 pub mod storage;
 pub mod user;
 
 #[cfg(feature = "canbench-rs")]
 mod benchmarks;
+mod history;
 mod ledger;
 #[cfg(any(test, feature = "canbench-rs"))]
 pub mod test_fixtures;
@@ -398,7 +402,7 @@ pub fn get_fee_balances(
 pub enum GetMyOrdersError {
     /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
     /// not a well-formed order id.
-    InvalidOrderId(order::OrderIdParseError),
+    InvalidOrderId(ids::ParseFixedWithIdError),
     /// A well-formed order id (`ById` target or `ByPage.after` cursor) is
     /// unknown or not owned by the caller.
     OrderNotFound,
@@ -432,11 +436,72 @@ pub fn get_my_orders(
     Ok(results
         .into_iter()
         .map(|(id, pair, record)| UserOrder {
-            id: id.into(),
+            id: id.to_string(),
             pair: pair.into(),
             order: record.into(),
         })
         .collect())
+}
+
+/// Why a [`get_my_trades`] call could not be served.
+///
+/// Typically those errors indicate a client bug.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GetMyTradesError {
+    /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
+    InvalidOrderId(ids::ParseFixedWithIdError),
+    /// The `after` cursor was not a well-formed `TradeId`.
+    InvalidTradeId(ids::ParseFixedWithIdError),
+    /// The `order_id` in a `ByOrder` filter is unknown or not owned by the
+    /// caller.
+    OrderNotFound,
+}
+
+pub fn get_my_trades(
+    args: GetMyTradesArgs,
+    caller: candid::Principal,
+) -> Result<Vec<oisy_trade_types::Trade>, GetMyTradesError> {
+    use oisy_trade_types::TradesFilter;
+    let trades = match args.filter {
+        TradesFilter::ByOrder(by_order) => {
+            let order_id = by_order
+                .order_id
+                .parse::<order::OrderId>()
+                .map_err(GetMyTradesError::InvalidOrderId)?;
+            let after = by_order
+                .after
+                .map(|cursor| cursor.parse::<order::TradeId>())
+                .transpose()
+                .map_err(GetMyTradesError::InvalidTradeId)?;
+            let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
+            match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
+                Ok(trades) => trades
+                    .into_iter()
+                    .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
+                    .collect(),
+                Err(state::GetUserOrderTradesError::OrderNotFound) => {
+                    return Err(GetMyTradesError::OrderNotFound);
+                }
+                Err(state::GetUserOrderTradesError::CursorNotFound) => Vec::new(),
+            }
+        }
+        TradesFilter::ByAccount(by_account) => {
+            let after = by_account
+                .after
+                .map(|cursor| cursor.parse::<order::TradeId>())
+                .transpose()
+                .map_err(GetMyTradesError::InvalidTradeId)?;
+            let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
+            match state::with_state(|s| s.get_user_trades(&caller, after, length)) {
+                Ok(trades) => trades
+                    .into_iter()
+                    .map(|(id, trade)| trade.into_public(id))
+                    .collect(),
+                Err(order::CursorNotFound) => Vec::new(),
+            }
+        }
+    };
+    Ok(trades)
 }
 
 pub fn list_supported_tokens() -> Vec<Token> {

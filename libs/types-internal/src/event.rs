@@ -1,6 +1,6 @@
 use crate::{InitArg, UpgradeArg};
 use candid::{CandidType, Nat, Principal};
-use oisy_trade_types::{TimeInForce, TokenId, TokenMetadata};
+use oisy_trade_types::{PairToken, TimeInForce, TokenId, TokenMetadata};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -84,6 +84,17 @@ pub struct MatchingEvent {
 pub struct SettlingEvent {
     pub book_id: u64,
     pub balance_operations: Vec<BalanceOperation>,
+    pub fills: Vec<FillEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct FillEvent {
+    pub fill_seq: u64,
+    pub taker_order_seq: u64,
+    pub maker_order_seq: u64,
+    pub quantity: Nat,
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -107,12 +118,6 @@ pub enum BalanceOperation {
         token: PairToken,
         amount: Nat,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
-pub enum PairToken {
-    Base,
-    Quote,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

@@ -10,10 +10,11 @@ use ic_cdk::call::{Call, CallFailed, RejectCode};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
     DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError, GetMyOrdersArgs,
-    GetMyOrdersError, GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError,
-    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, Token, TokenId,
-    TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
-    WithdrawRequest, WithdrawResponse,
+    GetMyOrdersError, GetMyTradesArgs, GetMyTradesError, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, Token, TokenId, Trade, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse,
 };
 use serde::de::DeserializeOwned;
 
@@ -101,6 +102,18 @@ impl<R: Runtime> OisyTradeClient<R> {
     ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_my_orders", (Some(args),), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Query the caller's fills, by order or across the account, depending on
+    /// the `GetMyTradesArgs` filter.
+    pub async fn get_my_trades(
+        &self,
+        args: GetMyTradesArgs,
+    ) -> Result<Vec<Trade>, GetMyTradesError> {
+        self.runtime
+            .call(self.oisy_trade_canister, "get_my_trades", (args,), 0)
             .await
             .unwrap()
     }
