@@ -27,6 +27,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: set-benchmarks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_REPO: ${{ github.event.workflow_run.repository.full_name }}
         run: bash ./scripts/ci_download_canbench_artifacts.sh
 
   post-comment:
