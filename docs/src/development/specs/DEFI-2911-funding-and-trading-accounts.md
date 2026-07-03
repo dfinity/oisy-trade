@@ -143,9 +143,9 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   (IP allowlists, address allowlists, consensus approvals); with exactly one scope to express,
   the structural rule is smaller and safer.
 - **A principal is either a funding account or a trading account, never both.** Funding accounts
-  are exactly the registered users (they acquire a `UserId` when they first act as one — first
-  deposit or first grant); trading accounts can never deposit (R3), can never grant (R7), and
-  must be unregistered at grant time (R7), so they never acquire one.
+  are exactly the registered users (a `UserId` is acquired on first deposit, the only
+  registering path); trading accounts can never deposit (R3), can never grant (R7), and must be
+  unregistered at grant time (R7), so they never acquire one.
   This exclusivity is what makes *implicit* resolution unambiguous — "whose balance does `T`'s
   order draw?" always has exactly one answer.
 - **Resolution at the endpoint boundary; `owner = F` everywhere downstream.** The trading /
@@ -319,9 +319,10 @@ following the repo's multi-map domain-struct idiom (`OrderHistory`, `TokenBalanc
   requires `F` to be registered already (R7), so it always has a `UserId` to key by.
 
 The whitelist lives on `UserRegistry` (not in a separate struct) because the grant invariant
-spans both maps and `users`: `grant` checks "`T` is unregistered" and "`T` / `F` are not
-delegates" and registers `F` in one place, keeping *registered ⇔ funding account* enforced by
-the type that owns the data.
+spans both maps and `users`: `grant` checks "`F` is registered", "`T` is unregistered", and
+"`T` / `F` are not delegates" in one place, keeping *registered ⇔ funding account* enforced by
+the type that owns the data. Registration itself stays deposit-only — grant reads `users` but
+never writes it.
 
 API on `UserRegistry`: `grant(funding: Principal, trading: Principal, now: Timestamp) ->
 Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14; the
