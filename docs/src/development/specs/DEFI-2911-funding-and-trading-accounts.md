@@ -252,7 +252,7 @@ Sources:
 - The canister is event-sourced: state changes are recorded as events and replayed at
   `post_upgrade`; stable-memory writes are gated by `StableMemoryOptions::Write` so replay does
   not double-apply. Grant / revoke must follow the same pattern (R10).
-- Admission is proven by non-clonable permit tokens from `state/permissions`
+- Admission is proven by non-cloneable permit tokens from `state/permissions`
   (`permit_deposit(_caller)` / `permit_withdraw(_caller)` currently ignore the caller and always
   grant — this feature makes them caller-aware).
 - Per-user state is keyed by the compact `UserId` minted by `UserRegistry`
