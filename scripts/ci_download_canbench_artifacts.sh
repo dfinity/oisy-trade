@@ -46,12 +46,12 @@ pr_number=""
 if [ -n "${HEAD_SHA:-}" ]; then
   pr_number="$(
     gh api "repos/${WORKFLOW_RUN_REPO:-}/commits/${HEAD_SHA}/pulls" \
-      --jq '.[0].number // empty' 2>/dev/null || true
+      --jq '[.[] | select(.head.sha == env.HEAD_SHA) | .number] | first // empty' 2>/dev/null || true
   )"
 fi
 
-# Defense in depth: only ever emit a bare positive integer.
-if [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+# Defense in depth: only ever emit a bare positive integer (PR numbers start at 1).
+if [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
   echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 else
   echo "pr_number=" >> "$GITHUB_OUTPUT"
