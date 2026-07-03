@@ -443,6 +443,17 @@ endpoint resolves.
   R7 already bounds to unregistered principals and whose cost falls on the granter.
   Hyperliquid's `approveAgent` is likewise unilateral. Rejected; documented as an accepted
   residual (see Non-goals).
-- **Client-side key separation only (no canister change).** Impossible today: whatever key signs
-  orders *is* the account holding the funds — there is no separation to achieve without the
-  canister distinguishing the two roles.
+- **Compact ids (`Seq`) instead of principals in the whitelist and attribution.** The codebase's
+  compaction rule — per-user stable keys store an 8-byte id, not the ~30-byte identity — pays on
+  unbounded cardinality, and the design already applies it where it holds
+  (`trading_accounts_by_funding` is `UserId`-keyed). Everywhere else in the whitelist it cannot
+  pay: the `trading_accounts` key *is* the caller lookup; `TradingGrant.funding` as a `UserId`
+  would need a new `UserId → Principal` reverse region (~38 B/user) to save ≤ 88 B per granting
+  user, since resolution must yield the principal that the launched `owner` schema and the
+  ownership checks compare; the list and the grant events are bounded (≤ 4 per user, R14
+  rate-bounded). The one candidate that could pay is `placed_by` (unbounded, present on most
+  bot-placed orders): a `Seq`-minted trading-account id + immortal reverse map would shrink
+  ~31 B to ~9 B per attributed record. Deferred: it adds an id family, a reverse region, and
+  read-time joins while `owner` — the larger principal on the same record — stays principal-typed;
+  the honest version is a holistic compact-identity migration (owner + attribution) with a
+  natural home when subaccounts change the registry key type.
