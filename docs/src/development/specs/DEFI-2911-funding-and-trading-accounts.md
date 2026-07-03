@@ -296,7 +296,8 @@ granting entirely until set. Example configuration: 1 ICP or 10 ckUSDT.
 For attribution (R13), `OrderRecord` gains `placed_by : opt principal` (absent = placed by the
 owner itself), surfaced by `get_my_orders`. Adding an `opt` field to a returned record is a
 backward-compatible Candid evolution; on the stable-memory side it is a new trailing minicbor
-field decoding absent as `None` (`Option` + `#[cbor(default)]`), so records written before this
+field decoding absent as `None` (an `Option` field — minicbor's absent-field behavior, as
+`last_updated_at` already relies on; codec `icrc_cbor::principal::option`), so records written before this
 feature still decode — the post-launch requirement.
 
 ### Whitelist registry — `canister/src/user`
@@ -352,7 +353,7 @@ minimum-free-balance check layers in `State`, which owns `TokenBalance`),
 - **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
   owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
   the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel event gains
-  `canceled_by: Option<Principal>` likewise. Optional trailing fields with `#[cbor(default)]`
+  `canceled_by: Option<Principal>` likewise. Optional trailing fields (absent decodes as `None`)
   keep the event log and order history decoding pre-existing entries (post-launch
   compatibility); replay is byte-faithful since the events carry the attribution themselves.
 
