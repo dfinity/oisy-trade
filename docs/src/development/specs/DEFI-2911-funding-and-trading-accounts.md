@@ -316,6 +316,34 @@ following the repo's multi-map domain-struct idiom (`OrderHistory`, `TokenBalanc
   is variable-length), and a cardinality of at most 4 does not earn a scan index. Grant
   requires `F` to be registered already (R7), so it always has a `UserId` to key by.
 
+The two value types:
+
+```rust
+/// A trading account's standing authorization.
+pub struct TradingGrant {
+    /// The funding account this key acts for — the result of `resolve_account`.
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    funding: Principal,
+}
+
+/// A funding account's whitelist and its grant-cooldown anchor.
+pub struct TradingAccountList {
+    /// The whitelisted trading principals, at most
+    /// `MAX_TRADING_ACCOUNTS_PER_USER` (`get_my_trading_accounts`, the R7 cap check).
+    #[n(0)]
+    accounts: Vec<Principal>,
+    /// Time of the most recent successful grant — the R14 cooldown anchor.
+    /// Per funding account, not per key: R14 bounds the account's grant rate.
+    #[n(1)]
+    last_granted_at: Timestamp,
+}
+```
+
+Both are minicbor-encoded with CBOR-based `Storable` impls (`Bound::Unbounded`), like
+`PrincipalKey`. A `TradingAccountList` entry is created by the first grant (which always sets
+`last_granted_at`) and is **never removed**, only shrunk: if revoking the last key deleted the
+entry, the cooldown anchor would vanish and revoke-all → re-grant would bypass R14.
+
 The whitelist lives on `UserRegistry` (not in a separate struct) because the grant invariant
 spans both maps and `users`: `grant` checks "`F` is registered", "`T` is unregistered", and
 "`T` / `F` are not delegates" in one place, keeping *registered ⇔ funding account* enforced by
