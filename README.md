@@ -38,7 +38,7 @@ See the [design document](https://dfinity.github.io/oisy-trade/development/desig
 
 | Environment         | Canister ID                                                                                                  | Listings          |
 |---------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
-| 🚀 Production | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | _Coming soon!_ |
+| 🚀 Production | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | ICP/ckUSDT |
 | 🧪 Staging | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
 
 <a id="usage"></a>
