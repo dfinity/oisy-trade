@@ -45,7 +45,19 @@ pub enum TimeInForce {
 }
 
 /// A trading pair identified by the base and quote token ledger principals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    CandidType,
+    derive_more::Display,
+)]
+#[display("{base}/{quote}")]
 pub struct TradingPair {
     /// The base token ledger canister principal.
     pub base: Principal,
@@ -54,7 +66,10 @@ pub struct TradingPair {
 }
 
 /// Request to place a new limit order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
+#[display(
+    "pair={pair} side={side:?} price={price} quantity={quantity} time_in_force={time_in_force:?}"
+)]
 pub struct LimitOrderRequest {
     /// The trading pair to place the order on.
     pub pair: TradingPair,
@@ -177,7 +192,10 @@ pub enum OrderStatus {
 /// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
 /// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
 /// saving the caller a follow-up status/metadata query.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, derive_more::Display)]
+#[display(
+    "owner={owner} side={side:?} price={price} quantity={quantity} filled_quantity={filled_quantity} status={status:?} created_at={created_at} last_updated_at={last_updated_at:?} time_in_force={time_in_force:?} filled_quote={filled_quote} filled_fee={filled_fee}"
+)]
 pub struct OrderRecord {
     /// Principal that placed the order.
     pub owner: Principal,
@@ -384,8 +402,19 @@ pub struct TradesByAccount {
 
 /// A token identified by its ledger canister ID.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    CandidType,
+    derive_more::Display,
 )]
+#[display("{ledger_id}")]
 pub struct TokenId {
     /// The canister ID of the token's ledger.
     pub ledger_id: Principal,
@@ -410,7 +439,8 @@ pub struct Token {
 }
 
 /// Request to deposit tokens into the OISY TRADE.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
+#[display("token_id={token_id} amount={amount}")]
 pub struct DepositRequest {
     /// The token to deposit.
     pub token_id: TokenId,
@@ -477,7 +507,8 @@ pub struct AddTradingPairRequest {
 }
 
 /// Request to withdraw tokens from the OISY TRADE.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
+#[display("token_id={token_id} amount={amount}")]
 pub struct WithdrawRequest {
     /// The token to withdraw.
     pub token_id: TokenId,

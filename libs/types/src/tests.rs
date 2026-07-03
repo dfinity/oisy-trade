@@ -1,14 +1,96 @@
 use crate::{
-    Balance, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage, GetOrderBookDepthRequest,
-    LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderStatus, PriceLevel, Side, TimeInForce,
-    Token, TokenId, TokenMetadata, TradingPair, TradingPairInfo, TradingStatus,
+    Balance, DepositRequest, GetMyOrdersArgs, GetMyOrdersFilter, GetMyOrdersPage,
+    GetOrderBookDepthRequest, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderRecord,
+    OrderStatus, PriceLevel, Side, TimeInForce, Token, TokenId, TokenMetadata, TradingPair,
+    TradingPairInfo, TradingStatus, WithdrawRequest,
 };
 use candid::{Nat, Principal};
+
+const KNOWN_PRINCIPAL_TEXT: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 
 fn test_trading_pair() -> TradingPair {
     TradingPair {
         base: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
         quote: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+    }
+}
+
+#[test]
+fn should_display_principals_as_text() {
+    struct TestCase {
+        desc: &'static str,
+        rendered: String,
+    }
+
+    let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
+    let token_id = TokenId {
+        ledger_id: principal,
+    };
+    let pair = TradingPair {
+        base: principal,
+        quote: principal,
+    };
+
+    let cases = vec![
+        TestCase {
+            desc: "LimitOrderRequest",
+            rendered: LimitOrderRequest {
+                pair,
+                side: Side::Buy,
+                price: Nat::from(100u64),
+                quantity: Nat::from(1_000_000u64),
+                time_in_force: Some(TimeInForce::FillOrKill),
+            }
+            .to_string(),
+        },
+        TestCase {
+            desc: "OrderRecord",
+            rendered: OrderRecord {
+                owner: principal,
+                side: Side::Sell,
+                price: Nat::from(100u64),
+                quantity: Nat::from(1_000_000u64),
+                filled_quantity: Nat::from(0u64),
+                status: OrderStatus::Open,
+                created_at: 42,
+                last_updated_at: None,
+                time_in_force: TimeInForce::GoodTilCanceled,
+                filled_quote: Nat::from(0u64),
+                filled_fee: Nat::from(0u64),
+            }
+            .to_string(),
+        },
+        TestCase {
+            desc: "DepositRequest",
+            rendered: DepositRequest {
+                token_id: token_id.clone(),
+                amount: Nat::from(500u64),
+            }
+            .to_string(),
+        },
+        TestCase {
+            desc: "WithdrawRequest",
+            rendered: WithdrawRequest {
+                token_id,
+                amount: Nat::from(500u64),
+            }
+            .to_string(),
+        },
+    ];
+
+    for case in cases {
+        assert!(
+            case.rendered.contains(KNOWN_PRINCIPAL_TEXT),
+            "{}: expected textual principal in {:?}",
+            case.desc,
+            case.rendered
+        );
+        assert!(
+            !case.rendered.contains("[10,"),
+            "{}: expected no byte-array fragment in {:?}",
+            case.desc,
+            case.rendered
+        );
     }
 }
 

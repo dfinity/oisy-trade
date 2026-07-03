@@ -17,7 +17,7 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         oisy_trade_canister::add_limit_order(request.clone(), &oisy_trade_canister::IC_RUNTIME)?;
     canlog::log!(
         Priority::Info,
-        "[add_limit_order]: created order_id={} for request {:?}",
+        "[add_limit_order]: created order_id={} for request {}",
         order_id,
         request
     );
@@ -37,7 +37,7 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
     match &result {
         Ok(record) => canlog::log!(
             Priority::Info,
-            "[cancel_limit_order]: canceled order_id={order_id}: {record:?}"
+            "[cancel_limit_order]: canceled order_id={order_id}: {record}"
         ),
         Err(_err) => {
             // do not log errors due to user actions
@@ -65,7 +65,7 @@ fn get_order_book_depth(
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    let deposit_dbg = format!("{request:?}");
+    let deposit_dbg = format!("{request}");
     let result = oisy_trade_canister::deposit(request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
@@ -77,7 +77,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
             if should_log_deposit_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
+                    "[deposit]: deposit for request {deposit_dbg} failed, error={}",
                     err
                 )
             }
@@ -88,7 +88,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 
 #[ic_cdk::update]
 async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
-    let withdraw_dbg = format!("{request:?}");
+    let withdraw_dbg = format!("{request}");
     let result = oisy_trade_canister::withdraw(request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
@@ -100,7 +100,7 @@ async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, Withdraw
             if should_log_withdraw_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
+                    "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={}",
                     err
                 )
             }

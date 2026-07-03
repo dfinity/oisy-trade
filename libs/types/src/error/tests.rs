@@ -1,6 +1,11 @@
-use crate::{DepositError, DepositRequestError, ErrorKind};
-use candid::CandidType;
+use crate::{
+    DepositError, DepositRequestError, DepositTemporaryError, ErrorKind, TokenId, WithdrawError,
+    WithdrawRequestError,
+};
+use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
+
+const KNOWN_PRINCIPAL_TEXT: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 enum CurrentRequestError {
@@ -49,6 +54,52 @@ enum FutureErrorKind {
 struct FutureError {
     kind: FutureErrorKind,
     message: Option<String>,
+}
+
+#[test]
+fn should_display_principals_as_text() {
+    struct TestCase {
+        desc: &'static str,
+        rendered: String,
+    }
+
+    let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
+
+    let cases = vec![
+        TestCase {
+            desc: "DepositError CallFailed carries a ledger principal",
+            rendered: DepositError::temporary(DepositTemporaryError::CallFailed {
+                ledger: principal,
+                method: "icrc2_transfer_from".to_string(),
+                reason: "timed out".to_string(),
+            })
+            .to_string(),
+        },
+        TestCase {
+            desc: "WithdrawError UnsupportedToken carries a TokenId",
+            rendered: WithdrawError::request(WithdrawRequestError::UnsupportedToken {
+                token_id: TokenId {
+                    ledger_id: principal,
+                },
+            })
+            .to_string(),
+        },
+    ];
+
+    for case in cases {
+        assert!(
+            case.rendered.contains(KNOWN_PRINCIPAL_TEXT),
+            "{}: expected textual principal in {:?}",
+            case.desc,
+            case.rendered
+        );
+        assert!(
+            !case.rendered.contains("[10,"),
+            "{}: expected no byte-array fragment in {:?}",
+            case.desc,
+            case.rendered
+        );
+    }
 }
 
 #[test]
