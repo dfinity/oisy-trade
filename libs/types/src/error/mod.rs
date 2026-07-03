@@ -15,8 +15,7 @@ use std::fmt;
 /// human-readable [`message`](Self::message). The disposition is the contract;
 /// clients branch on `kind` and the inner leaf, and **must not** parse
 /// `message`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
-#[display("{}", message.as_deref().unwrap_or("<no detail>"))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct Error<Request, Temporary, Internal> {
     /// The disposition and, when available, the specific reason.
     pub kind: ErrorKind<Request, Temporary, Internal>,
@@ -24,6 +23,21 @@ pub struct Error<Request, Temporary, Internal> {
     /// `Display`. Clients must not parse it; programmatic handling is on
     /// [`kind`](Self::kind) and the inner leaf only.
     pub message: Option<String>,
+}
+
+impl<Request, Temporary, Internal> fmt::Display for Error<Request, Temporary, Internal> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let disposition = match self.kind {
+            ErrorKind::RequestError(_) => "request",
+            ErrorKind::TemporaryError(_) => "temporary",
+            ErrorKind::InternalError(_) => "internal",
+        };
+        write!(
+            f,
+            "{disposition} error: {}",
+            self.message.as_deref().unwrap_or("<no detail>")
+        )
+    }
 }
 
 /// The disposition of an [`Error`], parameterized by its per-endpoint leaves.

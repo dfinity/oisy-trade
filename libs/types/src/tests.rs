@@ -23,6 +23,7 @@ fn should_display_principals_as_text() {
     }
 
     let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
+    let principal_debug = format!("{principal:?}");
     let token_id = TokenId {
         ledger_id: principal,
     };
@@ -86,8 +87,8 @@ fn should_display_principals_as_text() {
             case.rendered
         );
         assert!(
-            !case.rendered.contains("[10,"),
-            "{}: expected no byte-array fragment in {:?}",
+            !case.rendered.contains(&principal_debug),
+            "{}: expected no Debug rendering of the principal in {:?}",
             case.desc,
             case.rendered
         );
