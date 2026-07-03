@@ -55,8 +55,6 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
 - **R7 — Grant preconditions.** `add_trading_account(T)` fails if any of:
   - `F` is not a registered user (has never deposited) — granting requires an existing,
     economically established account and never creates one;
-  - `F`'s free balance is below the configured minimum in every token that has one (see
-    [Design Decisions](#design-decisions) and the Candid section) — e.g. "at least 1 ICP free";
   - `T == F` (self-grant);
   - `T` is already a trading account, of `F` or of anyone else — a trading account maps to
     **exactly one** funding account;
@@ -118,8 +116,13 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   power over `F`'s own funds); a principal claimed against its will simply cannot deposit while
   whitelisted and its owner would use a different principal. R7's registered-user check ensures
   no principal with existing funds or history can ever be claimed, and claiming is not free —
-  the claimer must itself be a deposited funding account meeting the minimum-balance bar, one
-  grant per cooldown (R7, R14).
+  the claimer must itself be a deposited funding account, one grant per cooldown (R7, R14).
+- **A minimum-free-balance bar on granting.** A controller-configured per-token minimum
+  (`min_grant_balance`, e.g. "at least 1 ICP free", checked at grant time — a threshold, not a
+  fee, and not locked afterwards) would add economic skin-in-the-game on top of the
+  registration requirement and the grant cooldown (R7, R14). Deferred as a nice-to-have: the
+  shipped gates already bound whitelist churn, and the threshold needs per-token configuration
+  no other feature requires yet.
 - **Subaccounts.** They partition *funds* under one key; this feature separates *keys* over one
   fund. Orthogonal (the `UserRegistry` doc already anticipates subaccounts as a key-type
   change).
@@ -153,17 +156,17 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   order events, settlement, and the trades feed are untouched and keep operating on the funding
   principal. Replay needs no delegation state for orders because events already carry the
   resolved owner (R2).
-- **Grants are economically gated and rate-bounded; revocation never is.** Every surveyed venue
-  prices whitelist mutations (dYdX authenticator ops cost gas, Hyperliquid's `approveAgent` is
-  an on-chain action, CEX keys sit behind authenticated, rate-limited UIs) — while an IC update
+- **Grants are gated and rate-bounded; revocation never is.** Every surveyed venue prices
+  whitelist mutations (dYdX authenticator ops cost gas, Hyperliquid's `approveAgent` is an
+  on-chain action, CEX keys sit behind authenticated, rate-limited UIs) — while an IC update
   call costs its caller nothing, so an ungated grant would be the canister's cheapest
   write-amplification surface (each successful mutation appends an event and writes the
-  whitelist maps). Three layers close it: grant requires a **registered** funding account (the
-  only registering path, deposit, has a real-token cost — R7), requires a controller-configured
-  **minimum free balance** in some token (skin in the game, checked at grant time; deliberately
-  a threshold, not a fee, and not locked afterwards — R7), and successful grants are separated
-  by a **cooldown** (R14). `remove_trading_account` is exempt from all three: it must stay
-  instantly available as the compromise response, and it is inherently bounded by prior grants.
+  whitelist maps). Two layers close it: grant requires a **registered** funding account (the
+  only registering path, deposit, has a real-token cost — R7), and successful grants are
+  separated by a **cooldown** (R14). A third layer — a minimum free balance at grant time — is
+  a deferred nice-to-have (see Non-goals). `remove_trading_account` is exempt from all of it:
+  it must stay instantly available as the compromise response, and it is inherently bounded by
+  prior grants.
 - **Attribute, don't restrict.** Order authority is account-scoped (any of `F`'s keys can place
   and cancel `F`'s orders, R4) exactly as on every surveyed venue, but — going one step beyond
   the venues, none of which expose which API key placed an order — each action records the
@@ -204,7 +207,7 @@ structural guarantees; expiry is the one Hyperliquid feature deliberately deferr
 | Reads by trading credential | with read scope | no (query by master address) | n/a | yes, resolve to `F` (R5) |
 | Cross-key cancel on one balance | yes (any trade-scope key) | yes (any agent) | yes (same subaccount) | yes (R4) |
 | Orders attributed to the acting credential | no | no | not exposed | yes, `placed_by` (R13) |
-| Cost to mutate the whitelist | authenticated UI + rate limits | on-chain action | gas per op | registered + min free balance + cooldown (R7, R14) |
+| Cost to mutate the whitelist | authenticated UI + rate limits | on-chain action | gas per op | registered granter + cooldown (R7, R14) |
 
 Sources:
 
@@ -272,9 +275,9 @@ get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradin
 ```
 
 All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries one request-error
-variant per R7 precondition (granter not registered, free balance below the minimum,
-self-grant, already a trading account, already a registered user, caller is a trading account,
-too many trading accounts) plus the R14 cooldown in its `TemporaryError` class;
+variant per R7 precondition (granter not registered, self-grant, already a trading account,
+already a registered user, caller is a trading account, too many trading accounts) plus the
+R14 cooldown in its `TemporaryError` class;
 `RemoveTradingAccountError` covers "not your trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
 to trading accounts (R3), added *inside* the envelope's `opt variant` request-error class —
 the extension point DEFI-2801 built in exactly for this: a client compiled against the old
@@ -284,14 +287,8 @@ acceptable). The new endpoints are purely additive. The implementation PR update
 candid backward-compat expected diff accordingly.
 
 `MAX_TRADING_ACCOUNTS_PER_USER = 4` (Hyperliquid grants 1 unnamed + 3 named agents; no known
-integrator needs more — trivially raisable later). `TRADING_ACCOUNT_GRANT_COOLDOWN` is a code
-constant (proposed: 10 minutes — key rotation is a per-weeks operation).
-
-The per-token grant minimums (R7) are controller-configured: `InitArg` / `UpgradeArg` gain an
-optional `min_grant_balance : vec record { token_id : TokenId; amount : nat }` (an additive
-`opt` field, like `mode`). A token **without** a configured minimum never qualifies a granter,
-so depositing a worthless token cannot satisfy the check; an empty configuration disables
-granting entirely until set. Example configuration: 1 ICP or 10 ckUSDT.
+integrator needs more — trivially raisable later). `TRADING_ACCOUNT_GRANT_COOLDOWN = 1 hour`
+(a code constant — key rotation is a per-weeks operation).
 
 For attribution (R13), `OrderRecord` gains `placed_by : opt principal` (absent = placed by the
 owner itself), surfaced by `get_my_orders`. Adding an `opt` field to a returned record is a
@@ -326,8 +323,7 @@ the type that owns the data. Registration itself stays deposit-only — grant re
 never writes it.
 
 API on `UserRegistry`: `grant(funding: Principal, trading: Principal, now: Timestamp) ->
-Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14; the
-minimum-free-balance check layers in `State`, which owns `TokenBalance`),
+Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14),
 `revoke(funding: Principal, trading: Principal) -> Result<(), RevokeError>`,
 `resolve_account(caller: Principal) -> Principal` (delegate → funding principal, else the caller),
 `is_trading_account(&Principal) -> bool` (the R3 deny check),
@@ -347,9 +343,8 @@ minimum-free-balance check layers in `State`, which owns `TokenBalance`),
 - **Grant / revoke.** New event types `AddTradingAccountEvent { funding, trading }` and
   `RemoveTradingAccountEvent { funding, trading }`, handled in `state/audit` like `SetHalt`:
   the endpoint validates the preconditions synchronously — the identity, cap, and cooldown
-  checks in `UserRegistry`, the minimum free balance against `TokenBalance` (R7, R14) — records
-  the event, and the handler applies it to the `UserRegistry` whitelist maps under the `Write`
-  gate (R10). Rejected calls record nothing.
+  checks in `UserRegistry` (R7, R14) — records the event, and the handler applies it to the
+  `UserRegistry` whitelist maps under the `Write` gate (R10). Rejected calls record nothing.
 - **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
   owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
   the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel event gains
@@ -379,10 +374,8 @@ Unit (`*/tests.rs`, fixtures per repo convention):
   resolve (R5); after revoke, `T`'s calls act as a stranger and `F`'s open orders stay open
   (R6); `permit_deposit` / `permit_withdraw` deny a trading account (R3); `F` itself still
   passes all admissions (R8); replay with stable writes skipped does not double-apply grants
-  (R10); restricted mode checks the raw caller (R12); a grant below the configured minimum free
-  balance is rejected, one meeting it in a single configured token passes, and an empty
-  configuration means no grants (R7); a rejected grant appends no event (R14); an order placed
-  by `T` records and
+  (R10); restricted mode checks the raw caller (R12); a rejected grant appends no event (R14);
+  an order placed by `T` records and
   exposes `placed_by = T`, one placed by `F` records none, a cancel by `T` records
   `canceled_by = T`, and an `OrderRecord` persisted without the attribution field still decodes
   (R13).
@@ -396,9 +389,8 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
   `T`; `T`'s next call is rejected as a stranger while `F`'s remaining open orders are intact
   (R1–R8).
 - `get_my_trading_accounts` before / after grant and revoke (R9); each grant error surfaced
-  through the envelope, the cooldown as a `TemporaryError` (R7, R11, R14); `min_grant_balance`
-  set at init and changed via upgrade takes effect (R7); whitelist and enforcement survive a
-  canister upgrade (R10).
+  through the envelope, the cooldown as a `TemporaryError` (R7, R11, R14); whitelist and
+  enforcement survive a canister upgrade (R10).
 
 Verification:
 
@@ -412,22 +404,19 @@ cargo test -p oisy_trade_int_tests
 
 ### Delivery / PR sequence
 
-Three stacked PRs, each independently mergeable / compilable / testable.
+Six stacked PRs, each independently mergeable / compilable / testable. Funding-operation denial
+(PR 3) deliberately precedes every caller-resolution PR (4–6): once reads resolve, a balance
+`T` acquired for itself would become unreachable, so `T` must be unable to deposit *before* any
+endpoint resolves.
 
-1. **Whitelist registry + management endpoints.** The `UserRegistry` whitelist extension (two
-   new memory regions), `add_trading_account` / `remove_trading_account` /
-   `get_my_trading_accounts` with all grant preconditions (including the `min_grant_balance`
-   configuration and the grant cooldown), the two event types with replay handling, envelope
-   errors. The whitelist is recorded but not yet enforced anywhere.
-   **Acceptance: R1 (mechanics), R7, R9, R10, R11, R14.**
-2. **Funding-operation denial.** `permit_deposit` / `permit_withdraw` become caller-aware;
-   `deposit` / `withdraw` by a trading account fail with the dedicated error. Lands *before*
-   resolution so a whitelisted principal can never acquire a balance of its own that resolution
-   would later strand. **Acceptance: R3.**
-3. **Caller resolution on trading and read paths.** `add_limit_order` / `cancel_limit_order` /
-   `get_balances` / `get_my_orders` / `get_my_trades` resolve the effective account; attribution
-   (`placed_by` on the record, event and `get_my_orders`; `canceled_by` on the cancel event);
-   end-to-end integration lifecycle. **Acceptance: R2, R4, R5, R6, R8, R12, R13.**
+| # | Summary | Details | Requirements covered |
+|---|---|---|---|
+| 1 | Trading-account registry | `UserRegistry` whitelist extension (`TradingGrant`, `TradingAccountList`, two new memory regions), `add_trading_account` + `get_my_trading_accounts`, `AddTradingAccountEvent` with replay handling, envelope errors. All grant preconditions: registered granter, self-grant, 1:1, unregistered `T`, granter not a delegate, and the `MAX_TRADING_ACCOUNTS_PER_USER` cap. Whitelist recorded, enforced nowhere. | R1 (grant + list), R7, R9, R10, R11 |
+| 2 | Revocation + grant cooldown | `remove_trading_account` + `RemoveTradingAccountEvent`; the 1 h grant cooldown (`last_granted_at` anchor, rejected as `TemporaryError`, no event on rejection); revocation itself never rate-limited. The minimum-free-balance gate stays out of scope (nice-to-have — see Non-goals). | R1 (revoke), R6 (mechanics), R14 |
+| 3 | Funding-operation denial | `permit_deposit` / `permit_withdraw` become caller-aware; `deposit` / `withdraw` by a trading account fail with the dedicated envelope variant before any ledger call. | R3 |
+| 4 | Resolution on reads | `get_balances`, `get_my_orders`, `get_my_trades` resolve the caller to its funding account. | R5 |
+| 5 | Resolution on order placement | `add_limit_order` resolves the order owner (validation, reservation, record, event); `placed_by` attribution on `OrderRecord`, the placement event, and `get_my_orders`. | R2, R8, R13 (placement) |
+| 6 | Resolution on cancel | `cancel_limit_order` checks ownership against the resolved account; `canceled_by` on the cancel event; end-to-end integration lifecycle (deposit → grant → trade → revoke → stranger). | R4, R6 (end-to-end), R12, R13 (cancel) |
 
 ## Discussed Alternatives
 
