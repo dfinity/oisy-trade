@@ -23,7 +23,6 @@ canbench-rs = "0.6"
 candid = "0.10.29"
 candid_parser = "0.4.0"
 canlog = "0.2.0"
-derive_more = { version = "2.1", default-features = false, features = ["display"] }
 ic-cdk = "0.20.1"
 ic-cdk-timers = "1.0.0"
 ic-http-types = "0.1.0"

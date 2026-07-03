@@ -61,10 +61,10 @@ fn should_display_principals_as_text() {
     struct TestCase {
         desc: &'static str,
         rendered: String,
+        expected: &'static str,
     }
 
     let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
-    let principal_debug = format!("{principal:?}");
 
     let cases = vec![
         TestCase {
@@ -75,6 +75,7 @@ fn should_display_principals_as_text() {
                 reason: "timed out".to_string(),
             })
             .to_string(),
+            expected: "temporary error: call to ryjl3-tyaaa-aaaaa-aaaba-cai.icrc2_transfer_from failed: timed out",
         },
         TestCase {
             desc: "WithdrawError UnsupportedToken carries a TokenId",
@@ -84,22 +85,12 @@ fn should_display_principals_as_text() {
                 },
             })
             .to_string(),
+            expected: "request error: token ryjl3-tyaaa-aaaaa-aaaba-cai is not supported",
         },
     ];
 
     for case in cases {
-        assert!(
-            case.rendered.contains(KNOWN_PRINCIPAL_TEXT),
-            "{}: expected textual principal in {:?}",
-            case.desc,
-            case.rendered
-        );
-        assert!(
-            !case.rendered.contains(&principal_debug),
-            "{}: expected no Debug rendering of the principal in {:?}",
-            case.desc,
-            case.rendered
-        );
+        assert_eq!(case.rendered, case.expected, "{}", case.desc);
     }
 }
 

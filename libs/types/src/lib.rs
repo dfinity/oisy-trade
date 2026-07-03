@@ -20,6 +20,7 @@ pub use error::{
 
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Unique identifier for an order, encoded as a lowercase hex string.
 pub type OrderId = String;
@@ -45,19 +46,7 @@ pub enum TimeInForce {
 }
 
 /// A trading pair identified by the base and quote token ledger principals.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    CandidType,
-    derive_more::Display,
-)]
-#[display("{base}/{quote}")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, CandidType)]
 pub struct TradingPair {
     /// The base token ledger canister principal.
     pub base: Principal,
@@ -65,11 +54,15 @@ pub struct TradingPair {
     pub quote: Principal,
 }
 
+impl fmt::Display for TradingPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base, quote } = self;
+        write!(f, "{base}/{quote}")
+    }
+}
+
 /// Request to place a new limit order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
-#[display(
-    "pair={pair} side={side:?} price={price} quantity={quantity} time_in_force={time_in_force:?}"
-)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct LimitOrderRequest {
     /// The trading pair to place the order on.
     pub pair: TradingPair,
@@ -82,6 +75,22 @@ pub struct LimitOrderRequest {
     /// Time-in-force policy. Absent defaults to
     /// [`TimeInForce::GoodTilCanceled`].
     pub time_in_force: Option<TimeInForce>,
+}
+
+impl fmt::Display for LimitOrderRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            pair,
+            side,
+            price,
+            quantity,
+            time_in_force,
+        } = self;
+        write!(
+            f,
+            "pair={pair} side={side:?} price={price} quantity={quantity} time_in_force={time_in_force:?}"
+        )
+    }
 }
 
 /// Error returned by controller-gated endpoints when the caller is not
@@ -192,10 +201,7 @@ pub enum OrderStatus {
 /// Full view of an order as stored by the OISY TRADE. Returned by endpoints that
 /// have the whole record already loaded in hand (e.g. `cancel_limit_order`),
 /// saving the caller a follow-up status/metadata query.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType, derive_more::Display)]
-#[display(
-    "owner={owner} side={side:?} price={price} quantity={quantity} filled_quantity={filled_quantity} status={status:?} created_at={created_at} last_updated_at={last_updated_at:?} time_in_force={time_in_force:?} filled_quote={filled_quote} filled_fee={filled_fee}"
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct OrderRecord {
     /// Principal that placed the order.
     pub owner: Principal,
@@ -225,6 +231,28 @@ pub struct OrderRecord {
     /// Cumulative realized fee charged across the order's fills, denominated in
     /// the order's receive token — base for a buy, quote for a sell.
     pub filled_fee: Nat,
+}
+
+impl fmt::Display for OrderRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            owner,
+            side,
+            price,
+            quantity,
+            filled_quantity,
+            status,
+            created_at,
+            last_updated_at,
+            time_in_force,
+            filled_quote,
+            filled_fee,
+        } = self;
+        write!(
+            f,
+            "owner={owner} side={side:?} price={price} quantity={quantity} filled_quantity={filled_quantity} status={status:?} created_at={created_at} last_updated_at={last_updated_at:?} time_in_force={time_in_force:?} filled_quote={filled_quote} filled_fee={filled_fee}"
+        )
+    }
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.
@@ -402,22 +430,18 @@ pub struct TradesByAccount {
 
 /// A token identified by its ledger canister ID.
 #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    CandidType,
-    derive_more::Display,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, CandidType,
 )]
-#[display("{ledger_id}")]
 pub struct TokenId {
     /// The canister ID of the token's ledger.
     pub ledger_id: Principal,
+}
+
+impl fmt::Display for TokenId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { ledger_id } = self;
+        write!(f, "{ledger_id}")
+    }
 }
 
 /// Metadata associated with a token.
@@ -439,13 +463,19 @@ pub struct Token {
 }
 
 /// Request to deposit tokens into the OISY TRADE.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
-#[display("token_id={token_id} amount={amount}")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct DepositRequest {
     /// The token to deposit.
     pub token_id: TokenId,
     /// The amount to deposit.
     pub amount: Nat,
+}
+
+impl fmt::Display for DepositRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { token_id, amount } = self;
+        write!(f, "token_id={token_id} amount={amount}")
+    }
 }
 
 /// Response after a successful deposit.
@@ -507,8 +537,7 @@ pub struct AddTradingPairRequest {
 }
 
 /// Request to withdraw tokens from the OISY TRADE.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, derive_more::Display)]
-#[display("token_id={token_id} amount={amount}")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct WithdrawRequest {
     /// The token to withdraw.
     pub token_id: TokenId,
@@ -516,6 +545,13 @@ pub struct WithdrawRequest {
     /// The ledger transfer fee is deducted from this amount,
     /// so the caller receives `amount - fee` on the ledger.
     pub amount: Nat,
+}
+
+impl fmt::Display for WithdrawRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { token_id, amount } = self;
+        write!(f, "token_id={token_id} amount={amount}")
+    }
 }
 
 /// Response after a successful withdrawal.

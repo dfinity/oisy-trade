@@ -27,7 +27,8 @@ pub struct Error<Request, Temporary, Internal> {
 
 impl<Request, Temporary, Internal> fmt::Display for Error<Request, Temporary, Internal> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let disposition = match self.kind {
+        let Self { kind, message } = self;
+        let disposition = match kind {
             ErrorKind::RequestError(_) => "request",
             ErrorKind::TemporaryError(_) => "temporary",
             ErrorKind::InternalError(_) => "internal",
@@ -35,7 +36,7 @@ impl<Request, Temporary, Internal> fmt::Display for Error<Request, Temporary, In
         write!(
             f,
             "{disposition} error: {}",
-            self.message.as_deref().unwrap_or("<no detail>")
+            message.as_deref().unwrap_or("<no detail>")
         )
     }
 }
