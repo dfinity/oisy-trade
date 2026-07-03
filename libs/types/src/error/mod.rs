@@ -25,6 +25,22 @@ pub struct Error<Request, Temporary, Internal> {
     pub message: Option<String>,
 }
 
+impl<Request, Temporary, Internal> fmt::Display for Error<Request, Temporary, Internal> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { kind, message } = self;
+        let disposition = match kind {
+            ErrorKind::RequestError(_) => "request",
+            ErrorKind::TemporaryError(_) => "temporary",
+            ErrorKind::InternalError(_) => "internal",
+        };
+        write!(
+            f,
+            "{disposition} error: {}",
+            message.as_deref().unwrap_or("<no detail>")
+        )
+    }
+}
+
 /// The disposition of an [`Error`], parameterized by its per-endpoint leaves.
 ///
 /// Each arm carries an `Option` of its leaf so that a client built against an
