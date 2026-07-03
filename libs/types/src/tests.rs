@@ -53,7 +53,7 @@ fn should_display_principals_as_text() {
                 time_in_force: Some(TimeInForce::FillOrKill),
             }
             .to_string(),
-            expected: "pair=ryjl3-tyaaa-aaaaa-aaaba-cai/ryjl3-tyaaa-aaaaa-aaaba-cai side=Buy price=100 quantity=1_000_000 time_in_force=Some(FillOrKill)",
+            expected: "LimitOrderRequest(pair=ryjl3-tyaaa-aaaaa-aaaba-cai/ryjl3-tyaaa-aaaaa-aaaba-cai, side=Buy, price=100, quantity=1_000_000, time_in_force=Some(FillOrKill))",
         },
         TestCase {
             desc: "OrderRecord",
@@ -71,7 +71,7 @@ fn should_display_principals_as_text() {
                 filled_fee: Nat::from(0u64),
             }
             .to_string(),
-            expected: "owner=ryjl3-tyaaa-aaaaa-aaaba-cai side=Sell price=100 quantity=1_000_000 filled_quantity=0 status=Open created_at=42 last_updated_at=None time_in_force=GoodTilCanceled filled_quote=0 filled_fee=0",
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0)",
         },
         TestCase {
             desc: "DepositRequest",
@@ -80,7 +80,7 @@ fn should_display_principals_as_text() {
                 amount: Nat::from(500u64),
             }
             .to_string(),
-            expected: "token_id=ryjl3-tyaaa-aaaaa-aaaba-cai amount=500",
+            expected: "DepositRequest(token_id=ryjl3-tyaaa-aaaaa-aaaba-cai, amount=500)",
         },
         TestCase {
             desc: "WithdrawRequest",
@@ -89,7 +89,7 @@ fn should_display_principals_as_text() {
                 amount: Nat::from(500u64),
             }
             .to_string(),
-            expected: "token_id=ryjl3-tyaaa-aaaaa-aaaba-cai amount=500",
+            expected: "WithdrawRequest(token_id=ryjl3-tyaaa-aaaaa-aaaba-cai, amount=500)",
         },
     ];
 

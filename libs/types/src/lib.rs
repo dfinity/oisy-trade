@@ -88,7 +88,7 @@ impl fmt::Display for LimitOrderRequest {
         } = self;
         write!(
             f,
-            "pair={pair} side={side:?} price={price} quantity={quantity} time_in_force={time_in_force:?}"
+            "LimitOrderRequest(pair={pair}, side={side:?}, price={price}, quantity={quantity}, time_in_force={time_in_force:?})"
         )
     }
 }
@@ -250,7 +250,7 @@ impl fmt::Display for OrderRecord {
         } = self;
         write!(
             f,
-            "owner={owner} side={side:?} price={price} quantity={quantity} filled_quantity={filled_quantity} status={status:?} created_at={created_at} last_updated_at={last_updated_at:?} time_in_force={time_in_force:?} filled_quote={filled_quote} filled_fee={filled_fee}"
+            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee})"
         )
     }
 }
@@ -474,7 +474,7 @@ pub struct DepositRequest {
 impl fmt::Display for DepositRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { token_id, amount } = self;
-        write!(f, "token_id={token_id} amount={amount}")
+        write!(f, "DepositRequest(token_id={token_id}, amount={amount})")
     }
 }
 
@@ -550,7 +550,7 @@ pub struct WithdrawRequest {
 impl fmt::Display for WithdrawRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { token_id, amount } = self;
-        write!(f, "token_id={token_id} amount={amount}")
+        write!(f, "WithdrawRequest(token_id={token_id}, amount={amount})")
     }
 }
 
