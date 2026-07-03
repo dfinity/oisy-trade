@@ -430,11 +430,17 @@ endpoint resolves.
   Hyperliquid shape, and extra keys are free. Rejected; the registry chosen here does not preclude adding an
   explicit-argument path later if a one-key-many-funders need materializes.
 - **Alias in `UserRegistry` — register `T` under `F`'s `UserId`.** Seductively small: resolution
-  would fall out of the existing `lookup`. Rejected: revocation requires *removing* a registry
-  entry, and the registry's invariants forbid removal (dense `len()`-derived id assignment,
-  "identities are never removed"); moreover ownership checks and order records compare
-  *principals*, not `UserId`s, so cancel-by-`T` would still need its own resolution — the alias
-  buys less than it appears to.
+  would fall out of the existing `lookup`. The obvious objection — revocation requires removal,
+  which the `len()`-derived id assignment forbids — is fixable (store the next id in a
+  `StableCell`), but the fixes stop there. First, an undifferentiated alias makes `T` a full
+  alias of `F` **including `withdraw`** (`T` could send `F`'s funds to its own wallet — the
+  exact loss this feature exists to prevent), so a delegate marker is needed regardless; adding
+  one means either re-creating the `trading_accounts` map or breaking the launched `users`
+  map's value schema. Second, ownership checks, order records, and events compare *principals*
+  (`OrderRecord.owner` is launched CBOR **and** Candid schema), so cancel-by-`T` still needs a
+  `T → F`-principal mapping. Third, the cap, listing, and cooldown need the per-funding
+  structure anyway. The alias thus converges to the chosen design plus an extra region and a
+  migration risk.
 - **Store the whitelist inside the `Permissions` struct.** Keeps all authorization data in one
   place, but `Permissions` is heap state serialized into the snapshot and sized for a handful of
   global flags; a per-user whitelist grows with the user count and belongs in stable memory like
