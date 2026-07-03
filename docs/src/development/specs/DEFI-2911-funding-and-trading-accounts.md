@@ -178,8 +178,8 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   feature at its natural seam. Grant / revoke follow the `SetHalt` event pattern (controller-side
   admin ops recorded as events). The whitelist maps live as new fields **on `UserRegistry`**
   (each in its own stable-memory region), not as a separate struct: the grant invariant spans
-  both the `users` map ("`T` is unregistered", registering `F`) and the whitelist ("`T` is not
-  already a delegate"), so one type enforces *registered ⇔ funding account* where the data
+  both the `users` map ("`F` is registered", "`T` is unregistered") and the whitelist ("`T` is
+  not already a delegate"), so one type enforces *registered ⇔ funding account* where the data
   lives — and a multi-map domain struct is the repo idiom (`OrderHistory`, `TokenBalance`). The
   whitelist does **not** live in the snapshot-persisted `Permissions` struct: that struct holds
   a handful of global flags, while the whitelist grows with the user count (see Discussed
