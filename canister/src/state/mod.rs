@@ -25,7 +25,7 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{GrantError, UserId, UserRegistry};
+use crate::user::{GrantError, RevokeError, UserId, UserRegistry};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::{InitArg, Mode};
@@ -829,8 +829,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self,
         funding: Principal,
         trading: Principal,
+        now: Timestamp,
     ) -> Result<(), AddTradingAccountError> {
-        self.user_registry.validate_grant(funding, trading)?;
+        self.user_registry.validate_grant(funding, trading, now)?;
         if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading) {
             return Err(AddTradingAccountError::FundingOperationInProgress);
         }
@@ -846,6 +847,27 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
             self.user_registry.record_grant(funding, trading, now);
+        }
+    }
+
+    pub fn validate_remove_trading_account(
+        &self,
+        funding: Principal,
+        trading: Principal,
+    ) -> Result<(), RemoveTradingAccountError> {
+        self.user_registry
+            .validate_revoke(funding, trading)
+            .map_err(RemoveTradingAccountError::from)
+    }
+
+    pub fn record_remove_trading_account(
+        &mut self,
+        funding: Principal,
+        trading: Principal,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.user_registry.record_revoke(funding, trading);
         }
     }
 
@@ -1155,6 +1177,7 @@ pub enum AddTradingAccountError {
     GranterIsTradingAccount,
     TooManyTradingAccounts,
     FundingOperationInProgress,
+    CooldownActive,
 }
 
 impl From<GrantError> for AddTradingAccountError {
@@ -1166,6 +1189,31 @@ impl From<GrantError> for AddTradingAccountError {
             GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
             GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
             GrantError::TooManyTradingAccounts => AddTradingAccountError::TooManyTradingAccounts,
+            GrantError::CooldownActive => AddTradingAccountError::CooldownActive,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoveTradingAccountError {
+    NotYourTradingAccount,
+}
+
+impl From<RevokeError> for RemoveTradingAccountError {
+    fn from(err: RevokeError) -> Self {
+        match err {
+            RevokeError::NotYourTradingAccount => RemoveTradingAccountError::NotYourTradingAccount,
+        }
+    }
+}
+
+impl From<RemoveTradingAccountError> for oisy_trade_types::RemoveTradingAccountError {
+    fn from(err: RemoveTradingAccountError) -> Self {
+        use oisy_trade_types::RemoveTradingAccountRequestError as Req;
+        match err {
+            RemoveTradingAccountError::NotYourTradingAccount => {
+                oisy_trade_types::RemoveTradingAccountError::request(Req::NotYourTradingAccount)
+            }
         }
     }
 }
@@ -1197,6 +1245,9 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
             }
             AddTradingAccountError::FundingOperationInProgress => {
                 oisy_trade_types::AddTradingAccountError::temporary(Tmp::FundingOperationInProgress)
+            }
+            AddTradingAccountError::CooldownActive => {
+                oisy_trade_types::AddTradingAccountError::temporary(Tmp::GrantCooldownActive)
             }
         }
     }

@@ -16,7 +16,8 @@ pub use error::{
     GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
     GetMyTradesRequestError, GetMyTradingAccountsError, GetOrderBookDepthError,
     GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
-    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    RemoveTradingAccountError, RemoveTradingAccountRequestError, WithdrawError,
+    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};

@@ -1,7 +1,7 @@
 use crate::{
     AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
-    DepositError, DepositRequestError, DepositTemporaryError, ErrorKind, TokenId, WithdrawError,
-    WithdrawRequestError,
+    DepositError, DepositRequestError, DepositTemporaryError, ErrorKind, RemoveTradingAccountError,
+    RemoveTradingAccountRequestError, TokenId, WithdrawError, WithdrawRequestError,
 };
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
@@ -147,6 +147,7 @@ fn should_build_add_trading_account_errors_with_message_and_round_trip() {
         AddTradingAccountError::temporary(
             AddTradingAccountTemporaryError::FundingOperationInProgress,
         ),
+        AddTradingAccountError::temporary(AddTradingAccountTemporaryError::GrantCooldownActive),
     ];
 
     for error in cases {
@@ -158,6 +159,16 @@ fn should_build_add_trading_account_errors_with_message_and_round_trip() {
         let decoded: AddTradingAccountError = candid::decode_one(&encoded).unwrap();
         assert_eq!(error, decoded);
     }
+}
+
+#[test]
+fn should_build_remove_trading_account_error_with_message_and_round_trip() {
+    let error =
+        RemoveTradingAccountError::request(RemoveTradingAccountRequestError::NotYourTradingAccount);
+    assert!(error.message.as_deref().is_some_and(|m| !m.is_empty()));
+    let encoded = candid::encode_one(&error).unwrap();
+    let decoded: RemoveTradingAccountError = candid::decode_one(&encoded).unwrap();
+    assert_eq!(error, decoded);
 }
 
 #[test]

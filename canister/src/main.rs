@@ -6,8 +6,9 @@ use oisy_trade_types::{
     GetMyOrdersRequestError, GetMyTradesArgs, GetMyTradesError, GetMyTradesRequestError,
     GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, Token, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
+    OrderRecord, RemoveTradingAccountError, Token, Trade, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -55,6 +56,22 @@ fn add_trading_account(trading: candid::Principal) -> Result<(), AddTradingAccou
         Ok(()) => canlog::log!(
             Priority::Info,
             "[add_trading_account]: whitelisted trading account {trading}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
+}
+
+#[ic_cdk::update]
+fn remove_trading_account(trading: candid::Principal) -> Result<(), RemoveTradingAccountError> {
+    let result =
+        oisy_trade_canister::remove_trading_account(trading, &oisy_trade_canister::IC_RUNTIME);
+    match &result {
+        Ok(()) => canlog::log!(
+            Priority::Info,
+            "[remove_trading_account]: revoked trading account {trading}"
         ),
         Err(_err) => {
             // do not log errors due to user actions
@@ -399,6 +416,15 @@ fn get_events(
                 EventType::AddTradingAccount(
                     oisy_trade_canister::state::event::AddTradingAccountEvent { funding, trading },
                 ) => event::EventType::AddTradingAccount(event::AddTradingAccountEvent {
+                    funding,
+                    trading,
+                }),
+                EventType::RemoveTradingAccount(
+                    oisy_trade_canister::state::event::RemoveTradingAccountEvent {
+                        funding,
+                        trading,
+                    },
+                ) => event::EventType::RemoveTradingAccount(event::RemoveTradingAccountEvent {
                     funding,
                     trading,
                 }),

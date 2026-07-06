@@ -12,11 +12,17 @@ use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
+use std::time::Duration;
 
 /// Maximum number of trading accounts a single funding account may whitelist.
 /// Hyperliquid grants one unnamed plus three named agents; no known integrator
 /// needs more, and the cap is trivially raisable later.
 pub const MAX_TRADING_ACCOUNTS_PER_USER: usize = 4;
+
+/// Minimum time between two successful grants by the same funding account (R14).
+/// Key rotation happens on a timescale of weeks, so an hour between grants costs
+/// legitimate users nothing while bounding whitelist-write amplification.
+pub const TRADING_ACCOUNT_GRANT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
 /// Marker distinguishing the user-id family of [`Seq`].
 #[derive(Debug, Clone, Copy)]
@@ -132,6 +138,16 @@ pub enum GrantError {
     /// The funding account already holds the maximum number of trading
     /// accounts.
     TooManyTradingAccounts,
+    /// The grant cooldown has not elapsed since the funding account's previous
+    /// successful grant.
+    CooldownActive,
+}
+
+/// Why [`UserRegistry::validate_revoke`] rejected a revocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevokeError {
+    /// The principal is not currently a trading account of the funding account.
+    NotYourTradingAccount,
 }
 
 /// Maps each user identity to a dense, stable [`UserId`], and holds the
@@ -196,10 +212,15 @@ impl<M: Memory> UserRegistry<M> {
     }
 
     /// Checks the grant preconditions for whitelisting `trading` under funding
-    /// account `funding`, without mutating anything. Encodes the identity and
-    /// cap rules; the caller records the event and applies it via
-    /// [`Self::record_grant`].
-    pub fn validate_grant(&self, funding: Principal, trading: Principal) -> Result<(), GrantError> {
+    /// account `funding` at time `now`, without mutating anything. Encodes the
+    /// identity and cap rules (R7) and the grant cooldown (R14); the caller
+    /// records the event and applies it via [`Self::record_grant`].
+    pub fn validate_grant(
+        &self,
+        funding: Principal,
+        trading: Principal,
+        now: Timestamp,
+    ) -> Result<(), GrantError> {
         let funding_id = self
             .lookup(funding)
             .ok_or(GrantError::GranterNotRegistered)?;
@@ -215,15 +236,33 @@ impl<M: Memory> UserRegistry<M> {
         if self.is_trading_account(&funding) {
             return Err(GrantError::GranterIsTradingAccount);
         }
-        let count = self
-            .trading_accounts_by_funding
-            .get(&funding_id)
-            .map(|list| list.accounts.len())
-            .unwrap_or(0);
-        if count >= MAX_TRADING_ACCOUNTS_PER_USER {
+        let list = self.trading_accounts_by_funding.get(&funding_id);
+        if list.as_ref().map(|l| l.accounts.len()).unwrap_or(0) >= MAX_TRADING_ACCOUNTS_PER_USER {
             return Err(GrantError::TooManyTradingAccounts);
         }
+        if let Some(list) = list {
+            let elapsed = now
+                .as_nanos()
+                .saturating_sub(list.last_granted_at.as_nanos());
+            if u128::from(elapsed) < TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() {
+                return Err(GrantError::CooldownActive);
+            }
+        }
         Ok(())
+    }
+
+    /// Checks that `trading` is currently a trading account of `funding` (R7's
+    /// revoke precondition), without mutating anything. Revocation is never
+    /// rate-limited (R14).
+    pub fn validate_revoke(
+        &self,
+        funding: Principal,
+        trading: Principal,
+    ) -> Result<(), RevokeError> {
+        match self.trading_accounts.get(&PrincipalKey(trading)) {
+            Some(grant) if grant.funding == funding => Ok(()),
+            _ => Err(RevokeError::NotYourTradingAccount),
+        }
     }
 
     /// Records a grant of `trading` under funding account `funding`, stamping
@@ -242,6 +281,22 @@ impl<M: Memory> UserRegistry<M> {
         list.accounts.push(trading);
         list.last_granted_at = now;
         self.trading_accounts_by_funding.insert(funding_id, list);
+    }
+
+    /// Revokes `trading` from funding account `funding`: deletes its
+    /// `trading_accounts` entry and drops it from `funding`'s list. The
+    /// [`TradingAccountList`] entry itself is **never removed, only shrunk** —
+    /// the `last_granted_at` cooldown anchor must survive so revoke-all →
+    /// re-grant cannot bypass R14. Preconditions must already have been checked
+    /// via [`Self::validate_revoke`].
+    pub fn record_revoke(&mut self, funding: Principal, trading: Principal) {
+        self.trading_accounts.remove(&PrincipalKey(trading));
+        if let Some(funding_id) = self.lookup(funding)
+            && let Some(mut list) = self.trading_accounts_by_funding.get(&funding_id)
+        {
+            list.accounts.retain(|p| *p != trading);
+            self.trading_accounts_by_funding.insert(funding_id, list);
+        }
     }
 
     /// Returns `funding`'s current whitelist (empty if it has granted none, or

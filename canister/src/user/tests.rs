@@ -44,7 +44,8 @@ mod trading_accounts {
     use crate::test_fixtures::arbitrary::{arb_principal, arb_timestamp};
     use crate::test_fixtures::{principal, user_registry};
     use crate::user::{
-        GrantError, MAX_TRADING_ACCOUNTS_PER_USER, TradingAccountList, TradingGrant, UserRegistry,
+        GrantError, MAX_TRADING_ACCOUNTS_PER_USER, RevokeError, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccountList, TradingGrant, UserRegistry,
     };
     use ic_stable_structures::{Storable, VectorMemory};
     use proptest::collection::vec;
@@ -155,11 +156,137 @@ mod trading_accounts {
             },
         ];
 
+        // A timestamp far past any prior grant so the R14 cooldown never fires;
+        // these cases exercise the R7 identity/cap rules only.
+        let now = Timestamp::new(u64::MAX);
         for case in cases {
             let mut registry = user_registry();
             (case.setup)(&mut registry);
             assert_eq!(
-                registry.validate_grant(case.funding, case.trading),
+                registry.validate_grant(case.funding, case.trading, now),
+                case.expected,
+                "{}",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_enforce_grant_cooldown() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        let mut registry = user_registry();
+        register(&mut registry, funding());
+
+        let first_grant_at = Timestamp::new(1_000);
+        registry.record_grant(funding(), principal(2), first_grant_at);
+
+        // A second grant strictly within the cooldown is rejected as retryable,
+        // and the check is independent of the specific new trading principal.
+        assert_eq!(
+            registry.validate_grant(
+                funding(),
+                principal(3),
+                Timestamp::new(1_000 + cooldown - 1)
+            ),
+            Err(GrantError::CooldownActive),
+            "a grant within the cooldown is rejected"
+        );
+
+        // Exactly at the cooldown boundary the grant is allowed again.
+        assert_eq!(
+            registry.validate_grant(funding(), principal(3), Timestamp::new(1_000 + cooldown)),
+            Ok(()),
+            "a grant once the cooldown has elapsed is allowed"
+        );
+    }
+
+    #[test]
+    fn should_anchor_cooldown_even_after_revoking_the_last_key() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        let mut registry = user_registry();
+        register(&mut registry, funding());
+        registry.record_grant(funding(), principal(2), Timestamp::new(1_000));
+
+        registry.record_revoke(funding(), principal(2));
+        assert_eq!(registry.trading_accounts_of(funding()), vec![]);
+
+        // Revoking the last key must not reset the cooldown anchor: a re-grant
+        // within the cooldown is still rejected.
+        assert_eq!(
+            registry.validate_grant(
+                funding(),
+                principal(3),
+                Timestamp::new(1_000 + cooldown - 1)
+            ),
+            Err(GrantError::CooldownActive),
+            "revoke-all does not clear the cooldown anchor"
+        );
+    }
+
+    #[test]
+    fn should_revoke_removing_authority_from_both_maps() {
+        let mut registry = user_registry();
+        register(&mut registry, funding());
+        registry.record_grant(funding(), principal(2), Timestamp::new(1));
+        registry.record_grant(funding(), principal(3), Timestamp::new(2));
+
+        registry.record_revoke(funding(), principal(2));
+
+        assert!(!registry.is_trading_account(&principal(2)));
+        assert!(registry.is_trading_account(&principal(3)));
+        assert_eq!(
+            registry.trading_accounts_of(funding()),
+            vec![principal(3)],
+            "only the revoked key is dropped from the list"
+        );
+    }
+
+    struct RevokeCase {
+        desc: &'static str,
+        setup: Setup,
+        funding: candid::Principal,
+        trading: candid::Principal,
+        expected: Result<(), RevokeError>,
+    }
+
+    #[test]
+    fn should_enforce_revoke_precondition() {
+        let cases = vec![
+            RevokeCase {
+                desc: "revoking the caller's own trading account",
+                setup: Box::new(|r| {
+                    register(r, funding());
+                    r.record_grant(funding(), trading(), Timestamp::new(1));
+                }),
+                funding: funding(),
+                trading: trading(),
+                expected: Ok(()),
+            },
+            RevokeCase {
+                desc: "revoking a principal that is not a trading account",
+                setup: Box::new(|r| register(r, funding())),
+                funding: funding(),
+                trading: trading(),
+                expected: Err(RevokeError::NotYourTradingAccount),
+            },
+            RevokeCase {
+                desc: "revoking someone else's trading account",
+                setup: Box::new(|r| {
+                    register(r, funding());
+                    register(r, principal(3));
+                    r.record_grant(principal(3), trading(), Timestamp::new(1));
+                }),
+                funding: funding(),
+                trading: trading(),
+                expected: Err(RevokeError::NotYourTradingAccount),
+            },
+        ];
+
+        for case in cases {
+            let mut registry = user_registry();
+            (case.setup)(&mut registry);
+            assert_eq!(
+                registry.validate_revoke(case.funding, case.trading),
                 case.expected,
                 "{}",
                 case.desc

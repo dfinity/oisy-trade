@@ -3,7 +3,7 @@ use crate::balance::TokenBalance;
 use crate::order::{OrderHistory, TradeHistory};
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, CancelLimitOrderEvent,
-    DepositEvent, Event, EventType, SetHaltEvent, WithdrawEvent,
+    DepositEvent, Event, EventType, RemoveTradingAccountEvent, SetHaltEvent, WithdrawEvent,
 };
 use crate::state::permissions::Permit;
 use crate::storage;
@@ -147,6 +147,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading }) => {
             state.record_add_trading_account(*funding, *trading, timestamp, persistence);
+        }
+        EventType::RemoveTradingAccount(RemoveTradingAccountEvent { funding, trading }) => {
+            state.record_remove_trading_account(*funding, *trading, persistence);
         }
         EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
             let permissions = state.permissions_mut();

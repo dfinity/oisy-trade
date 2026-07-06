@@ -46,6 +46,8 @@ pub enum EventType {
     SetHalt(#[n(0)] SetHaltEvent),
     #[n(10)]
     AddTradingAccount(#[n(0)] AddTradingAccountEvent),
+    #[n(11)]
+    RemoveTradingAccount(#[n(0)] RemoveTradingAccountEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -197,6 +199,14 @@ pub struct SetHaltEvent {
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddTradingAccountEvent {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    pub funding: Principal,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    pub trading: Principal,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct RemoveTradingAccountEvent {
     #[cbor(n(0), with = "icrc_cbor::principal")]
     pub funding: Principal,
     #[cbor(n(1), with = "icrc_cbor::principal")]
