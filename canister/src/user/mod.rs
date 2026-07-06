@@ -290,13 +290,16 @@ impl<M: Memory> UserRegistry<M> {
     /// re-grant cannot bypass R14. Preconditions must already have been checked
     /// via [`Self::validate_revoke`].
     pub fn record_revoke(&mut self, funding: Principal, trading: Principal) {
+        let funding_id = self
+            .lookup(funding)
+            .expect("BUG: record_revoke on an unregistered funding account");
         self.trading_accounts.remove(&PrincipalKey(trading));
-        if let Some(funding_id) = self.lookup(funding)
-            && let Some(mut list) = self.trading_accounts_by_funding.get(&funding_id)
-        {
-            list.accounts.retain(|p| *p != trading);
-            self.trading_accounts_by_funding.insert(funding_id, list);
-        }
+        let mut list = self
+            .trading_accounts_by_funding
+            .get(&funding_id)
+            .expect("BUG: record_revoke on a funding account with no trading-account list");
+        list.accounts.retain(|p| *p != trading);
+        self.trading_accounts_by_funding.insert(funding_id, list);
     }
 
     /// Returns `funding`'s current whitelist (empty if it has granted none, or
