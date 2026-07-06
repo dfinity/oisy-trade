@@ -5,8 +5,9 @@ use crate::order::{
 };
 use crate::settlement::FillEvent;
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
-    Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
+    CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent,
+    SettlingEvent, WithdrawEvent,
 };
 use candid::Principal;
 use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
@@ -71,6 +72,7 @@ pub enum WorstCaseEvent {
     Matching,
     Settling,
     SetHalt,
+    AddTradingAccount,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -86,6 +88,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
             EventType::SetHalt(_) => Self::SetHalt,
+            EventType::AddTradingAccount(_) => Self::AddTradingAccount,
         }
     }
 }
@@ -120,6 +123,10 @@ impl WorstCaseEvent {
                 ),
                 halted: true,
             }),
+            Self::AddTradingAccount => EventType::AddTradingAccount(AddTradingAccountEvent {
+                funding: max_principal(0),
+                trading: max_principal(1),
+            }),
         })
     }
 
@@ -141,6 +148,7 @@ impl WorstCaseEvent {
             Self::Matching => 9_027,
             Self::Settling => 208_030,
             Self::SetHalt => 918,
+            Self::AddTradingAccount => 77,
         }
     }
 }

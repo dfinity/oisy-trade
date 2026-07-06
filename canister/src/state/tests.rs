@@ -65,7 +65,11 @@ mod assert_caller_is_allowed {
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
-            crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
+            crate::user::UserRegistry::new(
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+            ),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
@@ -3325,7 +3329,11 @@ mod execution_policy {
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
-            crate::user::UserRegistry::new(VectorMemory::default()),
+            crate::user::UserRegistry::new(
+                VectorMemory::default(),
+                VectorMemory::default(),
+                VectorMemory::default(),
+            ),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();

@@ -25,7 +25,7 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{UserId, UserRegistry};
+use crate::user::{GrantError, UserId, UserRegistry};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::{InitArg, Mode};
@@ -825,6 +825,43 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
+    /// Checks the grant preconditions for whitelisting `trading` under funding
+    /// account `funding` (R7): the registry identity and cap rules, plus the
+    /// "no in-flight funding operation for `trading`" race guard. Mutates
+    /// nothing; the caller records the event and the handler applies it.
+    pub fn validate_add_trading_account(
+        &self,
+        funding: Principal,
+        trading: Principal,
+    ) -> Result<(), AddTradingAccountError> {
+        self.user_registry.validate_grant(funding, trading)?;
+        if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading) {
+            return Err(AddTradingAccountError::FundingOperationInProgress);
+        }
+        Ok(())
+    }
+
+    /// Applies a validated grant to the whitelist maps under the stable-memory
+    /// `Write` gate; a no-op during replay (`Skip`), which reads the already
+    /// persisted maps.
+    pub fn record_add_trading_account(
+        &mut self,
+        funding: Principal,
+        trading: Principal,
+        now: Timestamp,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.user_registry.record_grant(funding, trading, now);
+        }
+    }
+
+    /// Returns `funding`'s current whitelist (R9); empty when it has granted
+    /// none. Acts on the raw principal without resolving delegation.
+    pub fn trading_accounts_of(&self, funding: Principal) -> Vec<Principal> {
+        self.user_registry.trading_accounts_of(funding)
+    }
+
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
         self.ledger_fee_cache
             .get(token_id)
@@ -1116,6 +1153,62 @@ pub enum AddLimitOrderError {
 pub enum GetUserOrderTradesError {
     OrderNotFound,
     CursorNotFound,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AddTradingAccountError {
+    GranterNotRegistered,
+    SelfGrant,
+    AlreadyTradingAccount,
+    AlreadyRegisteredUser,
+    GranterIsTradingAccount,
+    TooManyTradingAccounts,
+    FundingOperationInProgress,
+}
+
+impl From<GrantError> for AddTradingAccountError {
+    fn from(err: GrantError) -> Self {
+        match err {
+            GrantError::GranterNotRegistered => AddTradingAccountError::GranterNotRegistered,
+            GrantError::SelfGrant => AddTradingAccountError::SelfGrant,
+            GrantError::AlreadyTradingAccount => AddTradingAccountError::AlreadyTradingAccount,
+            GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
+            GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
+            GrantError::TooManyTradingAccounts => AddTradingAccountError::TooManyTradingAccounts,
+        }
+    }
+}
+
+impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
+    fn from(err: AddTradingAccountError) -> Self {
+        use oisy_trade_types::AddTradingAccountRequestError as Req;
+        use oisy_trade_types::AddTradingAccountTemporaryError as Tmp;
+        match err {
+            AddTradingAccountError::GranterNotRegistered => {
+                oisy_trade_types::AddTradingAccountError::request(Req::GranterNotRegistered)
+            }
+            AddTradingAccountError::SelfGrant => {
+                oisy_trade_types::AddTradingAccountError::request(Req::SelfGrant)
+            }
+            AddTradingAccountError::AlreadyTradingAccount => {
+                oisy_trade_types::AddTradingAccountError::request(Req::AlreadyTradingAccount)
+            }
+            AddTradingAccountError::AlreadyRegisteredUser => {
+                oisy_trade_types::AddTradingAccountError::request(Req::AlreadyRegisteredUser)
+            }
+            AddTradingAccountError::GranterIsTradingAccount => {
+                oisy_trade_types::AddTradingAccountError::request(Req::GranterIsTradingAccount)
+            }
+            AddTradingAccountError::TooManyTradingAccounts => {
+                oisy_trade_types::AddTradingAccountError::request(Req::TooManyTradingAccounts {
+                    max: crate::user::MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                })
+            }
+            AddTradingAccountError::FundingOperationInProgress => {
+                oisy_trade_types::AddTradingAccountError::temporary(Tmp::FundingOperationInProgress)
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

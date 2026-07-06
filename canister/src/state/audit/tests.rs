@@ -6,8 +6,8 @@ use crate::order::{
 };
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
-    AddLimitOrderEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent, MatchingEvent,
-    WithdrawEvent,
+    AddLimitOrderEvent, AddTradingAccountEvent, BalanceOperation, CancelLimitOrderEvent,
+    DepositEvent, MatchingEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -357,6 +357,19 @@ impl Scenario {
         self
     }
 
+    fn with_add_trading_account(mut self, funding: Principal, trading: Principal) -> Self {
+        let timestamp = self.timestamp();
+        let payload = EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading });
+        apply_state_transition(
+            &mut self.state,
+            &payload,
+            timestamp,
+            StableMemoryOptions::Write,
+        );
+        self.events.push(Event { timestamp, payload });
+        self
+    }
+
     fn assert_replay_matches(self) {
         // Replay into *fresh* stable structures (not clones of `normal`'s) so
         // the assertion also validates that replay reconstructs stable memory,
@@ -434,6 +447,15 @@ fn should_replay_withdraw() {
             deposit_amount - withdraw_amount,
             0u64,
         )
+        .assert_replay_matches();
+}
+
+#[test]
+fn should_replay_add_trading_account() {
+    Scenario::new()
+        .with_trading_pair()
+        .with_deposit(user_1(), TokenId::new(base()), Quantity::from(1_000_000u64))
+        .with_add_trading_account(user_1(), user_2())
         .assert_replay_matches();
 }
 

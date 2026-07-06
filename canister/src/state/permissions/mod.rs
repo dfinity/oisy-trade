@@ -144,4 +144,11 @@ impl Permissions {
     pub fn permit_admin(&self) -> SyncPermit {
         SyncPermit(())
     }
+
+    /// Admission for a trading-account grant. The grant's R7 preconditions are
+    /// checked by the caller before this permit is consumed to record the
+    /// event; the permit is caller-agnostic like the other synchronous permits.
+    pub fn permit_grant(&self) -> SyncPermit {
+        SyncPermit(())
+    }
 }

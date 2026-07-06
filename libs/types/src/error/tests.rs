@@ -1,4 +1,5 @@
 use crate::{
+    AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
     DepositError, DepositRequestError, DepositTemporaryError, ErrorKind, TokenId, WithdrawError,
     WithdrawRequestError,
 };
@@ -133,6 +134,30 @@ fn should_set_message_from_leaf_display() {
     );
     assert_eq!(error.message, Some(leaf.to_string()));
     assert!(!error.message.unwrap().is_empty());
+}
+
+#[test]
+fn should_build_add_trading_account_errors_with_message_and_round_trip() {
+    let cases = [
+        AddTradingAccountError::request(AddTradingAccountRequestError::GranterNotRegistered),
+        AddTradingAccountError::request(AddTradingAccountRequestError::SelfGrant),
+        AddTradingAccountError::request(AddTradingAccountRequestError::TooManyTradingAccounts {
+            max: 4,
+        }),
+        AddTradingAccountError::temporary(
+            AddTradingAccountTemporaryError::FundingOperationInProgress,
+        ),
+    ];
+
+    for error in cases {
+        assert!(
+            error.message.as_deref().is_some_and(|m| !m.is_empty()),
+            "every leaf sets a non-empty advisory message"
+        );
+        let encoded = candid::encode_one(&error).unwrap();
+        let decoded: AddTradingAccountError = candid::decode_one(&encoded).unwrap();
+        assert_eq!(error, decoded);
+    }
 }
 
 #[test]

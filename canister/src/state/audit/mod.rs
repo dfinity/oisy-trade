@@ -2,8 +2,8 @@ use super::{StableMemoryOptions, State};
 use crate::balance::TokenBalance;
 use crate::order::{OrderHistory, TradeHistory};
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    SetHaltEvent, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, CancelLimitOrderEvent,
+    DepositEvent, Event, EventType, SetHaltEvent, WithdrawEvent,
 };
 use crate::state::permissions::Permit;
 use crate::storage;
@@ -144,6 +144,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, timestamp, persistence);
+        }
+        EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading }) => {
+            state.record_add_trading_account(*funding, *trading, timestamp, persistence);
         }
         EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
             let permissions = state.permissions_mut();

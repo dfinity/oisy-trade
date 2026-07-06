@@ -409,6 +409,57 @@ pub enum GetOrderBookDepthRequestError {
     },
 }
 
+/// Error returned by the `add_trading_account` endpoint.
+pub type AddTradingAccountError =
+    Error<AddTradingAccountRequestError, AddTradingAccountTemporaryError, Never>;
+
+/// Caller-side reasons `add_trading_account` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum AddTradingAccountRequestError {
+    /// The granter has never deposited, so it is not a registered funding
+    /// account. Granting requires an existing, economically established
+    /// account and never creates one.
+    #[error("the granter is not a registered user")]
+    GranterNotRegistered,
+    /// The granter tried to whitelist itself as its own trading account.
+    #[error("a funding account cannot whitelist itself")]
+    SelfGrant,
+    /// The principal is already a trading account, of the granter or of
+    /// someone else — a trading account maps to exactly one funding account.
+    #[error("the principal is already a trading account")]
+    AlreadyTradingAccount,
+    /// The principal has already deposited, so it is a registered user; a
+    /// trading key must be a fresh principal.
+    #[error("the principal is already a registered user")]
+    AlreadyRegisteredUser,
+    /// The granter is itself a trading account; delegation chains are not
+    /// allowed.
+    #[error("the granter is itself a trading account")]
+    GranterIsTradingAccount,
+    /// The granter already has the maximum number of trading accounts.
+    #[error("the granter already has the maximum of {max} trading accounts")]
+    TooManyTradingAccounts {
+        /// The per-funding-account cap on trading accounts.
+        max: u32,
+    },
+}
+
+/// Transient reasons `add_trading_account` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum AddTradingAccountTemporaryError {
+    /// The principal has an in-flight deposit or withdrawal. Retry once it
+    /// completes; whitelisting it now could strand a balance it is about to
+    /// acquire.
+    #[error("the principal has an in-flight deposit or withdrawal")]
+    FundingOperationInProgress,
+}
+
+/// Error returned by the `get_my_trading_accounts` query.
+///
+/// The query cannot currently fail, so all three disposition arms are reserved
+/// (always-`null`) — the forward-compatible slot for future leaves.
+pub type GetMyTradingAccountsError = Error<Never, Never, Never>;
+
 /// Error returned by the `get_my_trades` query.
 pub type GetMyTradesError = Error<GetMyTradesRequestError, Never, Never>;
 
