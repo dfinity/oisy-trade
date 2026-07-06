@@ -2643,39 +2643,25 @@ mod add_trading_account {
             granter: candid::Principal,
             trading: candid::Principal,
             expected: AddTradingAccountRequestError,
+            /// A reason-specific substring of the advisory message: distinct
+            /// from the sibling reason folded into the same public variant, so
+            /// the test proves the collapsed message still identifies which
+            /// reason fired.
+            message_contains: &'static str,
         }
 
         // Several internal reasons collapse into one public variant, so more
         // than one setup maps to the same `expected` — the test stays a guard
-        // against a transposed `From` arm.
+        // against a transposed `From` arm, and the `message_contains` phrases
+        // prove the folded reasons stay distinguishable in the message.
         let cases = vec![
             RejectionCase {
-                desc: "granter whitelisting itself",
-                setup: || fund_user(principal(0x50)),
-                granter: principal(0x50),
-                trading: principal(0x50),
-                expected: AddTradingAccountRequestError::InvalidTradingAccount,
-            },
-            RejectionCase {
-                desc: "principal already a trading account",
-                setup: || {
-                    fund_user(principal(0x51));
-                    add_trading_account(principal(0x52), &mock_runtime_for(principal(0x51)))
-                        .unwrap();
-                },
-                granter: principal(0x51),
-                trading: principal(0x52),
-                expected: AddTradingAccountRequestError::AlreadyTradingAccount,
-            },
-            RejectionCase {
-                desc: "principal already a registered user",
-                setup: || {
-                    fund_user(principal(0x53));
-                    fund_user(principal(0x54));
-                },
-                granter: principal(0x53),
-                trading: principal(0x54),
-                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                desc: "granter is not a registered user",
+                setup: || {},
+                granter: principal(0x59),
+                trading: principal(0x5a),
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "not a registered user",
             },
             RejectionCase {
                 desc: "granter is itself a trading account",
@@ -2688,6 +2674,38 @@ mod add_trading_account {
                 granter: principal(0x56),
                 trading: principal(0x57),
                 expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "itself a trading account",
+            },
+            RejectionCase {
+                desc: "granter whitelisting itself",
+                setup: || fund_user(principal(0x50)),
+                granter: principal(0x50),
+                trading: principal(0x50),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "whitelist itself",
+            },
+            RejectionCase {
+                desc: "principal already a registered user",
+                setup: || {
+                    fund_user(principal(0x53));
+                    fund_user(principal(0x54));
+                },
+                granter: principal(0x53),
+                trading: principal(0x54),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "already a registered user",
+            },
+            RejectionCase {
+                desc: "principal already a trading account",
+                setup: || {
+                    fund_user(principal(0x51));
+                    add_trading_account(principal(0x52), &mock_runtime_for(principal(0x51)))
+                        .unwrap();
+                },
+                granter: principal(0x51),
+                trading: principal(0x52),
+                expected: AddTradingAccountRequestError::AlreadyTradingAccount,
+                message_contains: "already a trading account",
             },
             RejectionCase {
                 desc: "granter already at the trading-account cap",
@@ -2706,6 +2724,7 @@ mod add_trading_account {
                 expected: AddTradingAccountRequestError::TooManyTradingAccounts {
                     max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
                 },
+                message_contains: "maximum number",
             },
         ];
 
@@ -2727,9 +2746,13 @@ mod add_trading_account {
                 case.desc
             );
             assert!(
-                err.message.as_deref().is_some_and(|m| !m.is_empty()),
-                "{}: the specific reason is preserved in the advisory message",
-                case.desc
+                err.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains(case.message_contains)),
+                "{}: advisory message should identify the specific reason (contains {:?}), got {:?}",
+                case.desc,
+                case.message_contains,
+                err.message
             );
             assert_eq!(
                 storage::total_event_count(),
