@@ -2635,16 +2635,6 @@ mod add_trading_account {
         );
     }
 
-    /// Drives the endpoint into each R7 rejection and asserts the *specific*
-    /// Candid variant it surfaces, guarding the two `From` mapping layers
-    /// against a transposed arm (which the compiler-exhaustive matches cannot
-    /// catch). Every precondition is provoked through the real endpoint/state
-    /// path, exercising the mapping rather than the error constructor.
-    ///
-    /// Each case uses disjoint principals: `init_state_with_order_book` rebuilds
-    /// the heap `State` but the stable-memory regions (registry, balances)
-    /// persist across the loop, so sharing principals between cases would leak
-    /// state.
     #[test]
     fn should_map_each_rejection_to_its_candid_variant() {
         struct RejectionCase {
@@ -2685,9 +2675,6 @@ mod add_trading_account {
                 expected: AddTradingAccountRequestError::AlreadyRegisteredUser,
             },
             RejectionCase {
-                // Reachable only because R3 (funding-operation denial) is a
-                // later PR: a trading account can still deposit here and thus
-                // become a registered principal that is also a delegate.
                 desc: "granter is itself a trading account",
                 setup: || {
                     fund_user(principal(0x55));
