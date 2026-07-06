@@ -601,16 +601,16 @@ type GetBalancesResult = variant {
 type AddTradingAccountError = record {
     kind : variant {
         RequestError : opt variant {
-            // The granter has never deposited, so is not a registered funding account.
-            GranterNotRegistered;
-            // The granter tried to whitelist itself.
-            SelfGrant;
+            // The funding account cannot act as a granter: it is not a
+            // registered user, or it is itself a trading account. The advisory
+            // `message` distinguishes the two.
+            FundingAccountNotFound;
+            // The proposed trading account is not a valid, fresh key: it is the
+            // funding account itself, or an already-registered user. The
+            // advisory `message` distinguishes the two.
+            InvalidTradingAccount;
             // The principal is already a trading account (of anyone).
             AlreadyTradingAccount;
-            // The principal is already a registered user.
-            AlreadyRegisteredUser;
-            // The granter is itself a trading account (no delegation chains).
-            GranterIsTradingAccount;
             // The granter already has the maximum number of trading accounts.
             TooManyTradingAccounts : record { max : nat32 };
         };

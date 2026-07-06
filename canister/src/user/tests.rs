@@ -44,7 +44,8 @@ mod trading_accounts {
     use crate::test_fixtures::arbitrary::{arb_principal, arb_timestamp};
     use crate::test_fixtures::{principal, user_registry};
     use crate::user::{
-        GrantError, MAX_TRADING_ACCOUNTS_PER_USER, TradingAccountList, TradingGrant, UserRegistry,
+        FundingAccount, GrantError, MAX_TRADING_ACCOUNTS_PER_USER, TradingAccount,
+        TradingAccountList, TradingGrant, UserRegistry,
     };
     use ic_stable_structures::{Storable, VectorMemory};
     use proptest::collection::vec;
@@ -65,9 +66,18 @@ mod trading_accounts {
         registry.get_or_register(p);
     }
 
+    fn record(
+        registry: &mut UserRegistry<VectorMemory>,
+        funding: candid::Principal,
+        trading: candid::Principal,
+        now: Timestamp,
+    ) {
+        registry.record_trading_account(FundingAccount(funding), TradingAccount(trading), now);
+    }
+
     type Setup = Box<dyn Fn(&mut UserRegistry<VectorMemory>)>;
 
-    struct GrantCase {
+    struct PreconditionCase {
         desc: &'static str,
         setup: Setup,
         funding: candid::Principal,
@@ -76,51 +86,51 @@ mod trading_accounts {
     }
 
     #[test]
-    fn should_enforce_grant_preconditions() {
+    fn should_enforce_add_trading_account_preconditions() {
         let cases = vec![
-            GrantCase {
+            PreconditionCase {
                 desc: "registered funding, fresh trading principal",
                 setup: Box::new(|r| register(r, funding())),
                 funding: funding(),
                 trading: trading(),
                 expected: Ok(()),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "granter is not a registered user",
                 setup: Box::new(|_| {}),
                 funding: funding(),
                 trading: trading(),
                 expected: Err(GrantError::GranterNotRegistered),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "granter whitelists itself",
                 setup: Box::new(|r| register(r, funding())),
                 funding: funding(),
                 trading: funding(),
                 expected: Err(GrantError::SelfGrant),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "trading principal is already a trading account of someone else",
                 setup: Box::new(|r| {
                     register(r, funding());
                     register(r, principal(3));
-                    r.record_grant(principal(3), trading(), Timestamp::new(1));
+                    record(r, principal(3), trading(), Timestamp::new(1));
                 }),
                 funding: funding(),
                 trading: trading(),
                 expected: Err(GrantError::AlreadyTradingAccount),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "trading principal is already a trading account of the granter",
                 setup: Box::new(|r| {
                     register(r, funding());
-                    r.record_grant(funding(), trading(), Timestamp::new(1));
+                    record(r, funding(), trading(), Timestamp::new(1));
                 }),
                 funding: funding(),
                 trading: trading(),
                 expected: Err(GrantError::AlreadyTradingAccount),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "trading principal is already a registered user",
                 setup: Box::new(|r| {
                     register(r, funding());
@@ -130,23 +140,23 @@ mod trading_accounts {
                 trading: trading(),
                 expected: Err(GrantError::AlreadyRegisteredUser),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "granter is itself a trading account",
                 setup: Box::new(|r| {
                     register(r, principal(3));
                     register(r, funding());
-                    r.record_grant(principal(3), funding(), Timestamp::new(1));
+                    record(r, principal(3), funding(), Timestamp::new(1));
                 }),
                 funding: funding(),
                 trading: trading(),
                 expected: Err(GrantError::GranterIsTradingAccount),
             },
-            GrantCase {
+            PreconditionCase {
                 desc: "granter is already at the trading-account cap",
                 setup: Box::new(|r| {
                     register(r, funding());
                     for i in 0..MAX_TRADING_ACCOUNTS_PER_USER as u8 {
-                        r.record_grant(funding(), principal(10 + i), Timestamp::new(1));
+                        record(r, funding(), principal(10 + i), Timestamp::new(1));
                     }
                 }),
                 funding: funding(),
@@ -159,7 +169,10 @@ mod trading_accounts {
             let mut registry = user_registry();
             (case.setup)(&mut registry);
             assert_eq!(
-                registry.validate_grant(case.funding, case.trading),
+                registry.validate_trading_account(
+                    FundingAccount(case.funding),
+                    TradingAccount(case.trading)
+                ),
                 case.expected,
                 "{}",
                 case.desc
@@ -168,13 +181,13 @@ mod trading_accounts {
     }
 
     #[test]
-    fn should_record_and_list_grants() {
+    fn should_record_and_list_trading_accounts() {
         let mut registry = user_registry();
         register(&mut registry, funding());
         assert_eq!(registry.trading_accounts_of(funding()), vec![]);
 
-        registry.record_grant(funding(), principal(2), Timestamp::new(7));
-        registry.record_grant(funding(), principal(3), Timestamp::new(9));
+        record(&mut registry, funding(), principal(2), Timestamp::new(7));
+        record(&mut registry, funding(), principal(3), Timestamp::new(9));
 
         assert_eq!(
             registry.trading_accounts_of(funding()),
@@ -194,11 +207,11 @@ mod trading_accounts {
     }
 
     #[test]
-    fn should_stamp_last_granted_at_on_each_grant() {
+    fn should_stamp_last_granted_at_on_each_add() {
         let mut registry = user_registry();
         let funding_id = registry.get_or_register(funding());
 
-        registry.record_grant(funding(), principal(2), Timestamp::new(7));
+        record(&mut registry, funding(), principal(2), Timestamp::new(7));
         assert_eq!(
             registry
                 .trading_accounts_by_funding
@@ -208,7 +221,7 @@ mod trading_accounts {
             Timestamp::new(7)
         );
 
-        registry.record_grant(funding(), principal(3), Timestamp::new(42));
+        record(&mut registry, funding(), principal(3), Timestamp::new(42));
         assert_eq!(
             registry
                 .trading_accounts_by_funding

@@ -146,7 +146,12 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             state.record_settling_event(event, timestamp, persistence);
         }
         EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading }) => {
-            state.record_add_trading_account(*funding, *trading, timestamp, persistence);
+            state.record_add_trading_account(
+                crate::user::FundingAccount(*funding),
+                crate::user::TradingAccount(*trading),
+                timestamp,
+                persistence,
+            );
         }
         EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
             let permissions = state.permissions_mut();

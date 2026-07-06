@@ -145,7 +145,7 @@ impl Permissions {
         SyncPermit(())
     }
 
-    pub fn permit_grant(&self) -> SyncPermit {
+    pub fn permit_add_trading_account(&self) -> SyncPermit {
         SyncPermit(())
     }
 }

@@ -25,7 +25,7 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{GrantError, UserId, UserRegistry};
+use crate::user::{FundingAccount, GrantError, TradingAccount, UserId, UserRegistry};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::{InitArg, Mode};
@@ -827,11 +827,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn validate_add_trading_account(
         &self,
-        funding: Principal,
-        trading: Principal,
+        funding: FundingAccount,
+        trading: TradingAccount,
     ) -> Result<(), AddTradingAccountError> {
-        self.user_registry.validate_grant(funding, trading)?;
-        if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading) {
+        self.user_registry
+            .validate_trading_account(funding, trading)?;
+        if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading.0) {
             return Err(AddTradingAccountError::FundingOperationInProgress);
         }
         Ok(())
@@ -839,13 +840,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn record_add_trading_account(
         &mut self,
-        funding: Principal,
-        trading: Principal,
+        funding: FundingAccount,
+        trading: TradingAccount,
         now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.user_registry.record_grant(funding, trading, now);
+            self.user_registry
+                .record_trading_account(funding, trading, now);
         }
     }
 
@@ -1174,30 +1176,45 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
     fn from(err: AddTradingAccountError) -> Self {
         use oisy_trade_types::AddTradingAccountRequestError as Req;
         use oisy_trade_types::AddTradingAccountTemporaryError as Tmp;
-        match err {
-            AddTradingAccountError::GranterNotRegistered => {
-                oisy_trade_types::AddTradingAccountError::request(Req::GranterNotRegistered)
-            }
-            AddTradingAccountError::SelfGrant => {
-                oisy_trade_types::AddTradingAccountError::request(Req::SelfGrant)
-            }
-            AddTradingAccountError::AlreadyTradingAccount => {
-                oisy_trade_types::AddTradingAccountError::request(Req::AlreadyTradingAccount)
-            }
-            AddTradingAccountError::AlreadyRegisteredUser => {
-                oisy_trade_types::AddTradingAccountError::request(Req::AlreadyRegisteredUser)
-            }
-            AddTradingAccountError::GranterIsTradingAccount => {
-                oisy_trade_types::AddTradingAccountError::request(Req::GranterIsTradingAccount)
-            }
-            AddTradingAccountError::TooManyTradingAccounts => {
-                oisy_trade_types::AddTradingAccountError::request(Req::TooManyTradingAccounts {
-                    max: crate::user::MAX_TRADING_ACCOUNTS_PER_USER as u32,
-                })
-            }
-            AddTradingAccountError::FundingOperationInProgress => {
-                oisy_trade_types::AddTradingAccountError::temporary(Tmp::FundingOperationInProgress)
-            }
+        use oisy_trade_types::ErrorKind;
+        // Several internal reasons collapse into one public typed variant; the
+        // advisory `message` keeps the specific reason so diagnostics survive.
+        let (kind, message): (ErrorKind<Req, Tmp, oisy_trade_types::Never>, &'static str) =
+            match err {
+                AddTradingAccountError::GranterNotRegistered => (
+                    ErrorKind::RequestError(Some(Req::FundingAccountNotFound)),
+                    "the funding account is not a registered user",
+                ),
+                AddTradingAccountError::GranterIsTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::FundingAccountNotFound)),
+                    "the funding account is itself a trading account",
+                ),
+                AddTradingAccountError::SelfGrant => (
+                    ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
+                    "a funding account cannot whitelist itself",
+                ),
+                AddTradingAccountError::AlreadyRegisteredUser => (
+                    ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
+                    "the proposed trading account is already a registered user",
+                ),
+                AddTradingAccountError::AlreadyTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::AlreadyTradingAccount)),
+                    "the principal is already a trading account",
+                ),
+                AddTradingAccountError::TooManyTradingAccounts => (
+                    ErrorKind::RequestError(Some(Req::TooManyTradingAccounts {
+                        max: crate::user::MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                    })),
+                    "the granter already has the maximum number of trading accounts",
+                ),
+                AddTradingAccountError::FundingOperationInProgress => (
+                    ErrorKind::TemporaryError(Some(Tmp::FundingOperationInProgress)),
+                    "the trading account has an in-flight deposit or withdrawal",
+                ),
+            };
+        oisy_trade_types::AddTradingAccountError {
+            kind,
+            message: Some(message.to_string()),
         }
     }
 }

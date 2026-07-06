@@ -2580,7 +2580,7 @@ mod add_trading_account {
             result,
             Err(AddTradingAccountError {
                 kind: ErrorKind::RequestError(Some(
-                    AddTradingAccountRequestError::GranterNotRegistered
+                    AddTradingAccountRequestError::FundingAccountNotFound
                 )),
                 ..
             })
@@ -2645,13 +2645,16 @@ mod add_trading_account {
             expected: AddTradingAccountRequestError,
         }
 
+        // Several internal reasons collapse into one public variant, so more
+        // than one setup maps to the same `expected` — the test stays a guard
+        // against a transposed `From` arm.
         let cases = vec![
             RejectionCase {
                 desc: "granter whitelisting itself",
                 setup: || fund_user(principal(0x50)),
                 granter: principal(0x50),
                 trading: principal(0x50),
-                expected: AddTradingAccountRequestError::SelfGrant,
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
             },
             RejectionCase {
                 desc: "principal already a trading account",
@@ -2672,7 +2675,7 @@ mod add_trading_account {
                 },
                 granter: principal(0x53),
                 trading: principal(0x54),
-                expected: AddTradingAccountRequestError::AlreadyRegisteredUser,
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
             },
             RejectionCase {
                 desc: "granter is itself a trading account",
@@ -2684,7 +2687,7 @@ mod add_trading_account {
                 },
                 granter: principal(0x56),
                 trading: principal(0x57),
-                expected: AddTradingAccountRequestError::GranterIsTradingAccount,
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
             },
             RejectionCase {
                 desc: "granter already at the trading-account cap",
@@ -2711,12 +2714,27 @@ mod add_trading_account {
             init_state_with_order_book();
             (case.setup)();
 
-            let result = add_trading_account(case.trading, &mock_runtime_for(case.granter));
+            // Capture after setup so setup grants (which do record events) don't
+            // count against the rejection's own no-event guarantee.
+            let before = storage::total_event_count();
+            let err = add_trading_account(case.trading, &mock_runtime_for(case.granter))
+                .expect_err(case.desc);
 
             assert_eq!(
-                result,
-                Err(AddTradingAccountError::request(case.expected.clone())),
+                err.kind,
+                ErrorKind::RequestError(Some(case.expected.clone())),
                 "{}",
+                case.desc
+            );
+            assert!(
+                err.message.as_deref().is_some_and(|m| !m.is_empty()),
+                "{}: the specific reason is preserved in the advisory message",
+                case.desc
+            );
+            assert_eq!(
+                storage::total_event_count(),
+                before,
+                "{}: a rejected grant records no event",
                 case.desc
             );
         }
@@ -2745,14 +2763,15 @@ mod add_trading_account {
         );
 
         let overflow = principal(0x30 + MAX_TRADING_ACCOUNTS_PER_USER as u8);
+        let err = add_trading_account(overflow, &mock_runtime_for(funding()))
+            .expect_err("the grant past the cap is rejected");
         assert_eq!(
-            add_trading_account(overflow, &mock_runtime_for(funding())),
-            Err(AddTradingAccountError::request(
+            err.kind,
+            ErrorKind::RequestError(Some(
                 AddTradingAccountRequestError::TooManyTradingAccounts {
                     max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
                 }
-            )),
-            "the grant past the cap is rejected"
+            ))
         );
     }
 }
