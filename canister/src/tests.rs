@@ -2522,6 +2522,7 @@ mod set_halt {
 mod add_trading_account {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
+    use crate::user::MAX_TRADING_ACCOUNTS_PER_USER;
     use crate::{add_trading_account, get_my_trading_accounts, state, storage};
     use oisy_trade_types::{
         AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
@@ -2631,6 +2632,140 @@ mod add_trading_account {
             storage::total_event_count(),
             before + 1,
             "a successful grant records exactly one event"
+        );
+    }
+
+    /// Drives the endpoint into each R7 rejection and asserts the *specific*
+    /// Candid variant it surfaces, guarding the two `From` mapping layers
+    /// against a transposed arm (which the compiler-exhaustive matches cannot
+    /// catch). Every precondition is provoked through the real endpoint/state
+    /// path, exercising the mapping rather than the error constructor.
+    ///
+    /// Each case uses disjoint principals: `init_state_with_order_book` rebuilds
+    /// the heap `State` but the stable-memory regions (registry, balances)
+    /// persist across the loop, so sharing principals between cases would leak
+    /// state.
+    #[test]
+    fn should_map_each_rejection_to_its_candid_variant() {
+        struct RejectionCase {
+            desc: &'static str,
+            setup: fn(),
+            granter: candid::Principal,
+            trading: candid::Principal,
+            expected: AddTradingAccountRequestError,
+        }
+
+        let cases = vec![
+            RejectionCase {
+                desc: "granter whitelisting itself",
+                setup: || fund_user(principal(0x50)),
+                granter: principal(0x50),
+                trading: principal(0x50),
+                expected: AddTradingAccountRequestError::SelfGrant,
+            },
+            RejectionCase {
+                desc: "principal already a trading account",
+                setup: || {
+                    fund_user(principal(0x51));
+                    add_trading_account(principal(0x52), &mock_runtime_for(principal(0x51)))
+                        .unwrap();
+                },
+                granter: principal(0x51),
+                trading: principal(0x52),
+                expected: AddTradingAccountRequestError::AlreadyTradingAccount,
+            },
+            RejectionCase {
+                desc: "principal already a registered user",
+                setup: || {
+                    fund_user(principal(0x53));
+                    fund_user(principal(0x54));
+                },
+                granter: principal(0x53),
+                trading: principal(0x54),
+                expected: AddTradingAccountRequestError::AlreadyRegisteredUser,
+            },
+            RejectionCase {
+                // Reachable only because R3 (funding-operation denial) is a
+                // later PR: a trading account can still deposit here and thus
+                // become a registered principal that is also a delegate.
+                desc: "granter is itself a trading account",
+                setup: || {
+                    fund_user(principal(0x55));
+                    add_trading_account(principal(0x56), &mock_runtime_for(principal(0x55)))
+                        .unwrap();
+                    fund_user(principal(0x56));
+                },
+                granter: principal(0x56),
+                trading: principal(0x57),
+                expected: AddTradingAccountRequestError::GranterIsTradingAccount,
+            },
+            RejectionCase {
+                desc: "granter already at the trading-account cap",
+                setup: || {
+                    fund_user(principal(0x58));
+                    for i in 0..MAX_TRADING_ACCOUNTS_PER_USER as u8 {
+                        add_trading_account(
+                            principal(0x60 + i),
+                            &mock_runtime_for(principal(0x58)),
+                        )
+                        .unwrap();
+                    }
+                },
+                granter: principal(0x58),
+                trading: principal(0x60 + MAX_TRADING_ACCOUNTS_PER_USER as u8),
+                expected: AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                },
+            },
+        ];
+
+        for case in cases {
+            state::reset_state();
+            init_state_with_order_book();
+            (case.setup)();
+
+            let result = add_trading_account(case.trading, &mock_runtime_for(case.granter));
+
+            assert_eq!(
+                result,
+                Err(AddTradingAccountError::request(case.expected.clone())),
+                "{}",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_grant_up_to_the_cap_then_reject_the_next() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x30 + i))
+            .collect();
+        for account in &accounts {
+            assert_eq!(
+                add_trading_account(*account, &mock_runtime_for(funding())),
+                Ok(()),
+                "a grant within the cap succeeds"
+            );
+        }
+
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(accounts.clone()),
+            "all {MAX_TRADING_ACCOUNTS_PER_USER} granted accounts are listed"
+        );
+
+        let overflow = principal(0x30 + MAX_TRADING_ACCOUNTS_PER_USER as u8);
+        assert_eq!(
+            add_trading_account(overflow, &mock_runtime_for(funding())),
+            Err(AddTradingAccountError::request(
+                AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                }
+            )),
+            "the grant past the cap is rejected"
         );
     }
 }
