@@ -195,7 +195,6 @@ pub struct SetHaltEvent {
     pub halted: bool,
 }
 
-/// A funding account whitelisted a trading principal.
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddTradingAccountEvent {
     #[cbor(n(0), with = "icrc_cbor::principal")]

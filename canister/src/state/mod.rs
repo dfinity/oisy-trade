@@ -825,10 +825,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Checks the grant preconditions for whitelisting `trading` under funding
-    /// account `funding` (R7): the registry identity and cap rules, plus the
-    /// "no in-flight funding operation for `trading`" race guard. Mutates
-    /// nothing; the caller records the event and the handler applies it.
     pub fn validate_add_trading_account(
         &self,
         funding: Principal,
@@ -841,9 +837,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         Ok(())
     }
 
-    /// Applies a validated grant to the whitelist maps under the stable-memory
-    /// `Write` gate; a no-op during replay (`Skip`), which reads the already
-    /// persisted maps.
     pub fn record_add_trading_account(
         &mut self,
         funding: Principal,
@@ -856,8 +849,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
-    /// Returns `funding`'s current whitelist (R9); empty when it has granted
-    /// none. Acts on the raw principal without resolving delegation.
     pub fn trading_accounts_of(&self, funding: Principal) -> Vec<Principal> {
         self.user_registry.trading_accounts_of(funding)
     }

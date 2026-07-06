@@ -111,13 +111,6 @@ pub fn cancel_limit_order(
     Ok(record.into())
 }
 
-/// Whitelists `trading` as a trading account of the caller's funding account
-/// (R1 grant). Acts on the raw caller (R9); validates the R7 preconditions
-/// synchronously, then records an [`AddTradingAccountEvent`] applied to the
-/// whitelist under the stable-memory write gate (R10). Rejected calls record
-/// nothing.
-///
-/// [`AddTradingAccountEvent`]: state::event::AddTradingAccountEvent
 pub fn add_trading_account(
     trading: candid::Principal,
     runtime: &impl Runtime,
@@ -139,8 +132,6 @@ pub fn add_trading_account(
     })
 }
 
-/// Returns the caller's current trading-account whitelist (R9), empty for a
-/// principal with none. Acts on the raw caller; never resolves delegation.
 pub fn get_my_trading_accounts(
     caller: candid::Principal,
 ) -> Result<Vec<candid::Principal>, GetMyTradingAccountsError> {

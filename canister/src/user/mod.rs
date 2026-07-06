@@ -59,7 +59,6 @@ impl Storable for PrincipalKey {
 /// A trading account's standing authorization.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
 pub struct TradingGrant {
-    /// The funding account this key acts for.
     #[cbor(n(0), with = "icrc_cbor::principal")]
     funding: Principal,
 }
@@ -88,12 +87,8 @@ impl Storable for TradingGrant {
 /// A funding account's whitelist and its grant-cooldown anchor.
 #[derive(Debug, Clone, PartialEq, Eq, Default, minicbor::Encode, minicbor::Decode)]
 pub struct TradingAccountList {
-    /// The whitelisted trading principals, at most
-    /// [`MAX_TRADING_ACCOUNTS_PER_USER`].
     #[cbor(n(0), with = "crate::cbor::vec_principal")]
     accounts: Vec<Principal>,
-    /// Time of the most recent successful grant — the grant-cooldown anchor
-    /// (enforced in a later PR). Per funding account, not per key.
     #[n(1)]
     last_granted_at: Timestamp,
 }
@@ -144,10 +139,7 @@ pub enum GrantError {
 /// stable-memory regions and survives upgrades on its own.
 pub struct UserRegistry<M: Memory> {
     users: StableBTreeMap<PrincipalKey, UserId, M>,
-    /// Trading principal → its grant. The hot lookup: one `get` per resolved
-    /// call.
     trading_accounts: StableBTreeMap<PrincipalKey, TradingGrant, M>,
-    /// Funding `UserId` → its bounded whitelist plus the grant-cooldown anchor.
     trading_accounts_by_funding: StableBTreeMap<UserId, TradingAccountList, M>,
 }
 
