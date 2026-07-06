@@ -63,7 +63,15 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   - `F` is itself a trading account (no delegation chains; subsumed by the registration
     requirement once R3 is enforced, but kept explicit because the whitelist PR ships before
     the funding-denial PR);
-  - `F` already has `MAX_TRADING_ACCOUNTS_PER_USER` trading accounts.
+  - `F` already has `MAX_TRADING_ACCOUNTS_PER_USER` trading accounts;
+  - `T` has an in-flight deposit or withdraw (a retryable rejection, the envelope's
+    `TemporaryError` class). This closes a race on deposit's await window: without it, "`T` is
+    unregistered" could pass while `T`'s first `icrc2_transfer_from` awaits the ledger, and the
+    completing deposit would then register and credit `T` *after* the grant made it a delegate —
+    a delegate with a stranded balance of its own. Grant itself is synchronous (no await), so
+    checking the in-flight set (the `UserOpGuard` state) at validation closes the window from
+    both sides: a grant during the deposit is rejected, and a deposit after the grant is denied
+    (R3).
   `remove_trading_account(T)` fails only if `T` is not currently `F`'s trading account.
 - **R8 — Funding account unaffected.** `F` retains full authority — deposit, withdraw, trade,
   cancel, queries — regardless of how many trading accounts it has whitelisted.
@@ -117,6 +125,14 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   whitelisted and its owner would use a different principal. R7's registered-user check ensures
   no principal with existing funds or history can ever be claimed, and claiming is not free —
   the claimer must itself be a deposited funding account, one grant per cooldown (R7, R14).
+- **Automatic order cancellation on revocation (typed revocation).** Revoking a key could
+  cancel the open orders it placed (`placed_by`, R13, would make them identifiable), and one
+  could distinguish a "compromised key" revocation (cancel everything) from a "scheduled
+  rotation" one (orders stay). Deliberately kept simple: revocation only removes authority
+  (R6). Auto-cancel is right for compromise but wrong for routine rotation, and the compromise
+  response is already compact — revoke, then cancel the revoked key's orders via
+  `get_my_orders` filtered on `placed_by`. A typed-revocation surface can be added later if
+  operational experience demands it.
 - **A minimum-free-balance bar on granting.** A controller-configured per-token minimum
   (`min_grant_balance`, e.g. "at least 1 ICP free", checked at grant time — a threshold, not a
   fee, and not locked afterwards) would add economic skin-in-the-game on top of the
@@ -276,8 +292,8 @@ get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradin
 
 All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries one request-error
 variant per R7 precondition (granter not registered, self-grant, already a trading account,
-already a registered user, caller is a trading account, too many trading accounts) plus the
-R14 cooldown in its `TemporaryError` class;
+already a registered user, caller is a trading account, too many trading accounts) plus, in
+its `TemporaryError` class, the R14 cooldown and the in-flight-funding-operation rejection;
 `RemoveTradingAccountError` covers "not your trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
 to trading accounts (R3), added *inside* the envelope's `opt variant` request-error class —
 the extension point DEFI-2801 built in exactly for this: a client compiled against the old
@@ -372,7 +388,8 @@ Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14),
 - **Grant / revoke.** New event types `AddTradingAccountEvent { funding, trading }` and
   `RemoveTradingAccountEvent { funding, trading }`, handled in `state/audit` like `SetHalt`:
   the endpoint validates the preconditions synchronously — the identity, cap, and cooldown
-  checks in `UserRegistry` (R7, R14) — records the event, and the handler applies it to the
+  checks in `UserRegistry`, plus "`T` has no in-flight funding operation" against the
+  `UserOpGuard` state (R7, R14) — records the event, and the handler applies it to the
   `UserRegistry` whitelist maps under the `Write` gate (R10). Rejected calls record nothing.
 - **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
   owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
