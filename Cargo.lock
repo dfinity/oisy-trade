@@ -1870,6 +1870,7 @@ dependencies = [
  "icrc-cbor",
  "minicbor",
  "oisy_trade_types",
+ "proptest",
  "serde",
 ]
 

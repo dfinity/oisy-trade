@@ -25,3 +25,27 @@ pub mod btreeset_principal {
         vec.encode(e, ctx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::btreeset_principal;
+    use candid::Principal;
+    use proptest::collection::{btree_set, vec as prop_vec};
+    use proptest::prelude::{Strategy, any, prop_assert_eq, proptest};
+
+    fn arb_principal() -> impl Strategy<Value = Principal> {
+        prop_vec(any::<u8>(), 0..=29).prop_map(|bytes| Principal::from_slice(&bytes))
+    }
+
+    proptest! {
+        #[test]
+        fn btreeset_principal_roundtrips(principals in btree_set(arb_principal(), 0..=8)) {
+            let mut buf = vec![];
+            btreeset_principal::encode(&principals, &mut minicbor::Encoder::new(&mut buf), &mut ())
+                .unwrap();
+            let decoded =
+                btreeset_principal::decode(&mut minicbor::Decoder::new(&buf), &mut ()).unwrap();
+            prop_assert_eq!(decoded, principals);
+        }
+    }
+}
