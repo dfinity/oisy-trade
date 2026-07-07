@@ -122,7 +122,19 @@ impl Storable for TradingAccountList {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-/// Why [`UserRegistry::validate_grant`] rejected a grant.
+/// A funding account principal — the account a grant acts on behalf of. A
+/// distinct type from [`TradingAccount`] so the two same-shaped arguments of
+/// [`UserRegistry::validate_trading_account`] / [`UserRegistry::record_trading_account`]
+/// cannot be transposed by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FundingAccount(pub Principal);
+
+/// A trading account principal — the key being whitelisted. See
+/// [`FundingAccount`] for why this is a distinct newtype.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TradingAccount(pub Principal);
+
+/// Why [`UserRegistry::validate_trading_account`] rejected a grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantError {
     /// The funding account is not a registered user.
@@ -214,13 +226,21 @@ impl<M: Memory> UserRegistry<M> {
     /// Checks the grant preconditions for whitelisting `trading` under funding
     /// account `funding` at time `now`, without mutating anything. Encodes the
     /// identity and cap rules (R7) and the grant cooldown (R14); the caller
-    /// records the event and applies it via [`Self::record_grant`].
-    pub fn validate_grant(
+    /// records the event and applies it via [`Self::record_trading_account`].
+    pub fn validate_trading_account(
         &self,
-        funding: Principal,
-        trading: Principal,
+        funding: FundingAccount,
+        trading: TradingAccount,
         now: Timestamp,
     ) -> Result<(), GrantError> {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
+        // Checked before the registration lookup: a trading account is
+        // unregistered by design, so a delegate granter would otherwise be
+        // reported as merely `GranterNotRegistered`, losing the specific reason.
+        if self.is_trading_account(&funding) {
+            return Err(GrantError::GranterIsTradingAccount);
+        }
         let funding_id = self
             .lookup(funding)
             .ok_or(GrantError::GranterNotRegistered)?;
@@ -233,13 +253,12 @@ impl<M: Memory> UserRegistry<M> {
         if self.lookup(trading).is_some() {
             return Err(GrantError::AlreadyRegisteredUser);
         }
-        if self.is_trading_account(&funding) {
-            return Err(GrantError::GranterIsTradingAccount);
-        }
         let list = self.trading_accounts_by_funding.get(&funding_id);
         if list.as_ref().map(|l| l.accounts.len()).unwrap_or(0) >= MAX_TRADING_ACCOUNTS_PER_USER {
             return Err(GrantError::TooManyTradingAccounts);
         }
+        // The cooldown is retryable, so it is checked only after every
+        // permanent R7 rejection — a permanent error still wins.
         if let Some(list) = list {
             let elapsed = now
                 .as_nanos()
@@ -256,9 +275,11 @@ impl<M: Memory> UserRegistry<M> {
     /// rate-limited (R14).
     pub fn validate_revoke(
         &self,
-        funding: Principal,
-        trading: Principal,
+        funding: FundingAccount,
+        trading: TradingAccount,
     ) -> Result<(), RevokeError> {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
         match self.trading_accounts.get(&PrincipalKey(trading)) {
             Some(grant) if grant.funding == funding => Ok(()),
             _ => Err(RevokeError::NotYourTradingAccount),
@@ -267,13 +288,26 @@ impl<M: Memory> UserRegistry<M> {
 
     /// Records a grant of `trading` under funding account `funding`, stamping
     /// `now` as the grant-cooldown anchor. Preconditions must already have been
-    /// checked via [`Self::validate_grant`]; `funding` must be registered.
-    pub fn record_grant(&mut self, funding: Principal, trading: Principal, now: Timestamp) {
+    /// checked via [`Self::validate_trading_account`]; `funding` must be
+    /// registered and `trading` must be a fresh key (adds are not idempotent).
+    pub fn record_trading_account(
+        &mut self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        now: Timestamp,
+    ) {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
         let funding_id = self
             .lookup(funding)
-            .expect("BUG: record_grant on an unregistered funding account");
-        self.trading_accounts
+            .expect("BUG: record_trading_account on an unregistered funding account");
+        let previous = self
+            .trading_accounts
             .insert(PrincipalKey(trading), TradingGrant { funding });
+        debug_assert!(
+            previous.is_none(),
+            "BUG: record_trading_account overwrote an existing trading account"
+        );
         let mut list = self
             .trading_accounts_by_funding
             .get(&funding_id)
@@ -289,7 +323,9 @@ impl<M: Memory> UserRegistry<M> {
     /// the `last_granted_at` cooldown anchor must survive so revoke-all →
     /// re-grant cannot bypass R14. Preconditions must already have been checked
     /// via [`Self::validate_revoke`].
-    pub fn record_revoke(&mut self, funding: Principal, trading: Principal) {
+    pub fn record_revoke(&mut self, funding: FundingAccount, trading: TradingAccount) {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
         let funding_id = self
             .lookup(funding)
             .expect("BUG: record_revoke on an unregistered funding account");
