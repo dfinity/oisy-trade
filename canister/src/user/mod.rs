@@ -19,7 +19,7 @@ use std::time::Duration;
 /// needs more, and the cap is trivially raisable later.
 pub const MAX_TRADING_ACCOUNTS_PER_USER: usize = 4;
 
-/// Minimum time between two successful grants by the same funding account (R14).
+/// Minimum time between two successful grants by the same funding account.
 /// Key rotation happens on a timescale of weeks, so an hour between grants costs
 /// legitimate users nothing while bounding whitelist-write amplification.
 pub const TRADING_ACCOUNT_GRANT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
@@ -225,7 +225,7 @@ impl<M: Memory> UserRegistry<M> {
 
     /// Checks the grant preconditions for whitelisting `trading` under funding
     /// account `funding` at time `now`, without mutating anything. Encodes the
-    /// identity and cap rules (R7) and the grant cooldown (R14); the caller
+    /// identity and cap rules and the grant cooldown; the caller
     /// records the event and applies it via [`Self::record_trading_account`].
     pub fn validate_trading_account(
         &self,
@@ -258,7 +258,7 @@ impl<M: Memory> UserRegistry<M> {
             return Err(GrantError::TooManyTradingAccounts);
         }
         // The cooldown is retryable, so it is checked only after every
-        // permanent R7 rejection — a permanent error still wins.
+        // permanent rejection — a permanent error still wins.
         if let Some(list) = list {
             let elapsed = now
                 .as_nanos()
@@ -270,9 +270,9 @@ impl<M: Memory> UserRegistry<M> {
         Ok(())
     }
 
-    /// Checks that `trading` is currently a trading account of `funding` (R7's
+    /// Checks that `trading` is currently a trading account of `funding` (the
     /// revoke precondition), without mutating anything. Revocation is never
-    /// rate-limited (R14).
+    /// rate-limited.
     pub fn validate_revoke(
         &self,
         funding: FundingAccount,
@@ -321,8 +321,8 @@ impl<M: Memory> UserRegistry<M> {
     /// `trading_accounts` entry and drops it from `funding`'s list. The
     /// [`TradingAccountList`] entry itself is **never removed, only shrunk** —
     /// the `last_granted_at` cooldown anchor must survive so revoke-all →
-    /// re-grant cannot bypass R14. Preconditions must already have been checked
-    /// via [`Self::validate_revoke`].
+    /// re-grant cannot bypass the cooldown. Preconditions must already have been
+    /// checked via [`Self::validate_revoke`].
     pub fn record_revoke(&mut self, funding: FundingAccount, trading: TradingAccount) {
         let FundingAccount(funding) = funding;
         let TradingAccount(trading) = trading;

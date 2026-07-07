@@ -176,8 +176,8 @@ mod trading_accounts {
             },
         ];
 
-        // A timestamp far past any prior grant so the R14 cooldown never fires;
-        // these cases exercise the R7 identity/cap rules only.
+        // A timestamp far past any prior grant so the cooldown never fires;
+        // these cases exercise the identity/cap rules only.
         let now = Timestamp::new(u64::MAX);
         for case in cases {
             let mut registry = user_registry();
