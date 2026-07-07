@@ -22,7 +22,7 @@
 
 set -Eeuo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 IDENTITY="${IDENTITY:-hsm}"
 ENVIRONMENT="${ENVIRONMENT:-staging}"
