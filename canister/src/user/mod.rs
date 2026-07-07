@@ -6,11 +6,17 @@
 #[cfg(test)]
 mod tests;
 
+use crate::Timestamp;
 use crate::ids::{Seq, SeqMarker};
 use candid::Principal;
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{Memory, StableBTreeMap, Storable};
 use std::borrow::Cow;
+
+/// Maximum number of trading accounts a single funding account may whitelist.
+/// Hyperliquid grants one unnamed plus three named agents; no known integrator
+/// needs more, and the cap is trivially raisable later.
+pub const MAX_TRADING_ACCOUNTS_PER_USER: usize = 4;
 
 /// Marker distinguishing the user-id family of [`Seq`].
 #[derive(Debug, Clone, Copy)]
@@ -50,10 +56,103 @@ impl Storable for PrincipalKey {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-/// Maps each user identity to a dense, stable [`UserId`]. Lives in its own
-/// stable-memory region and survives upgrades on its own.
+/// A trading account's standing authorization.
+#[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
+pub struct TradingGrant {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    funding: Principal,
+}
+
+impl Storable for TradingGrant {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf).expect("trading grant encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf).expect("trading grant encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode trading grant bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+/// A funding account's whitelist and its grant-cooldown anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Default, minicbor::Encode, minicbor::Decode)]
+pub struct TradingAccountList {
+    #[cbor(n(0), with = "crate::cbor::vec_principal")]
+    accounts: Vec<Principal>,
+    #[n(1)]
+    last_granted_at: Timestamp,
+}
+
+impl Storable for TradingAccountList {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut buf = vec![];
+        minicbor::encode(self, &mut buf)
+            .expect("trading account list encoding should always succeed");
+        Cow::Owned(buf)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        minicbor::encode(&self, &mut buf)
+            .expect("trading account list encoding should always succeed");
+        buf
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        minicbor::decode(bytes.as_ref())
+            .unwrap_or_else(|e| panic!("failed to decode trading account list bytes: {e}"))
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+/// A funding account principal — the account a grant acts on behalf of. A
+/// distinct type from [`TradingAccount`] so the two same-shaped arguments of
+/// [`UserRegistry::validate_trading_account`] / [`UserRegistry::record_trading_account`]
+/// cannot be transposed by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FundingAccount(pub Principal);
+
+/// A trading account principal — the key being whitelisted. See
+/// [`FundingAccount`] for why this is a distinct newtype.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TradingAccount(pub Principal);
+
+/// Why [`UserRegistry::validate_trading_account`] rejected a grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantError {
+    /// The funding account is not a registered user.
+    GranterNotRegistered,
+    /// The funding account tried to whitelist itself.
+    SelfGrant,
+    /// The prospective trading account is already a trading account.
+    AlreadyTradingAccount,
+    /// The prospective trading account is already a registered user.
+    AlreadyRegisteredUser,
+    /// The funding account is itself a trading account.
+    GranterIsTradingAccount,
+    /// The funding account already holds the maximum number of trading
+    /// accounts.
+    TooManyTradingAccounts,
+}
+
+/// Maps each user identity to a dense, stable [`UserId`], and holds the
+/// per-funding-account trading-account whitelist. Lives in its own
+/// stable-memory regions and survives upgrades on its own.
 pub struct UserRegistry<M: Memory> {
     users: StableBTreeMap<PrincipalKey, UserId, M>,
+    trading_accounts: StableBTreeMap<PrincipalKey, TradingGrant, M>,
+    trading_accounts_by_funding: StableBTreeMap<UserId, TradingAccountList, M>,
 }
 
 impl<M: Memory> std::fmt::Debug for UserRegistry<M> {
@@ -65,9 +164,19 @@ impl<M: Memory> std::fmt::Debug for UserRegistry<M> {
 }
 
 impl<M: Memory> UserRegistry<M> {
-    pub fn new(memory: M) -> Self {
+    /// `users_memory`, `trading_accounts_memory`, and
+    /// `trading_accounts_by_funding_memory` **must be distinct memory
+    /// regions**: the three maps share no isolation beyond their backing
+    /// memory, so reusing a handle would let them overwrite each other.
+    pub fn new(
+        users_memory: M,
+        trading_accounts_memory: M,
+        trading_accounts_by_funding_memory: M,
+    ) -> Self {
         Self {
-            users: StableBTreeMap::init(memory),
+            users: StableBTreeMap::init(users_memory),
+            trading_accounts: StableBTreeMap::init(trading_accounts_memory),
+            trading_accounts_by_funding: StableBTreeMap::init(trading_accounts_by_funding_memory),
         }
     }
 
@@ -91,6 +200,92 @@ impl<M: Memory> UserRegistry<M> {
     pub fn lookup(&self, principal: Principal) -> Option<UserId> {
         self.users.get(&PrincipalKey(principal))
     }
+
+    /// Returns `true` if `principal` is currently a trading account.
+    pub fn is_trading_account(&self, principal: &Principal) -> bool {
+        self.trading_accounts
+            .contains_key(&PrincipalKey(*principal))
+    }
+
+    /// Checks the grant preconditions for whitelisting `trading` under funding
+    /// account `funding`, without mutating anything. Encodes the identity and
+    /// cap rules; the caller records the event and applies it via
+    /// [`Self::record_trading_account`].
+    pub fn validate_trading_account(
+        &self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+    ) -> Result<(), GrantError> {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
+        // Checked before the registration lookup: a trading account is
+        // unregistered by design, so a delegate granter would otherwise be
+        // reported as merely `GranterNotRegistered`, losing the specific reason.
+        if self.is_trading_account(&funding) {
+            return Err(GrantError::GranterIsTradingAccount);
+        }
+        let funding_id = self
+            .lookup(funding)
+            .ok_or(GrantError::GranterNotRegistered)?;
+        if trading == funding {
+            return Err(GrantError::SelfGrant);
+        }
+        if self.is_trading_account(&trading) {
+            return Err(GrantError::AlreadyTradingAccount);
+        }
+        if self.lookup(trading).is_some() {
+            return Err(GrantError::AlreadyRegisteredUser);
+        }
+        let count = self
+            .trading_accounts_by_funding
+            .get(&funding_id)
+            .map(|list| list.accounts.len())
+            .unwrap_or(0);
+        if count >= MAX_TRADING_ACCOUNTS_PER_USER {
+            return Err(GrantError::TooManyTradingAccounts);
+        }
+        Ok(())
+    }
+
+    /// Records a grant of `trading` under funding account `funding`, stamping
+    /// `now` as the grant-cooldown anchor. Preconditions must already have been
+    /// checked via [`Self::validate_trading_account`]; `funding` must be
+    /// registered and `trading` must be a fresh key (adds are not idempotent).
+    pub fn record_trading_account(
+        &mut self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        now: Timestamp,
+    ) {
+        let FundingAccount(funding) = funding;
+        let TradingAccount(trading) = trading;
+        let funding_id = self
+            .lookup(funding)
+            .expect("BUG: record_trading_account on an unregistered funding account");
+        let previous = self
+            .trading_accounts
+            .insert(PrincipalKey(trading), TradingGrant { funding });
+        debug_assert!(
+            previous.is_none(),
+            "BUG: record_trading_account overwrote an existing trading account"
+        );
+        let mut list = self
+            .trading_accounts_by_funding
+            .get(&funding_id)
+            .unwrap_or_default();
+        list.accounts.push(trading);
+        list.last_granted_at = now;
+        self.trading_accounts_by_funding.insert(funding_id, list);
+    }
+
+    /// Returns `funding`'s current whitelist (empty if it has granted none, or
+    /// is unregistered). Acts on the raw principal; never resolves delegation.
+    pub fn trading_accounts_of(&self, funding: Principal) -> Vec<Principal> {
+        self.lookup(funding)
+            .and_then(|funding_id| self.trading_accounts_by_funding.get(&funding_id))
+            .map(|list| list.accounts)
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -100,14 +295,38 @@ impl UserRegistry<ic_stable_structures::VectorMemory> {
             .iter()
             .map(|entry| (entry.key().clone(), entry.value()))
     }
+
+    fn iter_trading_accounts(&self) -> impl Iterator<Item = (PrincipalKey, TradingGrant)> + '_ {
+        self.trading_accounts
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value()))
+    }
+
+    fn iter_trading_accounts_by_funding(
+        &self,
+    ) -> impl Iterator<Item = (UserId, TradingAccountList)> + '_ {
+        self.trading_accounts_by_funding
+            .iter()
+            .map(|entry| (*entry.key(), entry.value()))
+    }
 }
 
 #[cfg(test)]
 impl Clone for UserRegistry<ic_stable_structures::VectorMemory> {
     fn clone(&self) -> Self {
-        let mut fresh = Self::new(ic_stable_structures::VectorMemory::default());
+        let mut fresh = Self::new(
+            ic_stable_structures::VectorMemory::default(),
+            ic_stable_structures::VectorMemory::default(),
+            ic_stable_structures::VectorMemory::default(),
+        );
         for (key, id) in self.iter() {
             fresh.users.insert(key, id);
+        }
+        for (key, grant) in self.iter_trading_accounts() {
+            fresh.trading_accounts.insert(key, grant);
+        }
+        for (funding_id, list) in self.iter_trading_accounts_by_funding() {
+            fresh.trading_accounts_by_funding.insert(funding_id, list);
         }
         fresh
     }
@@ -117,6 +336,12 @@ impl Clone for UserRegistry<ic_stable_structures::VectorMemory> {
 impl PartialEq for UserRegistry<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
+            && self
+                .iter_trading_accounts()
+                .eq(other.iter_trading_accounts())
+            && self
+                .iter_trading_accounts_by_funding()
+                .eq(other.iter_trading_accounts_by_funding())
     }
 }
 

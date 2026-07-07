@@ -44,6 +44,8 @@ pub enum EventType {
     CancelLimitOrder(#[n(0)] CancelLimitOrderEvent),
     #[n(9)]
     SetHalt(#[n(0)] SetHaltEvent),
+    #[n(10)]
+    AddTradingAccount(#[n(0)] AddTradingAccountEvent),
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
@@ -191,6 +193,14 @@ pub struct SetHaltEvent {
     pub book_ids: Option<Vec<OrderBookId>>,
     #[n(1)]
     pub halted: bool,
+}
+
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
+pub struct AddTradingAccountEvent {
+    #[cbor(n(0), with = "icrc_cbor::principal")]
+    pub funding: Principal,
+    #[cbor(n(1), with = "icrc_cbor::principal")]
+    pub trading: Principal,
 }
 
 impl Storable for Event {

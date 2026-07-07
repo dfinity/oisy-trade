@@ -21,3 +21,6 @@ icrc-cbor = { workspace = true, optional = true }
 minicbor = { workspace = true, features = ["derive"], optional = true }
 oisy_trade_types = { path = "../types", version = "0.3.0" }
 serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+proptest = { workspace = true }

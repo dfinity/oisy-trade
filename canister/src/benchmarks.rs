@@ -473,7 +473,11 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             storage::user_orders_memory(),
         ),
         TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory()),
-        crate::user::UserRegistry::new(storage::user_registry_memory()),
+        crate::user::UserRegistry::new(
+            storage::user_registry_memory(),
+            storage::trading_accounts_memory(),
+            storage::trading_accounts_by_funding_memory(),
+        ),
         crate::balance::TokenBalance::new(storage::balances_memory()),
     )
     .unwrap();

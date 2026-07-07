@@ -14,8 +14,8 @@ context — e.g. who uses each mechanism and when it applies.*
 ## Requirements
 
 *The verifiable behavioral contract, enumerated: `R1: if X, then Y.` This is the
-canonical list — the Test plan and the per-PR acceptance criteria reference these `R#`
-rather than restating behavior.*
+canonical list — the per-PR acceptance criteria reference these `R#` rather than
+restating behavior; the implementer and reviewer derive the tests from them.*
 
 ## Non-goals
 
@@ -41,10 +41,6 @@ line anchors.*
 ### `<module / area>`
 
 *Concrete types, signatures, events, enforcement points.*
-
-### Test plan
-
-*Integration + unit tests; tag each to an `R#`. Note the verification commands.*
 
 ### Delivery / PR sequence
 

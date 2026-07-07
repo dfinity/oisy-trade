@@ -596,6 +596,44 @@ type GetBalancesResult = variant {
     Err : GetBalancesError;
 };
 
+// Error reported by `add_trading_account`. See the disposition contract at the
+// top of this file.
+type AddTradingAccountError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The funding account cannot act as a granter: it is not a
+            // registered user, or it is itself a trading account. The advisory
+            // `message` distinguishes the two.
+            FundingAccountNotFound;
+            // The proposed trading account is not a valid, fresh key: it is the
+            // funding account itself, or an already-registered user. The
+            // advisory `message` distinguishes the two.
+            InvalidTradingAccount;
+            // The principal is already a trading account (of anyone).
+            AlreadyTradingAccount;
+            // The granter already has the maximum number of trading accounts.
+            TooManyTradingAccounts : record { max : nat32 };
+        };
+        TemporaryError : opt variant {
+            // The principal has an in-flight deposit or withdrawal; retry once it completes.
+            FundingOperationInProgress;
+        };
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Error reported by `get_my_trading_accounts`. The query cannot currently fail;
+// all three disposition arms are reserved for forward compatibility.
+type GetMyTradingAccountsError = record {
+    kind : variant {
+        RequestError : opt variant {};
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
 // Request to add a new trading pair to the canister.
 type AddTradingPairRequest = record {
     // The base token of the pair.
@@ -751,6 +789,13 @@ type SetHaltEvent = record {
     halted : bool;
 };
 
+// Event payload recording a trading-account grant: `funding` whitelisted
+// `trading` as one of its trading accounts.
+type AddTradingAccountEvent = record {
+    funding : principal;
+    trading : principal;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -812,6 +857,7 @@ type EventType = variant {
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
     SetHalt : SetHaltEvent;
+    AddTradingAccount : AddTradingAccountEvent;
 };
 
 // A canister event with a timestamp.
@@ -931,6 +977,20 @@ service : (OisyTradeArg) -> {
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
+
+    // Whitelist `trading` as a trading account of the caller's funding account.
+    // From then on `trading` may place and cancel orders acting on the caller's
+    // account (enforced in later releases). Acts on the raw caller as a funding
+    // account and never resolves delegation. Fails if the caller is not a
+    // registered user, is granting itself, is itself a trading account, has
+    // reached the maximum number of trading accounts, or if `trading` is already
+    // a trading account or an already-registered user; a transient failure is
+    // returned while `trading` has an in-flight deposit or withdrawal.
+    add_trading_account : (principal) -> (variant { Ok; Err : AddTradingAccountError });
+
+    // Return the caller's current trading-account whitelist (empty if it has
+    // granted none). Acts on the raw caller and never resolves delegation.
+    get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradingAccountsError }) query;
 
     // ===== END of Public / user endpoints =====
 
