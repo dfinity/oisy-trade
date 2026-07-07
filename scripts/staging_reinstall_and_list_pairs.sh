@@ -26,6 +26,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 IDENTITY="${IDENTITY:-hsm}"
 ENVIRONMENT="${ENVIRONMENT:-staging}"
+
+# This script hardcodes testnet ledgers, params, and pairs. Refuse to run
+# against any other environment (e.g. prod) regardless of FORCE.
+if [[ "$ENVIRONMENT" != "staging" ]]; then
+    echo "ERROR: this script only supports ENVIRONMENT=staging (got '$ENVIRONMENT')." >&2
+    echo "It hardcodes testnet ledgers and pairs and would wipe/mislist any other environment." >&2
+    exit 1
+fi
+
 PIN_FILE="${PIN_FILE:-}"
 
 # Build the auth flags shared by every signing call. Unlock secret handling
