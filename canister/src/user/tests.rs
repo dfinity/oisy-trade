@@ -141,10 +141,12 @@ mod trading_accounts {
                 expected: Err(GrantError::AlreadyRegisteredUser),
             },
             PreconditionCase {
-                desc: "granter is itself a trading account",
+                // An unregistered delegate granter: the trading-account check
+                // runs before the registration check, so it is reported with
+                // the specific reason rather than `GranterNotRegistered`.
+                desc: "granter is itself a trading account (and unregistered)",
                 setup: Box::new(|r| {
                     register(r, principal(3));
-                    register(r, funding());
                     record(r, principal(3), funding(), Timestamp::new(1));
                 }),
                 funding: funding(),

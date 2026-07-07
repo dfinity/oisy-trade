@@ -2664,12 +2664,15 @@ mod add_trading_account {
                 message_contains: "not a registered user",
             },
             RejectionCase {
-                desc: "granter is itself a trading account",
+                // The delegate granter is intentionally left unregistered (no
+                // `fund_user`): the trading-account check precedes the
+                // registration check, so it is reported as a trading account
+                // rather than as merely unregistered.
+                desc: "granter is itself a trading account (and unregistered)",
                 setup: || {
                     fund_user(principal(0x55));
                     add_trading_account(principal(0x56), &mock_runtime_for(principal(0x55)))
                         .unwrap();
-                    fund_user(principal(0x56));
                 },
                 granter: principal(0x56),
                 trading: principal(0x57),

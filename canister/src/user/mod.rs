@@ -218,6 +218,12 @@ impl<M: Memory> UserRegistry<M> {
     ) -> Result<(), GrantError> {
         let FundingAccount(funding) = funding;
         let TradingAccount(trading) = trading;
+        // Checked before the registration lookup: a trading account is
+        // unregistered by design, so a delegate granter would otherwise be
+        // reported as merely `GranterNotRegistered`, losing the specific reason.
+        if self.is_trading_account(&funding) {
+            return Err(GrantError::GranterIsTradingAccount);
+        }
         let funding_id = self
             .lookup(funding)
             .ok_or(GrantError::GranterNotRegistered)?;
@@ -229,9 +235,6 @@ impl<M: Memory> UserRegistry<M> {
         }
         if self.lookup(trading).is_some() {
             return Err(GrantError::AlreadyRegisteredUser);
-        }
-        if self.is_trading_account(&funding) {
-            return Err(GrantError::GranterIsTradingAccount);
         }
         let count = self
             .trading_accounts_by_funding
