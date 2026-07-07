@@ -49,10 +49,10 @@ if [[ "${NO_PASSWORD:-0}" != "1" ]]; then
     if [[ -z "$PIN_FILE" ]]; then
         PIN_FILE="$(mktemp -t icp-identity-XXXXXX)"
         chmod 600 "$PIN_FILE"
+        cleanup_pin=true
         read -rs -p "Unlock $IDENTITY (HSM PIN or PEM password): " pin && echo
         printf '%s' "$pin" > "$PIN_FILE"
         unset pin
-        cleanup_pin=true
     fi
     AUTH+=(--identity-password-file "$PIN_FILE")
 fi
