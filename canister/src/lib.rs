@@ -144,7 +144,7 @@ pub fn remove_trading_account(
     state::with_state_mut(|s| {
         s.validate_remove_trading_account(FundingAccount(funding), TradingAccount(trading))
             .map_err(RemoveTradingAccountError::from)?;
-        let permit = s.permissions().permit_add_trading_account();
+        let permit = s.permissions().permit_remove_trading_account();
         let event = state::event::RemoveTradingAccountEvent { funding, trading };
         state::audit::process_event(
             s,
