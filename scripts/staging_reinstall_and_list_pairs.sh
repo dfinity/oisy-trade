@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Reinstall the staging OISY TRADE canister and re-list the launch pairs.
+# Reinstall the staging OISY TRADE canister and re-list the staging trading pairs.
 #
 # Mirrors docs/src/usage/for-admins.md. Steps:
 #   1) Reinstall the canister (WIPES stable memory).
@@ -8,9 +8,10 @@
 #   3) Add trading pair TESTICP/ckSepoliaUSDC.
 #   4) List trading pairs (verify both appear).
 #
-# Requires: the `icp` CLI on PATH, and an identity that is a controller of the
-# canister. Run from anywhere — the script cd's to the repo root so
-# `--environment staging` resolves the `oisy_trade` canister name from icp.yaml.
+# Requires: the `icp` CLI on PATH, `just` on PATH (unless SKIP_BUILD=1), and an
+# identity that is a controller of the canister. Run from anywhere — the script
+# cd's to the repo root so `--environment staging` resolves the `oisy_trade`
+# canister name from icp.yaml.
 #
 # Config via environment variables:
 #   IDENTITY     controller identity              (default: hsm)
