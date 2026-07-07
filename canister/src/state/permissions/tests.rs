@@ -25,8 +25,8 @@ proptest! {
             Err(UnauthorizedError::TradingHalted)
         ));
 
-        let _ = permissions.permit_deposit(caller);
-        let _ = permissions.permit_withdraw(caller);
+        prop_assert!(permissions.permit_deposit(caller, false).is_ok());
+        prop_assert!(permissions.permit_withdraw(caller, false).is_ok());
         let _ = permissions.permit_cancel();
         let _ = permissions.permit_settling();
         let _ = permissions.permit_add_trading_pair();
@@ -57,12 +57,30 @@ fn should_permit_every_event_on_empty_permissions() {
 
     assert!(permissions.permit_trading(caller, BOOK).is_ok());
     assert!(permissions.permit_matching(BOOK).is_ok());
-    let _ = permissions.permit_deposit(caller);
-    let _ = permissions.permit_withdraw(caller);
+    assert!(permissions.permit_deposit(caller, false).is_ok());
+    assert!(permissions.permit_withdraw(caller, false).is_ok());
     let _ = permissions.permit_cancel();
     let _ = permissions.permit_settling();
     let _ = permissions.permit_add_trading_pair();
     let _ = permissions.permit_admin();
+}
+
+#[test]
+fn should_deny_funding_operations_to_a_trading_account() {
+    let permissions = Permissions::default();
+    let caller = Principal::from_slice(&[1]);
+
+    assert!(matches!(
+        permissions.permit_deposit(caller, true),
+        Err(UnauthorizedError::TradingAccountCannotFund)
+    ));
+    assert!(matches!(
+        permissions.permit_withdraw(caller, true),
+        Err(UnauthorizedError::TradingAccountCannotFund)
+    ));
+    // A non-delegate caller is still admitted.
+    assert!(permissions.permit_deposit(caller, false).is_ok());
+    assert!(permissions.permit_withdraw(caller, false).is_ok());
 }
 
 #[test]

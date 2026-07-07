@@ -1009,6 +1009,29 @@ mod deposit {
         assert!(runtime.captured_calls().is_empty());
     }
 
+    #[tokio::test]
+    async fn should_deny_deposit_by_trading_account_before_any_ledger_call() {
+        use crate::test_fixtures::{fund_user, mocks::mock_runtime_for};
+
+        init_state_with_order_book();
+        // Make USER a trading account of the funding account OTHER_USER.
+        fund_user(OTHER_USER);
+        crate::add_trading_account(USER, &mock_runtime_for(OTHER_USER)).unwrap();
+
+        let runtime = CapturingRuntime::new(USER, vec![]);
+        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountCannotDeposit))
+        );
+        assert!(
+            runtime.captured_calls().is_empty(),
+            "a denied deposit performs no ledger interaction"
+        );
+        assert_in_flight_empty();
+    }
+
     fn deposit_request(token: TokenId) -> DepositRequest {
         DepositRequest {
             token_id: token.into(),
@@ -1462,6 +1485,52 @@ mod withdraw {
                 "in_flight_user_ops should be empty after the call returns"
             );
         });
+    }
+
+    #[tokio::test]
+    async fn should_deny_withdraw_by_trading_account_before_any_ledger_call() {
+        use crate::test_fixtures::mocks::mock_runtime_for;
+
+        let funding = Principal::from_slice(&[0x43]);
+        state::init_state(crate::test_fixtures::state_vmem());
+        state::with_state_mut(|s| {
+            s.record_token(
+                TokenId::from(token_id()),
+                crate::order::TokenMetadata {
+                    symbol: "TEST".to_string(),
+                    decimals: 8,
+                },
+            );
+            // Register the funding account so it can grant; USER stays
+            // unregistered so it can be whitelisted as a trading account.
+            s.deposit(
+                funding,
+                TokenId::from(token_id()),
+                Quantity::from(1u64),
+                state::StableMemoryOptions::Write,
+            );
+        });
+        crate::add_trading_account(USER, &mock_runtime_for(funding)).unwrap();
+
+        // No ledger expectation: the deny must short-circuit before any transfer.
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
+
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(1_000u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountCannotWithdraw))
+        );
+        assert_in_flight_empty();
     }
 
     #[tokio::test]

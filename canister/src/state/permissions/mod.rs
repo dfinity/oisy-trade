@@ -15,6 +15,9 @@ pub struct Permissions {
 pub enum UnauthorizedError {
     TradingHalted,
     NotController,
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot deposit or withdraw.
+    TradingAccountCannotFund,
 }
 
 /// Proof that a synchronous admission check ran and passed.
@@ -121,12 +124,32 @@ impl Permissions {
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_deposit(&self, _caller: Principal) -> PreAsyncPermit {
-        PreAsyncPermit(())
+    /// Admits a deposit unless the caller is a trading account, which can never
+    /// hold DEX balances. `caller_is_trading_account` is the caller's
+    /// delegation status, resolved against the registry by the caller.
+    pub fn permit_deposit(
+        &self,
+        _caller: Principal,
+        caller_is_trading_account: bool,
+    ) -> Result<PreAsyncPermit, UnauthorizedError> {
+        if caller_is_trading_account {
+            return Err(UnauthorizedError::TradingAccountCannotFund);
+        }
+        Ok(PreAsyncPermit(()))
     }
 
-    pub fn permit_withdraw(&self, _caller: Principal) -> PreAsyncPermit {
-        PreAsyncPermit(())
+    /// Admits a withdrawal unless the caller is a trading account, which can
+    /// never hold DEX balances. `caller_is_trading_account` is the caller's
+    /// delegation status, resolved against the registry by the caller.
+    pub fn permit_withdraw(
+        &self,
+        _caller: Principal,
+        caller_is_trading_account: bool,
+    ) -> Result<PreAsyncPermit, UnauthorizedError> {
+        if caller_is_trading_account {
+            return Err(UnauthorizedError::TradingAccountCannotFund);
+        }
+        Ok(PreAsyncPermit(()))
     }
 
     pub fn permit_cancel(&self) -> SyncPermit {

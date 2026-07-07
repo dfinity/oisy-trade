@@ -304,6 +304,17 @@ pub async fn deposit(
     })?;
     let caller = runtime.msg_caller();
 
+    // A trading account can never hold DEX balances, so deny its funding
+    // operations up front — before the in-flight guard or any ledger call. The
+    // check acts on the raw caller (deposit is never delegation-resolved).
+    let pre = state::with_state(|s| {
+        s.permissions()
+            .permit_deposit(caller, s.is_trading_account(&caller))
+    })
+    .map_err(|_| {
+        DepositError::request(oisy_trade_types::DepositRequestError::TradingAccountCannotDeposit)
+    })?;
+
     let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
         DepositError::temporary(oisy_trade_types::DepositTemporaryError::OperationInProgress)
     })?;
@@ -319,8 +330,6 @@ pub async fn deposit(
             oisy_trade_types::DepositRequestError::AmountExceedsMaximum,
         ));
     }
-
-    let pre = state::with_state(|s| s.permissions().permit_deposit(caller));
 
     let deposit_response = ledger::deposit(request, runtime).await?;
     let event = state::event::DepositEvent {
@@ -368,6 +377,18 @@ pub async fn withdraw(
         WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
     })?;
 
+    // A trading account can never hold DEX balances, so deny its funding
+    // operations up front — before the in-flight guard, the balance debit, or
+    // any ledger call. The check acts on the raw caller (withdraw is never
+    // delegation-resolved).
+    let pre = state::with_state(|s| {
+        s.permissions()
+            .permit_withdraw(caller, s.is_trading_account(&caller))
+    })
+    .map_err(|_| {
+        WithdrawError::request(oisy_trade_types::WithdrawRequestError::TradingAccountCannotWithdraw)
+    })?;
+
     let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
         WithdrawError::temporary(oisy_trade_types::WithdrawTemporaryError::OperationInProgress)
     })?;
@@ -380,8 +401,6 @@ pub async fn withdraw(
             },
         )
     })?;
-
-    let pre = state::with_state(|s| s.permissions().permit_withdraw(caller));
 
     // Perform the ledger transfer (with automatic BadFee retry).
     let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;

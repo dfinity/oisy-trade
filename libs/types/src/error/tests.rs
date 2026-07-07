@@ -136,6 +136,26 @@ fn should_set_message_from_leaf_display() {
 }
 
 #[test]
+fn should_round_trip_trading_account_funding_denial_leaves() {
+    let deposit = DepositError::request(DepositRequestError::TradingAccountCannotDeposit);
+    assert_eq!(
+        deposit.kind,
+        ErrorKind::RequestError(Some(DepositRequestError::TradingAccountCannotDeposit))
+    );
+    let decoded: DepositError = candid::decode_one(&candid::encode_one(&deposit).unwrap()).unwrap();
+    assert_eq!(deposit, decoded);
+
+    let withdraw = WithdrawError::request(WithdrawRequestError::TradingAccountCannotWithdraw);
+    assert_eq!(
+        withdraw.kind,
+        ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountCannotWithdraw))
+    );
+    let decoded: WithdrawError =
+        candid::decode_one(&candid::encode_one(&withdraw).unwrap()).unwrap();
+    assert_eq!(withdraw, decoded);
+}
+
+#[test]
 fn should_decode_future_leaf_as_none_keeping_arm_and_message() {
     let future = FutureError {
         kind: FutureErrorKind::RequestError(Some(FutureRequestError::SomeFutureReason {
