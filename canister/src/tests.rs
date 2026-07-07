@@ -2518,3 +2518,286 @@ mod set_halt {
         mock
     }
 }
+
+mod add_trading_account {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
+    use crate::user::MAX_TRADING_ACCOUNTS_PER_USER;
+    use crate::{add_trading_account, get_my_trading_accounts, state, storage};
+    use oisy_trade_types::{
+        AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
+        ErrorKind,
+    };
+
+    fn funding() -> candid::Principal {
+        principal(0x21)
+    }
+
+    fn trading() -> candid::Principal {
+        principal(0x22)
+    }
+
+    #[test]
+    fn should_grant_and_list_trading_account() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        assert_eq!(
+            add_trading_account(trading(), &mock_runtime_for(funding())),
+            Ok(())
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![trading()]),
+            "the funding account lists its trading account"
+        );
+    }
+
+    #[test]
+    fn should_act_on_raw_caller_and_not_resolve_delegation() {
+        init_state_with_order_book();
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+
+        assert_eq!(
+            get_my_trading_accounts(trading()),
+            Ok(vec![]),
+            "the trading account's own whitelist is empty; reads act on the raw caller"
+        );
+        assert_eq!(
+            get_my_trading_accounts(principal(0x99)),
+            Ok(vec![]),
+            "a principal with no grants lists nothing"
+        );
+    }
+
+    #[test]
+    fn should_reject_grant_from_unregistered_granter() {
+        init_state_with_order_book();
+
+        let result = add_trading_account(trading(), &mock_runtime_for(funding()));
+        assert!(matches!(
+            result,
+            Err(AddTradingAccountError {
+                kind: ErrorKind::RequestError(Some(
+                    AddTradingAccountRequestError::FundingAccountNotFound
+                )),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn should_reject_grant_of_principal_with_in_flight_funding_operation() {
+        init_state_with_order_book();
+        fund_user(funding());
+        state::with_state_mut(|s| {
+            s.in_flight_user_ops_mut()
+                .insert((trading(), icp_token_id()));
+        });
+
+        let result = add_trading_account(trading(), &mock_runtime_for(funding()));
+        assert!(matches!(
+            result,
+            Err(AddTradingAccountError {
+                kind: ErrorKind::TemporaryError(Some(
+                    AddTradingAccountTemporaryError::FundingOperationInProgress
+                )),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn should_record_no_event_on_rejected_grant() {
+        init_state_with_order_book();
+
+        let before = storage::total_event_count();
+        assert!(add_trading_account(trading(), &mock_runtime_for(funding())).is_err());
+        assert_eq!(
+            storage::total_event_count(),
+            before,
+            "a rejected grant records no event"
+        );
+    }
+
+    #[test]
+    fn should_record_one_event_on_successful_grant() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        let before = storage::total_event_count();
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+        assert_eq!(
+            storage::total_event_count(),
+            before + 1,
+            "a successful grant records exactly one event"
+        );
+    }
+
+    #[test]
+    fn should_map_each_rejection_to_its_candid_variant() {
+        struct RejectionCase {
+            desc: &'static str,
+            setup: fn(),
+            granter: candid::Principal,
+            trading: candid::Principal,
+            expected: AddTradingAccountRequestError,
+            /// A reason-specific substring of the advisory message: distinct
+            /// from the sibling reason folded into the same public variant, so
+            /// the test proves the collapsed message still identifies which
+            /// reason fired.
+            message_contains: &'static str,
+        }
+
+        // Several internal reasons collapse into one public variant, so more
+        // than one setup maps to the same `expected` — the test stays a guard
+        // against a transposed `From` arm, and the `message_contains` phrases
+        // prove the folded reasons stay distinguishable in the message.
+        let cases = vec![
+            RejectionCase {
+                desc: "granter is not a registered user",
+                setup: || {},
+                granter: principal(0x59),
+                trading: principal(0x5a),
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "not a registered user",
+            },
+            RejectionCase {
+                // The delegate granter is intentionally left unregistered (no
+                // `fund_user`): the trading-account check precedes the
+                // registration check, so it is reported as a trading account
+                // rather than as merely unregistered.
+                desc: "granter is itself a trading account (and unregistered)",
+                setup: || {
+                    fund_user(principal(0x55));
+                    add_trading_account(principal(0x56), &mock_runtime_for(principal(0x55)))
+                        .unwrap();
+                },
+                granter: principal(0x56),
+                trading: principal(0x57),
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "itself a trading account",
+            },
+            RejectionCase {
+                desc: "granter whitelisting itself",
+                setup: || fund_user(principal(0x50)),
+                granter: principal(0x50),
+                trading: principal(0x50),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "whitelist itself",
+            },
+            RejectionCase {
+                desc: "principal already a registered user",
+                setup: || {
+                    fund_user(principal(0x53));
+                    fund_user(principal(0x54));
+                },
+                granter: principal(0x53),
+                trading: principal(0x54),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "already a registered user",
+            },
+            RejectionCase {
+                desc: "principal already a trading account",
+                setup: || {
+                    fund_user(principal(0x51));
+                    add_trading_account(principal(0x52), &mock_runtime_for(principal(0x51)))
+                        .unwrap();
+                },
+                granter: principal(0x51),
+                trading: principal(0x52),
+                expected: AddTradingAccountRequestError::AlreadyTradingAccount,
+                message_contains: "already a trading account",
+            },
+            RejectionCase {
+                desc: "granter already at the trading-account cap",
+                setup: || {
+                    fund_user(principal(0x58));
+                    for i in 0..MAX_TRADING_ACCOUNTS_PER_USER as u8 {
+                        add_trading_account(
+                            principal(0x60 + i),
+                            &mock_runtime_for(principal(0x58)),
+                        )
+                        .unwrap();
+                    }
+                },
+                granter: principal(0x58),
+                trading: principal(0x60 + MAX_TRADING_ACCOUNTS_PER_USER as u8),
+                expected: AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                },
+                message_contains: "maximum number",
+            },
+        ];
+
+        for case in cases {
+            state::reset_state();
+            init_state_with_order_book();
+            (case.setup)();
+
+            // Capture after setup so setup grants (which do record events) don't
+            // count against the rejection's own no-event guarantee.
+            let before = storage::total_event_count();
+            let err = add_trading_account(case.trading, &mock_runtime_for(case.granter))
+                .expect_err(case.desc);
+
+            assert_eq!(
+                err.kind,
+                ErrorKind::RequestError(Some(case.expected.clone())),
+                "{}",
+                case.desc
+            );
+            assert!(
+                err.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains(case.message_contains)),
+                "{}: advisory message should identify the specific reason (contains {:?}), got {:?}",
+                case.desc,
+                case.message_contains,
+                err.message
+            );
+            assert_eq!(
+                storage::total_event_count(),
+                before,
+                "{}: a rejected grant records no event",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_grant_up_to_the_cap_then_reject_the_next() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x30 + i))
+            .collect();
+        for account in &accounts {
+            assert_eq!(
+                add_trading_account(*account, &mock_runtime_for(funding())),
+                Ok(()),
+                "a grant within the cap succeeds"
+            );
+        }
+
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(accounts.clone()),
+            "all {MAX_TRADING_ACCOUNTS_PER_USER} granted accounts are listed"
+        );
+
+        let overflow = principal(0x30 + MAX_TRADING_ACCOUNTS_PER_USER as u8);
+        let err = add_trading_account(overflow, &mock_runtime_for(funding()))
+            .expect_err("the grant past the cap is rejected");
+        assert_eq!(
+            err.kind,
+            ErrorKind::RequestError(Some(
+                AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                }
+            ))
+        );
+    }
+}

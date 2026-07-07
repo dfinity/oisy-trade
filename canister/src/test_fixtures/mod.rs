@@ -109,7 +109,11 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             crate::storage::trades_memory(),
             crate::storage::trades_by_user_memory(),
         ),
-        UserRegistry::new(crate::storage::user_registry_memory()),
+        UserRegistry::new(
+            crate::storage::user_registry_memory(),
+            crate::storage::trading_accounts_memory(),
+            crate::storage::trading_accounts_by_funding_memory(),
+        ),
         TokenBalance::new(crate::storage::balances_memory()),
     )
     .unwrap()
@@ -297,7 +301,11 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::trades_memory(),
         crate::storage::trades_by_user_memory(),
     );
-    let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
+    let user_registry = UserRegistry::new(
+        crate::storage::user_registry_memory(),
+        crate::storage::trading_accounts_memory(),
+        crate::storage::trading_accounts_by_funding_memory(),
+    );
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
@@ -416,7 +424,11 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 }
 
 pub fn user_registry() -> UserRegistry<VectorMemory> {
-    UserRegistry::new(VectorMemory::default())
+    UserRegistry::new(
+        VectorMemory::default(),
+        VectorMemory::default(),
+        VectorMemory::default(),
+    )
 }
 
 /// A deterministic test principal seeded by a single byte.
@@ -475,8 +487,9 @@ pub mod arbitrary {
     };
     use crate::settlement::FillEvent;
     use crate::state::event::{
-        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
+        AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
+        CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent,
+        SettlingEvent, WithdrawEvent,
     };
     use crate::user::UserId;
     use candid::Principal;
@@ -1096,6 +1109,11 @@ pub mod arbitrary {
         (book_ids, any::<bool>()).prop_map(|(book_ids, halted)| SetHaltEvent { book_ids, halted })
     }
 
+    pub fn arb_add_trading_account_event() -> impl Strategy<Value = AddTradingAccountEvent> {
+        (arb_principal(), arb_principal())
+            .prop_map(|(funding, trading)| AddTradingAccountEvent { funding, trading })
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_arg().prop_map(EventType::Init),
@@ -1108,6 +1126,7 @@ pub mod arbitrary {
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
             arb_set_halt_event().prop_map(EventType::SetHalt),
+            arb_add_trading_account_event().prop_map(EventType::AddTradingAccount),
         ]
     }
 

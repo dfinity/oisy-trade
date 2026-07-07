@@ -25,7 +25,11 @@ pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
     let trade_history =
         TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory());
     let balances = TokenBalance::new(storage::balances_memory());
-    let user_registry = UserRegistry::new(storage::user_registry_memory());
+    let user_registry = UserRegistry::new(
+        storage::user_registry_memory(),
+        storage::trading_accounts_memory(),
+        storage::trading_accounts_by_funding_memory(),
+    );
     state::init_state(
         State::new(
             init_arg.clone(),
@@ -77,7 +81,11 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
             ),
             TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory()),
             TokenBalance::new(storage::balances_memory()),
-            UserRegistry::new(storage::user_registry_memory()),
+            UserRegistry::new(
+                storage::user_registry_memory(),
+                storage::trading_accounts_memory(),
+                storage::trading_accounts_by_funding_memory(),
+            ),
         )
     };
 

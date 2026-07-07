@@ -1,9 +1,10 @@
 use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesArgs,
-    GetMyTradesError, GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
+    CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, DepositTemporaryError,
+    ErrorKind, FilterToken, GetBalancesError, GetMyOrdersArgs, GetMyOrdersError,
+    GetMyOrdersRequestError, GetMyTradesArgs, GetMyTradesError, GetMyTradesRequestError,
+    GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
     OrderRecord, Token, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
     UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
@@ -44,6 +45,28 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
         }
     }
     result
+}
+
+#[ic_cdk::update]
+fn add_trading_account(trading: candid::Principal) -> Result<(), AddTradingAccountError> {
+    let result =
+        oisy_trade_canister::add_trading_account(trading, &oisy_trade_canister::IC_RUNTIME);
+    match &result {
+        Ok(()) => canlog::log!(
+            Priority::Info,
+            "[add_trading_account]: whitelisted trading account {trading}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
+}
+
+#[ic_cdk::query]
+fn get_my_trading_accounts() -> Result<Vec<candid::Principal>, GetMyTradingAccountsError> {
+    use oisy_trade_canister::Runtime;
+    oisy_trade_canister::get_my_trading_accounts(oisy_trade_canister::IC_RUNTIME.msg_caller())
 }
 
 #[ic_cdk::query]
@@ -372,6 +395,12 @@ fn get_events(
                         .book_ids
                         .map(|ids| ids.into_iter().map(|id| id.get()).collect()),
                     halted: e.halted,
+                }),
+                EventType::AddTradingAccount(
+                    oisy_trade_canister::state::event::AddTradingAccountEvent { funding, trading },
+                ) => event::EventType::AddTradingAccount(event::AddTradingAccountEvent {
+                    funding,
+                    trading,
                 }),
             },
         }

@@ -14,6 +14,8 @@ const USER_REGISTRY_MEMORY_ID: MemoryId = MemoryId::new(5);
 const USER_ORDERS_MEMORY_ID: MemoryId = MemoryId::new(6);
 const TRADES_MEMORY_ID: MemoryId = MemoryId::new(7);
 const TRADES_BY_USER_MEMORY_ID: MemoryId = MemoryId::new(8);
+const TRADING_ACCOUNTS_MEMORY_ID: MemoryId = MemoryId::new(9);
+const TRADING_ACCOUNTS_BY_FUNDING_MEMORY_ID: MemoryId = MemoryId::new(10);
 
 pub type VMem = VirtualMemory<DefaultMemoryImpl>;
 type EventLog = StableLog<Event, VMem, VMem>;
@@ -81,6 +83,20 @@ pub fn balances_memory() -> VMem {
 /// `init` / `post_upgrade`.
 pub fn user_registry_memory() -> VMem {
     MEMORY_MANAGER.with(|m| m.borrow().get(USER_REGISTRY_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice that backs `UserRegistry`'s
+/// trading-account map (trading principal → grant). Distinct from
+/// [`user_registry_memory`] and [`trading_accounts_by_funding_memory`].
+pub fn trading_accounts_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(TRADING_ACCOUNTS_MEMORY_ID))
+}
+
+/// Returns the virtual memory slice that backs `UserRegistry`'s per-funding
+/// trading-account list (funding `UserId` → its whitelist). Distinct from
+/// [`user_registry_memory`] and [`trading_accounts_memory`].
+pub fn trading_accounts_by_funding_memory() -> VMem {
+    MEMORY_MANAGER.with(|m| m.borrow().get(TRADING_ACCOUNTS_BY_FUNDING_MEMORY_ID))
 }
 
 /// Returns the virtual memory slice that backs `OrderHistory`'s per-user

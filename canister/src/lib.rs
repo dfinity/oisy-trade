@@ -1,12 +1,12 @@
 use oisy_trade_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, MAX_DEPTH_LIMIT,
-    MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
+    CancelLimitOrderError, DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse,
+    FilterToken, GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetMyTradingAccountsError,
+    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
+    MAX_DEPTH_LIMIT, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel, Token, TradingPair,
+    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -109,6 +109,34 @@ pub fn cancel_limit_order(
     })?;
     let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
     Ok(record.into())
+}
+
+pub fn add_trading_account(
+    trading: candid::Principal,
+    runtime: &impl Runtime,
+) -> Result<(), AddTradingAccountError> {
+    use crate::user::{FundingAccount, TradingAccount};
+    state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let funding = runtime.msg_caller();
+    state::with_state_mut(|s| {
+        s.validate_add_trading_account(FundingAccount(funding), TradingAccount(trading))
+            .map_err(AddTradingAccountError::from)?;
+        let permit = s.permissions().permit_add_trading_account();
+        let event = state::event::AddTradingAccountEvent { funding, trading };
+        state::audit::process_event(
+            s,
+            state::event::EventType::AddTradingAccount(event),
+            permit.into(),
+            runtime,
+        );
+        Ok(())
+    })
+}
+
+pub fn get_my_trading_accounts(
+    caller: candid::Principal,
+) -> Result<Vec<candid::Principal>, GetMyTradingAccountsError> {
+    Ok(state::with_state(|s| s.trading_accounts_of(caller)))
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatus {

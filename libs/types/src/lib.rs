@@ -10,12 +10,13 @@ mod error;
 
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
+    AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
     DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
-    GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
-    GetOrderBookTickerError, GetOrderBookTickerRequestError, Never, WithdrawError,
-    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    GetMyTradesRequestError, GetMyTradingAccountsError, GetOrderBookDepthError,
+    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
+    WithdrawError, WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
