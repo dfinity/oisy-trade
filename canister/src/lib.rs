@@ -317,8 +317,16 @@ pub async fn deposit(
         s.permissions()
             .permit_deposit(caller, s.is_trading_account(&caller))
     })
-    .map_err(|_| {
-        DepositError::request(oisy_trade_types::DepositRequestError::TradingAccountCannotDeposit)
+    .map_err(|e| match e {
+        state::permissions::UnauthorizedError::TradingAccountCannotFund => DepositError::request(
+            oisy_trade_types::DepositRequestError::TradingAccountCannotDeposit,
+        ),
+        state::permissions::UnauthorizedError::TradingHalted => {
+            unreachable!("permit_deposit does not check trading halt")
+        }
+        state::permissions::UnauthorizedError::NotController => {
+            unreachable!("permit_deposit is not controller-gated")
+        }
     })?;
 
     let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
@@ -391,8 +399,16 @@ pub async fn withdraw(
         s.permissions()
             .permit_withdraw(caller, s.is_trading_account(&caller))
     })
-    .map_err(|_| {
-        WithdrawError::request(oisy_trade_types::WithdrawRequestError::TradingAccountCannotWithdraw)
+    .map_err(|e| match e {
+        state::permissions::UnauthorizedError::TradingAccountCannotFund => WithdrawError::request(
+            oisy_trade_types::WithdrawRequestError::TradingAccountCannotWithdraw,
+        ),
+        state::permissions::UnauthorizedError::TradingHalted => {
+            unreachable!("permit_withdraw does not check trading halt")
+        }
+        state::permissions::UnauthorizedError::NotController => {
+            unreachable!("permit_withdraw is not controller-gated")
+        }
     })?;
 
     let _guard = guard::UserOpGuard::new(caller, internal_token).ok_or_else(|| {
