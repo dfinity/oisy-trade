@@ -1019,6 +1019,9 @@ mod deposit {
         crate::add_trading_account(USER, &mock_runtime_for(OTHER_USER)).unwrap();
 
         let runtime = CapturingRuntime::new(USER, vec![]);
+        // Capture after setup (the grant above records an event) so the
+        // assertion covers only the denied deposit.
+        let events_before = crate::storage::total_event_count();
         let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
@@ -1028,6 +1031,11 @@ mod deposit {
         assert!(
             runtime.captured_calls().is_empty(),
             "a denied deposit performs no ledger interaction"
+        );
+        assert_eq!(
+            crate::storage::total_event_count(),
+            events_before,
+            "a denied deposit records no event"
         );
         assert_in_flight_empty();
     }
@@ -1517,6 +1525,9 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
         runtime.expect_time().return_const(crate::Timestamp::EPOCH);
 
+        // Capture after setup (the grant above records an event) so the
+        // assertion covers only the denied withdrawal.
+        let events_before = crate::storage::total_event_count();
         let result = withdraw(
             WithdrawRequest {
                 token_id: token_id(),
@@ -1529,6 +1540,11 @@ mod withdraw {
         assert_eq!(
             result.unwrap_err().kind,
             ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountCannotWithdraw))
+        );
+        assert_eq!(
+            crate::storage::total_event_count(),
+            events_before,
+            "a denied withdrawal records no event"
         );
         assert_in_flight_empty();
     }
