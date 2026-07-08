@@ -719,16 +719,17 @@ where
 /// resting min-notional sell orders (each from a distinct principal, one fill
 /// each) swept by a single fill-or-kill buy that empties the book in one
 /// settling event. 22_900 is the largest maker count whose sweep still fits
-/// under the IC per-message cap (`execution_policy::MAX_INSTRUCTION_BUDGET`, 40B
-/// instructions); at ~23_000 the sweep crosses the cap and the message traps.
+/// under the IC per-message cap (40B instructions,
+/// `crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`); at ~23_000 the
+/// sweep crosses the cap and the message traps.
 mod settling_event_sweep {
     use crate::order::{
-        FeeRates, LotSize, OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side,
-        TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+        FeeRates, LotSize, OrderBookId, OrderStatus, PendingOrder, Price, Quantity, Side, TickSize,
+        TimeInForce, TokenMetadata,
     };
     use crate::order::{OrderHistory, TradeHistory};
+    use crate::state::State;
     use crate::state::execution_policy::ExecutionPolicy;
-    use crate::state::{StableMemoryOptions, State};
     use crate::storage;
     use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
     use async_trait::async_trait;
@@ -823,16 +824,16 @@ mod settling_event_sweep {
     fn bench_fok_sweep_22_900_makers() -> canbench_rs::BenchResult {
         let num_makers = NUM_MAKERS;
         let mut state = new_state();
-        let pair = trading_pair();
+        let pair = super::trading_pair();
 
         // Resting sell side: `num_makers` orders, each exactly at the min
         // notional, each from a distinct principal so every fill touches a
         // fresh maker balance (worst case for balance lookups). All rest at the
         // same price, so they never cross one another.
         for i in 0..num_makers {
-            let principal = user(i);
-            fund_user(&mut state, principal);
-            place_order(
+            let principal = super::user(i);
+            super::fund_user(&mut state, principal);
+            super::place_order(
                 &mut state,
                 principal,
                 PendingOrder {
@@ -852,9 +853,9 @@ mod settling_event_sweep {
         // One fill-or-kill buy sized to the whole book: it crosses every maker
         // at `MAKER_PRICE` and fully fills, emptying the book in a single
         // settling event whose application cost scales with `num_makers`.
-        let taker = user(num_makers);
-        fund_user(&mut state, taker);
-        let buy = place_order(
+        let taker = super::user(num_makers);
+        super::fund_user(&mut state, taker);
+        let buy = super::place_order(
             &mut state,
             taker,
             PendingOrder {
@@ -882,6 +883,10 @@ mod settling_event_sweep {
         res
     }
 
+    /// Mainnet ICP/ckUSDT book — differs from the parent module's Binance
+    /// fixture (6-decimal quote, wider tick/lot, 5 ckUSDT min notional), so it
+    /// is kept local; the pair, principal, funding and order-placement helpers
+    /// are shared from the parent module.
     fn new_state() -> State<storage::VMem, storage::VMem> {
         let mut state = State::new(
             InitArg {
@@ -904,7 +909,7 @@ mod settling_event_sweep {
         .unwrap();
         state.record_trading_pair(
             OrderBookId::ZERO,
-            trading_pair(),
+            super::trading_pair(),
             TokenMetadata {
                 symbol: "ICP".to_string(),
                 decimals: 8,
@@ -920,50 +925,6 @@ mod settling_event_sweep {
             FeeRates::default(),
         );
         state
-    }
-
-    fn trading_pair() -> TradingPair {
-        TradingPair {
-            base: TokenId::new(Principal::from_slice(&[1])),
-            quote: TokenId::new(Principal::from_slice(&[2])),
-        }
-    }
-
-    fn user(id: u64) -> Principal {
-        Principal::from_slice(&id.to_be_bytes())
-    }
-
-    fn fund_user(state: &mut State<storage::VMem, storage::VMem>, principal: Principal) {
-        let pair = trading_pair();
-        state.deposit(
-            principal,
-            pair.base,
-            Quantity::from_u128(u128::MAX),
-            StableMemoryOptions::Write,
-        );
-        state.deposit(
-            principal,
-            pair.quote,
-            Quantity::from_u128(u128::MAX),
-            StableMemoryOptions::Write,
-        );
-    }
-
-    fn place_order(
-        state: &mut State<storage::VMem, storage::VMem>,
-        user: Principal,
-        pending: PendingOrder,
-    ) -> OrderId {
-        let pair = trading_pair();
-        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
-        state.record_limit_order(
-            user,
-            order_id.book_id(),
-            order,
-            crate::Timestamp::EPOCH,
-            StableMemoryOptions::Write,
-        );
-        order_id
     }
 }
 
