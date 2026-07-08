@@ -488,10 +488,10 @@ pub mod arbitrary {
     use crate::settlement::FillEvent;
     use crate::state::event::{
         AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
-        CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent,
-        SettlingEvent, WithdrawEvent,
+        CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent,
+        RemoveTradingAccountEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
     };
-    use crate::user::UserId;
+    use crate::user::{FundingAccount, TradingAccount, UserId};
     use candid::Principal;
     use minicbor::{Decode, Encode};
     use oisy_trade_types::FilterToken;
@@ -1110,8 +1110,19 @@ pub mod arbitrary {
     }
 
     pub fn arb_add_trading_account_event() -> impl Strategy<Value = AddTradingAccountEvent> {
-        (arb_principal(), arb_principal())
-            .prop_map(|(funding, trading)| AddTradingAccountEvent { funding, trading })
+        (arb_principal(), arb_principal()).prop_map(|(funding, trading)| AddTradingAccountEvent {
+            funding: FundingAccount(funding),
+            trading: TradingAccount(trading),
+        })
+    }
+
+    pub fn arb_remove_trading_account_event() -> impl Strategy<Value = RemoveTradingAccountEvent> {
+        (arb_principal(), arb_principal()).prop_map(|(funding, trading)| {
+            RemoveTradingAccountEvent {
+                funding: FundingAccount(funding),
+                trading: TradingAccount(trading),
+            }
+        })
     }
 
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
@@ -1127,6 +1138,7 @@ pub mod arbitrary {
             arb_settling_event().prop_map(EventType::Settling),
             arb_set_halt_event().prop_map(EventType::SetHalt),
             arb_add_trading_account_event().prop_map(EventType::AddTradingAccount),
+            arb_remove_trading_account_event().prop_map(EventType::RemoveTradingAccount),
         ]
     }
 

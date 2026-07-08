@@ -7,7 +7,7 @@ use crate::order::{
 use crate::state::StableMemoryOptions;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingAccountEvent, BalanceOperation, CancelLimitOrderEvent,
-    DepositEvent, MatchingEvent, WithdrawEvent,
+    DepositEvent, MatchingEvent, RemoveTradingAccountEvent, WithdrawEvent,
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
@@ -359,7 +359,26 @@ impl Scenario {
 
     fn with_add_trading_account(mut self, funding: Principal, trading: Principal) -> Self {
         let timestamp = self.timestamp();
-        let payload = EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading });
+        let payload = EventType::AddTradingAccount(AddTradingAccountEvent {
+            funding: crate::user::FundingAccount(funding),
+            trading: crate::user::TradingAccount(trading),
+        });
+        apply_state_transition(
+            &mut self.state,
+            &payload,
+            timestamp,
+            StableMemoryOptions::Write,
+        );
+        self.events.push(Event { timestamp, payload });
+        self
+    }
+
+    fn with_remove_trading_account(mut self, funding: Principal, trading: Principal) -> Self {
+        let timestamp = self.timestamp();
+        let payload = EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+            funding: crate::user::FundingAccount(funding),
+            trading: crate::user::TradingAccount(trading),
+        });
         apply_state_transition(
             &mut self.state,
             &payload,
@@ -456,6 +475,16 @@ fn should_replay_add_trading_account() {
         .with_trading_pair()
         .with_deposit(user_1(), TokenId::new(base()), Quantity::from(1_000_000u64))
         .with_add_trading_account(user_1(), user_2())
+        .assert_replay_matches();
+}
+
+#[test]
+fn should_replay_remove_trading_account_preserving_the_cooldown_anchor() {
+    Scenario::new()
+        .with_trading_pair()
+        .with_deposit(user_1(), TokenId::new(base()), Quantity::from(1_000_000u64))
+        .with_add_trading_account(user_1(), user_2())
+        .with_remove_trading_account(user_1(), user_2())
         .assert_replay_matches();
 }
 

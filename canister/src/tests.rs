@@ -2520,9 +2520,15 @@ mod set_halt {
 }
 
 mod add_trading_account {
-    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::Timestamp;
+    use crate::state::event::{AddTradingAccountEvent, EventType};
+    use crate::test_fixtures::event::last_event;
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
-    use crate::user::MAX_TRADING_ACCOUNTS_PER_USER;
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
     use crate::{add_trading_account, get_my_trading_accounts, state, storage};
     use oisy_trade_types::{
         AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
@@ -2633,6 +2639,14 @@ mod add_trading_account {
             before + 1,
             "a successful grant records exactly one event"
         );
+        assert_eq!(
+            last_event(),
+            EventType::AddTradingAccount(AddTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
+        );
     }
 
     #[test]
@@ -2713,11 +2727,12 @@ mod add_trading_account {
             RejectionCase {
                 desc: "granter already at the trading-account cap",
                 setup: || {
+                    let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
                     fund_user(principal(0x58));
                     for i in 0..MAX_TRADING_ACCOUNTS_PER_USER as u8 {
                         add_trading_account(
                             principal(0x60 + i),
-                            &mock_runtime_for(principal(0x58)),
+                            &mock_runtime_at(principal(0x58), Timestamp::new(i as u64 * cooldown)),
                         )
                         .unwrap();
                     }
@@ -2768,15 +2783,20 @@ mod add_trading_account {
 
     #[test]
     fn should_grant_up_to_the_cap_then_reject_the_next() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
         init_state_with_order_book();
         fund_user(funding());
 
+        // Successive grants must clear the cooldown, so space them an hour apart.
         let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
             .map(|i| principal(0x30 + i))
             .collect();
-        for account in &accounts {
+        for (i, account) in accounts.iter().enumerate() {
             assert_eq!(
-                add_trading_account(*account, &mock_runtime_for(funding())),
+                add_trading_account(
+                    *account,
+                    &mock_runtime_at(funding(), Timestamp::new(i as u64 * cooldown))
+                ),
                 Ok(()),
                 "a grant within the cap succeeds"
             );
@@ -2788,9 +2808,16 @@ mod add_trading_account {
             "all {MAX_TRADING_ACCOUNTS_PER_USER} granted accounts are listed"
         );
 
+        // Past the cap the request-level error takes precedence over the cooldown.
         let overflow = principal(0x30 + MAX_TRADING_ACCOUNTS_PER_USER as u8);
-        let err = add_trading_account(overflow, &mock_runtime_for(funding()))
-            .expect_err("the grant past the cap is rejected");
+        let err = add_trading_account(
+            overflow,
+            &mock_runtime_at(
+                funding(),
+                Timestamp::new(MAX_TRADING_ACCOUNTS_PER_USER as u64 * cooldown),
+            ),
+        )
+        .expect_err("the grant past the cap is rejected");
         assert_eq!(
             err.kind,
             ErrorKind::RequestError(Some(
@@ -2799,5 +2826,222 @@ mod add_trading_account {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn should_reject_second_grant_within_cooldown_without_recording_event() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        add_trading_account(
+            principal(0x40),
+            &mock_runtime_at(funding(), Timestamp::new(1_000)),
+        )
+        .unwrap();
+
+        let before = storage::total_event_count();
+        let result = add_trading_account(
+            principal(0x41),
+            &mock_runtime_at(funding(), Timestamp::new(1_000 + cooldown - 1)),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(AddTradingAccountError {
+                    kind: ErrorKind::TemporaryError(Some(
+                        AddTradingAccountTemporaryError::RateLimit { retry_after_ns: 1 }
+                    )),
+                    ..
+                })
+            ),
+            "a grant within the cooldown is a retryable rate-limit error carrying the \
+             remaining time, got {result:?}"
+        );
+        assert_eq!(
+            storage::total_event_count(),
+            before,
+            "a cooldown rejection records no event"
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![principal(0x40)]),
+            "the rejected grant did not join the whitelist"
+        );
+    }
+
+    #[test]
+    fn should_allow_grant_after_cooldown_elapses() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        add_trading_account(
+            principal(0x40),
+            &mock_runtime_at(funding(), Timestamp::new(1_000)),
+        )
+        .unwrap();
+        assert_eq!(
+            add_trading_account(
+                principal(0x41),
+                &mock_runtime_at(funding(), Timestamp::new(1_000 + cooldown))
+            ),
+            Ok(()),
+            "a grant once the cooldown has elapsed succeeds"
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![principal(0x40), principal(0x41)])
+        );
+    }
+}
+
+mod remove_trading_account {
+    use crate::Timestamp;
+    use crate::state::event::{EventType, RemoveTradingAccountEvent};
+    use crate::test_fixtures::event::last_event;
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, principal};
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
+    use crate::{add_trading_account, get_my_trading_accounts, remove_trading_account, storage};
+    use oisy_trade_types::{
+        ErrorKind, RemoveTradingAccountError, RemoveTradingAccountRequestError,
+    };
+
+    fn funding() -> candid::Principal {
+        principal(0x70)
+    }
+
+    fn trading() -> candid::Principal {
+        principal(0x71)
+    }
+
+    #[test]
+    fn should_revoke_removing_authority_and_emit_one_event() {
+        init_state_with_order_book();
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+
+        let before = storage::total_event_count();
+        assert_eq!(
+            remove_trading_account(trading(), &mock_runtime_for(funding())),
+            Ok(())
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![]),
+            "the revoked key is no longer whitelisted"
+        );
+        assert_eq!(
+            storage::total_event_count(),
+            before + 1,
+            "a successful revoke records exactly one event"
+        );
+        assert_eq!(
+            last_event(),
+            EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
+        );
+    }
+
+    #[test]
+    fn should_not_rate_limit_revocation() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        // Grant the maximum number of trading accounts (grants are spaced by
+        // the cooldown), then revoke every one of them back-to-back at the same
+        // time — revocation carries no cooldown.
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x72 + i))
+            .collect();
+        for (i, account) in accounts.iter().enumerate() {
+            add_trading_account(
+                *account,
+                &mock_runtime_at(funding(), Timestamp::new(i as u64 * cooldown)),
+            )
+            .unwrap();
+        }
+
+        for account in &accounts {
+            assert_eq!(
+                remove_trading_account(*account, &mock_runtime_for(funding())),
+                Ok(()),
+                "revocation is never rate-limited"
+            );
+        }
+        assert_eq!(get_my_trading_accounts(funding()), Ok(vec![]));
+    }
+
+    #[test]
+    fn should_reject_revoke_by_unauthorized_caller_recording_no_event() {
+        init_state_with_order_book();
+        // `funding()` grants `trading()`.
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+        // A separate funding account with its own trading account.
+        let other_funding = principal(0x80);
+        let other_trading = principal(0x81);
+        fund_user(other_funding);
+        add_trading_account(other_trading, &mock_runtime_for(other_funding)).unwrap();
+
+        struct Case {
+            desc: &'static str,
+            caller: candid::Principal,
+            target: candid::Principal,
+        }
+        let cases = [
+            Case {
+                desc: "a stranger that granted nothing",
+                caller: principal(0x90),
+                target: trading(),
+            },
+            Case {
+                desc: "a different funding account",
+                caller: other_funding,
+                target: trading(),
+            },
+            Case {
+                desc: "a trading account of another funding account",
+                caller: other_trading,
+                target: trading(),
+            },
+            Case {
+                desc: "the owner targeting a principal that is not its trading account",
+                caller: funding(),
+                target: principal(0x99),
+            },
+        ];
+
+        for case in cases {
+            let before = storage::total_event_count();
+            let result = remove_trading_account(case.target, &mock_runtime_for(case.caller));
+            assert!(
+                matches!(
+                    result,
+                    Err(RemoveTradingAccountError {
+                        kind: ErrorKind::RequestError(Some(
+                            RemoveTradingAccountRequestError::NotAllowed
+                        )),
+                        ..
+                    })
+                ),
+                "{}: got {result:?}",
+                case.desc
+            );
+            assert_eq!(
+                storage::total_event_count(),
+                before,
+                "{}: a rejected revoke records no event",
+                case.desc
+            );
+        }
     }
 }

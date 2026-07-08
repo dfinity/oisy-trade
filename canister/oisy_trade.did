@@ -617,7 +617,25 @@ type AddTradingAccountError = record {
         TemporaryError : opt variant {
             // The principal has an in-flight deposit or withdrawal; retry once it completes.
             FundingOperationInProgress;
+            // Too little time has elapsed since the previous successful grant;
+            // retry after `retry_after_ns` nanoseconds.
+            RateLimit : record { retry_after_ns : nat64 };
         };
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Error reported by `remove_trading_account`. Revocation is never rate-limited.
+// See the disposition contract at the top of this file.
+type RemoveTradingAccountError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The caller may not remove this trading account (it is not
+            // currently one of the caller's trading accounts).
+            NotAllowed;
+        };
+        TemporaryError : opt variant {};
         InternalError : opt variant {};
     };
     message : opt text;
@@ -796,6 +814,13 @@ type AddTradingAccountEvent = record {
     trading : principal;
 };
 
+// Event payload recording a trading-account revocation: `funding` removed
+// `trading` from its trading accounts.
+type RemoveTradingAccountEvent = record {
+    funding : principal;
+    trading : principal;
+};
+
 // Engine drove a matching round on `book_id`, processing these orders in
 // FIFO order. Drives replay of the matching engine.
 type MatchingEvent = record {
@@ -858,6 +883,7 @@ type EventType = variant {
     Withdraw : WithdrawEvent;
     SetHalt : SetHaltEvent;
     AddTradingAccount : AddTradingAccountEvent;
+    RemoveTradingAccount : RemoveTradingAccountEvent;
 };
 
 // A canister event with a timestamp.
@@ -987,6 +1013,13 @@ service : (OisyTradeArg) -> {
     // a trading account or an already-registered user; a transient failure is
     // returned while `trading` has an in-flight deposit or withdrawal.
     add_trading_account : (principal) -> (variant { Ok; Err : AddTradingAccountError });
+
+    // Revoke a trading account previously whitelisted by the caller. Acts on the
+    // raw caller as a funding account and never resolves delegation. Revocation
+    // is immediate and never rate-limited. Fails if `trading` is not currently
+    // one of the caller's trading accounts. The caller's open orders — including
+    // any the revoked key placed — are unaffected.
+    remove_trading_account : (principal) -> (variant { Ok; Err : RemoveTradingAccountError });
 
     // Return the caller's current trading-account whitelist (empty if it has
     // granted none). Acts on the raw caller and never resolves delegation.

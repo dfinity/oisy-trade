@@ -148,4 +148,8 @@ impl Permissions {
     pub fn permit_add_trading_account(&self) -> SyncPermit {
         SyncPermit(())
     }
+
+    pub fn permit_remove_trading_account(&self) -> SyncPermit {
+        SyncPermit(())
+    }
 }

@@ -22,6 +22,7 @@ pub enum EventType {
     Withdraw(WithdrawEvent),
     SetHalt(SetHaltEvent),
     AddTradingAccount(AddTradingAccountEvent),
+    RemoveTradingAccount(RemoveTradingAccountEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -77,6 +78,12 @@ pub struct SetHaltEvent {
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct AddTradingAccountEvent {
+    pub funding: Principal,
+    pub trading: Principal,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct RemoveTradingAccountEvent {
     pub funding: Principal,
     pub trading: Principal,
 }

@@ -6,13 +6,22 @@ use crate::order::{
 use crate::settlement::FillEvent;
 use crate::state::event::{
     AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
-    CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent,
-    SettlingEvent, WithdrawEvent,
+    CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent,
+    RemoveTradingAccountEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
 };
+use crate::user::{FundingAccount, TradingAccount};
 use candid::Principal;
 use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
 use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
+
+/// The most recently recorded event in the storage log. Panics if the log is
+/// empty.
+pub fn last_event() -> EventType {
+    let count = crate::storage::total_event_count();
+    let Event { payload, .. } = crate::storage::get_event(count - 1).expect("event log not empty");
+    payload
+}
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
@@ -73,6 +82,7 @@ pub enum WorstCaseEvent {
     Settling,
     SetHalt,
     AddTradingAccount,
+    RemoveTradingAccount,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -89,6 +99,7 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Settling(_) => Self::Settling,
             EventType::SetHalt(_) => Self::SetHalt,
             EventType::AddTradingAccount(_) => Self::AddTradingAccount,
+            EventType::RemoveTradingAccount(_) => Self::RemoveTradingAccount,
         }
     }
 }
@@ -124,9 +135,15 @@ impl WorstCaseEvent {
                 halted: true,
             }),
             Self::AddTradingAccount => EventType::AddTradingAccount(AddTradingAccountEvent {
-                funding: max_principal(0),
-                trading: max_principal(1),
+                funding: FundingAccount(max_principal(0)),
+                trading: TradingAccount(max_principal(1)),
             }),
+            Self::RemoveTradingAccount => {
+                EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+                    funding: FundingAccount(max_principal(0)),
+                    trading: TradingAccount(max_principal(1)),
+                })
+            }
         })
     }
 
@@ -148,7 +165,8 @@ impl WorstCaseEvent {
             Self::Matching => 9_027,
             Self::Settling => 208_030,
             Self::SetHalt => 918,
-            Self::AddTradingAccount => 77,
+            Self::AddTradingAccount => 79,
+            Self::RemoveTradingAccount => 79,
         }
     }
 }

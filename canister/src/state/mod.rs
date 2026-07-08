@@ -25,7 +25,7 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{FundingAccount, GrantError, TradingAccount, UserId, UserRegistry};
+use crate::user::{FundingAccount, GrantError, RevokeError, TradingAccount, UserId, UserRegistry};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::{InitArg, Mode};
@@ -829,9 +829,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         &self,
         funding: FundingAccount,
         trading: TradingAccount,
+        now: Timestamp,
     ) -> Result<(), AddTradingAccountError> {
         self.user_registry
-            .validate_trading_account(funding, trading)?;
+            .validate_add_trading_account(funding, trading, now)?;
         if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading.0) {
             return Err(AddTradingAccountError::FundingOperationInProgress);
         }
@@ -847,7 +848,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
             self.user_registry
-                .record_trading_account(funding, trading, now);
+                .record_add_trading_account(funding, trading, now);
+        }
+    }
+
+    pub fn validate_remove_trading_account(
+        &self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+    ) -> Result<(), RemoveTradingAccountError> {
+        self.user_registry
+            .validate_remove_trading_account(funding, trading)
+            .map_err(RemoveTradingAccountError::from)
+    }
+
+    pub fn record_remove_trading_account(
+        &mut self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.user_registry
+                .record_remove_trading_account(funding, trading);
         }
     }
 
@@ -1157,6 +1180,7 @@ pub enum AddTradingAccountError {
     GranterIsTradingAccount,
     TooManyTradingAccounts,
     FundingOperationInProgress,
+    CooldownActive { retry_after_ns: u64 },
 }
 
 impl From<GrantError> for AddTradingAccountError {
@@ -1168,6 +1192,33 @@ impl From<GrantError> for AddTradingAccountError {
             GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
             GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
             GrantError::TooManyTradingAccounts => AddTradingAccountError::TooManyTradingAccounts,
+            GrantError::CooldownActive { retry_after_ns } => {
+                AddTradingAccountError::CooldownActive { retry_after_ns }
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoveTradingAccountError {
+    NotAllowed,
+}
+
+impl From<RevokeError> for RemoveTradingAccountError {
+    fn from(err: RevokeError) -> Self {
+        match err {
+            RevokeError::NotAllowed => RemoveTradingAccountError::NotAllowed,
+        }
+    }
+}
+
+impl From<RemoveTradingAccountError> for oisy_trade_types::RemoveTradingAccountError {
+    fn from(err: RemoveTradingAccountError) -> Self {
+        use oisy_trade_types::RemoveTradingAccountRequestError as Req;
+        match err {
+            RemoveTradingAccountError::NotAllowed => {
+                oisy_trade_types::RemoveTradingAccountError::request(Req::NotAllowed)
+            }
         }
     }
 }
@@ -1210,6 +1261,10 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
                 AddTradingAccountError::FundingOperationInProgress => (
                     ErrorKind::TemporaryError(Some(Tmp::FundingOperationInProgress)),
                     "the trading account has an in-flight deposit or withdrawal",
+                ),
+                AddTradingAccountError::CooldownActive { retry_after_ns } => (
+                    ErrorKind::TemporaryError(Some(Tmp::RateLimit { retry_after_ns })),
+                    "the grant cooldown has not elapsed since the previous grant",
                 ),
             };
         oisy_trade_types::AddTradingAccountError {
