@@ -78,7 +78,7 @@ fn should_deny_funding_operations_to_a_trading_account() {
         permissions.permit_withdraw(caller, true),
         Err(UnauthorizedError::TradingAccountCannotFund)
     ));
-    // A non-delegate caller is still admitted.
+    // A caller that is not a trading account is still admitted.
     assert!(permissions.permit_deposit(caller, false).is_ok());
     assert!(permissions.permit_withdraw(caller, false).is_ok());
 }
