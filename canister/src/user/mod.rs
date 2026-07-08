@@ -126,15 +126,13 @@ impl Storable for TradingAccountList {
 /// distinct type from [`TradingAccount`] so the two same-shaped arguments of
 /// [`UserRegistry::validate_add_trading_account`] /
 /// [`UserRegistry::record_add_trading_account`] cannot be transposed by
-/// accident. Encodes transparently as its inner principal.
+/// accident. Encodes as an indexed-field struct so it can grow fields later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-#[cbor(transparent)]
 pub struct FundingAccount(#[cbor(n(0), with = "icrc_cbor::principal")] pub Principal);
 
 /// A trading account principal — the key being whitelisted. See
 /// [`FundingAccount`] for why this is a distinct newtype.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-#[cbor(transparent)]
 pub struct TradingAccount(#[cbor(n(0), with = "icrc_cbor::principal")] pub Principal);
 
 /// Why [`UserRegistry::validate_add_trading_account`] rejected a grant.
@@ -344,7 +342,14 @@ impl<M: Memory> UserRegistry<M> {
         let funding_id = self
             .lookup(funding)
             .expect("BUG: record_remove_trading_account on an unregistered funding account");
-        self.trading_accounts.remove(&PrincipalKey(trading));
+        let removed = self
+            .trading_accounts
+            .remove(&PrincipalKey(trading))
+            .expect("BUG: record_remove_trading_account removed no grant");
+        debug_assert_eq!(
+            removed.funding, funding,
+            "BUG: record_remove_trading_account on a grant owned by a different funding account"
+        );
         let mut list = self.trading_accounts_by_funding.get(&funding_id).expect(
             "BUG: record_remove_trading_account on a funding account with no trading-account list",
         );

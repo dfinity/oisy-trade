@@ -15,6 +15,14 @@ use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
 use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
 
+/// The most recently recorded event in the storage log. Panics if the log is
+/// empty.
+pub fn last_event() -> EventType {
+    let count = crate::storage::total_event_count();
+    let Event { payload, .. } = crate::storage::get_event(count - 1).expect("event log not empty");
+    payload
+}
+
 pub fn init_event(mode: Mode) -> Event {
     Event {
         timestamp: Timestamp::EPOCH,
@@ -157,8 +165,8 @@ impl WorstCaseEvent {
             Self::Matching => 9_027,
             Self::Settling => 208_030,
             Self::SetHalt => 918,
-            Self::AddTradingAccount => 77,
-            Self::RemoveTradingAccount => 77,
+            Self::AddTradingAccount => 79,
+            Self::RemoveTradingAccount => 79,
         }
     }
 }
