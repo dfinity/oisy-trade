@@ -710,6 +710,320 @@ where
     res
 }
 
+/// DEFI-2913 — bound settling-event application cost during matching.
+///
+/// One taker crossing many resting makers produces a single oversized settling
+/// event that is applied in one message with no per-op instruction check, so
+/// its cost scales linearly with the number of fills. These benches reproduce
+/// that worst case under the mainnet ICP/ckUSDT listing parameters: a book of
+/// `N` resting min-notional sell orders (each from a distinct principal, one
+/// fill each) swept by a single fill-or-kill buy that empties the book in one
+/// settling event. Running at several `N` lets us fit the per-fill cost and
+/// locate the `N` at which the single message would exceed the IC per-message
+/// cap (`execution_policy::MAX_INSTRUCTION_BUDGET`, 40B instructions) and trap.
+mod settling_event_sweep {
+    use crate::order::{
+        FeeRates, LotSize, OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side,
+        TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
+    };
+    use crate::order::{OrderHistory, TradeHistory};
+    use crate::state::execution_policy::ExecutionPolicy;
+    use crate::state::{StableMemoryOptions, State};
+    use crate::storage;
+    use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
+    use async_trait::async_trait;
+    use canbench_rs::bench;
+    use candid::Principal;
+    use candid::utils::ArgumentEncoder;
+    use ic_cdk::call::{CallFailed, Response};
+    use oisy_trade_types_internal::{InitArg, Mode};
+    use std::num::{NonZeroU64, NonZeroU128};
+
+    /// A [`Runtime`] that reports the instruction counter *relative to its own
+    /// construction*. It delegates every other call to [`IC_RUNTIME`] but
+    /// subtracts the counter value captured at `new()` from every reading, so
+    /// the executor's per-message budget check sees a fresh (near-zero) counter
+    /// at the start of the benched sweep — exactly as on the IC, where the
+    /// sweep runs in its own message with its own budget.
+    ///
+    /// Without this, canbench's single shared instruction counter (setup and
+    /// `bench_fn` run in one message) makes `run_once` bail before the sweep
+    /// once the unmeasured setup work alone crosses the 40B budget. canbench
+    /// measures the real instructions independently of this reading, so the
+    /// reported sweep cost is unaffected — this only keeps the executor from
+    /// charging the sweep for the benchmark's setup.
+    struct SweepRuntime {
+        baseline: u64,
+    }
+
+    impl SweepRuntime {
+        fn new() -> Self {
+            Self {
+                baseline: IC_RUNTIME.instruction_counter(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Runtime for SweepRuntime {
+        async fn call_unbounded_wait<A>(
+            &self,
+            canister_id: Principal,
+            method: &str,
+            args: A,
+        ) -> Result<Response, CallFailed>
+        where
+            A: ArgumentEncoder + Send,
+        {
+            IC_RUNTIME
+                .call_unbounded_wait(canister_id, method, args)
+                .await
+        }
+
+        fn msg_caller(&self) -> Principal {
+            IC_RUNTIME.msg_caller()
+        }
+
+        fn canister_self(&self) -> Principal {
+            IC_RUNTIME.canister_self()
+        }
+
+        fn is_controller(&self, principal: &Principal) -> bool {
+            IC_RUNTIME.is_controller(principal)
+        }
+
+        fn instruction_counter(&self) -> u64 {
+            IC_RUNTIME
+                .instruction_counter()
+                .saturating_sub(self.baseline)
+        }
+
+        fn time(&self) -> Timestamp {
+            IC_RUNTIME.time()
+        }
+    }
+
+    // Mainnet ICP/ckUSDT listing parameters (ICP: 8 decimals, ckUSDT: 6).
+    /// 0.001 ckUSDT price increment: `0.001 × 10^6`.
+    const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(1_000).unwrap());
+    /// 0.01 ICP quantity increment: `0.01 × 10^8`.
+    const LOT_SIZE: LotSize = LotSize::new(NonZeroU64::new(1_000_000).unwrap());
+    /// 5 ckUSDT minimum order value: `5 × 10^6`.
+    const MIN_NOTIONAL: u128 = 5_000_000;
+    /// 5.000 ckUSDT per ICP (a multiple of the tick).
+    const MAKER_PRICE: u128 = 5_000_000;
+    /// 1 ICP (= 100 lots). At `MAKER_PRICE` this is exactly the min notional:
+    /// `5_000_000 × 100_000_000 / 10^8 = 5_000_000` = 5 ckUSDT.
+    const MAKER_QUANTITY: u128 = 100_000_000;
+
+    /// 1_000 makers → ~1 fill per maker; a small, fast point on the cost line.
+    #[bench(raw)]
+    fn bench_fok_sweep_1_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(1_000)
+    }
+
+    /// 5_000 makers — a mid point on the cost line.
+    #[bench(raw)]
+    fn bench_fok_sweep_5_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(5_000)
+    }
+
+    /// 10_000 makers — an upper point on the cost line, still comfortably below
+    /// the 40B per-message cap so the sweep completes in a single event.
+    #[bench(raw)]
+    fn bench_fok_sweep_10_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(10_000)
+    }
+
+    /// 18_000 makers — a high point on the cost line, still under the 40B cap.
+    #[bench(raw)]
+    fn bench_fok_sweep_18_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(18_000)
+    }
+
+    /// 22_500 makers — a point just below the measured 40B crossing.
+    #[bench(raw)]
+    fn bench_fok_sweep_22_500_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(22_500)
+    }
+
+    /// 22_900 makers — expected to sit right at the 40B cap: the largest sweep
+    /// the canister can still apply in a single message.
+    #[bench(raw)]
+    fn bench_fok_sweep_22_900_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(22_900)
+    }
+
+    /// 23_000 makers — measured just past the 40B cap: on-chain the sweeping
+    /// message would trap.
+    #[bench(raw)]
+    fn bench_fok_sweep_23_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(23_000)
+    }
+
+    /// 24_000 makers — expected to straddle the 40B cap.
+    #[bench(raw)]
+    fn bench_fok_sweep_24_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(24_000)
+    }
+
+    /// 25_000 makers — expected to sit just past the 40B cap: on-chain the
+    /// sweeping message would trap. Brackets the trap from above.
+    #[bench(raw)]
+    fn bench_fok_sweep_25_000_makers() -> canbench_rs::BenchResult {
+        run_min_notional_fok_sweep(25_000)
+    }
+
+    /// Build a book of `num_makers` resting min-notional sell orders, then
+    /// measure a single fill-or-kill buy that sweeps every one of them in one
+    /// settling event. Setup (placing/resting the makers) runs outside
+    /// `bench_fn`; only the sweeping `run_once` is measured.
+    fn run_min_notional_fok_sweep(num_makers: u64) -> canbench_rs::BenchResult {
+        let mut state = new_state();
+        let pair = trading_pair();
+
+        // Resting sell side: `num_makers` orders, each exactly at the min
+        // notional, each from a distinct principal so every fill touches a
+        // fresh maker balance (worst case for balance lookups). All rest at the
+        // same price, so they never cross one another.
+        for i in 0..num_makers {
+            let principal = user(i);
+            fund_user(&mut state, principal);
+            place_order(
+                &mut state,
+                principal,
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(MAKER_PRICE),
+                    quantity: Quantity::from_u128(MAKER_QUANTITY),
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                },
+            );
+        }
+        state.set_execution_policy(ExecutionPolicy::MAX);
+        EXECUTOR.run_once(&mut state, &SweepRuntime::new());
+        let book = state.get_order_book(&pair).unwrap();
+        assert_eq!(book.pending_orders_len(), 0);
+        assert_eq!(book.resting_orders_len(), num_makers as usize);
+
+        // One fill-or-kill buy sized to the whole book: it crosses every maker
+        // at `MAKER_PRICE` and fully fills, emptying the book in a single
+        // settling event whose application cost scales with `num_makers`.
+        let taker = user(num_makers);
+        fund_user(&mut state, taker);
+        let buy = place_order(
+            &mut state,
+            taker,
+            PendingOrder {
+                side: Side::Buy,
+                price: Price::new(MAKER_PRICE),
+                quantity: Quantity::from_u128(num_makers as u128 * MAKER_QUANTITY),
+                time_in_force: TimeInForce::FillOrKill,
+            },
+        );
+
+        let res = canbench_rs::bench_fn(|| {
+            EXECUTOR.run_once(&mut state, &SweepRuntime::new());
+        });
+
+        let book = state.get_order_book(&pair).unwrap();
+        assert_eq!(book.pending_orders_len(), 0);
+        assert_eq!(
+            book.resting_orders_len(),
+            0,
+            "the FOK must sweep every resting maker"
+        );
+        let (_, _, buy_record) = state.get_user_order(&taker, buy).unwrap();
+        assert_eq!(buy_record.status, OrderStatus::Filled);
+
+        res
+    }
+
+    fn new_state() -> State<storage::VMem, storage::VMem> {
+        let mut state = State::new(
+            InitArg {
+                mode: Mode::GeneralAvailability,
+                max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+                instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            },
+            OrderHistory::new(
+                storage::order_history_memory(),
+                storage::user_orders_memory(),
+            ),
+            TradeHistory::new(storage::trades_memory(), storage::trades_by_user_memory()),
+            crate::user::UserRegistry::new(
+                storage::user_registry_memory(),
+                storage::trading_accounts_memory(),
+                storage::trading_accounts_by_funding_memory(),
+            ),
+            crate::balance::TokenBalance::new(storage::balances_memory()),
+        )
+        .unwrap();
+        state.record_trading_pair(
+            OrderBookId::ZERO,
+            trading_pair(),
+            TokenMetadata {
+                symbol: "ICP".to_string(),
+                decimals: 8,
+            },
+            TokenMetadata {
+                symbol: "ckUSDT".to_string(),
+                decimals: 6,
+            },
+            TICK_SIZE,
+            LOT_SIZE,
+            Quantity::from_u128(MIN_NOTIONAL),
+            None,
+            FeeRates::default(),
+        );
+        state
+    }
+
+    fn trading_pair() -> TradingPair {
+        TradingPair {
+            base: TokenId::new(Principal::from_slice(&[1])),
+            quote: TokenId::new(Principal::from_slice(&[2])),
+        }
+    }
+
+    fn user(id: u64) -> Principal {
+        Principal::from_slice(&id.to_be_bytes())
+    }
+
+    fn fund_user(state: &mut State<storage::VMem, storage::VMem>, principal: Principal) {
+        let pair = trading_pair();
+        state.deposit(
+            principal,
+            pair.base,
+            Quantity::from_u128(u128::MAX),
+            StableMemoryOptions::Write,
+        );
+        state.deposit(
+            principal,
+            pair.quote,
+            Quantity::from_u128(u128::MAX),
+            StableMemoryOptions::Write,
+        );
+    }
+
+    fn place_order(
+        state: &mut State<storage::VMem, storage::VMem>,
+        user: Principal,
+        pending: PendingOrder,
+    ) -> OrderId {
+        let pair = trading_pair();
+        let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+        state.record_limit_order(
+            user,
+            order_id.book_id(),
+            order,
+            crate::Timestamp::EPOCH,
+            StableMemoryOptions::Write,
+        );
+        order_id
+    }
+}
+
 mod event_storage {
     use crate::storage;
     use crate::test_fixtures::event::WorstCaseEvent;
