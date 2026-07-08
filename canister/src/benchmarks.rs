@@ -714,13 +714,13 @@ where
 ///
 /// One taker crossing many resting makers produces a single oversized settling
 /// event that is applied in one message with no per-op instruction check, so
-/// its cost scales linearly with the number of fills. These benches reproduce
-/// that worst case under the mainnet ICP/ckUSDT listing parameters: a book of
-/// `N` resting min-notional sell orders (each from a distinct principal, one
-/// fill each) swept by a single fill-or-kill buy that empties the book in one
-/// settling event. Running at several `N` lets us fit the per-fill cost and
-/// locate the `N` at which the single message would exceed the IC per-message
-/// cap (`execution_policy::MAX_INSTRUCTION_BUDGET`, 40B instructions) and trap.
+/// its cost scales linearly with the number of fills. This bench reproduces the
+/// worst case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
+/// resting min-notional sell orders (each from a distinct principal, one fill
+/// each) swept by a single fill-or-kill buy that empties the book in one
+/// settling event. 22_900 is the largest maker count whose sweep still fits
+/// under the IC per-message cap (`execution_policy::MAX_INSTRUCTION_BUDGET`, 40B
+/// instructions); at ~23_000 the sweep crosses the cap and the message traps.
 mod settling_event_sweep {
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderId, OrderStatus, PendingOrder, Price, Quantity, Side,
@@ -816,69 +816,12 @@ mod settling_event_sweep {
     /// `5_000_000 × 100_000_000 / 10^8 = 5_000_000` = 5 ckUSDT.
     const MAKER_QUANTITY: u128 = 100_000_000;
 
-    /// 1_000 makers → ~1 fill per maker; a small, fast point on the cost line.
-    #[bench(raw)]
-    fn bench_fok_sweep_1_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(1_000)
-    }
+    /// The largest maker count whose sweep still fits under the 40B cap.
+    const NUM_MAKERS: u64 = 22_900;
 
-    /// 5_000 makers — a mid point on the cost line.
-    #[bench(raw)]
-    fn bench_fok_sweep_5_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(5_000)
-    }
-
-    /// 10_000 makers — an upper point on the cost line, still comfortably below
-    /// the 40B per-message cap so the sweep completes in a single event.
-    #[bench(raw)]
-    fn bench_fok_sweep_10_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(10_000)
-    }
-
-    /// 18_000 makers — a high point on the cost line, still under the 40B cap.
-    #[bench(raw)]
-    fn bench_fok_sweep_18_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(18_000)
-    }
-
-    /// 22_500 makers — a point just below the measured 40B crossing.
-    #[bench(raw)]
-    fn bench_fok_sweep_22_500_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(22_500)
-    }
-
-    /// 22_900 makers — expected to sit right at the 40B cap: the largest sweep
-    /// the canister can still apply in a single message.
     #[bench(raw)]
     fn bench_fok_sweep_22_900_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(22_900)
-    }
-
-    /// 23_000 makers — measured just past the 40B cap: on-chain the sweeping
-    /// message would trap.
-    #[bench(raw)]
-    fn bench_fok_sweep_23_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(23_000)
-    }
-
-    /// 24_000 makers — expected to straddle the 40B cap.
-    #[bench(raw)]
-    fn bench_fok_sweep_24_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(24_000)
-    }
-
-    /// 25_000 makers — expected to sit just past the 40B cap: on-chain the
-    /// sweeping message would trap. Brackets the trap from above.
-    #[bench(raw)]
-    fn bench_fok_sweep_25_000_makers() -> canbench_rs::BenchResult {
-        run_min_notional_fok_sweep(25_000)
-    }
-
-    /// Build a book of `num_makers` resting min-notional sell orders, then
-    /// measure a single fill-or-kill buy that sweeps every one of them in one
-    /// settling event. Setup (placing/resting the makers) runs outside
-    /// `bench_fn`; only the sweeping `run_once` is measured.
-    fn run_min_notional_fok_sweep(num_makers: u64) -> canbench_rs::BenchResult {
+        let num_makers = NUM_MAKERS;
         let mut state = new_state();
         let pair = trading_pair();
 
