@@ -120,7 +120,9 @@ mod settling_batches {
     use crate::order::{
         FeeRates, Fill, FillSeq, MatchingOutput, OrderSeq, Price, Quantity, RemovedOrder, Side,
     };
-    use crate::settlement::{FillSettlement, MAX_FILLS_PER_SETTLING_EVENT, MatchSettlement};
+    use crate::settlement::{
+        FillSettlement, MAX_FILLS_PER_SETTLING_EVENT, MatchSettlement, RemovedOrderSettlement,
+    };
     use crate::state::event::BalanceOperation;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use std::collections::{BTreeMap, BTreeSet};
@@ -241,17 +243,58 @@ mod settling_batches {
         assert_eq!(no_fills.settling_batches[0].balance_operations.len(), 4);
     }
 
+    /// When the fill count is an exact multiple of the cap the trailing
+    /// `batch_fills` is empty, yet the expired-order refunds must still be
+    /// appended to the LAST settling event (not the first), and concatenating
+    /// the batches must reproduce the unsplit op order.
+    #[test]
+    fn appends_expired_refunds_to_the_last_batch_when_fills_fill_the_cap_exactly() {
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        let cap = MAX_FILLS_PER_SETTLING_EVENT;
+        let num_expired = 2;
+
+        let settlement = build(cap * 2, num_expired, base_scale);
+        assert_eq!(settlement.settling_batches.len(), 2);
+        for batch in &settlement.settling_batches {
+            assert_eq!(batch.fills.len(), cap, "each full batch carries cap fills");
+        }
+
+        let last_refunds = settlement.settling_batches[1]
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
+            .count();
+        assert_eq!(
+            last_refunds, num_expired,
+            "all refunds land on the last batch"
+        );
+        let first_refunds = settlement.settling_batches[0]
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
+            .count();
+        assert_eq!(first_refunds, 0, "no refund leaks into the first batch");
+
+        let (mut expected_ops, expected_fills) = flat_reference(&fills(cap * 2), base_scale);
+        expected_ops.extend(expired_ops(num_expired, base_scale));
+        let flat_ops: Vec<_> = settlement
+            .settling_batches
+            .iter()
+            .flat_map(|b| b.balance_operations.iter().cloned())
+            .collect();
+        let flat_fills: Vec<_> = settlement
+            .settling_batches
+            .iter()
+            .flat_map(|b| b.fills.iter().cloned())
+            .collect();
+        assert_eq!(flat_ops, expected_ops, "flattened balance operations");
+        assert_eq!(flat_fills, expected_fills, "flattened fills");
+    }
+
     fn build(num_fills: usize, num_expired: usize, base_scale: NonZeroU64) -> MatchSettlement {
         let mut expired_orders = BTreeMap::new();
         for i in 0..num_expired as u64 {
-            expired_orders.insert(
-                OrderSeq::new(1_000_000 + i),
-                RemovedOrder {
-                    side: Side::Sell,
-                    price: price(),
-                    remaining_quantity: quantity(),
-                },
-            );
+            expired_orders.insert(OrderSeq::new(1_000_000 + i), removed_order());
         }
         let out = MatchingOutput {
             fills: fills(num_fills),
@@ -260,6 +303,24 @@ mod settling_batches {
             expired_orders,
         };
         MatchSettlement::from_matching(out, FeeRates::default(), base_scale)
+    }
+
+    fn expired_ops(num_expired: usize, base_scale: NonZeroU64) -> Vec<BalanceOperation> {
+        let mut ops = Vec::new();
+        for i in 0..num_expired as u64 {
+            let removed = removed_order();
+            RemovedOrderSettlement::new(OrderSeq::new(1_000_000 + i), &removed, base_scale)
+                .push_balance_operations(&mut ops);
+        }
+        ops
+    }
+
+    fn removed_order() -> RemovedOrder {
+        RemovedOrder {
+            side: Side::Sell,
+            price: price(),
+            remaining_quantity: quantity(),
+        }
     }
 
     fn flat_reference(
