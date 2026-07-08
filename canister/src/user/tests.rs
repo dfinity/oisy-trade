@@ -282,8 +282,7 @@ mod trading_accounts {
     struct RevokeCase {
         desc: &'static str,
         setup: Setup,
-        funding: candid::Principal,
-        trading: candid::Principal,
+        revoke_args: (FundingAccount, TradingAccount),
         expected: Result<(), RevokeError>,
     }
 
@@ -296,15 +295,13 @@ mod trading_accounts {
                     register(r, funding());
                     record(r, funding(), trading(), Timestamp::new(1));
                 }),
-                funding: funding(),
-                trading: trading(),
+                revoke_args: (FundingAccount(funding()), TradingAccount(trading())),
                 expected: Ok(()),
             },
             RevokeCase {
                 desc: "revoking a principal that is not a trading account",
                 setup: Box::new(|r| register(r, funding())),
-                funding: funding(),
-                trading: trading(),
+                revoke_args: (FundingAccount(funding()), TradingAccount(trading())),
                 expected: Err(RevokeError::NotAllowed),
             },
             RevokeCase {
@@ -314,8 +311,7 @@ mod trading_accounts {
                     register(r, principal(3));
                     record(r, principal(3), trading(), Timestamp::new(1));
                 }),
-                funding: funding(),
-                trading: trading(),
+                revoke_args: (FundingAccount(funding()), TradingAccount(trading())),
                 expected: Err(RevokeError::NotAllowed),
             },
         ];
@@ -323,9 +319,9 @@ mod trading_accounts {
         for case in cases {
             let mut registry = user_registry();
             (case.setup)(&mut registry);
-            let revoke_args = (FundingAccount(case.funding), TradingAccount(case.trading));
+            let (funding, trading) = case.revoke_args;
             assert_eq!(
-                registry.validate_remove_trading_account(revoke_args.0, revoke_args.1),
+                registry.validate_remove_trading_account(funding, trading),
                 case.expected,
                 "{}",
                 case.desc
