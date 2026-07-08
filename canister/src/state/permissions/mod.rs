@@ -125,8 +125,10 @@ impl Permissions {
     }
 
     /// Admits a deposit unless the caller is a trading account, which can never
-    /// hold DEX balances. `caller_is_trading_account` is the caller's
-    /// delegation status, resolved against the registry by the caller.
+    /// hold DEX balances. `caller_is_trading_account` is whether the calling
+    /// principal is a trading account, computed by the canister from the
+    /// registry (via `State::is_trading_account`); it is derived internally and
+    /// must never be treated as caller-supplied input.
     pub fn permit_deposit(
         &self,
         _caller: Principal,
@@ -139,8 +141,10 @@ impl Permissions {
     }
 
     /// Admits a withdrawal unless the caller is a trading account, which can
-    /// never hold DEX balances. `caller_is_trading_account` is the caller's
-    /// delegation status, resolved against the registry by the caller.
+    /// never hold DEX balances. `caller_is_trading_account` is whether the
+    /// calling principal is a trading account, computed by the canister from the
+    /// registry (via `State::is_trading_account`); it is derived internally and
+    /// must never be treated as caller-supplied input.
     pub fn permit_withdraw(
         &self,
         _caller: Principal,
