@@ -416,8 +416,8 @@ fn get_events(
                 EventType::AddTradingAccount(
                     oisy_trade_canister::state::event::AddTradingAccountEvent { funding, trading },
                 ) => event::EventType::AddTradingAccount(event::AddTradingAccountEvent {
-                    funding,
-                    trading,
+                    funding: funding.0,
+                    trading: trading.0,
                 }),
                 EventType::RemoveTradingAccount(
                     oisy_trade_canister::state::event::RemoveTradingAccountEvent {
@@ -425,8 +425,8 @@ fn get_events(
                         trading,
                     },
                 ) => event::EventType::RemoveTradingAccount(event::RemoveTradingAccountEvent {
-                    funding,
-                    trading,
+                    funding: funding.0,
+                    trading: trading.0,
                 }),
             },
         }

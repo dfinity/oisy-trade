@@ -832,7 +832,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         now: Timestamp,
     ) -> Result<(), AddTradingAccountError> {
         self.user_registry
-            .validate_trading_account(funding, trading, now)?;
+            .validate_add_trading_account(funding, trading, now)?;
         if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading.0) {
             return Err(AddTradingAccountError::FundingOperationInProgress);
         }
@@ -848,7 +848,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
             self.user_registry
-                .record_trading_account(funding, trading, now);
+                .record_add_trading_account(funding, trading, now);
         }
     }
 
@@ -858,7 +858,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         trading: TradingAccount,
     ) -> Result<(), RemoveTradingAccountError> {
         self.user_registry
-            .validate_revoke(funding, trading)
+            .validate_remove_trading_account(funding, trading)
             .map_err(RemoveTradingAccountError::from)
     }
 
@@ -869,7 +869,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         persistence: StableMemoryOptions,
     ) {
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.user_registry.record_revoke(funding, trading);
+            self.user_registry
+                .record_remove_trading_account(funding, trading);
         }
     }
 
@@ -1179,7 +1180,7 @@ pub enum AddTradingAccountError {
     GranterIsTradingAccount,
     TooManyTradingAccounts,
     FundingOperationInProgress,
-    CooldownActive,
+    CooldownActive { retry_after_ns: u64 },
 }
 
 impl From<GrantError> for AddTradingAccountError {
@@ -1191,20 +1192,22 @@ impl From<GrantError> for AddTradingAccountError {
             GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
             GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
             GrantError::TooManyTradingAccounts => AddTradingAccountError::TooManyTradingAccounts,
-            GrantError::CooldownActive => AddTradingAccountError::CooldownActive,
+            GrantError::CooldownActive { retry_after_ns } => {
+                AddTradingAccountError::CooldownActive { retry_after_ns }
+            }
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RemoveTradingAccountError {
-    NotYourTradingAccount,
+    NotAllowed,
 }
 
 impl From<RevokeError> for RemoveTradingAccountError {
     fn from(err: RevokeError) -> Self {
         match err {
-            RevokeError::NotYourTradingAccount => RemoveTradingAccountError::NotYourTradingAccount,
+            RevokeError::NotAllowed => RemoveTradingAccountError::NotAllowed,
         }
     }
 }
@@ -1213,8 +1216,8 @@ impl From<RemoveTradingAccountError> for oisy_trade_types::RemoveTradingAccountE
     fn from(err: RemoveTradingAccountError) -> Self {
         use oisy_trade_types::RemoveTradingAccountRequestError as Req;
         match err {
-            RemoveTradingAccountError::NotYourTradingAccount => {
-                oisy_trade_types::RemoveTradingAccountError::request(Req::NotYourTradingAccount)
+            RemoveTradingAccountError::NotAllowed => {
+                oisy_trade_types::RemoveTradingAccountError::request(Req::NotAllowed)
             }
         }
     }
@@ -1259,8 +1262,8 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
                     ErrorKind::TemporaryError(Some(Tmp::FundingOperationInProgress)),
                     "the trading account has an in-flight deposit or withdrawal",
                 ),
-                AddTradingAccountError::CooldownActive => (
-                    ErrorKind::TemporaryError(Some(Tmp::GrantCooldownActive)),
+                AddTradingAccountError::CooldownActive { retry_after_ns } => (
+                    ErrorKind::TemporaryError(Some(Tmp::RateLimit { retry_after_ns })),
                     "the grant cooldown has not elapsed since the previous grant",
                 ),
             };

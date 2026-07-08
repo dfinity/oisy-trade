@@ -73,7 +73,7 @@ mod trading_accounts {
         trading: candid::Principal,
         now: Timestamp,
     ) {
-        registry.record_trading_account(FundingAccount(funding), TradingAccount(trading), now);
+        registry.record_add_trading_account(FundingAccount(funding), TradingAccount(trading), now);
     }
 
     fn revoke(
@@ -81,7 +81,7 @@ mod trading_accounts {
         funding: candid::Principal,
         trading: candid::Principal,
     ) {
-        registry.record_revoke(FundingAccount(funding), TradingAccount(trading));
+        registry.record_remove_trading_account(FundingAccount(funding), TradingAccount(trading));
     }
 
     type Setup = Box<dyn Fn(&mut UserRegistry<VectorMemory>)>;
@@ -183,7 +183,7 @@ mod trading_accounts {
             let mut registry = user_registry();
             (case.setup)(&mut registry);
             assert_eq!(
-                registry.validate_trading_account(
+                registry.validate_add_trading_account(
                     FundingAccount(case.funding),
                     TradingAccount(case.trading),
                     now
@@ -209,20 +209,21 @@ mod trading_accounts {
         );
 
         // A second grant strictly within the cooldown is rejected as retryable,
-        // and the check is independent of the specific new trading principal.
+        // carrying the remaining time; the check is independent of the specific
+        // new trading principal.
         assert_eq!(
-            registry.validate_trading_account(
+            registry.validate_add_trading_account(
                 FundingAccount(funding()),
                 TradingAccount(principal(3)),
                 Timestamp::new(1_000 + cooldown - 1)
             ),
-            Err(GrantError::CooldownActive),
-            "a grant within the cooldown is rejected"
+            Err(GrantError::CooldownActive { retry_after_ns: 1 }),
+            "a grant within the cooldown is rejected with the remaining time"
         );
 
         // Exactly at the cooldown boundary the grant is allowed again.
         assert_eq!(
-            registry.validate_trading_account(
+            registry.validate_add_trading_account(
                 FundingAccount(funding()),
                 TradingAccount(principal(3)),
                 Timestamp::new(1_000 + cooldown)
@@ -250,12 +251,12 @@ mod trading_accounts {
         // Revoking the last key must not reset the cooldown anchor: a re-grant
         // within the cooldown is still rejected.
         assert_eq!(
-            registry.validate_trading_account(
+            registry.validate_add_trading_account(
                 FundingAccount(funding()),
                 TradingAccount(principal(3)),
                 Timestamp::new(1_000 + cooldown - 1)
             ),
-            Err(GrantError::CooldownActive),
+            Err(GrantError::CooldownActive { retry_after_ns: 1 }),
             "revoke-all does not clear the cooldown anchor"
         );
     }
@@ -304,7 +305,7 @@ mod trading_accounts {
                 setup: Box::new(|r| register(r, funding())),
                 funding: funding(),
                 trading: trading(),
-                expected: Err(RevokeError::NotYourTradingAccount),
+                expected: Err(RevokeError::NotAllowed),
             },
             RevokeCase {
                 desc: "revoking someone else's trading account",
@@ -315,16 +316,16 @@ mod trading_accounts {
                 }),
                 funding: funding(),
                 trading: trading(),
-                expected: Err(RevokeError::NotYourTradingAccount),
+                expected: Err(RevokeError::NotAllowed),
             },
         ];
 
         for case in cases {
             let mut registry = user_registry();
             (case.setup)(&mut registry);
+            let revoke_args = (FundingAccount(case.funding), TradingAccount(case.trading));
             assert_eq!(
-                registry
-                    .validate_revoke(FundingAccount(case.funding), TradingAccount(case.trading)),
+                registry.validate_remove_trading_account(revoke_args.0, revoke_args.1),
                 case.expected,
                 "{}",
                 case.desc

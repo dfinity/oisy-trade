@@ -447,10 +447,14 @@ pub enum AddTradingAccountTemporaryError {
     /// acquire.
     #[error("the principal has an in-flight deposit or withdrawal")]
     FundingOperationInProgress,
-    /// The grant cooldown has not elapsed since the funding account's previous
-    /// successful grant. Retry after the cooldown.
-    #[error("the grant cooldown has not elapsed since the previous grant")]
-    GrantCooldownActive,
+    /// The grant rate limit is active: too little time has elapsed since the
+    /// funding account's previous successful grant. Retry after
+    /// `retry_after_ns` nanoseconds.
+    #[error("grant rate limit active; retry after {retry_after_ns} ns")]
+    RateLimit {
+        /// Nanoseconds remaining until the caller may grant again.
+        retry_after_ns: u64,
+    },
 }
 
 /// Error returned by the `remove_trading_account` endpoint.
@@ -459,9 +463,10 @@ pub type RemoveTradingAccountError = Error<RemoveTradingAccountRequestError, Nev
 /// Caller-side reasons `remove_trading_account` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 pub enum RemoveTradingAccountRequestError {
-    /// The principal is not currently a trading account of the caller.
-    #[error("the principal is not currently a trading account of the caller")]
-    NotYourTradingAccount,
+    /// The caller may not remove this trading account: it is not currently a
+    /// trading account of the caller.
+    #[error("not allowed to remove this trading account")]
+    NotAllowed,
 }
 
 /// Error returned by the `get_my_trading_accounts` query.

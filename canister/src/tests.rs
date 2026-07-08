@@ -2521,9 +2521,13 @@ mod set_halt {
 
 mod add_trading_account {
     use crate::Timestamp;
+    use crate::state::event::{AddTradingAccountEvent, Event, EventType};
     use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
-    use crate::user::{MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN};
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
     use crate::{add_trading_account, get_my_trading_accounts, state, storage};
     use oisy_trade_types::{
         AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
@@ -2536,6 +2540,13 @@ mod add_trading_account {
 
     fn trading() -> candid::Principal {
         principal(0x22)
+    }
+
+    /// The most recently recorded event in the log.
+    fn last_event() -> EventType {
+        let count = storage::total_event_count();
+        let Event { payload, .. } = storage::get_event(count - 1).expect("event log not empty");
+        payload
     }
 
     #[test]
@@ -2633,6 +2644,14 @@ mod add_trading_account {
             storage::total_event_count(),
             before + 1,
             "a successful grant records exactly one event"
+        );
+        assert_eq!(
+            last_event(),
+            EventType::AddTradingAccount(AddTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
         );
     }
 
@@ -2837,12 +2856,13 @@ mod add_trading_account {
                 result,
                 Err(AddTradingAccountError {
                     kind: ErrorKind::TemporaryError(Some(
-                        AddTradingAccountTemporaryError::GrantCooldownActive
+                        AddTradingAccountTemporaryError::RateLimit { retry_after_ns: 1 }
                     )),
                     ..
                 })
             ),
-            "a grant within the cooldown is a retryable temporary error, got {result:?}"
+            "a grant within the cooldown is a retryable rate-limit error carrying the \
+             remaining time, got {result:?}"
         );
         assert_eq!(
             storage::total_event_count(),
@@ -2884,9 +2904,13 @@ mod add_trading_account {
 
 mod remove_trading_account {
     use crate::Timestamp;
+    use crate::state::event::{Event, EventType, RemoveTradingAccountEvent};
     use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{fund_user, init_state_with_order_book, principal};
-    use crate::user::TRADING_ACCOUNT_GRANT_COOLDOWN;
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
     use crate::{add_trading_account, get_my_trading_accounts, remove_trading_account, storage};
     use oisy_trade_types::{
         ErrorKind, RemoveTradingAccountError, RemoveTradingAccountRequestError,
@@ -2898,6 +2922,13 @@ mod remove_trading_account {
 
     fn trading() -> candid::Principal {
         principal(0x71)
+    }
+
+    /// The most recently recorded event in the log.
+    fn last_event() -> EventType {
+        let count = storage::total_event_count();
+        let Event { payload, .. } = storage::get_event(count - 1).expect("event log not empty");
+        payload
     }
 
     #[test]
@@ -2921,6 +2952,14 @@ mod remove_trading_account {
             before + 1,
             "a successful revoke records exactly one event"
         );
+        assert_eq!(
+            last_event(),
+            EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
+        );
     }
 
     #[test]
@@ -2928,62 +2967,80 @@ mod remove_trading_account {
         let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
         init_state_with_order_book();
         fund_user(funding());
-        // The two grants are spaced by the cooldown; the revocations below are
-        // not — revocation carries no cooldown.
-        add_trading_account(
-            principal(0x72),
-            &mock_runtime_at(funding(), Timestamp::new(0)),
-        )
-        .unwrap();
-        add_trading_account(
-            principal(0x73),
-            &mock_runtime_at(funding(), Timestamp::new(cooldown)),
-        )
-        .unwrap();
 
-        assert_eq!(
-            remove_trading_account(principal(0x72), &mock_runtime_for(funding())),
-            Ok(())
-        );
-        assert_eq!(
-            remove_trading_account(principal(0x73), &mock_runtime_for(funding())),
-            Ok(())
-        );
+        // Grant the maximum number of trading accounts (grants are spaced by
+        // the cooldown), then revoke every one of them back-to-back at the same
+        // time — revocation carries no cooldown.
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x72 + i))
+            .collect();
+        for (i, account) in accounts.iter().enumerate() {
+            add_trading_account(
+                *account,
+                &mock_runtime_at(funding(), Timestamp::new(i as u64 * cooldown)),
+            )
+            .unwrap();
+        }
+
+        for account in &accounts {
+            assert_eq!(
+                remove_trading_account(*account, &mock_runtime_for(funding())),
+                Ok(()),
+                "revocation is never rate-limited"
+            );
+        }
         assert_eq!(get_my_trading_accounts(funding()), Ok(vec![]));
     }
 
     #[test]
-    fn should_reject_revoke_of_non_delegate_recording_no_event() {
+    fn should_reject_revoke_by_unauthorized_caller_recording_no_event() {
         init_state_with_order_book();
+        // `funding()` grants `trading()`.
         fund_user(funding());
-        // A funding account for someone else's delegate.
-        fund_user(principal(0x80));
-        add_trading_account(principal(0x81), &mock_runtime_for(principal(0x80))).unwrap();
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+        // A separate funding account with its own trading account.
+        let other_funding = principal(0x80);
+        let other_trading = principal(0x81);
+        fund_user(other_funding);
+        add_trading_account(other_trading, &mock_runtime_for(other_funding)).unwrap();
 
         struct Case {
             desc: &'static str,
+            caller: candid::Principal,
             target: candid::Principal,
         }
         let cases = [
             Case {
-                desc: "a principal that is not a trading account at all",
+                desc: "a stranger that granted nothing",
+                caller: principal(0x90),
                 target: trading(),
             },
             Case {
-                desc: "someone else's trading account",
-                target: principal(0x81),
+                desc: "a different funding account",
+                caller: other_funding,
+                target: trading(),
+            },
+            Case {
+                desc: "a trading account of another funding account",
+                caller: other_trading,
+                target: trading(),
+            },
+            Case {
+                desc: "the owner targeting a principal that is not its trading account",
+                caller: funding(),
+                target: principal(0x99),
             },
         ];
 
         for case in cases {
             let before = storage::total_event_count();
-            let result = remove_trading_account(case.target, &mock_runtime_for(funding()));
+            let result = remove_trading_account(case.target, &mock_runtime_for(case.caller));
             assert!(
                 matches!(
                     result,
                     Err(RemoveTradingAccountError {
                         kind: ErrorKind::RequestError(Some(
-                            RemoveTradingAccountRequestError::NotYourTradingAccount
+                            RemoveTradingAccountRequestError::NotAllowed
                         )),
                         ..
                     })
