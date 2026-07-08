@@ -212,83 +212,101 @@ mod settling_batches {
         }
     }
 
-    /// Expired-order refund operations are appended to the last batch when the
-    /// round produced fills, and form a single trailing zero-fill batch when it
-    /// did not — in both cases concatenating the batches reproduces the flat
-    /// order (all fill ops, then the refunds).
-    #[test]
-    fn appends_expired_refunds_to_the_last_batch() {
-        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
-        let cap = MAX_FILLS_PER_SETTLING_EVENT;
-
-        let with_fills = build(cap + 1, 3, base_scale);
-        assert_eq!(with_fills.settling_batches.len(), 2);
-        let last = with_fills.settling_batches.last().unwrap();
-        let refunds = last
-            .balance_operations
-            .iter()
-            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
-            .count();
-        assert_eq!(refunds, 3, "all refunds land on the last batch");
-        let first_refunds = with_fills.settling_batches[0]
-            .balance_operations
-            .iter()
-            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
-            .count();
-        assert_eq!(first_refunds, 0, "no refund leaks into an earlier batch");
-
-        let no_fills = build(0, 4, base_scale);
-        assert_eq!(no_fills.settling_batches.len(), 1);
-        assert!(no_fills.settling_batches[0].fills.is_empty());
-        assert_eq!(no_fills.settling_batches[0].balance_operations.len(), 4);
+    struct RefundCase {
+        desc: &'static str,
+        num_fills: usize,
+        num_expired: usize,
+        expected_batches: usize,
     }
 
-    /// When the fill count is an exact multiple of the cap the trailing
-    /// `batch_fills` is empty, yet the expired-order refunds must still be
-    /// appended to the LAST settling event (not the first), and concatenating
-    /// the batches must reproduce the unsplit op order.
+    /// Expired-order refund operations are appended to the LAST batch, never an
+    /// earlier one: to a partial trailing batch when fills spill past the cap,
+    /// to the last full batch when fills fill the cap exactly (the `last_mut`
+    /// arm, not `first_mut`), and to a lone trailing zero-fill batch when the
+    /// round produced no fills — in every case concatenating the batches
+    /// reproduces the flat order (all fill ops, then the refunds).
     #[test]
-    fn appends_expired_refunds_to_the_last_batch_when_fills_fill_the_cap_exactly() {
-        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+    fn appends_expired_refunds_to_the_last_batch() {
         let cap = MAX_FILLS_PER_SETTLING_EVENT;
-        let num_expired = 2;
+        let cases = vec![
+            RefundCase {
+                desc: "one over the cap: partial trailing batch",
+                num_fills: cap + 1,
+                num_expired: 3,
+                expected_batches: 2,
+            },
+            RefundCase {
+                desc: "exact multiple of the cap: append to the last full batch",
+                num_fills: cap * 2,
+                num_expired: 2,
+                expected_batches: 2,
+            },
+            RefundCase {
+                desc: "no fills: lone trailing zero-fill batch",
+                num_fills: 0,
+                num_expired: 4,
+                expected_batches: 1,
+            },
+        ];
 
-        let settlement = build(cap * 2, num_expired, base_scale);
-        assert_eq!(settlement.settling_batches.len(), 2);
-        for batch in &settlement.settling_batches {
-            assert_eq!(batch.fills.len(), cap, "each full batch carries cap fills");
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        for case in cases {
+            let settlement = build(case.num_fills, case.num_expired, base_scale);
+
+            assert_eq!(
+                settlement.settling_batches.len(),
+                case.expected_batches,
+                "{}: batch count",
+                case.desc,
+            );
+
+            let (last, earlier) = settlement
+                .settling_batches
+                .split_last()
+                .expect("at least one batch");
+            assert_eq!(
+                refund_count(last),
+                case.num_expired,
+                "{}: all refunds land on the last batch",
+                case.desc,
+            );
+            for batch in earlier {
+                assert_eq!(
+                    refund_count(batch),
+                    0,
+                    "{}: no refund leaks into an earlier batch",
+                    case.desc,
+                );
+            }
+
+            let (mut expected_ops, expected_fills) =
+                flat_reference(&fills(case.num_fills), base_scale);
+            expected_ops.extend(expired_ops(case.num_expired, base_scale));
+            let flat_ops: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.balance_operations.iter().cloned())
+                .collect();
+            let flat_fills: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.fills.iter().cloned())
+                .collect();
+            assert_eq!(
+                flat_ops, expected_ops,
+                "{}: flattened balance operations",
+                case.desc,
+            );
+            assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
         }
+    }
 
-        let last_refunds = settlement.settling_batches[1]
+    fn refund_count(batch: &crate::settlement::SettlementBatch) -> usize {
+        batch
             .balance_operations
             .iter()
             .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
-            .count();
-        assert_eq!(
-            last_refunds, num_expired,
-            "all refunds land on the last batch"
-        );
-        let first_refunds = settlement.settling_batches[0]
-            .balance_operations
-            .iter()
-            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
-            .count();
-        assert_eq!(first_refunds, 0, "no refund leaks into the first batch");
-
-        let (mut expected_ops, expected_fills) = flat_reference(&fills(cap * 2), base_scale);
-        expected_ops.extend(expired_ops(num_expired, base_scale));
-        let flat_ops: Vec<_> = settlement
-            .settling_batches
-            .iter()
-            .flat_map(|b| b.balance_operations.iter().cloned())
-            .collect();
-        let flat_fills: Vec<_> = settlement
-            .settling_batches
-            .iter()
-            .flat_map(|b| b.fills.iter().cloned())
-            .collect();
-        assert_eq!(flat_ops, expected_ops, "flattened balance operations");
-        assert_eq!(flat_fills, expected_fills, "flattened fills");
+            .count()
     }
 
     fn build(num_fills: usize, num_expired: usize, base_scale: NonZeroU64) -> MatchSettlement {
