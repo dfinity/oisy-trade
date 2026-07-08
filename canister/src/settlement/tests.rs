@@ -116,6 +116,198 @@ mod settled_fill {
     }
 }
 
+mod settling_batches {
+    use crate::order::{
+        FeeRates, Fill, FillSeq, MatchingOutput, OrderSeq, Price, Quantity, RemovedOrder, Side,
+    };
+    use crate::settlement::{FillSettlement, MAX_FILLS_PER_SETTLING_EVENT, MatchSettlement};
+    use crate::state::event::BalanceOperation;
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::NonZeroU64;
+
+    const BASE_SCALE: u64 = 100_000_000;
+
+    struct TestCase {
+        desc: &'static str,
+        num_fills: usize,
+        expected_batches: usize,
+    }
+
+    /// `from_matching` partitions a round's fills into `ceil(N / cap)` bounded
+    /// batches of at most `cap` fills each, and concatenating the batches
+    /// reproduces the exact flat op/fill order the pre-refactor single-vec build
+    /// produced.
+    #[test]
+    fn partitions_fills_into_bounded_batches_preserving_flat_order() {
+        let cap = MAX_FILLS_PER_SETTLING_EVENT;
+        let cases = vec![
+            TestCase {
+                desc: "no fills",
+                num_fills: 0,
+                expected_batches: 0,
+            },
+            TestCase {
+                desc: "single fill",
+                num_fills: 1,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "exactly the cap fits in one batch",
+                num_fills: cap,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "one over the cap spills into a second batch",
+                num_fills: cap + 1,
+                expected_batches: 2,
+            },
+            TestCase {
+                desc: "several caps plus a remainder",
+                num_fills: cap * 3 + 7,
+                expected_batches: 4,
+            },
+        ];
+
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        for case in cases {
+            let all_fills = fills(case.num_fills);
+            let (expected_ops, expected_fills) = flat_reference(&all_fills, base_scale);
+
+            let settlement =
+                MatchSettlement::from_matching(output(all_fills), FeeRates::default(), base_scale);
+
+            assert_eq!(
+                settlement.settling_batches.len(),
+                case.expected_batches,
+                "{}: batch count",
+                case.desc,
+            );
+            for batch in &settlement.settling_batches {
+                assert!(
+                    batch.fills.len() <= cap,
+                    "{}: batch carries at most cap fills",
+                    case.desc,
+                );
+            }
+
+            let flat_ops: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.balance_operations.iter().cloned())
+                .collect();
+            let flat_fills: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.fills.iter().cloned())
+                .collect();
+            assert_eq!(
+                flat_ops, expected_ops,
+                "{}: flattened balance operations",
+                case.desc,
+            );
+            assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
+        }
+    }
+
+    /// Expired-order refund operations are appended to the last batch when the
+    /// round produced fills, and form a single trailing zero-fill batch when it
+    /// did not — in both cases concatenating the batches reproduces the flat
+    /// order (all fill ops, then the refunds).
+    #[test]
+    fn appends_expired_refunds_to_the_last_batch() {
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        let cap = MAX_FILLS_PER_SETTLING_EVENT;
+
+        let with_fills = build(cap + 1, 3, base_scale);
+        assert_eq!(with_fills.settling_batches.len(), 2);
+        let last = with_fills.settling_batches.last().unwrap();
+        let refunds = last
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
+            .count();
+        assert_eq!(refunds, 3, "all refunds land on the last batch");
+        let first_refunds = with_fills.settling_batches[0]
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
+            .count();
+        assert_eq!(first_refunds, 0, "no refund leaks into an earlier batch");
+
+        let no_fills = build(0, 4, base_scale);
+        assert_eq!(no_fills.settling_batches.len(), 1);
+        assert!(no_fills.settling_batches[0].fills.is_empty());
+        assert_eq!(no_fills.settling_batches[0].balance_operations.len(), 4);
+    }
+
+    fn build(num_fills: usize, num_expired: usize, base_scale: NonZeroU64) -> MatchSettlement {
+        let mut expired_orders = BTreeMap::new();
+        for i in 0..num_expired as u64 {
+            expired_orders.insert(
+                OrderSeq::new(1_000_000 + i),
+                RemovedOrder {
+                    side: Side::Sell,
+                    price: price(),
+                    remaining_quantity: quantity(),
+                },
+            );
+        }
+        let out = MatchingOutput {
+            fills: fills(num_fills),
+            resting_orders: BTreeSet::new(),
+            filled_orders: BTreeSet::new(),
+            expired_orders,
+        };
+        MatchSettlement::from_matching(out, FeeRates::default(), base_scale)
+    }
+
+    fn flat_reference(
+        fills: &[Fill],
+        base_scale: NonZeroU64,
+    ) -> (Vec<BalanceOperation>, Vec<crate::settlement::FillEvent>) {
+        let mut ops = Vec::new();
+        let mut settled = Vec::new();
+        for fill in fills {
+            let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
+            settlement.push_balance_operations(&mut ops);
+            settled.push(settlement.fill_event());
+        }
+        (ops, settled)
+    }
+
+    fn output(fills: Vec<Fill>) -> MatchingOutput {
+        MatchingOutput {
+            fills,
+            resting_orders: BTreeSet::new(),
+            filled_orders: BTreeSet::new(),
+            expired_orders: BTreeMap::new(),
+        }
+    }
+
+    fn fills(n: usize) -> Vec<Fill> {
+        (0..n as u64)
+            .map(|i| Fill {
+                fill_seq: FillSeq::new(i),
+                taker_order_seq: OrderSeq::new(0),
+                taker_side: Side::Sell,
+                taker_price: price(),
+                maker_order_seq: OrderSeq::new(i + 1),
+                maker_price: price(),
+                quantity: quantity(),
+            })
+            .collect()
+    }
+
+    fn price() -> Price {
+        Price::new(5 * TICK_SIZE.get())
+    }
+
+    fn quantity() -> Quantity {
+        Quantity::from(u128::from(LOT_SIZE.get()))
+    }
+}
+
 mod settlement_shape {
     use crate::order::{self, FeeRates, PairToken};
     use crate::settlement::{FillSettlement, RemovedOrderSettlement};

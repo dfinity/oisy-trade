@@ -722,6 +722,75 @@ fn should_replay_matching_with_price_improvement() {
         .assert_replay_matches();
 }
 
+/// A matching round with more than `MAX_FILLS_PER_SETTLING_EVENT` fills is
+/// enqueued as several bounded settling events; replaying that multi-event log
+/// must reconstruct exactly the same state the primary path produced.
+#[test]
+fn should_replay_matching_round_split_across_multiple_settling_events() {
+    let buyer = user_1();
+    let price = 100u128;
+    let quantity = 1_000_000u128;
+    let book_id = OrderBookId::ZERO;
+    let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+    let num_makers = cap + 1;
+
+    let mut scenario = Scenario::new().with_trading_pair().with_deposit(
+        buyer,
+        TokenId::new(quote()),
+        Quantity::from(price * quantity * num_makers as u128),
+    );
+
+    let mut maker_seqs = Vec::new();
+    for i in 0..num_makers {
+        let seller = maker(i);
+        scenario = scenario.with_deposit(seller, TokenId::new(base()), Quantity::from(quantity));
+        let (next, sell_id) = scenario.with_limit_order(
+            seller,
+            Side::Sell,
+            Price::new(price * PRICE_SCALE),
+            Quantity::from(quantity),
+        );
+        scenario = next;
+        maker_seqs.push(sell_id.seq());
+    }
+    let (scenario, buy_id) = scenario.with_limit_order(
+        buyer,
+        Side::Buy,
+        Price::new(price * PRICE_SCALE),
+        Quantity::from(num_makers as u128 * quantity),
+    );
+
+    let mut expected_ops = Vec::new();
+    for maker_seq in &maker_seqs {
+        expected_ops.push(BalanceOperation::Transfer {
+            from_order: buy_id.seq(),
+            to_order: *maker_seq,
+            token: PairToken::Quote,
+            amount: Quantity::from(price * quantity),
+            fee: None,
+        });
+        expected_ops.push(BalanceOperation::Transfer {
+            from_order: *maker_seq,
+            to_order: buy_id.seq(),
+            token: PairToken::Base,
+            amount: Quantity::from(quantity),
+            fee: None,
+        });
+    }
+
+    let mut orders = maker_seqs;
+    orders.push(buy_id.seq());
+
+    scenario
+        .with_matching_round(MatchingEvent { book_id, orders }, expected_ops)
+        .assert_order_status(buy_id, OrderStatus::Filled)
+        .assert_replay_matches();
+}
+
+fn maker(i: usize) -> Principal {
+    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
+}
+
 #[test]
 fn should_replay_cancel_pending_order() {
     let price = 100u128;

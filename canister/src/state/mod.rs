@@ -409,13 +409,15 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                         .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            if !settlement.balance_operations.is_empty() || !settlement.fills.is_empty() {
-                self.pending_settling_events
-                    .push_back(event::SettlingEvent {
-                        book_id: event.book_id,
-                        balance_operations: settlement.balance_operations,
-                        fills: settlement.fills,
-                    });
+            for batch in settlement.settling_batches {
+                if !batch.balance_operations.is_empty() || !batch.fills.is_empty() {
+                    self.pending_settling_events
+                        .push_back(event::SettlingEvent {
+                            book_id: event.book_id,
+                            balance_operations: batch.balance_operations,
+                            fills: batch.fills,
+                        });
+                }
             }
         }
     }

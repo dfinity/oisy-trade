@@ -11,15 +11,33 @@ use std::num::NonZeroU64;
 #[cfg(test)]
 mod tests;
 
+/// The maximum number of [`FillEvent`]s packed into a single settling event, so
+/// a matching chunk emits `ceil(N / cap)` bounded events instead of one, and the
+/// per-message cost of applying any one event stays well under the instruction
+/// cap. At ~1.75M instructions per fill applied, a full event costs ≈ 224M
+/// instructions — ~4.5× under the 1B `DEFAULT_INSTRUCTION_BUDGET` and ~178×
+/// under the 40B `MAX_INSTRUCTION_BUDGET` — and above every existing test's
+/// per-round fill count, so only the dedicated sweep tests exercise the split.
+pub const MAX_FILLS_PER_SETTLING_EVENT: usize = 128;
+
 /// The full set of stable-memory state changes a matching round settles into:
-/// the balance operations to apply, the per-order record updates (fill deltas
-/// plus terminal status), and the lean per-fill [`FillEvent`]s to persist and
-/// later replay into trades. Built once from a [`MatchingOutput`] during the
-/// matching phase; consumed to update `order_history` and enqueue the
-/// `SettlingEvent`.
+/// the per-order record updates (fill deltas plus terminal status) applied in
+/// one pass, and the balance operations and lean per-fill [`FillEvent`]s
+/// partitioned into bounded [`SettlementBatch`]es, each enqueued as its own
+/// `SettlingEvent`. Built once from a [`MatchingOutput`] during the matching
+/// phase; consumed to update `order_history` and enqueue the settling events.
 pub struct MatchSettlement {
-    pub balance_operations: Vec<event::BalanceOperation>,
     pub order_updates: BTreeMap<OrderSeq, OrderUpdate>,
+    pub settling_batches: Vec<SettlementBatch>,
+}
+
+/// A bounded slice of a matching round's settlement: at most
+/// [`MAX_FILLS_PER_SETTLING_EVENT`] fills together with the balance operations
+/// they produced. A fill and its operations are always kept in the same batch so
+/// that the settling phase can resolve each fill's taker/maker order seqs from
+/// the operations of the same event.
+pub struct SettlementBatch {
+    pub balance_operations: Vec<event::BalanceOperation>,
     pub fills: Vec<FillEvent>,
 }
 
@@ -41,19 +59,49 @@ impl MatchSettlement {
             filled_orders,
             expired_orders,
         } = output;
-        let mut balance_operations = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
         let mut order_updates = BTreeMap::new();
-        let mut settled_fills = Vec::with_capacity(fills.len());
+        let mut settling_batches: Vec<SettlementBatch> = Vec::new();
+        let mut balance_operations = Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT * 3);
+        let mut batch_fills = Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT);
         for fill in fills {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(&mut order_updates);
-            settled_fills.push(settlement.fill_event());
+            batch_fills.push(settlement.fill_event());
+            if batch_fills.len() == MAX_FILLS_PER_SETTLING_EVENT {
+                settling_batches.push(SettlementBatch {
+                    balance_operations: std::mem::replace(
+                        &mut balance_operations,
+                        Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT * 3),
+                    ),
+                    fills: std::mem::replace(
+                        &mut batch_fills,
+                        Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT),
+                    ),
+                });
+            }
         }
+
+        let mut expired_ops = Vec::with_capacity(expired_orders.len());
         for (seq, removed) in &expired_orders {
             RemovedOrderSettlement::new(*seq, removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
+                .push_balance_operations(&mut expired_ops);
         }
+        if !batch_fills.is_empty() {
+            balance_operations.extend(expired_ops);
+            settling_batches.push(SettlementBatch {
+                balance_operations,
+                fills: batch_fills,
+            });
+        } else if let Some(last) = settling_batches.last_mut() {
+            last.balance_operations.extend(expired_ops);
+        } else if !expired_ops.is_empty() {
+            settling_batches.push(SettlementBatch {
+                balance_operations: expired_ops,
+                fills: Vec::new(),
+            });
+        }
+
         for seq in &resting_orders {
             order_updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
         }
@@ -64,9 +112,8 @@ impl MatchSettlement {
             order_updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
         }
         Self {
-            balance_operations,
             order_updates,
-            fills: settled_fills,
+            settling_batches,
         }
     }
 }

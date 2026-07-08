@@ -712,16 +712,18 @@ where
 
 /// DEFI-2913 — bound settling-event application cost during matching.
 ///
-/// One taker crossing many resting makers produces a single oversized settling
-/// event that is applied in one message with no per-op instruction check, so
-/// its cost scales linearly with the number of fills. This bench reproduces the
-/// worst case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
-/// resting min-notional sell orders (each from a distinct principal, one fill
-/// each) swept by a single fill-or-kill buy that empties the book in one
-/// settling event. 22_900 is the largest maker count whose sweep still fits
-/// under the IC per-message cap (40B instructions,
-/// `crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`); at ~23_000 the
-/// sweep crosses the cap and the message traps.
+/// One taker crossing many resting makers used to produce a single oversized
+/// settling event applied in one message, whose cost scaled linearly with the
+/// number of fills and, past ~23_000 fills, trapped the message. The round now
+/// partitions its fills into bounded settling events
+/// (`crate::settlement::MAX_FILLS_PER_SETTLING_EVENT` fills each), and the
+/// executor checks the instruction budget between events, so the same sweep
+/// drains as many small events. This bench keeps the worst case under the
+/// mainnet ICP/ckUSDT listing parameters: a book of 22_900 resting min-notional
+/// sell orders (each from a distinct principal, one fill each) swept by a single
+/// fill-or-kill buy that empties the book. Under an unlimited per-message budget
+/// (`crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`, 40B instructions)
+/// all the resulting bounded events drain in one `run_once`.
 mod settling_event_sweep {
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderStatus, PendingOrder, Price, Quantity, Side, TickSize,

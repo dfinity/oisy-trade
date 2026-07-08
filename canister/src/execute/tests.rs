@@ -97,6 +97,53 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
+/// A single taker sweeping more than `MAX_FILLS_PER_SETTLING_EVENT` resting
+/// makers produces several bounded settling events; under an unlimited budget
+/// one `run_once` matches and drains all of them, leaving no pending work and
+/// every order `Filled`.
+#[test]
+fn should_drain_all_split_settling_events_in_one_run() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+    let num_makers = cap + 2;
+
+    let maker_ids: Vec<(Principal, OrderId)> = (0..num_makers)
+        .map(|i| {
+            let owner = maker(i);
+            let id = test_fixtures::order(owner, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            (owner, id)
+        })
+        .collect();
+    let buy_id = test_fixtures::order(
+        BUYER,
+        &pair,
+        Side::Buy,
+        100 * PRICE_SCALE,
+        num_makers as u64 * lot,
+    )
+    .place(&mut state);
+
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert!(!state.has_pending_orders());
+    assert!(!state.has_pending_settling_events());
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Filled));
+    for (owner, id) in maker_ids {
+        let status = state.get_user_order(&owner, id).map(|(_, _, r)| r.status);
+        assert_eq!(status, Some(OrderStatus::Filled));
+    }
+}
+
+fn maker(i: usize) -> Principal {
+    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
+}
+
 #[test]
 fn should_be_a_no_op_when_globally_halted() {
     let mut state = setup_one_book();

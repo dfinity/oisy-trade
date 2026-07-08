@@ -3731,6 +3731,152 @@ mod pending_state_predicates {
         assert!(state.has_pending_settling_events());
     }
 
+    /// A taker sweeping more than `MAX_FILLS_PER_SETTLING_EVENT` resting makers
+    /// splits the round into several bounded settling events, and draining all
+    /// of them leaves exactly the state a single unsplit event would have — the
+    /// split is a pure batching of the same operations.
+    #[test]
+    fn sweeping_over_cap_makers_splits_into_bounded_events_equivalent_to_one() {
+        let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+        let num_makers = cap + 2;
+
+        let mut split_state = matched_sweep(num_makers);
+        let mut events = Vec::new();
+        while let Some(event) = split_state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        assert_eq!(events.len(), num_makers.div_ceil(cap));
+        for event in &events {
+            assert!(
+                event.fills.len() <= cap,
+                "each settling event carries at most cap fills",
+            );
+        }
+        for event in &events {
+            split_state.record_settling_event(
+                event,
+                crate::Timestamp::EPOCH,
+                crate::state::StableMemoryOptions::Write,
+            );
+        }
+
+        let mut combined_state = matched_sweep(num_makers);
+        let mut combined = combined_state
+            .take_next_pending_settling_event()
+            .expect("matching must produce at least one settling event");
+        while let Some(event) = combined_state.take_next_pending_settling_event() {
+            combined.balance_operations.extend(event.balance_operations);
+            combined.fills.extend(event.fills);
+        }
+        combined_state.record_settling_event(
+            &combined,
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        assert_eq!(
+            split_state, combined_state,
+            "splitting the settling events must not change the final state",
+        );
+    }
+
+    /// A round that both fills and kills a fill-or-kill order appends the killed
+    /// order's refund to the last settling event, never to an earlier one.
+    #[test]
+    fn expired_refunds_land_on_the_last_settling_event() {
+        let mut state = setup_one_book();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+        let num_makers = cap + 1;
+
+        for i in 0..num_makers {
+            test_fixtures::order(maker(i), &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+        }
+        test_fixtures::order(
+            BUYER,
+            &pair,
+            Side::Buy,
+            100 * PRICE_SCALE,
+            num_makers as u128 * lot,
+        )
+        .place(&mut state);
+        let killed = test_fixtures::order(SELLER, &pair, Side::Buy, 50 * PRICE_SCALE, lot)
+            .fill_or_kill()
+            .place(&mut state);
+
+        let book = state.order_book(&OrderBookId::ZERO).unwrap();
+        let matching_event = crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: book.pending_order_seqs().collect(),
+        };
+        state.record_matching_event(
+            &matching_event,
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        assert_eq!(events.len(), num_makers.div_ceil(cap));
+
+        let refund_in_last = events.last().unwrap().balance_operations.iter().any(|op| {
+            matches!(
+                op,
+                crate::state::event::BalanceOperation::Unreserve { order, .. }
+                    if *order == killed.seq()
+            )
+        });
+        assert!(refund_in_last, "the kill refund must be on the last event");
+
+        for event in &events[..events.len() - 1] {
+            let has_refund = event
+                .balance_operations
+                .iter()
+                .any(|op| matches!(op, crate::state::event::BalanceOperation::Unreserve { .. }));
+            assert!(!has_refund, "no refund may leak into an earlier event");
+        }
+    }
+
+    fn matched_sweep(
+        num_makers: usize,
+    ) -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
+    {
+        let mut state = setup_one_book();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for i in 0..num_makers {
+            test_fixtures::order(maker(i), &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+        }
+        test_fixtures::order(
+            BUYER,
+            &pair,
+            Side::Buy,
+            100 * PRICE_SCALE,
+            num_makers as u128 * lot,
+        )
+        .place(&mut state);
+        let book = state.order_book(&OrderBookId::ZERO).unwrap();
+        let matching_event = crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: book.pending_order_seqs().collect(),
+        };
+        state.record_matching_event(
+            &matching_event,
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+        state
+    }
+
+    fn maker(i: usize) -> Principal {
+        Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
+    }
+
     fn setup_one_book()
     -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
     {
