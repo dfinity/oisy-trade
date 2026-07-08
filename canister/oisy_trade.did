@@ -621,8 +621,9 @@ type AddTradingAccountError = record {
         TemporaryError : opt variant {
             // The principal has an in-flight deposit or withdrawal; retry once it completes.
             FundingOperationInProgress;
-            // The grant cooldown has not elapsed since the previous grant; retry later.
-            GrantCooldownActive;
+            // Too little time has elapsed since the previous successful grant;
+            // retry after `retry_after_ns` nanoseconds.
+            RateLimit : record { retry_after_ns : nat64 };
         };
         InternalError : opt variant {};
     };
@@ -634,8 +635,9 @@ type AddTradingAccountError = record {
 type RemoveTradingAccountError = record {
     kind : variant {
         RequestError : opt variant {
-            // The principal is not currently a trading account of the caller.
-            NotYourTradingAccount;
+            // The caller may not remove this trading account (it is not
+            // currently one of the caller's trading accounts).
+            NotAllowed;
         };
         TemporaryError : opt variant {};
         InternalError : opt variant {};

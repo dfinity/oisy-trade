@@ -359,7 +359,10 @@ impl Scenario {
 
     fn with_add_trading_account(mut self, funding: Principal, trading: Principal) -> Self {
         let timestamp = self.timestamp();
-        let payload = EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading });
+        let payload = EventType::AddTradingAccount(AddTradingAccountEvent {
+            funding: crate::user::FundingAccount(funding),
+            trading: crate::user::TradingAccount(trading),
+        });
         apply_state_transition(
             &mut self.state,
             &payload,
@@ -372,8 +375,10 @@ impl Scenario {
 
     fn with_remove_trading_account(mut self, funding: Principal, trading: Principal) -> Self {
         let timestamp = self.timestamp();
-        let payload =
-            EventType::RemoveTradingAccount(RemoveTradingAccountEvent { funding, trading });
+        let payload = EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+            funding: crate::user::FundingAccount(funding),
+            trading: crate::user::TradingAccount(trading),
+        });
         apply_state_transition(
             &mut self.state,
             &payload,

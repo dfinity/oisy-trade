@@ -9,6 +9,7 @@ use crate::state::event::{
     CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent,
     RemoveTradingAccountEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
 };
+use crate::user::{FundingAccount, TradingAccount};
 use candid::Principal;
 use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
@@ -126,13 +127,13 @@ impl WorstCaseEvent {
                 halted: true,
             }),
             Self::AddTradingAccount => EventType::AddTradingAccount(AddTradingAccountEvent {
-                funding: max_principal(0),
-                trading: max_principal(1),
+                funding: FundingAccount(max_principal(0)),
+                trading: TradingAccount(max_principal(1)),
             }),
             Self::RemoveTradingAccount => {
                 EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
-                    funding: max_principal(0),
-                    trading: max_principal(1),
+                    funding: FundingAccount(max_principal(0)),
+                    trading: TradingAccount(max_principal(1)),
                 })
             }
         })

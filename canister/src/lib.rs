@@ -123,7 +123,10 @@ pub fn add_trading_account(
         s.validate_add_trading_account(FundingAccount(funding), TradingAccount(trading), now)
             .map_err(AddTradingAccountError::from)?;
         let permit = s.permissions().permit_add_trading_account();
-        let event = state::event::AddTradingAccountEvent { funding, trading };
+        let event = state::event::AddTradingAccountEvent {
+            funding: FundingAccount(funding),
+            trading: TradingAccount(trading),
+        };
         state::audit::process_event(
             s,
             state::event::EventType::AddTradingAccount(event),
@@ -145,7 +148,10 @@ pub fn remove_trading_account(
         s.validate_remove_trading_account(FundingAccount(funding), TradingAccount(trading))
             .map_err(RemoveTradingAccountError::from)?;
         let permit = s.permissions().permit_remove_trading_account();
-        let event = state::event::RemoveTradingAccountEvent { funding, trading };
+        let event = state::event::RemoveTradingAccountEvent {
+            funding: FundingAccount(funding),
+            trading: TradingAccount(trading),
+        };
         state::audit::process_event(
             s,
             state::event::EventType::RemoveTradingAccount(event),

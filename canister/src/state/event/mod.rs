@@ -4,6 +4,7 @@ use crate::order::{
     TimeInForce, TokenId, TokenMetadata,
 };
 use crate::settlement::FillEvent;
+use crate::user::{FundingAccount, TradingAccount};
 use candid::Principal;
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -199,18 +200,18 @@ pub struct SetHaltEvent {
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct AddTradingAccountEvent {
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub funding: Principal,
-    #[cbor(n(1), with = "icrc_cbor::principal")]
-    pub trading: Principal,
+    #[n(0)]
+    pub funding: FundingAccount,
+    #[n(1)]
+    pub trading: TradingAccount,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub struct RemoveTradingAccountEvent {
-    #[cbor(n(0), with = "icrc_cbor::principal")]
-    pub funding: Principal,
-    #[cbor(n(1), with = "icrc_cbor::principal")]
-    pub trading: Principal,
+    #[n(0)]
+    pub funding: FundingAccount,
+    #[n(1)]
+    pub trading: TradingAccount,
 }
 
 impl Storable for Event {

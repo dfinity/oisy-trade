@@ -3928,3 +3928,172 @@ mod halt {
         setup.drop().await;
     }
 }
+
+mod trading_accounts {
+    use assert_matches::assert_matches;
+    use candid::Principal;
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_types::{
+        AddTradingAccountRequestError, AddTradingAccountTemporaryError, ErrorKind,
+        RemoveTradingAccountRequestError,
+    };
+    use std::time::Duration;
+
+    /// Mirrors the canister's `TRADING_ACCOUNT_GRANT_COOLDOWN` (1 hour). The
+    /// integration crate does not depend on the canister lib, so the value is
+    /// duplicated here.
+    const GRANT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
+    /// Mirrors the canister's `MAX_TRADING_ACCOUNTS_PER_USER`.
+    const MAX_TRADING_ACCOUNTS_PER_USER: u8 = 4;
+
+    fn trading_account(n: u8) -> Principal {
+        Principal::from_slice(&[0xF0, n])
+    }
+
+    /// Registers `who` as a funding account by depositing quote tokens.
+    async fn register_funding_account(setup: &Setup, who: Principal) {
+        setup.fund_quote(who, 1_000_000).await;
+    }
+
+    #[tokio::test]
+    async fn should_grant_list_and_revoke() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+
+        client.add_trading_account(trading).await.unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the granted trading account is listed"
+        );
+
+        client.remove_trading_account(trading).await.unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            Vec::<Principal>::new(),
+            "the whitelist is empty after revocation"
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_grant_past_the_cap() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+
+        // Fill the cap, advancing the clock past the cooldown between grants.
+        for i in 0..MAX_TRADING_ACCOUNTS_PER_USER {
+            client
+                .add_trading_account(trading_account(i))
+                .await
+                .unwrap();
+            setup.env().advance_time(GRANT_COOLDOWN).await;
+            setup.env().tick().await;
+        }
+
+        let err = client
+            .add_trading_account(trading_account(MAX_TRADING_ACCOUNTS_PER_USER))
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(
+                AddTradingAccountRequestError::TooManyTradingAccounts { max }
+            )) if max == MAX_TRADING_ACCOUNTS_PER_USER as u32
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_rate_limit_a_second_grant_within_the_cooldown() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+
+        client
+            .add_trading_account(trading_account(1))
+            .await
+            .unwrap();
+
+        let err = client
+            .add_trading_account(trading_account(2))
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::TemporaryError(Some(AddTradingAccountTemporaryError::RateLimit {
+                retry_after_ns,
+            })) if retry_after_ns > 0 && retry_after_ns <= GRANT_COOLDOWN.as_nanos() as u64
+        );
+
+        // Once the cooldown has elapsed, the second grant succeeds.
+        setup.env().advance_time(GRANT_COOLDOWN).await;
+        setup.env().tick().await;
+        client
+            .add_trading_account(trading_account(2))
+            .await
+            .unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            vec![trading_account(1), trading_account(2)]
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_unauthorized_remove() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let owner = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        owner.add_trading_account(trading).await.unwrap();
+
+        // A stranger — a different, registered funding account — cannot remove it.
+        let stranger = Principal::from_slice(&[0xAB, 0xCD]);
+        register_funding_account(&setup, stranger).await;
+        let stranger_client = setup.oisy_trade_client_with_caller(stranger);
+        let err = stranger_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(RemoveTradingAccountRequestError::NotAllowed))
+        );
+
+        // A trading account cannot remove a trading account of its funding
+        // account (or any other).
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+        let err = trading_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(RemoveTradingAccountRequestError::NotAllowed))
+        );
+
+        // The owner's grant is untouched by the rejected removals.
+        assert_eq!(
+            owner.get_my_trading_accounts().await.unwrap(),
+            vec![trading]
+        );
+
+        // NOTE: the "a revoked trading account can no longer place orders"
+        // lifecycle needs caller resolution on orders (PR 5/6); the spec
+        // sequences the full deposit→grant→trade→revoke→stranger lifecycle into
+        // PR 6, so it is intentionally not covered here.
+
+        setup.drop().await;
+    }
+}
