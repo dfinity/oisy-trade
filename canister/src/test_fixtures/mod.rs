@@ -436,6 +436,12 @@ pub fn principal(seed: u8) -> Principal {
     Principal::from_slice(&[seed])
 }
 
+/// A deterministic maker principal seeded by an index, kept clear of the
+/// single-byte [`principal`] seeds.
+pub fn maker(i: usize) -> Principal {
+    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
+}
+
 /// Construct a [`ic_cdk::call::Response`] from Candid-encoded bytes.
 ///
 /// `Response` has a private field, but is a newtype over `Vec<u8>` with

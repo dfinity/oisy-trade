@@ -113,7 +113,7 @@ fn should_drain_all_split_settling_events_in_one_run() {
 
     let maker_ids: Vec<(Principal, OrderId)> = (0..num_makers)
         .map(|i| {
-            let owner = maker(i);
+            let owner = test_fixtures::maker(i);
             let id = test_fixtures::order(owner, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
                 .place(&mut state);
             (owner, id)
@@ -138,10 +138,6 @@ fn should_drain_all_split_settling_events_in_one_run() {
         let status = state.get_user_order(&owner, id).map(|(_, _, r)| r.status);
         assert_eq!(status, Some(OrderStatus::Filled));
     }
-}
-
-fn maker(i: usize) -> Principal {
-    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
 }
 
 #[test]

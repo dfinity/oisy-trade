@@ -11,7 +11,7 @@ use crate::state::event::{
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
-    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata, maker,
     order_history, quote_metadata, state, trade_history, user_registry,
 };
 use candid::Principal;
@@ -785,10 +785,6 @@ fn should_replay_matching_round_split_across_multiple_settling_events() {
         .with_matching_round(MatchingEvent { book_id, orders }, expected_ops)
         .assert_order_status(buy_id, OrderStatus::Filled)
         .assert_replay_matches();
-}
-
-fn maker(i: usize) -> Principal {
-    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
 }
 
 #[test]

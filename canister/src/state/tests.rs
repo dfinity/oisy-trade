@@ -3791,8 +3791,14 @@ mod pending_state_predicates {
         let num_makers = cap + 1;
 
         for i in 0..num_makers {
-            test_fixtures::order(maker(i), &pair, Side::Sell, 100 * PRICE_SCALE, lot)
-                .place(&mut state);
+            test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            )
+            .place(&mut state);
         }
         test_fixtures::order(
             BUYER,
@@ -3849,8 +3855,14 @@ mod pending_state_predicates {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         for i in 0..num_makers {
-            test_fixtures::order(maker(i), &pair, Side::Sell, 100 * PRICE_SCALE, lot)
-                .place(&mut state);
+            test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            )
+            .place(&mut state);
         }
         test_fixtures::order(
             BUYER,
@@ -3871,10 +3883,6 @@ mod pending_state_predicates {
             crate::state::StableMemoryOptions::Write,
         );
         state
-    }
-
-    fn maker(i: usize) -> Principal {
-        Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
     }
 
     fn setup_one_book()
