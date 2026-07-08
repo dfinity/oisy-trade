@@ -853,8 +853,10 @@ mod settling_event_sweep {
         assert_eq!(book.resting_orders_len(), num_makers as usize);
 
         // One fill-or-kill buy sized to the whole book: it crosses every maker
-        // at `MAKER_PRICE` and fully fills, emptying the book in a single
-        // settling event whose application cost scales with `num_makers`.
+        // at `MAKER_PRICE` and fully fills, emptying the book across the bounded
+        // settling events its fills partition into (each at most
+        // `MAX_FILLS_PER_SETTLING_EVENT` fills), whose combined application cost
+        // scales with `num_makers`.
         let taker = super::user(num_makers);
         super::fund_user(&mut state, taker);
         let buy = super::place_order(
