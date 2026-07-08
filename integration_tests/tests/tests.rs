@@ -4107,8 +4107,8 @@ mod trading_accounts {
         let trading = trading_account(1);
         owner.add_trading_account(trading).await.unwrap();
 
-        // The trading account can neither deposit nor withdraw — R3 denies both
-        // synchronously, before any ledger interaction.
+        // The trading account can neither deposit nor withdraw — the denial is
+        // synchronous, before any ledger interaction.
         let trading_client = setup.oisy_trade_client_with_caller(trading);
         let token = setup.quote_token_id();
 

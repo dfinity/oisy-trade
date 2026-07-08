@@ -879,7 +879,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Returns `true` if `principal` is currently a trading account (delegate)
-    /// of some funding account. Used by the R3 funding-operation denial.
+    /// of some funding account. Used to deny funding operations to trading
+    /// accounts.
     pub fn is_trading_account(&self, principal: &Principal) -> bool {
         self.user_registry.is_trading_account(principal)
     }
