@@ -719,7 +719,7 @@ benches:
   bench_read_events:
     total:
       calls: 1
-      instructions: 18905061
+      instructions: 18906057
       heap_increase: 8
       stable_memory_increase: 0
     scopes:
@@ -730,7 +730,7 @@ benches:
         stable_memory_increase: 0
       AddTradingAccount:
         calls: 1
-        instructions: 5451
+        instructions: 5949
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
@@ -760,7 +760,7 @@ benches:
         stable_memory_increase: 0
       RemoveTradingAccount:
         calls: 1
-        instructions: 5451
+        instructions: 5949
         heap_increase: 0
         stable_memory_increase: 0
       SetHalt:
@@ -870,7 +870,7 @@ benches:
   bench_write_events:
     total:
       calls: 1
-      instructions: 28880016
+      instructions: 28880736
       heap_increase: 15
       stable_memory_increase: 0
     scopes:
@@ -881,7 +881,7 @@ benches:
         stable_memory_increase: 0
       AddTradingAccount:
         calls: 1
-        instructions: 7199
+        instructions: 7559
         heap_increase: 0
         stable_memory_increase: 0
       AddTradingPair:
@@ -911,7 +911,7 @@ benches:
         stable_memory_increase: 0
       RemoveTradingAccount:
         calls: 1
-        instructions: 7197
+        instructions: 7557
         heap_increase: 0
         stable_memory_increase: 0
       SetHalt:

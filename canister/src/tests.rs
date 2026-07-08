@@ -2521,7 +2521,8 @@ mod set_halt {
 
 mod add_trading_account {
     use crate::Timestamp;
-    use crate::state::event::{AddTradingAccountEvent, Event, EventType};
+    use crate::state::event::{AddTradingAccountEvent, EventType};
+    use crate::test_fixtures::event::last_event;
     use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
     use crate::user::{
@@ -2540,13 +2541,6 @@ mod add_trading_account {
 
     fn trading() -> candid::Principal {
         principal(0x22)
-    }
-
-    /// The most recently recorded event in the log.
-    fn last_event() -> EventType {
-        let count = storage::total_event_count();
-        let Event { payload, .. } = storage::get_event(count - 1).expect("event log not empty");
-        payload
     }
 
     #[test]
@@ -2904,7 +2898,8 @@ mod add_trading_account {
 
 mod remove_trading_account {
     use crate::Timestamp;
-    use crate::state::event::{Event, EventType, RemoveTradingAccountEvent};
+    use crate::state::event::{EventType, RemoveTradingAccountEvent};
+    use crate::test_fixtures::event::last_event;
     use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
     use crate::test_fixtures::{fund_user, init_state_with_order_book, principal};
     use crate::user::{
@@ -2922,13 +2917,6 @@ mod remove_trading_account {
 
     fn trading() -> candid::Principal {
         principal(0x71)
-    }
-
-    /// The most recently recorded event in the log.
-    fn last_event() -> EventType {
-        let count = storage::total_event_count();
-        let Event { payload, .. } = storage::get_event(count - 1).expect("event log not empty");
-        payload
     }
 
     #[test]
