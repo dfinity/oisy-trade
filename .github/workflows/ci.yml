@@ -247,7 +247,17 @@ jobs:
         continue-on-error: ${{ steps.check-override.outputs.skip == 'true' }}
         run: |
           git show "${{ steps.did-changed.outputs.base }}:canister/oisy_trade.did" > base_oisy_trade.did
-          didc check canister/oisy_trade.did base_oisy_trade.did
+          # Endpoints listed in `canister/no_compat_endpoints.conf` ship with
+          # no backwards-compatibility guarantee. Strip them (and their
+          # exclusive transitive types, which `didc check` ignores once
+          # unreferenced) from both the base and head interface so that
+          # debug-only changes don't trip the gate. See the conf file for
+          # details.
+          python3 ./scripts/strip_candid_methods.py base_oisy_trade.did \
+            canister/no_compat_endpoints.conf > base_oisy_trade.stripped.did
+          python3 ./scripts/strip_candid_methods.py canister/oisy_trade.did \
+            canister/no_compat_endpoints.conf > head_oisy_trade.stripped.did
+          didc check head_oisy_trade.stripped.did base_oisy_trade.stripped.did
 
   benchmark:
     if: github.event_name == 'pull_request'
