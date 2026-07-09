@@ -423,14 +423,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 }
             }
             for batch in settling_batches {
-                if !batch.is_empty() {
-                    self.pending_settling_events
-                        .push_back(event::SettlingEvent {
-                            book_id: event.book_id,
-                            balance_operations: batch.balance_operations,
-                            fills: batch.fills,
-                        });
-                }
+                self.pending_settling_events
+                    .push_back(event::SettlingEvent {
+                        book_id: event.book_id,
+                        balance_operations: batch.balance_operations,
+                        fills: batch.fills,
+                    });
             }
         }
     }

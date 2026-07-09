@@ -3714,7 +3714,7 @@ mod pending_state_predicates {
     fn should_report_settling_events_present_between_match_and_drain() {
         let mut state = setup_one_book();
 
-        place_sweep(&mut state, 1);
+        place_sweep(&mut state, 1, 100 * PRICE_SCALE);
         record_matching_round(&mut state);
 
         assert!(state.has_pending_settling_events());
@@ -3787,7 +3787,7 @@ mod pending_state_predicates {
             )
             .unwrap(),
         );
-        place_sweep(&mut state, num_makers);
+        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
         record_matching_round(&mut state);
 
         let mut events = Vec::new();
@@ -3817,7 +3817,7 @@ mod pending_state_predicates {
         let refund_units = 1;
         let total_units = num_makers + refund_units;
 
-        place_sweep(&mut state, num_makers);
+        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
         let killed = test_fixtures::order(SELLER, &pair, Side::Buy, 50 * PRICE_SCALE, lot)
             .fill_or_kill()
             .place(&mut state);
@@ -3863,7 +3863,7 @@ mod pending_state_predicates {
         let num_makers = cap + 3;
 
         let mut state = setup_one_book();
-        place_surplus_sweep(&mut state, num_makers);
+        place_sweep(&mut state, num_makers, 50 * PRICE_SCALE);
         record_matching_round(&mut state);
 
         let mut events = Vec::new();
@@ -3920,7 +3920,7 @@ mod pending_state_predicates {
     ) -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
     {
         let mut state = setup_one_book();
-        place_sweep(&mut state, num_makers);
+        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
         record_matching_round(&mut state);
         state
     }
@@ -3931,47 +3931,13 @@ mod pending_state_predicates {
             ic_stable_structures::VectorMemory,
         >,
         num_makers: usize,
+        maker_price: u128,
     ) {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         for i in 0..num_makers {
-            test_fixtures::order(
-                test_fixtures::maker(i),
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            )
-            .place(state);
-        }
-        test_fixtures::order(
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            num_makers as u128 * lot,
-        )
-        .place(state);
-    }
-
-    fn place_surplus_sweep(
-        state: &mut crate::state::State<
-            ic_stable_structures::VectorMemory,
-            ic_stable_structures::VectorMemory,
-        >,
-        num_makers: usize,
-    ) {
-        let pair = icp_ckbtc_trading_pair();
-        let lot = u128::from(LOT_SIZE.get());
-        for i in 0..num_makers {
-            test_fixtures::order(
-                test_fixtures::maker(i),
-                &pair,
-                Side::Sell,
-                50 * PRICE_SCALE,
-                lot,
-            )
-            .place(state);
+            test_fixtures::order(test_fixtures::maker(i), &pair, Side::Sell, maker_price, lot)
+                .place(state);
         }
         test_fixtures::order(
             BUYER,
