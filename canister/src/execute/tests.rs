@@ -97,7 +97,7 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
-/// A single taker sweeping more than `max_fills_per_settling_event` resting
+/// A single taker sweeping more than `max_settlement_units_per_event` resting
 /// makers produces several bounded settling events; under an unlimited budget
 /// one `run_once` matches and drains all of them, leaving no pending work and
 /// every order `Filled`.
@@ -108,7 +108,7 @@ fn should_drain_all_split_settling_events_in_one_run() {
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
     let num_makers = cap + 2;
 
     let maker_ids: Vec<(Principal, OrderId)> = (0..num_makers)
@@ -495,7 +495,7 @@ fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
         ExecutionPolicy::try_new(
             max_orders_per_chunk,
             MAX_INSTRUCTION_BUDGET,
-            oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
         )
         .unwrap(),
     );

@@ -83,8 +83,8 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-            max_fills_per_settling_event: Some(
-                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
             ),
         },
         order_history(),
@@ -103,8 +103,8 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-            max_fills_per_settling_event: Some(
-                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
             ),
         },
         crate::order::OrderHistory::new(
@@ -319,8 +319,8 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 mode: oisy_trade_types_internal::Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-                max_fills_per_settling_event: Some(
-                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
                 ),
             },
             order_history,
@@ -822,12 +822,17 @@ pub mod arbitrary {
             option::of(1..=10_000u32),
         )
             .prop_map(
-                |(mode, max_orders_per_chunk, instruction_budget, max_fills_per_settling_event)| {
+                |(
+                    mode,
+                    max_orders_per_chunk,
+                    instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
                     InitArg {
                         mode,
                         max_orders_per_chunk,
                         instruction_budget,
-                        max_fills_per_settling_event,
+                        max_settlement_units_per_event,
                     }
                 },
             )
@@ -841,12 +846,17 @@ pub mod arbitrary {
             option::of(1..=10_000u32),
         )
             .prop_map(
-                |(mode, max_orders_per_chunk, instruction_budget, max_fills_per_settling_event)| {
+                |(
+                    mode,
+                    max_orders_per_chunk,
+                    instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
                     UpgradeArg {
                         mode,
                         max_orders_per_chunk,
                         instruction_budget,
-                        max_fills_per_settling_event,
+                        max_settlement_units_per_event,
                     }
                 },
             )

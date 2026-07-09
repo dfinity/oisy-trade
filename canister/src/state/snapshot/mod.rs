@@ -7,7 +7,7 @@
 //! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache`,
 //! `pending_settling_events`, the chunked-matching `execution_policy`
 //! (`max_orders_per_chunk` + `instruction_budget` +
-//! `max_fills_per_settling_event`), and the heap-resident
+//! `max_settlement_units_per_event`), and the heap-resident
 //! `fee_pool` inside [`crate::balance::TokenBalance`] — is serialized
 //! here at `pre_upgrade` and restored at `post_upgrade`.
 
@@ -25,7 +25,7 @@ use crate::user::UserRegistry;
 use candid::Nat;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
-use oisy_trade_types_internal::{DEFAULT_MAX_FILLS_PER_SETTLING_EVENT, Mode};
+use oisy_trade_types_internal::{DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT, Mode};
 use std::collections::{BTreeMap, VecDeque};
 
 #[cfg(test)]
@@ -51,7 +51,7 @@ pub struct StateSnapshot {
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
     /// Chunked-matching policy, flattened on the wire across 3 fields:
     /// `max_orders_per_chunk` and `instruction_budget` here, plus
-    /// `max_fills_per_settling_event` at index 11.
+    /// `max_settlement_units_per_event` at index 11.
     #[n(7)]
     pub max_orders_per_chunk: Option<u32>,
     #[n(8)]
@@ -65,7 +65,7 @@ pub struct StateSnapshot {
     #[n(10)]
     pub permissions: Option<PermissionsSnapshot>,
     #[n(11)]
-    pub max_fills_per_settling_event: Option<u32>,
+    pub max_settlement_units_per_event: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -158,8 +158,8 @@ impl StateSnapshot {
             },
             max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
             instruction_budget: Some(execution_policy.instruction_budget()),
-            max_fills_per_settling_event: Some(
-                execution_policy.max_fills_per_settling_event().get(),
+            max_settlement_units_per_event: Some(
+                execution_policy.max_settlement_units_per_event().get(),
             ),
             fee_pool: {
                 let snapshot = balances.fee_pool_snapshot();
@@ -236,15 +236,15 @@ impl StateSnapshot {
         let execution_policy = match (
             self.max_orders_per_chunk,
             self.instruction_budget,
-            self.max_fills_per_settling_event,
+            self.max_settlement_units_per_event,
         ) {
             (Some(max), Some(budget), Some(fills)) => ExecutionPolicy::try_new(max, budget, fills)
                 .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
             // Snapshots written after the two-field policy but before this
-            // PR carry no `max_fills_per_settling_event`; fall back to the
+            // PR carry no `max_settlement_units_per_event`; fall back to the
             // production default for that field alone.
             (Some(max), Some(budget), None) => {
-                ExecutionPolicy::try_new(max, budget, DEFAULT_MAX_FILLS_PER_SETTLING_EVENT)
+                ExecutionPolicy::try_new(max, budget, DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT)
                     .expect("BUG: snapshot carried an invalid ExecutionPolicy")
             }
             // Snapshots written before the policy was persisted carry no
@@ -255,7 +255,7 @@ impl StateSnapshot {
             (max, budget, fills) => panic!(
                 "invalid snapshot: partial execution policy fields \
                  (max_orders_per_chunk={:?}, instruction_budget={:?}, \
-                 max_fills_per_settling_event={:?})",
+                 max_settlement_units_per_event={:?})",
                 max, budget, fills,
             ),
         };

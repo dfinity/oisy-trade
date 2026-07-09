@@ -34,15 +34,17 @@ pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u32 = 1_000;
 /// per-message instruction cap.
 pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
-/// Conservative production default for [`InitArg::max_fills_per_settling_event`]:
-/// the maximum number of fill events packed into a single settling event, so a
-/// matching chunk emits `ceil(N / cap)` bounded events instead of one, and the
-/// per-message cost of applying any one event stays well under the instruction
-/// cap. At ~1.75M instructions per fill applied, a full event costs ≈ 224M
-/// instructions — ~4.5× under the 1B [`DEFAULT_INSTRUCTION_BUDGET`] and ~178×
-/// under the 40B `MAX_INSTRUCTION_BUDGET` — and above every existing test's
-/// per-round fill count, so only the dedicated sweep tests exercise the split.
-pub const DEFAULT_MAX_FILLS_PER_SETTLING_EVENT: u32 = 128;
+/// Conservative production default for [`InitArg::max_settlement_units_per_event`]:
+/// the maximum number of balance operations packed into a single settling event,
+/// so a matching round emits `ceil(total_ops / cap)` bounded events instead of
+/// one. A settlement unit is one balance operation — the per-op write against the
+/// balance stable map that dominates a settling event's apply cost — so bounding
+/// units per event bounds that per-message instruction cost. A fill contributes
+/// 2–3 operations and a killed or expired order one, all counted alike. The value
+/// keeps a full event well under the 1B [`DEFAULT_INSTRUCTION_BUDGET`] and far
+/// under the 40B `MAX_INSTRUCTION_BUDGET`, and above every existing test's
+/// per-round operation count, so only the dedicated sweep tests exercise the split.
+pub const DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT: u32 = 512;
 
 /// Argument for canister initialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
@@ -57,11 +59,11 @@ pub struct InitArg {
     /// Maximum instructions consumed before a chunk yields.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: u64,
-    /// Maximum fill events packed into a single settling event; `None` in
+    /// Maximum balance operations packed into a single settling event; `None` in
     /// `Init` events persisted before this field existed, falling back to
-    /// [`DEFAULT_MAX_FILLS_PER_SETTLING_EVENT`].
+    /// [`DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT`].
     #[cfg_attr(feature = "event", n(3))]
-    pub max_fills_per_settling_event: Option<u32>,
+    pub max_settlement_units_per_event: Option<u32>,
 }
 
 /// Argument for canister upgrade.
@@ -77,9 +79,9 @@ pub struct UpgradeArg {
     /// If set, overrides the current `instruction_budget`.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: Option<u64>,
-    /// If set, overrides the current `max_fills_per_settling_event`.
+    /// If set, overrides the current `max_settlement_units_per_event`.
     #[cfg_attr(feature = "event", n(3))]
-    pub max_fills_per_settling_event: Option<u32>,
+    pub max_settlement_units_per_event: Option<u32>,
 }
 
 /// Controls who may call update endpoints on the OISY TRADE canister.

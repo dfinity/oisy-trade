@@ -1,6 +1,7 @@
 use super::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
 use oisy_trade_types_internal::{
-    DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_FILLS_PER_SETTLING_EVENT, DEFAULT_MAX_ORDERS_PER_CHUNK,
+    DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK,
+    DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
 };
 
 #[test]
@@ -8,19 +9,19 @@ fn should_construct_with_valid_args() {
     let p = ExecutionPolicy::try_new(1, 1, 1).unwrap();
     assert_eq!(p.max_orders_per_chunk(), 1);
     assert_eq!(p.instruction_budget(), 1);
-    assert_eq!(p.max_fills_per_settling_event().get(), 1);
+    assert_eq!(p.max_settlement_units_per_event().get(), 1);
 
     let p = ExecutionPolicy::try_new(
         5_000,
         MAX_INSTRUCTION_BUDGET,
-        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
     )
     .unwrap();
     assert_eq!(p.max_orders_per_chunk(), 5_000);
     assert_eq!(p.instruction_budget(), MAX_INSTRUCTION_BUDGET);
     assert_eq!(
-        p.max_fills_per_settling_event().get(),
-        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        p.max_settlement_units_per_event().get(),
+        DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
     );
 }
 
@@ -30,8 +31,8 @@ fn should_default_to_production_policy() {
     assert_eq!(p.max_orders_per_chunk(), DEFAULT_MAX_ORDERS_PER_CHUNK,);
     assert_eq!(p.instruction_budget(), DEFAULT_INSTRUCTION_BUDGET,);
     assert_eq!(
-        p.max_fills_per_settling_event().get(),
-        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        p.max_settlement_units_per_event().get(),
+        DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
     );
 }
 
@@ -52,10 +53,10 @@ fn should_reject_zero_instruction_budget() {
 }
 
 #[test]
-fn should_reject_zero_max_fills_per_settling_event() {
+fn should_reject_zero_max_settlement_units_per_event() {
     assert_eq!(
         ExecutionPolicy::try_new(1, 1_000, 0),
-        Err("max_fills_per_settling_event must be non-zero".to_string()),
+        Err("max_settlement_units_per_event must be non-zero".to_string()),
     );
 }
 

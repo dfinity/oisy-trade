@@ -87,13 +87,13 @@ impl Scenario {
         mut self,
         max_orders_per_chunk: u32,
         instruction_budget: u64,
-        max_fills_per_settling_event: u32,
+        max_settlement_units_per_event: u32,
     ) -> Self {
         self.state.set_execution_policy(
             crate::state::ExecutionPolicy::try_new(
                 max_orders_per_chunk,
                 instruction_budget,
-                max_fills_per_settling_event,
+                max_settlement_units_per_event,
             )
             .unwrap(),
         );
@@ -101,7 +101,7 @@ impl Scenario {
             None,
             Some(max_orders_per_chunk),
             Some(instruction_budget),
-            Some(max_fills_per_settling_event),
+            Some(max_settlement_units_per_event),
         ));
         self
     }
@@ -728,7 +728,7 @@ fn should_replay_matching_with_price_improvement() {
         .assert_replay_matches();
 }
 
-/// A matching round with more than `max_fills_per_settling_event` fills is
+/// A matching round with more than `max_settlement_units_per_event` fills is
 /// enqueued as several bounded settling events; replaying that multi-event log
 /// must reconstruct exactly the same state the primary path produced.
 #[test]
@@ -737,7 +737,7 @@ fn should_replay_matching_round_split_across_multiple_settling_events() {
     let price = 100u128;
     let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
-    let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
     let num_makers = cap + 1;
 
     let mut scenario = Scenario::new().with_trading_pair().with_deposit(

@@ -127,127 +127,83 @@ mod settling_batches {
     use std::num::{NonZeroU32, NonZeroU64};
 
     const BASE_SCALE: u64 = 100_000_000;
-    const CAP: usize = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
+    const CAP: usize = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+
+    const OPS_PER_SELL_FILL: usize = 2;
 
     struct TestCase {
-        desc: &'static str,
-        num_fills: usize,
-        expected_batches: usize,
-    }
-
-    /// `from_matching` partitions a round's fills into `ceil(N / cap)` bounded
-    /// batches of at most `cap` fills each, and concatenating the batches
-    /// reproduces the exact flat op/fill order the pre-refactor single-vec build
-    /// produced.
-    #[test]
-    fn partitions_fills_into_bounded_batches_preserving_flat_order() {
-        let cap = CAP;
-        let cases = vec![
-            TestCase {
-                desc: "no fills",
-                num_fills: 0,
-                expected_batches: 0,
-            },
-            TestCase {
-                desc: "single fill",
-                num_fills: 1,
-                expected_batches: 1,
-            },
-            TestCase {
-                desc: "exactly the cap fits in one batch",
-                num_fills: cap,
-                expected_batches: 1,
-            },
-            TestCase {
-                desc: "one over the cap spills into a second batch",
-                num_fills: cap + 1,
-                expected_batches: 2,
-            },
-            TestCase {
-                desc: "several caps plus a remainder",
-                num_fills: cap * 3 + 7,
-                expected_batches: 4,
-            },
-        ];
-
-        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
-        for case in cases {
-            let all_fills = fills(case.num_fills);
-            let (expected_ops, expected_fills) = flat_reference(&all_fills, base_scale);
-
-            let settlement = MatchSettlement::from_matching(
-                output(all_fills),
-                FeeRates::default(),
-                base_scale,
-                NonZeroU32::new(cap as u32).unwrap(),
-            );
-
-            assert_eq!(
-                settlement.settling_batches.len(),
-                case.expected_batches,
-                "{}: batch count",
-                case.desc,
-            );
-            for batch in &settlement.settling_batches {
-                assert!(
-                    batch.fills.len() <= cap,
-                    "{}: batch carries at most cap fills",
-                    case.desc,
-                );
-            }
-
-            let flat_ops: Vec<_> = settlement
-                .settling_batches
-                .iter()
-                .flat_map(|b| b.balance_operations.iter().cloned())
-                .collect();
-            let flat_fills: Vec<_> = settlement
-                .settling_batches
-                .iter()
-                .flat_map(|b| b.fills.iter().cloned())
-                .collect();
-            assert_eq!(
-                flat_ops, expected_ops,
-                "{}: flattened balance operations",
-                case.desc,
-            );
-            assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
-        }
-    }
-
-    struct RefundCase {
         desc: &'static str,
         num_fills: usize,
         num_expired: usize,
         expected_batches: usize,
     }
 
-    /// Expired-order refund operations are appended to the LAST batch, never an
-    /// earlier one: to a partial trailing batch when fills spill past the cap,
-    /// to the last full batch when fills fill the cap exactly (the `last_mut`
-    /// arm, not `first_mut`), and to a lone trailing zero-fill batch when the
-    /// round produced no fills — in every case concatenating the batches
-    /// reproduces the flat order (all fill ops, then the refunds).
+    /// `from_matching` packs a round's settlement into events bounded by balance
+    /// OPERATION count, not fill count: each sell-taker fill contributes two
+    /// operations (the test fixture generates no buy-taker surplus) and each
+    /// killed/expired order one, and the packer opens a new event whenever the
+    /// next group would push a non-empty event past the cap. Groups are never
+    /// split, so flattening every event's operations and fills reproduces the
+    /// exact single-event order (all fill ops in fill order, then the refund
+    /// ops). The refund cases also prove killed-order `Unreserve`s are now
+    /// chunked across events instead of piled onto one event.
     #[test]
-    fn appends_expired_refunds_to_the_last_batch() {
+    fn packs_settlement_into_operation_bounded_events() {
         let cap = CAP;
+        let fills_per_event = cap / OPS_PER_SELL_FILL;
         let cases = vec![
-            RefundCase {
-                desc: "one over the cap: partial trailing batch",
-                num_fills: cap + 1,
+            TestCase {
+                desc: "empty round",
+                num_fills: 0,
+                num_expired: 0,
+                expected_batches: 0,
+            },
+            TestCase {
+                desc: "single fill",
+                num_fills: 1,
+                num_expired: 0,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "fill ops exactly fill one event",
+                num_fills: fills_per_event,
+                num_expired: 0,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "one fill over the cap spills into a second event",
+                num_fills: fills_per_event + 1,
+                num_expired: 0,
+                expected_batches: 2,
+            },
+            TestCase {
+                desc: "several full events of fills plus a remainder",
+                num_fills: fills_per_event * 3 + 7,
+                num_expired: 0,
+                expected_batches: 4,
+            },
+            TestCase {
+                desc: "refund ops exactly fill one event",
+                num_fills: 0,
+                num_expired: cap,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "refund ops are chunked across events past the cap",
+                num_fills: 0,
+                num_expired: cap * 2 + 5,
+                expected_batches: 3,
+            },
+            TestCase {
+                desc: "refunds after a full fill event start a new event",
+                num_fills: fills_per_event,
                 num_expired: 3,
                 expected_batches: 2,
             },
-            RefundCase {
-                desc: "exact multiple of the cap: append to the last full batch",
-                num_fills: cap * 2,
-                num_expired: 2,
-                expected_batches: 2,
-            },
-            RefundCase {
-                desc: "no fills: lone trailing zero-fill batch",
-                num_fills: 0,
-                num_expired: 4,
+            TestCase {
+                desc: "refunds top up a partial trailing fill event",
+                num_fills: 1,
+                num_expired: 3,
                 expected_batches: 1,
             },
         ];
@@ -259,27 +215,16 @@ mod settling_batches {
             assert_eq!(
                 settlement.settling_batches.len(),
                 case.expected_batches,
-                "{}: batch count",
+                "{}: event count",
                 case.desc,
             );
-
-            let (last, earlier) = settlement
-                .settling_batches
-                .split_last()
-                .expect("at least one batch");
-            assert_eq!(
-                refund_count(last),
-                case.num_expired,
-                "{}: all refunds land on the last batch",
-                case.desc,
-            );
-            for batch in earlier {
-                assert_eq!(
-                    refund_count(batch),
-                    0,
-                    "{}: no refund leaks into an earlier batch",
+            for batch in &settlement.settling_batches {
+                assert!(
+                    batch.balance_operations.len() <= cap,
+                    "{}: event stays within the operation cap",
                     case.desc,
                 );
+                assert!(!batch.is_empty(), "{}: no empty event", case.desc);
             }
 
             let (mut expected_ops, expected_fills) =
@@ -302,14 +247,6 @@ mod settling_batches {
             );
             assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
         }
-    }
-
-    fn refund_count(batch: &crate::settlement::SettlementBatch) -> usize {
-        batch
-            .balance_operations
-            .iter()
-            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
-            .count()
     }
 
     fn build(num_fills: usize, num_expired: usize, base_scale: NonZeroU64) -> MatchSettlement {
@@ -361,15 +298,6 @@ mod settling_batches {
             settled.push(settlement.fill_event());
         }
         (ops, settled)
-    }
-
-    fn output(fills: Vec<Fill>) -> MatchingOutput {
-        MatchingOutput {
-            fills,
-            resting_orders: BTreeSet::new(),
-            filled_orders: BTreeSet::new(),
-            expired_orders: BTreeMap::new(),
-        }
     }
 
     fn fills(n: usize) -> Vec<Fill> {

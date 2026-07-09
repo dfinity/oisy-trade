@@ -2696,8 +2696,8 @@ mod chunked_matching {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
                 instruction_budget: 1, // intentionally too small to make progress
-                max_fills_per_settling_event: Some(
-                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
                 ),
             })
             .build()
@@ -2717,7 +2717,7 @@ mod chunked_matching {
                 mode: None,
                 max_orders_per_chunk: None,
                 instruction_budget: Some(1_000_000_000),
-                max_fills_per_settling_event: None,
+                max_settlement_units_per_event: None,
             }))
             .await;
 
@@ -2747,8 +2747,8 @@ mod chunked_matching {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
                 instruction_budget: 1_000_000_000,
-                max_fills_per_settling_event: Some(
-                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
                 ),
             })
             .build()

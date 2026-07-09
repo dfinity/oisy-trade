@@ -141,7 +141,7 @@ mod schema_stability {
             // Non-default policy.
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
-            max_fills_per_settling_event: Some(90),
+            max_settlement_units_per_event: Some(90),
             fee_pool: None,
             permissions: None,
         }
@@ -507,7 +507,7 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
 }
 
 /// A snapshot written after `permissions` but before the
-/// `max_fills_per_settling_event` field existed (the `#[n(11)]` slot absent)
+/// `max_settlement_units_per_event` field existed (the `#[n(11)]` slot absent)
 /// decodes with that field `None` and rebuilds the default cap on `into_state`.
 #[test]
 fn should_decode_snapshot_without_max_fills_to_default_cap() {
@@ -561,7 +561,7 @@ fn should_decode_snapshot_without_max_fills_to_default_cap() {
     minicbor::encode(&pre, &mut buf).unwrap();
     let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
 
-    assert_eq!(decoded.max_fills_per_settling_event, None);
+    assert_eq!(decoded.max_settlement_units_per_event, None);
     let restored = decoded.into_state(
         state.order_history.clone(),
         state.trade_history.clone(),
@@ -571,9 +571,9 @@ fn should_decode_snapshot_without_max_fills_to_default_cap() {
     assert_eq!(
         restored
             .execution_policy()
-            .max_fills_per_settling_event()
+            .max_settlement_units_per_event()
             .get(),
-        oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
     );
     assert_eq!(state, restored);
 }

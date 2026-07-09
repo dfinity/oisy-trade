@@ -30,8 +30,8 @@ pub fn init_event(mode: Mode) -> Event {
             mode,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-            max_fills_per_settling_event: Some(
-                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
             ),
         }),
     }
@@ -41,7 +41,7 @@ pub fn upgrade_event(
     mode: Option<Mode>,
     max_orders_per_chunk: Option<u32>,
     instruction_budget: Option<u64>,
-    max_fills_per_settling_event: Option<u32>,
+    max_settlement_units_per_event: Option<u32>,
 ) -> Event {
     Event {
         timestamp: Timestamp::new(1),
@@ -49,7 +49,7 @@ pub fn upgrade_event(
             mode,
             max_orders_per_chunk,
             instruction_budget,
-            max_fills_per_settling_event,
+            max_settlement_units_per_event,
         }),
     }
 }
@@ -192,7 +192,7 @@ fn init_restricted() -> EventType {
         mode: Mode::RestrictedTo(restricted_principals()),
         max_orders_per_chunk: u32::MAX,
         instruction_budget: u64::MAX,
-        max_fills_per_settling_event: Some(u32::MAX),
+        max_settlement_units_per_event: Some(u32::MAX),
     })
 }
 
@@ -201,7 +201,7 @@ fn upgrade_restricted() -> EventType {
         mode: Some(Mode::RestrictedTo(restricted_principals())),
         max_orders_per_chunk: Some(u32::MAX),
         instruction_budget: Some(u64::MAX),
-        max_fills_per_settling_event: Some(u32::MAX),
+        max_settlement_units_per_event: Some(u32::MAX),
     })
 }
 
