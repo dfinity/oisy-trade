@@ -2,7 +2,7 @@ benches:
   bench_fok_fill_full_bid_side:
     total:
       calls: 1
-      instructions: 1000684561
+      instructions: 1000683865
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -63,7 +63,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 101048901
+        instructions: 101048205
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -201,7 +201,7 @@ benches:
   bench_fok_sweep_22_900_makers:
     total:
       calls: 1
-      instructions: 38383344572
+      instructions: 38383321584
       heap_increase: 482
       stable_memory_increase: 128
     scopes:
@@ -262,7 +262,7 @@ benches:
         stable_memory_increase: 128
       matching:
         calls: 1
-        instructions: 3629710773
+        instructions: 3629687785
         heap_increase: 321
         stable_memory_increase: 0
       order_history:
@@ -408,7 +408,7 @@ benches:
   bench_gtc_fill_full_bid_side:
     total:
       calls: 1
-      instructions: 1000684547
+      instructions: 1000683851
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -469,7 +469,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 101048885
+        instructions: 101048189
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -525,7 +525,7 @@ benches:
   bench_process_pending_orders_1000:
     total:
       calls: 1
-      instructions: 1228703309
+      instructions: 1228702541
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -601,7 +601,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 152903995
+        instructions: 152903227
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
@@ -704,7 +704,7 @@ benches:
   bench_process_pending_orders_1000_with_fees:
     total:
       calls: 1
-      instructions: 1266755682
+      instructions: 1266754914
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
@@ -780,7 +780,7 @@ benches:
         stable_memory_increase: 0
       matching:
         calls: 1
-        instructions: 171378077
+        instructions: 171377309
         heap_increase: 0
         stable_memory_increase: 0
       order_history:
