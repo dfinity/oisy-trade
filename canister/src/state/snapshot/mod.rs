@@ -49,7 +49,9 @@ pub struct StateSnapshot {
     /// messages (hence the `Option` — encoded as `null` when empty).
     #[n(6)]
     pub pending_settling_events: Option<Vec<SettlingEvent>>,
-    /// Chunked-matching policy, flattened on the wire in 2 fields.
+    /// Chunked-matching policy, flattened on the wire across 3 fields:
+    /// `max_orders_per_chunk` and `instruction_budget` here, plus
+    /// `max_fills_per_settling_event` at index 11.
     #[n(7)]
     pub max_orders_per_chunk: Option<u32>,
     #[n(8)]
