@@ -3853,13 +3853,66 @@ mod pending_state_predicates {
         );
     }
 
-    fn unit_count(event: &crate::state::event::SettlingEvent) -> usize {
-        let refunds = event
-            .balance_operations
+    /// A buy taker crossing below its limit emits a surplus `Unreserve` as part
+    /// of each fill unit, not as a separate settlement unit. The packer counts
+    /// each such fill once, so a surplus-bearing sweep partitions into the same
+    /// number of events as a surplus-free one and no event exceeds the unit cap.
+    #[test]
+    fn surplus_fills_count_as_one_unit_each() {
+        let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+        let num_makers = cap + 3;
+
+        let mut state = setup_one_book();
+        place_surplus_sweep(&mut state, num_makers);
+        record_matching_round(&mut state);
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+
+        let surplus_unreserves: usize = events
             .iter()
+            .flat_map(|event| &event.balance_operations)
             .filter(|op| matches!(op, crate::state::event::BalanceOperation::Unreserve { .. }))
             .count();
-        event.fills.len() + refunds
+        assert_eq!(
+            surplus_unreserves, num_makers,
+            "every crossing-below-limit fill must emit a surplus refund",
+        );
+
+        let total_units: usize = events.iter().map(unit_count).sum();
+        assert_eq!(
+            total_units, num_makers,
+            "each surplus fill is one unit; its refund is not counted separately",
+        );
+
+        assert_eq!(events.len(), num_makers.div_ceil(cap));
+        for event in &events {
+            assert!(
+                unit_count(event) <= cap,
+                "each settling event holds at most the unit cap",
+            );
+        }
+    }
+
+    fn unit_count(event: &crate::state::event::SettlingEvent) -> usize {
+        let taker_seqs: std::collections::BTreeSet<_> = event
+            .fills
+            .iter()
+            .map(|fill| fill.taker_order_seq)
+            .collect();
+        let removed_order_units = event
+            .balance_operations
+            .iter()
+            .filter(|op| match op {
+                crate::state::event::BalanceOperation::Unreserve { order, .. } => {
+                    !taker_seqs.contains(order)
+                }
+                _ => false,
+            })
+            .count();
+        event.fills.len() + removed_order_units
     }
 
     fn matched_sweep(
@@ -3887,6 +3940,35 @@ mod pending_state_predicates {
                 &pair,
                 Side::Sell,
                 100 * PRICE_SCALE,
+                lot,
+            )
+            .place(state);
+        }
+        test_fixtures::order(
+            BUYER,
+            &pair,
+            Side::Buy,
+            100 * PRICE_SCALE,
+            num_makers as u128 * lot,
+        )
+        .place(state);
+    }
+
+    fn place_surplus_sweep(
+        state: &mut crate::state::State<
+            ic_stable_structures::VectorMemory,
+            ic_stable_structures::VectorMemory,
+        >,
+        num_makers: usize,
+    ) {
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for i in 0..num_makers {
+            test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                Side::Sell,
+                50 * PRICE_SCALE,
                 lot,
             )
             .place(state);
