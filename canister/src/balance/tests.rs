@@ -526,6 +526,320 @@ mod fee_pool {
     }
 }
 
+mod settling_batch {
+    use crate::balance::{Balance, TokenBalance};
+    use crate::order::{Quantity, TokenId};
+    use crate::user::UserId;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    enum Op {
+        Transfer {
+            debtor: UserId,
+            creditor: UserId,
+            token: TokenId,
+            gross: u64,
+            fee: u64,
+        },
+        Unreserve {
+            user: UserId,
+            token: TokenId,
+            amount: u64,
+        },
+    }
+
+    struct TestCase {
+        desc: &'static str,
+        setup: Vec<(UserId, TokenId, u64, u64)>,
+        ops: Vec<Op>,
+    }
+
+    #[test]
+    fn batch_matches_per_op_semantics() {
+        let cases = vec![
+            TestCase {
+                desc: "taker party to several fills, no fees",
+                setup: vec![
+                    (taker(), base(), 300, 300),
+                    (maker1(), quote(), 0, 0),
+                    (maker2(), quote(), 0, 0),
+                ],
+                ops: vec![
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 100,
+                        fee: 0,
+                    },
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker2(),
+                        token: base(),
+                        gross: 150,
+                        fee: 0,
+                    },
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 50,
+                        fee: 0,
+                    },
+                ],
+            },
+            TestCase {
+                desc: "taker party to several fills, with fees",
+                setup: vec![
+                    (taker(), base(), 300, 300),
+                    (maker1(), quote(), 0, 0),
+                    (maker2(), quote(), 0, 0),
+                ],
+                ops: vec![
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 100,
+                        fee: 3,
+                    },
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker2(),
+                        token: base(),
+                        gross: 150,
+                        fee: 7,
+                    },
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 50,
+                        fee: 1,
+                    },
+                ],
+            },
+            TestCase {
+                desc: "self-transfer credits the just-debited row",
+                setup: vec![(taker(), base(), 100, 60)],
+                ops: vec![Op::Transfer {
+                    debtor: taker(),
+                    creditor: taker(),
+                    token: base(),
+                    gross: 60,
+                    fee: 0,
+                }],
+            },
+            TestCase {
+                desc: "self-transfer with fee",
+                setup: vec![(taker(), base(), 100, 60)],
+                ops: vec![Op::Transfer {
+                    debtor: taker(),
+                    creditor: taker(),
+                    token: base(),
+                    gross: 60,
+                    fee: 4,
+                }],
+            },
+            TestCase {
+                desc: "unreserve interleaved with transfers",
+                setup: vec![(taker(), base(), 200, 200), (maker1(), quote(), 0, 0)],
+                ops: vec![
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 80,
+                        fee: 2,
+                    },
+                    Op::Unreserve {
+                        user: taker(),
+                        token: base(),
+                        amount: 40,
+                    },
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 60,
+                        fee: 0,
+                    },
+                ],
+            },
+            TestCase {
+                desc: "creditor row created within the event",
+                setup: vec![(taker(), base(), 100, 100)],
+                ops: vec![Op::Transfer {
+                    debtor: taker(),
+                    creditor: maker1(),
+                    token: base(),
+                    gross: 100,
+                    fee: 5,
+                }],
+            },
+            TestCase {
+                desc: "two tokens touched in one event",
+                setup: vec![(taker(), base(), 100, 100), (maker1(), quote(), 90, 90)],
+                ops: vec![
+                    Op::Transfer {
+                        debtor: taker(),
+                        creditor: maker1(),
+                        token: base(),
+                        gross: 100,
+                        fee: 4,
+                    },
+                    Op::Transfer {
+                        debtor: maker1(),
+                        creditor: taker(),
+                        token: quote(),
+                        gross: 90,
+                        fee: 3,
+                    },
+                ],
+            },
+        ];
+
+        for case in cases {
+            let mut expected = seeded(&case.setup);
+            for op in &case.ops {
+                apply_per_op(&mut expected, op);
+            }
+
+            let mut actual = seeded(&case.setup);
+            {
+                let mut batch = actual.settling_batch();
+                for op in &case.ops {
+                    match op {
+                        Op::Transfer {
+                            debtor,
+                            creditor,
+                            token,
+                            gross,
+                            fee,
+                        } => batch.transfer(
+                            *debtor,
+                            *creditor,
+                            token,
+                            Quantity::from(*gross),
+                            Quantity::from(*fee),
+                        ),
+                        Op::Unreserve {
+                            user,
+                            token,
+                            amount,
+                        } => batch.unreserve(*user, token, Quantity::from(*amount)),
+                    }
+                }
+                batch.flush();
+            }
+
+            assert_eq!(
+                actual, expected,
+                "batch and per-op balances diverged: {}",
+                case.desc
+            );
+        }
+    }
+
+    fn apply_per_op(tb: &mut TokenBalance<VectorMemory>, op: &Op) {
+        match op {
+            Op::Transfer {
+                debtor,
+                creditor,
+                token,
+                gross,
+                fee,
+            } => tb.transfer(
+                *debtor,
+                *creditor,
+                token,
+                Quantity::from(*gross),
+                Quantity::from(*fee),
+            ),
+            Op::Unreserve {
+                user,
+                token,
+                amount,
+            } => tb.unreserve(*user, token, Quantity::from(*amount)),
+        }
+    }
+
+    fn seeded(setup: &[(UserId, TokenId, u64, u64)]) -> TokenBalance<VectorMemory> {
+        let mut tb = TokenBalance::default();
+        for (user, token, deposit, reserve) in setup {
+            if *deposit > 0 {
+                tb.deposit(*user, *token, Quantity::from(*deposit));
+            }
+            if *reserve > 0 {
+                tb.reserve(*user, token, Quantity::from(*reserve)).unwrap();
+            }
+        }
+        tb
+    }
+
+    #[test]
+    fn flush_elides_untouched_empty_creditor_row() {
+        let mut tb = TokenBalance::default();
+        {
+            let mut batch = tb.settling_batch();
+            batch.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(0u64),
+                Quantity::from(0u64),
+            );
+            batch.flush();
+        }
+        assert_eq!(tb.get_balance(maker1(), &base()), None);
+    }
+
+    #[test]
+    fn flush_writes_hand_computed_balances() {
+        let mut tb = seeded(&[(taker(), base(), 100, 100)]);
+        {
+            let mut batch = tb.settling_batch();
+            batch.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(100u64),
+                Quantity::from(5u64),
+            );
+            batch.flush();
+        }
+        assert_eq!(
+            tb.get_balance(taker(), &base()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(
+            tb.get_balance(maker1(), &base()),
+            Some(Balance::new(95u64, 0u64))
+        );
+        assert_eq!(tb.fee_balance(&base()), Some(Quantity::from(5u64)));
+    }
+
+    fn taker() -> UserId {
+        UserId::new(1)
+    }
+
+    fn maker1() -> UserId {
+        UserId::new(2)
+    }
+
+    fn maker2() -> UserId {
+        UserId::new(3)
+    }
+
+    fn base() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xA0]))
+    }
+
+    fn quote() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xB0]))
+    }
+}
+
 mod key {
     use super::super::BalanceKey;
     use crate::test_fixtures::arbitrary::arb_balance_key;

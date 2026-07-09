@@ -155,6 +155,20 @@ impl<M: Memory> TokenBalance<M> {
         }
     }
 
+    /// Open a write-back buffer over the balance map, scoped to a single
+    /// settling event. Each `(token, user)` row touched while the batch is
+    /// live is read from the stable map at most once and written back at most
+    /// once, on [`SettlingBatch::flush`]. Preserves the per-op accounting of
+    /// [`transfer`](Self::transfer) / [`unreserve`](Self::unreserve) exactly,
+    /// including the fee-pool accrual and the empty-row elision.
+    pub fn settling_batch(&mut self) -> SettlingBatch<'_, M> {
+        SettlingBatch {
+            balances: &mut self.balances,
+            fee_balances: &mut self.fee_balances,
+            buffer: BTreeMap::new(),
+        }
+    }
+
     /// Read the accumulated fee balance for `token`. `None` if no fees have
     /// ever been accrued for this token.
     pub fn fee_balance(&self, token: &TokenId) -> Option<Quantity> {
@@ -232,6 +246,88 @@ impl<M: Memory> TokenBalance<M> {
         self.balances
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
+    }
+}
+
+/// In-heap write-back buffer over the balance map for the balance operations
+/// of one settling event, opened by [`TokenBalance::settling_batch`].
+///
+/// The taker of a large sweep is party to every fill, so its two balance rows
+/// would otherwise be read-modify-written on each fill. The buffer collapses
+/// that to a single stable read per row on first touch and a single write-back
+/// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
+/// on the heap as in [`TokenBalance::transfer`].
+pub struct SettlingBatch<'a, M: Memory> {
+    balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
+    fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
+    buffer: BTreeMap<BalanceKey, BufferedBalance>,
+}
+
+struct BufferedBalance {
+    balance: Balance,
+    existed: bool,
+}
+
+impl<M: Memory> SettlingBatch<'_, M> {
+    /// Buffered counterpart of [`TokenBalance::transfer`]: debits `gross` from
+    /// the debtor's reserved, credits `gross - fee` to the creditor's free, and
+    /// accrues `fee` to the token's fee pool. A self-transfer lands the credit
+    /// on the just-debited buffered row.
+    pub fn transfer(
+        &mut self,
+        debtor: UserId,
+        creditor: UserId,
+        token: &TokenId,
+        gross: Quantity,
+        fee: Quantity,
+    ) {
+        bench_scopes!("balances", "balances::transfer");
+        assert!(
+            fee <= gross,
+            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
+        );
+        self.load(BalanceKey::new(*token, debtor))
+            .debit_reserved(&gross);
+
+        let net = gross
+            .checked_sub(fee)
+            .expect("BUG: fee <= gross checked above");
+        self.load(BalanceKey::new(*token, creditor)).deposit(net);
+
+        if !fee.is_zero() {
+            let entry = self.fee_balances.entry(*token).or_default();
+            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
+        }
+    }
+
+    /// Buffered counterpart of [`TokenBalance::unreserve`]: moves `amount` from
+    /// the user's reserved to their free balance.
+    pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
+        bench_scopes!("balances", "balances::unreserve");
+        self.load(BalanceKey::new(*token, user)).unreserve(amount);
+    }
+
+    /// Write each buffered row back to the stable map exactly once, eliding
+    /// rows that neither existed before the batch nor hold a non-zero balance —
+    /// matching the empty-row elision of [`TokenBalance::update`].
+    pub fn flush(self) {
+        bench_scopes!("balances", "balances::flush");
+        for (key, buffered) in self.buffer {
+            if buffered.existed || !buffered.balance.is_zero() {
+                self.balances.insert(key, buffered.balance);
+            }
+        }
+    }
+
+    fn load(&mut self, key: BalanceKey) -> &mut Balance {
+        let entry = self.buffer.entry(key).or_insert_with(|| {
+            let prev = self.balances.get(&key);
+            BufferedBalance {
+                existed: prev.is_some(),
+                balance: prev.unwrap_or_default(),
+            }
+        });
+        &mut entry.balance
     }
 }
 
