@@ -3713,24 +3713,9 @@ mod pending_state_predicates {
     #[test]
     fn should_report_settling_events_present_between_match_and_drain() {
         let mut state = setup_one_book();
-        let pair = icp_ckbtc_trading_pair();
-        let lot = u128::from(LOT_SIZE.get());
 
-        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
-
-        // Apply only the matching event; do not drain settling. The matching
-        // produces a SettlingEvent on the queue that must be observable.
-        let book = state.order_book(&OrderBookId::ZERO).unwrap();
-        let matching_event = crate::state::event::MatchingEvent {
-            book_id: OrderBookId::ZERO,
-            orders: book.pending_order_seqs().collect(),
-        };
-        state.record_matching_event(
-            &matching_event,
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
+        place_sweep(&mut state, 1);
+        record_matching_round(&mut state);
 
         assert!(state.has_pending_settling_events());
     }
