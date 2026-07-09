@@ -238,8 +238,10 @@ impl StateSnapshot {
             self.instruction_budget,
             self.max_settlement_units_per_event,
         ) {
-            (Some(max), Some(budget), Some(fills)) => ExecutionPolicy::try_new(max, budget, fills)
-                .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
+            (Some(max), Some(budget), Some(settlement_units)) => {
+                ExecutionPolicy::try_new(max, budget, settlement_units)
+                    .expect("BUG: snapshot carried an invalid ExecutionPolicy")
+            }
             // Snapshots written after the two-field policy but before this
             // PR carry no `max_settlement_units_per_event`; fall back to the
             // production default for that field alone.
@@ -252,11 +254,11 @@ impl StateSnapshot {
             // combination implies a schema regression and traps so the bug
             // surfaces instead of silently reverting to defaults.
             (None, None, None) => ExecutionPolicy::default(),
-            (max, budget, fills) => panic!(
+            (max, budget, settlement_units) => panic!(
                 "invalid snapshot: partial execution policy fields \
                  (max_orders_per_chunk={:?}, instruction_budget={:?}, \
                  max_settlement_units_per_event={:?})",
-                max, budget, fills,
+                max, budget, settlement_units,
             ),
         };
 

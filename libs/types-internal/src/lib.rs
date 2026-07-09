@@ -59,9 +59,9 @@ pub struct InitArg {
     /// Maximum instructions consumed before a chunk yields.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: u64,
-    /// Maximum balance operations packed into a single settling event; `None` in
-    /// `Init` events persisted before this field existed, falling back to
-    /// [`DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT`].
+    /// Maximum settlement units (a fill, or a removed-order refund) packed into
+    /// a single settling event; `None` in `Init` events persisted before this
+    /// field existed, falling back to [`DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT`].
     #[cfg_attr(feature = "event", n(3))]
     pub max_settlement_units_per_event: Option<u32>,
 }

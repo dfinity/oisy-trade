@@ -733,8 +733,9 @@ type InitArg = record {
     max_orders_per_chunk : nat32;
     // Maximum instructions consumed before a chunk yields.
     instruction_budget : nat64;
-    // Maximum balance operations packed into a single settling event; absent
-    // falls back to the conservative production default.
+    // Maximum settlement units (a fill, or a removed-order refund) packed into
+    // a single settling event; absent falls back to the conservative production
+    // default.
     max_settlement_units_per_event : opt nat32;
 };
 
