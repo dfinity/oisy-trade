@@ -1018,8 +1018,6 @@ mod deposit {
         crate::add_trading_account(USER, &mock_runtime_for(OTHER_USER)).unwrap();
 
         let runtime = CapturingRuntime::new(USER, vec![]);
-        // Capture after the grant (which records an event) so the count check
-        // below covers only the denied deposit.
         let events_before = crate::storage::total_event_count();
         let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
@@ -1508,8 +1506,6 @@ mod withdraw {
                     decimals: 8,
                 },
             );
-            // Register `funding` so it can grant; USER stays unregistered so it
-            // can be whitelisted as a trading account.
             s.deposit(
                 funding,
                 TokenId::from(token_id()),
@@ -1524,8 +1520,6 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
         runtime.expect_time().return_const(crate::Timestamp::EPOCH);
 
-        // Capture after the grant (which records an event) so the count check
-        // below covers only the denied withdrawal.
         let events_before = crate::storage::total_event_count();
         let result = withdraw(
             WithdrawRequest {
