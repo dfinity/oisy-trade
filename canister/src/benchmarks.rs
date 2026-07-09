@@ -710,7 +710,8 @@ where
     res
 }
 
-/// Bound settling-event application cost during matching.
+/// Worst-case settling-event application cost during matching: an unbounded
+/// single-event maker sweep (the DoS/trap surface).
 ///
 /// One taker crossing many resting makers produces a single oversized settling
 /// event that is applied in one message with no per-op instruction check, so
