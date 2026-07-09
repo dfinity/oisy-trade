@@ -14,7 +14,7 @@ environments:
     network: ic
     canisters: [oisy_trade]
     init_args:
-      oisy_trade: "( variant { Init = record { mode = variant { GeneralAvailability }; max_orders_per_chunk = 1_000 : nat32; instruction_budget = 1_000_000_000 : nat64 } } )"
+      oisy_trade: "( variant { Init = record { mode = variant { GeneralAvailability }; max_orders_per_chunk = 1_000 : nat32; instruction_budget = 1_000_000_000 : nat64; max_fills_per_settling_event = opt (128 : nat32) } } )"
 
   - name: prod
     network: ic
