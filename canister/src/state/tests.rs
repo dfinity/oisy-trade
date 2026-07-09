@@ -56,8 +56,9 @@ mod assert_caller_is_allowed {
                 mode,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-                max_fills_per_settling_event:
+                max_fills_per_settling_event: Some(
                     oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+                ),
             },
             crate::state::OrderHistory::new(
                 ic_stable_structures::VectorMemory::default(),
@@ -3328,7 +3329,7 @@ mod execution_policy {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: 17,
                 instruction_budget: 12_345,
-                max_fills_per_settling_event: 42,
+                max_fills_per_settling_event: Some(42),
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             TradeHistory::new(VectorMemory::default(), VectorMemory::default()),

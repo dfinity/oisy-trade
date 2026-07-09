@@ -30,8 +30,9 @@ pub fn init_event(mode: Mode) -> Event {
             mode,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-            max_fills_per_settling_event:
+            max_fills_per_settling_event: Some(
                 oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            ),
         }),
     }
 }
@@ -191,7 +192,7 @@ fn init_restricted() -> EventType {
         mode: Mode::RestrictedTo(restricted_principals()),
         max_orders_per_chunk: u32::MAX,
         instruction_budget: u64::MAX,
-        max_fills_per_settling_event: u32::MAX,
+        max_fills_per_settling_event: Some(u32::MAX),
     })
 }
 

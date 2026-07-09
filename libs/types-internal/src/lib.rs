@@ -57,9 +57,11 @@ pub struct InitArg {
     /// Maximum instructions consumed before a chunk yields.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: u64,
-    /// Maximum fill events packed into a single settling event.
+    /// Maximum fill events packed into a single settling event; `None` in
+    /// `Init` events persisted before this field existed, falling back to
+    /// [`DEFAULT_MAX_FILLS_PER_SETTLING_EVENT`].
     #[cfg_attr(feature = "event", n(3))]
-    pub max_fills_per_settling_event: u32,
+    pub max_fills_per_settling_event: Option<u32>,
 }
 
 /// Argument for canister upgrade.

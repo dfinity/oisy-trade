@@ -28,7 +28,7 @@ use crate::storage::VMem;
 use crate::user::{FundingAccount, GrantError, RevokeError, TradingAccount, UserId, UserRegistry};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
-use oisy_trade_types_internal::{InitArg, Mode};
+use oisy_trade_types_internal::{DEFAULT_MAX_FILLS_PER_SETTLING_EVENT, InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
@@ -112,7 +112,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let execution_policy = ExecutionPolicy::try_new(
             init_arg.max_orders_per_chunk,
             init_arg.instruction_budget,
-            init_arg.max_fills_per_settling_event,
+            init_arg
+                .max_fills_per_settling_event
+                .unwrap_or(DEFAULT_MAX_FILLS_PER_SETTLING_EVENT),
         )?;
         Ok(Self {
             mode: init_arg.mode,

@@ -733,8 +733,9 @@ type InitArg = record {
     max_orders_per_chunk : nat32;
     // Maximum instructions consumed before a chunk yields.
     instruction_budget : nat64;
-    // Maximum fill events packed into a single settling event.
-    max_fills_per_settling_event : nat32;
+    // Maximum fill events packed into a single settling event; absent falls
+    // back to the conservative production default.
+    max_fills_per_settling_event : opt nat32;
 };
 
 // Argument for canister upgrade.
