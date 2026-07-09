@@ -252,7 +252,7 @@ pub enum DepositRequestError {
     /// The caller is a trading account, which can never hold DEX balances and
     /// so cannot deposit.
     #[error("a trading account cannot deposit")]
-    TradingAccountCannotDeposit,
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a deposit can fail.
@@ -328,7 +328,7 @@ pub enum WithdrawRequestError {
     /// The caller is a trading account, which can never hold DEX balances and
     /// so cannot withdraw.
     #[error("a trading account cannot withdraw")]
-    TradingAccountCannotWithdraw,
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a withdrawal can fail.

@@ -1014,19 +1014,18 @@ mod deposit {
         use crate::test_fixtures::{fund_user, mocks::mock_runtime_for};
 
         init_state_with_order_book();
-        // Make USER a trading account of the funding account OTHER_USER.
         fund_user(OTHER_USER);
         crate::add_trading_account(USER, &mock_runtime_for(OTHER_USER)).unwrap();
 
         let runtime = CapturingRuntime::new(USER, vec![]);
-        // Capture after setup (the grant above records an event) so the
-        // assertion covers only the denied deposit.
+        // Capture after the grant (which records an event) so the count check
+        // below covers only the denied deposit.
         let events_before = crate::storage::total_event_count();
         let result = deposit(deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
-            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountCannotDeposit))
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
         );
         assert!(
             runtime.captured_calls().is_empty(),
@@ -1509,8 +1508,8 @@ mod withdraw {
                     decimals: 8,
                 },
             );
-            // Register the funding account so it can grant; USER stays
-            // unregistered so it can be whitelisted as a trading account.
+            // Register `funding` so it can grant; USER stays unregistered so it
+            // can be whitelisted as a trading account.
             s.deposit(
                 funding,
                 TokenId::from(token_id()),
@@ -1525,8 +1524,8 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
         runtime.expect_time().return_const(crate::Timestamp::EPOCH);
 
-        // Capture after setup (the grant above records an event) so the
-        // assertion covers only the denied withdrawal.
+        // Capture after the grant (which records an event) so the count check
+        // below covers only the denied withdrawal.
         let events_before = crate::storage::total_event_count();
         let result = withdraw(
             WithdrawRequest {
@@ -1539,7 +1538,7 @@ mod withdraw {
 
         assert_eq!(
             result.unwrap_err().kind,
-            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountCannotWithdraw))
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountForbidden))
         );
         assert_eq!(
             crate::storage::total_event_count(),
