@@ -129,10 +129,8 @@ impl<M: Memory> TokenBalance<M> {
         fee: Quantity,
     ) {
         bench_scopes!("balances", "balances::transfer");
-        assert!(
-            fee <= gross,
-            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
-        );
+        let net = split_net_fee(&mut self.fee_balances, token, gross, fee);
+
         let debtor_key = BalanceKey::new(*token, debtor);
         let mut debtor_balance = self
             .balances
@@ -141,18 +139,10 @@ impl<M: Memory> TokenBalance<M> {
         debtor_balance.debit_reserved(&gross);
         self.balances.insert(debtor_key, debtor_balance);
 
-        let net = gross
-            .checked_sub(fee)
-            .expect("BUG: fee <= gross checked above");
         // Self-transfer: debtor and creditor are the same user, so the
         // credit must land on the just-updated balance — `update` re-reads
         // before depositing to avoid clobbering the debit.
         self.update(creditor, *token, |b| b.deposit(net));
-
-        if !fee.is_zero() {
-            let entry = self.fee_balances.entry(*token).or_default();
-            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
-        }
     }
 
     /// Open a write-back buffer over the balance map, scoped to a single
@@ -249,6 +239,30 @@ impl<M: Memory> TokenBalance<M> {
     }
 }
 
+/// Assert `fee <= gross`, accrue `fee` into the token's fee pool, and return
+/// the net `gross - fee` owed to the creditor. Shared by the per-op
+/// [`TokenBalance::transfer`] and the buffered [`SettlingBatch::transfer`] so
+/// the money-accounting lives in one place.
+fn split_net_fee(
+    fee_balances: &mut BTreeMap<TokenId, Quantity>,
+    token: &TokenId,
+    gross: Quantity,
+    fee: Quantity,
+) -> Quantity {
+    assert!(
+        fee <= gross,
+        "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
+    );
+    let net = gross
+        .checked_sub(fee)
+        .expect("BUG: fee <= gross checked above");
+    if !fee.is_zero() {
+        let entry = fee_balances.entry(*token).or_default();
+        *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
+    }
+    net
+}
+
 /// In-heap write-back buffer over the balance map for the balance operations
 /// of one settling event, opened by [`TokenBalance::settling_batch`].
 ///
@@ -282,29 +296,26 @@ impl<M: Memory> SettlingBatch<'_, M> {
         fee: Quantity,
     ) {
         bench_scopes!("balances", "balances::transfer");
-        assert!(
-            fee <= gross,
-            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
-        );
-        self.load(BalanceKey::new(*token, debtor))
-            .debit_reserved(&gross);
+        let net = split_net_fee(self.fee_balances, token, gross, fee);
 
-        let net = gross
-            .checked_sub(fee)
-            .expect("BUG: fee <= gross checked above");
-        self.load(BalanceKey::new(*token, creditor)).deposit(net);
-
-        if !fee.is_zero() {
-            let entry = self.fee_balances.entry(*token).or_default();
-            *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
-        }
+        self.load_existing(
+            BalanceKey::new(*token, debtor),
+            "BUG: debtor balance missing",
+        )
+        .debit_reserved(&gross);
+        self.load_or_create(BalanceKey::new(*token, creditor))
+            .deposit(net);
     }
 
     /// Buffered counterpart of [`TokenBalance::unreserve`]: moves `amount` from
     /// the user's reserved to their free balance.
     pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::unreserve");
-        self.load(BalanceKey::new(*token, user)).unreserve(amount);
+        self.load_existing(
+            BalanceKey::new(*token, user),
+            "BUG: user balance missing for unreserve",
+        )
+        .unreserve(amount);
     }
 
     /// Write each buffered row back to the stable map exactly once, eliding
@@ -319,7 +330,21 @@ impl<M: Memory> SettlingBatch<'_, M> {
         }
     }
 
-    fn load(&mut self, key: BalanceKey) -> &mut Balance {
+    /// Buffer a row whose stable entry must already exist, mirroring the
+    /// `expect(...)` of the debtor read in [`TokenBalance::transfer`] and the
+    /// target read in [`TokenBalance::unreserve`]. Traps with `msg` if the row
+    /// is absent on its first touch this batch.
+    fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
+        let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
+            existed: true,
+            balance: self.balances.get(&key).expect(msg),
+        });
+        &mut entry.balance
+    }
+
+    /// Buffer a row that may not yet exist, mirroring the creditor credit in
+    /// [`TokenBalance::transfer`], which creates the entry on demand.
+    fn load_or_create(&mut self, key: BalanceKey) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| {
             let prev = self.balances.get(&key);
             BufferedBalance {

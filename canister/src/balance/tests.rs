@@ -779,7 +779,7 @@ mod settling_batch {
 
     #[test]
     fn flush_elides_untouched_empty_creditor_row() {
-        let mut tb = TokenBalance::default();
+        let mut tb = seeded(&[(taker(), base(), 100, 0)]);
         {
             let mut batch = tb.settling_batch();
             batch.transfer(
