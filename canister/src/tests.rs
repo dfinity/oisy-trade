@@ -901,6 +901,105 @@ mod order_status_via_get_my_orders {
     }
 }
 
+mod resolution_on_reads {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{
+        add_limit_order, add_trading_account, get_balances, get_my_orders, get_my_trades,
+        process_pending_orders,
+    };
+    use candid::Principal;
+    use oisy_trade_types::{GetMyOrdersArgs, GetMyTradesArgs, Side, TradesByAccount, TradesFilter};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const SELLER: Principal = Principal::from_slice(&[0x03]);
+    const UNKNOWN: Principal = Principal::from_slice(&[0x04]);
+
+    fn account_trades() -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        }
+    }
+
+    /// Funds `FUNDING`, gives it a filled order (and thus balances, an order,
+    /// and trades), then whitelists `TRADING` as its trading account.
+    fn setup_funding_with_activity() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(SELLER);
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+        let mut sell = limit_order_request();
+        sell.side = Side::Sell;
+        add_limit_order(sell, &mock_runtime_for(SELLER)).unwrap();
+        process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+    }
+
+    #[test]
+    fn should_return_funding_data_when_read_by_a_trading_account() {
+        setup_funding_with_activity();
+
+        assert_eq!(
+            get_balances(None, TRADING),
+            get_balances(None, FUNDING),
+            "a trading account sees its funding account's balances"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "a trading account sees its funding account's orders"
+        );
+        assert_eq!(
+            get_my_trades(account_trades(), TRADING),
+            get_my_trades(account_trades(), FUNDING),
+            "a trading account sees its funding account's trades"
+        );
+
+        assert!(!get_balances(None, FUNDING).unwrap().is_empty());
+        assert!(
+            !get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!get_my_trades(account_trades(), FUNDING).unwrap().is_empty());
+    }
+
+    #[test]
+    fn should_read_own_data_for_an_ordinary_user() {
+        setup_funding_with_activity();
+
+        assert!(
+            !get_my_orders(Some(GetMyOrdersArgs::default()), SELLER)
+                .unwrap()
+                .is_empty(),
+            "an ordinary registered user reads its own orders"
+        );
+        assert!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), SELLER).unwrap()
+                != get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap(),
+            "a non-delegate does not resolve to the funding account"
+        );
+    }
+
+    #[test]
+    fn should_resolve_an_unknown_principal_to_itself() {
+        setup_funding_with_activity();
+
+        assert_eq!(get_balances(None, UNKNOWN), Ok(vec![]));
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), UNKNOWN),
+            Ok(vec![])
+        );
+        assert_eq!(get_my_trades(account_trades(), UNKNOWN), Ok(vec![]));
+    }
+}
+
 mod deposit {
     use crate::deposit;
     use crate::guard::UserOpGuard;

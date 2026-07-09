@@ -466,7 +466,10 @@ pub fn get_balances(
     caller: candid::Principal,
 ) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     validate_filter_len(filter.as_deref())?;
-    state::with_state(|s| s.get_balances(&caller, filter.as_deref()))
+    state::with_state(|s| {
+        let caller = s.resolve_account(caller);
+        s.get_balances(&caller, filter.as_deref())
+    })
 }
 
 pub fn get_fee_balances(
@@ -493,6 +496,7 @@ pub fn get_my_orders(
     args: Option<GetMyOrdersArgs>,
     caller: candid::Principal,
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
+    let caller = state::with_state(|s| s.resolve_account(caller));
     let filter = args.unwrap_or_default().filter;
     let results = match filter {
         oisy_trade_types::GetMyOrdersFilter::ById(id) => {
@@ -543,6 +547,7 @@ pub fn get_my_trades(
     caller: candid::Principal,
 ) -> Result<Vec<oisy_trade_types::Trade>, GetMyTradesError> {
     use oisy_trade_types::TradesFilter;
+    let caller = state::with_state(|s| s.resolve_account(caller));
     let trades = match args.filter {
         TradesFilter::ByOrder(by_order) => {
             let order_id = by_order
