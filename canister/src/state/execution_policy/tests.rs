@@ -1,4 +1,7 @@
 use super::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
+use oisy_trade_types_internal::{
+    DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_FILLS_PER_SETTLING_EVENT, DEFAULT_MAX_ORDERS_PER_CHUNK,
+};
 
 #[test]
 fn should_construct_with_valid_args() {
@@ -7,26 +10,28 @@ fn should_construct_with_valid_args() {
     assert_eq!(p.instruction_budget(), 1);
     assert_eq!(p.max_fills_per_settling_event().get(), 1);
 
-    let p = ExecutionPolicy::try_new(5_000, MAX_INSTRUCTION_BUDGET, 256).unwrap();
+    let p = ExecutionPolicy::try_new(
+        5_000,
+        MAX_INSTRUCTION_BUDGET,
+        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+    )
+    .unwrap();
     assert_eq!(p.max_orders_per_chunk(), 5_000);
     assert_eq!(p.instruction_budget(), MAX_INSTRUCTION_BUDGET);
-    assert_eq!(p.max_fills_per_settling_event().get(), 256);
+    assert_eq!(
+        p.max_fills_per_settling_event().get(),
+        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+    );
 }
 
 #[test]
 fn should_default_to_production_policy() {
     let p = ExecutionPolicy::default();
-    assert_eq!(
-        p.max_orders_per_chunk(),
-        oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
-    );
-    assert_eq!(
-        p.instruction_budget(),
-        oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-    );
+    assert_eq!(p.max_orders_per_chunk(), DEFAULT_MAX_ORDERS_PER_CHUNK,);
+    assert_eq!(p.instruction_budget(), DEFAULT_INSTRUCTION_BUDGET,);
     assert_eq!(
         p.max_fills_per_settling_event().get(),
-        oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
     );
 }
 
