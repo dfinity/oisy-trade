@@ -156,7 +156,9 @@ impl StateSnapshot {
             },
             max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
             instruction_budget: Some(execution_policy.instruction_budget()),
-            max_fills_per_settling_event: Some(execution_policy.max_fills_per_settling_event()),
+            max_fills_per_settling_event: Some(
+                execution_policy.max_fills_per_settling_event().get(),
+            ),
             fee_pool: {
                 let snapshot = balances.fee_pool_snapshot();
                 if snapshot.is_empty() {

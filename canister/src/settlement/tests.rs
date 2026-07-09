@@ -124,7 +124,7 @@ mod settling_batches {
     use crate::state::event::BalanceOperation;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use std::collections::{BTreeMap, BTreeSet};
-    use std::num::NonZeroU64;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     const BASE_SCALE: u64 = 100_000_000;
     const CAP: usize = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
@@ -179,7 +179,7 @@ mod settling_batches {
                 output(all_fills),
                 FeeRates::default(),
                 base_scale,
-                cap,
+                NonZeroU32::new(cap as u32).unwrap(),
             );
 
             assert_eq!(
@@ -323,7 +323,12 @@ mod settling_batches {
             filled_orders: BTreeSet::new(),
             expired_orders,
         };
-        MatchSettlement::from_matching(out, FeeRates::default(), base_scale, CAP)
+        MatchSettlement::from_matching(
+            out,
+            FeeRates::default(),
+            base_scale,
+            NonZeroU32::new(CAP as u32).unwrap(),
+        )
     }
 
     fn expired_ops(num_expired: usize, base_scale: NonZeroU64) -> Vec<BalanceOperation> {

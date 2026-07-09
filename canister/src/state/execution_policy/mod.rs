@@ -66,8 +66,8 @@ impl ExecutionPolicy {
         self.instruction_budget.get()
     }
 
-    pub fn max_fills_per_settling_event(&self) -> u32 {
-        self.max_fills_per_settling_event.get()
+    pub fn max_fills_per_settling_event(&self) -> NonZeroU32 {
+        self.max_fills_per_settling_event
     }
 }
 

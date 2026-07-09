@@ -5,12 +5,12 @@ fn should_construct_with_valid_args() {
     let p = ExecutionPolicy::try_new(1, 1, 1).unwrap();
     assert_eq!(p.max_orders_per_chunk(), 1);
     assert_eq!(p.instruction_budget(), 1);
-    assert_eq!(p.max_fills_per_settling_event(), 1);
+    assert_eq!(p.max_fills_per_settling_event().get(), 1);
 
     let p = ExecutionPolicy::try_new(5_000, MAX_INSTRUCTION_BUDGET, 256).unwrap();
     assert_eq!(p.max_orders_per_chunk(), 5_000);
     assert_eq!(p.instruction_budget(), MAX_INSTRUCTION_BUDGET);
-    assert_eq!(p.max_fills_per_settling_event(), 256);
+    assert_eq!(p.max_fills_per_settling_event().get(), 256);
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn should_default_to_production_policy() {
         oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
     );
     assert_eq!(
-        p.max_fills_per_settling_event(),
+        p.max_fills_per_settling_event().get(),
         oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
     );
 }

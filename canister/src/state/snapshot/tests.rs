@@ -569,7 +569,10 @@ fn should_decode_snapshot_without_max_fills_to_default_cap() {
         state.user_registry.clone(),
     );
     assert_eq!(
-        restored.execution_policy().max_fills_per_settling_event(),
+        restored
+            .execution_policy()
+            .max_fills_per_settling_event()
+            .get(),
         oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
     );
     assert_eq!(state, restored);

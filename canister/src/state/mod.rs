@@ -403,13 +403,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let max_fills_per_settling_event =
-                self.execution_policy.max_fills_per_settling_event() as usize;
             let settlement = MatchSettlement::from_matching(
                 output,
                 fee_rates,
                 base_scale,
-                max_fills_per_settling_event,
+                self.execution_policy.max_fills_per_settling_event(),
             );
             {
                 #[cfg(feature = "canbench-rs")]

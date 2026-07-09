@@ -6,7 +6,7 @@ use crate::order::{
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 
 #[cfg(test)]
 mod tests;
@@ -43,8 +43,9 @@ impl MatchSettlement {
         output: MatchingOutput,
         fee_rates: FeeRates,
         base_scale: NonZeroU64,
-        max_fills_per_settling_event: usize,
+        max_fills_per_settling_event: NonZeroU32,
     ) -> Self {
+        let max_fills_per_settling_event = max_fills_per_settling_event.get() as usize;
         let MatchingOutput {
             fills,
             resting_orders,
