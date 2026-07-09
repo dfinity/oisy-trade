@@ -405,7 +405,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let settlement = MatchSettlement::from_matching(
+            let MatchSettlement {
+                order_updates,
+                settling_batches,
+            } = MatchSettlement::from_matching(
                 output,
                 fee_rates,
                 base_scale,
@@ -414,13 +417,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
-                for (seq, update) in settlement.order_updates {
+                for (seq, update) in order_updates {
                     self.order_history
                         .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            for batch in settlement.settling_batches {
-                if !batch.balance_operations.is_empty() || !batch.fills.is_empty() {
+            for batch in settling_batches {
+                if !batch.is_empty() {
                     self.pending_settling_events
                         .push_back(event::SettlingEvent {
                             book_id: event.book_id,

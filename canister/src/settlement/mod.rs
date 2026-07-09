@@ -109,6 +109,12 @@ impl MatchSettlement {
     }
 }
 
+impl SettlementBatch {
+    pub fn is_empty(&self) -> bool {
+        self.balance_operations.is_empty() && self.fills.is_empty()
+    }
+}
+
 /// A single [`Fill`] together with the realized values derived from it, computed
 /// once in the matching phase (the only point where both `fee_rates` and
 /// `base_scale` are in scope) and used to project both the
