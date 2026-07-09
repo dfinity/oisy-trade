@@ -3,5 +3,5 @@ build_cmd:
 wasm_path:
   ../target/wasm32-unknown-unknown/release/oisy_trade_canister.wasm
 init_args:
-  # OisyTradeArg::Init(InitArg { mode: GeneralAvailability, max_orders_per_chunk: 1_000u32, instruction_budget: 1_000_000_000u64, max_settlement_units_per_event: Some(512u32) })
-  hex: 4449444c096b02fcb88b840301b0ced18403086e026c04acb380c20203e3a683c30404d6d6fdb705078dece4db0c036e796e056b0296bab03c068390999e057f6d686e786c04acb380c20279e3a683c30405d6d6fdb705788dece4db0c03010001e80300000100ca9a3b000000000100020000
+  # OisyTradeArg::Init(InitArg { mode: GeneralAvailability, max_orders_per_chunk: 1_000u32, instruction_budget: 1_000_000_000u64, max_settlement_units_per_event: Some(256u32) })
+  hex: 4449444c096b02fcb88b840301b0ced18403086e026c04acb380c20203e3a683c30404d6d6fdb705078dece4db0c036e796e056b0296bab03c068390999e057f6d686e786c04acb380c20279e3a683c30405d6d6fdb705788dece4db0c03010001e80300000100ca9a3b000000000100010000
