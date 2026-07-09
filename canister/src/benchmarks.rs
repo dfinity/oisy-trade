@@ -741,7 +741,8 @@ mod settling_event_sweep {
     };
     use crate::order::{OrderHistory, TradeHistory};
     use crate::state::State;
-    use crate::state::execution_policy::ExecutionPolicy;
+    use crate::state::event::EventType;
+    use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
     use crate::storage;
     use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
     use async_trait::async_trait;
@@ -856,7 +857,14 @@ mod settling_event_sweep {
                 },
             );
         }
-        state.set_execution_policy(ExecutionPolicy::MAX);
+        state.set_execution_policy(
+            ExecutionPolicy::try_new(
+                u32::MAX,
+                MAX_INSTRUCTION_BUDGET,
+                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+            )
+            .unwrap(),
+        );
         EXECUTOR.run_once(&mut state, &SweepRuntime::new());
         let book = state.get_order_book(&pair).unwrap();
         assert_eq!(book.pending_orders_len(), 0);
@@ -880,6 +888,7 @@ mod settling_event_sweep {
             },
         );
 
+        let events_before = storage::total_event_count();
         let res = canbench_rs::bench_fn(|| {
             EXECUTOR.run_once(&mut state, &SweepRuntime::new());
         });
@@ -893,6 +902,18 @@ mod settling_event_sweep {
         );
         let (_, _, buy_record) = state.get_user_order(&taker, buy).unwrap();
         assert_eq!(buy_record.status, OrderStatus::Filled);
+
+        let settling_events = (events_before..storage::total_event_count())
+            .filter_map(storage::get_event)
+            .filter(|event| matches!(event.payload, EventType::Settling(_)))
+            .count();
+        assert_eq!(
+            settling_events,
+            (num_makers as usize)
+                .div_ceil(oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize),
+            "the sweep must partition its fills into more than one bounded settling event, \
+             not drain a single oversized event"
+        );
 
         res
     }
