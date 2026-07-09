@@ -271,6 +271,8 @@ fn split_net_fee(
 /// that to a single stable read per row on first touch and a single write-back
 /// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
 /// on the heap as in [`TokenBalance::transfer`].
+#[must_use = "SettlingBatch buffers balance mutations that are only applied by `flush()`; \
+              dropping it without flushing silently discards them"]
 pub struct SettlingBatch<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
     fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
@@ -330,10 +332,11 @@ impl<M: Memory> SettlingBatch<'_, M> {
         }
     }
 
-    /// Buffer a row whose stable entry must already exist, mirroring the
-    /// `expect(...)` of the debtor read in [`TokenBalance::transfer`] and the
-    /// target read in [`TokenBalance::unreserve`]. Traps with `msg` if the row
-    /// is absent on its first touch this batch.
+    /// Buffer a row that must already exist in the balance map, or have been
+    /// created earlier in this settling event, mirroring the `expect(...)` of
+    /// the debtor read in [`TokenBalance::transfer`] and the target read in
+    /// [`TokenBalance::unreserve`]. On the row's first touch this batch, traps
+    /// with `msg` if it is absent from the stable map.
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
             existed: true,

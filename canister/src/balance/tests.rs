@@ -819,6 +819,28 @@ mod settling_batch {
         assert_eq!(tb.fee_balance(&base()), Some(Quantity::from(5u64)));
     }
 
+    #[test]
+    #[should_panic(expected = "BUG: debtor balance missing")]
+    fn should_panic_batch_transfer_missing_debtor() {
+        let mut tb = TokenBalance::default();
+        let mut batch = tb.settling_batch();
+        batch.transfer(
+            taker(),
+            maker1(),
+            &base(),
+            Quantity::from(10u64),
+            Quantity::ZERO,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BUG: user balance missing for unreserve")]
+    fn should_panic_batch_unreserve_missing_entry() {
+        let mut tb = TokenBalance::default();
+        let mut batch = tb.settling_batch();
+        batch.unreserve(taker(), &base(), Quantity::from(10u64));
+    }
+
     fn taker() -> UserId {
         UserId::new(1)
     }
