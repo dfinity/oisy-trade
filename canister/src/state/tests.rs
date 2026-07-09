@@ -3801,36 +3801,8 @@ mod pending_state_predicates {
             )
             .unwrap(),
         );
-        let pair = icp_ckbtc_trading_pair();
-        let lot = u128::from(LOT_SIZE.get());
-        for i in 0..num_makers {
-            test_fixtures::order(
-                test_fixtures::maker(i),
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            )
-            .place(&mut state);
-        }
-        test_fixtures::order(
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            num_makers as u128 * lot,
-        )
-        .place(&mut state);
-        let book = state.order_book(&OrderBookId::ZERO).unwrap();
-        let matching_event = crate::state::event::MatchingEvent {
-            book_id: OrderBookId::ZERO,
-            orders: book.pending_order_seqs().collect(),
-        };
-        state.record_matching_event(
-            &matching_event,
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
+        place_sweep(&mut state, num_makers);
+        record_matching_round(&mut state);
 
         let mut events = Vec::new();
         while let Some(event) = state.take_next_pending_settling_event() {
@@ -3855,38 +3827,11 @@ mod pending_state_predicates {
         let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
         let num_makers = cap + 1;
 
-        for i in 0..num_makers {
-            test_fixtures::order(
-                test_fixtures::maker(i),
-                &pair,
-                Side::Sell,
-                100 * PRICE_SCALE,
-                lot,
-            )
-            .place(&mut state);
-        }
-        test_fixtures::order(
-            BUYER,
-            &pair,
-            Side::Buy,
-            100 * PRICE_SCALE,
-            num_makers as u128 * lot,
-        )
-        .place(&mut state);
+        place_sweep(&mut state, num_makers);
         let killed = test_fixtures::order(SELLER, &pair, Side::Buy, 50 * PRICE_SCALE, lot)
             .fill_or_kill()
             .place(&mut state);
-
-        let book = state.order_book(&OrderBookId::ZERO).unwrap();
-        let matching_event = crate::state::event::MatchingEvent {
-            book_id: OrderBookId::ZERO,
-            orders: book.pending_order_seqs().collect(),
-        };
-        state.record_matching_event(
-            &matching_event,
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
+        record_matching_round(&mut state);
 
         let mut events = Vec::new();
         while let Some(event) = state.take_next_pending_settling_event() {
@@ -3917,6 +3862,18 @@ mod pending_state_predicates {
     ) -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
     {
         let mut state = setup_one_book();
+        place_sweep(&mut state, num_makers);
+        record_matching_round(&mut state);
+        state
+    }
+
+    fn place_sweep(
+        state: &mut crate::state::State<
+            ic_stable_structures::VectorMemory,
+            ic_stable_structures::VectorMemory,
+        >,
+        num_makers: usize,
+    ) {
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
         for i in 0..num_makers {
@@ -3927,7 +3884,7 @@ mod pending_state_predicates {
                 100 * PRICE_SCALE,
                 lot,
             )
-            .place(&mut state);
+            .place(state);
         }
         test_fixtures::order(
             BUYER,
@@ -3936,7 +3893,15 @@ mod pending_state_predicates {
             100 * PRICE_SCALE,
             num_makers as u128 * lot,
         )
-        .place(&mut state);
+        .place(state);
+    }
+
+    fn record_matching_round(
+        state: &mut crate::state::State<
+            ic_stable_structures::VectorMemory,
+            ic_stable_structures::VectorMemory,
+        >,
+    ) {
         let book = state.order_book(&OrderBookId::ZERO).unwrap();
         let matching_event = crate::state::event::MatchingEvent {
             book_id: OrderBookId::ZERO,
@@ -3947,7 +3912,6 @@ mod pending_state_predicates {
             crate::Timestamp::EPOCH,
             crate::state::StableMemoryOptions::Write,
         );
-        state
     }
 
     fn setup_one_book()
