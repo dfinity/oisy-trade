@@ -710,18 +710,24 @@ where
     res
 }
 
-/// DEFI-2913 — bound settling-event application cost during matching.
+/// Bound settling-event application cost during matching.
 ///
 /// One taker crossing many resting makers produces a single oversized settling
 /// event that is applied in one message with no per-op instruction check, so
-/// its cost scales linearly with the number of fills. This bench reproduces the
-/// worst case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
+/// its cost scales with the number of fills. This bench reproduces the worst
+/// case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
 /// resting min-notional sell orders (each from a distinct principal, one fill
 /// each) swept by a single fill-or-kill buy that empties the book in one
-/// settling event. 22_900 is the largest maker count whose sweep still fits
-/// under the IC per-message cap (40B instructions,
-/// `crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`); at ~23_000 the
-/// sweep crosses the cap and the message traps.
+/// settling event.
+///
+/// 22_900 is the largest maker count whose sweep still fits under the IC
+/// per-message cap (40B instructions,
+/// `crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`): it measures
+/// ~38.46B. Cost near the cap is step-wise, not smooth — the ~1.68M
+/// instructions/maker average alone would extrapolate the crossing to ~23_800,
+/// but the stable memory grows another chunk just above 22_900, and that
+/// discrete jump pushes the ~23_000 sweep to ~40.30B, over the cap. Both
+/// figures are canbench measurements.
 mod settling_event_sweep {
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderStatus, PendingOrder, Price, Quantity, Side, TickSize,
