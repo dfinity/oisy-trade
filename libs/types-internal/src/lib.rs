@@ -35,16 +35,16 @@ pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u32 = 1_000;
 pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
 /// Conservative production default for [`InitArg::max_settlement_units_per_event`]:
-/// the maximum number of balance operations packed into a single settling event,
-/// so a matching round emits `ceil(total_ops / cap)` bounded events instead of
-/// one. A settlement unit is one balance operation — the per-op write against the
-/// balance stable map that dominates a settling event's apply cost — so bounding
-/// units per event bounds that per-message instruction cost. A fill contributes
-/// 2–3 operations and a killed or expired order one, all counted alike. The value
-/// keeps a full event well under the 1B [`DEFAULT_INSTRUCTION_BUDGET`] and far
-/// under the 40B `MAX_INSTRUCTION_BUDGET`, and above every existing test's
-/// per-round operation count, so only the dedicated sweep tests exercise the split.
-pub const DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT: u32 = 512;
+/// the maximum number of settlement units packed into a single settling event,
+/// so a matching round emits `ceil(total_units / cap)` bounded events instead of
+/// one. A settlement unit is a fill (with its 2–3 balance operations) or a killed
+/// or expired order (with its single `Unreserve`); its apply cost is dominated by
+/// its writes against the balance stable map, so bounding units per event bounds
+/// that per-message instruction cost. The value keeps a full event well under the
+/// 1B [`DEFAULT_INSTRUCTION_BUDGET`] and far under the 40B `MAX_INSTRUCTION_BUDGET`,
+/// and above every existing test's per-round unit count, so only the dedicated
+/// sweep tests exercise the split.
+pub const DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT: u32 = 256;
 
 /// Argument for canister initialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]

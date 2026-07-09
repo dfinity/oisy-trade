@@ -15,11 +15,11 @@ proptest! {
 /// existed (the `#[n(3)]` slot absent) decodes with that field `None`, so the
 /// event log replays historic installs against the default cap.
 #[test]
-fn should_decode_init_arg_without_max_fills_to_none() {
+fn should_decode_init_arg_without_settlement_units_to_none() {
     use oisy_trade_types_internal::{InitArg, Mode};
 
     #[derive(minicbor::Encode)]
-    struct PreMaxFillsInitArg {
+    struct PreSettlementUnitsInitArg {
         #[n(0)]
         mode: Mode,
         #[n(1)]
@@ -28,7 +28,7 @@ fn should_decode_init_arg_without_max_fills_to_none() {
         instruction_budget: u64,
     }
 
-    let pre = PreMaxFillsInitArg {
+    let pre = PreSettlementUnitsInitArg {
         mode: Mode::GeneralAvailability,
         max_orders_per_chunk: 1_000,
         instruction_budget: 1_000_000_000,

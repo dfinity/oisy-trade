@@ -510,7 +510,7 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
 /// `max_settlement_units_per_event` field existed (the `#[n(11)]` slot absent)
 /// decodes with that field `None` and rebuilds the default cap on `into_state`.
 #[test]
-fn should_decode_snapshot_without_max_fills_to_default_cap() {
+fn should_decode_snapshot_without_settlement_units_to_default_cap() {
     use crate::state::event::SettlingEvent;
     use oisy_trade_types_internal::Mode;
 
@@ -518,7 +518,7 @@ fn should_decode_snapshot_without_max_fills_to_default_cap() {
     let snapshot = StateSnapshot::from_state(&state);
 
     #[derive(minicbor::Encode)]
-    struct PreMaxFillsSnapshot<'a> {
+    struct PreSettlementUnitsSnapshot<'a> {
         #[n(0)]
         mode: &'a Mode,
         #[n(1)]
@@ -543,7 +543,7 @@ fn should_decode_snapshot_without_max_fills_to_default_cap() {
         permissions: &'a Option<super::PermissionsSnapshot>,
     }
 
-    let pre = PreMaxFillsSnapshot {
+    let pre = PreSettlementUnitsSnapshot {
         mode: &snapshot.mode,
         next_book_id: &snapshot.next_book_id,
         tokens: &snapshot.tokens,

@@ -717,9 +717,9 @@ where
 ///
 /// One taker crossing many resting makers used to produce a single oversized
 /// settling event applied in one message, whose cost scaled with the number of
-/// balance operations until it trapped the message. The round now partitions
-/// its balance operations into bounded settling events (at most
-/// `max_settlement_units_per_event` operations each), and the executor checks
+/// settlement units until it trapped the message. The round now partitions its
+/// settlement units into bounded settling events (at most
+/// `max_settlement_units_per_event` units each), and the executor checks
 /// the instruction budget between events,
 /// so the same sweep drains as many small events. This bench keeps the worst
 /// case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
@@ -834,11 +834,6 @@ mod settling_event_sweep {
     /// The largest maker count whose sweep still fits under the 40B cap.
     const NUM_MAKERS: u64 = 22_900;
 
-    /// Balance operations each fill in this sweep emits: a quote transfer and a
-    /// base transfer. The buy taker crosses at the maker price, so no
-    /// price-improvement surplus `Unreserve` is emitted.
-    const OPS_PER_FILL: usize = 2;
-
     #[bench(raw)]
     fn bench_fok_sweep_22_900_makers() -> canbench_rs::BenchResult {
         let num_makers = NUM_MAKERS;
@@ -878,9 +873,9 @@ mod settling_event_sweep {
 
         // One fill-or-kill buy sized to the whole book: it crosses every maker
         // at `MAKER_PRICE` and fully fills, emptying the book across the bounded
-        // settling events its balance operations partition into (each at most
-        // `max_settlement_units_per_event` operations), whose combined
-        // application cost scales with `num_makers`.
+        // settling events its settlement units partition into (each at most
+        // `max_settlement_units_per_event` units), whose combined application
+        // cost scales with `num_makers`.
         let taker = super::user(num_makers);
         super::fund_user(&mut state, taker);
         let buy = super::place_order(
@@ -915,10 +910,10 @@ mod settling_event_sweep {
             .count();
         assert_eq!(
             settling_events,
-            (num_makers as usize * OPS_PER_FILL).div_ceil(
+            (num_makers as usize).div_ceil(
                 oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize
             ),
-            "the sweep must partition its balance operations into more than one bounded \
+            "the sweep must partition its settlement units into more than one bounded \
              settling event, not drain a single oversized event"
         );
 

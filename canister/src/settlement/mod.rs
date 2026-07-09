@@ -23,22 +23,23 @@ pub struct MatchSettlement {
 }
 
 /// A bounded slice of a matching round's settlement: at most
-/// `max_settlement_units_per_event` balance operations together with the fills
-/// that produced them. A fill and its operations are always kept in the same
-/// batch so that the settling phase can resolve each fill's taker/maker order
-/// seqs from the operations of the same event.
+/// `max_settlement_units_per_event` settlement units, carrying the balance
+/// operations of those units together with the fills that produced them. A fill
+/// and its operations are always kept in the same batch so that the settling
+/// phase can resolve each fill's taker/maker order seqs from the operations of
+/// the same event.
 pub struct SettlementBatch {
     pub balance_operations: Vec<event::BalanceOperation>,
     pub fills: Vec<FillEvent>,
 }
 
-/// An indivisible bundle of balance operations plus an optional [`FillEvent`],
-/// the unit the packer cuts settling batches from. A fill contributes its 2–3
-/// balance operations together with `Some(fill_event())`; a removed (canceled,
-/// killed, or expired) order contributes its single `Unreserve` operation with
-/// `None`. The packer never splits a group across batches, which keeps every
-/// fill co-located with the operations that reference its taker and maker seqs.
-struct SettlementGroup {
+/// The atomic, indivisible piece of settlement work the packer counts and cuts
+/// settling batches from: a fill (its `Some(fill_event())` together with its 2–3
+/// balance operations) or a removed (canceled, killed, or expired) order (its
+/// single `Unreserve` operation with `None`). A unit is never split across
+/// batches, which keeps every fill co-located with the operations that reference
+/// its taker and maker seqs.
+struct SettlementUnit {
     balance_operations: Vec<event::BalanceOperation>,
     fill: Option<FillEvent>,
 }
@@ -51,13 +52,14 @@ impl MatchSettlement {
     /// `order_updates` map, the terminal status of every resting, filled, and
     /// expired order.
     ///
-    /// The settling batches are bounded on the number of **balance operations**,
-    /// not fills. Those operations are the per-op writes against the balance
-    /// stable map that dominate the per-message instruction cost of
-    /// [`crate::state::State::record_settling_event`], so bounding their count
-    /// per event is what actually bounds that cost — whereas bounding fills
-    /// ignores the `Unreserve` operations emitted by killed and expired orders,
-    /// which carry no fill yet still write to the balance map.
+    /// The settling batches are bounded on the number of **settlement units** —
+    /// each a fill (with its balance operations) or a removed order (with its
+    /// `Unreserve` operation). A unit's per-message cost is dominated by its
+    /// writes against the balance stable map, which drive the instruction cost
+    /// of [`crate::state::State::record_settling_event`], so bounding the number
+    /// of units per event is what bounds that cost — and, unlike a fill-based
+    /// bound, it also covers the `Unreserve` operations emitted by killed and
+    /// expired orders, which carry no fill yet still write to the balance map.
     pub fn from_matching(
         output: MatchingOutput,
         fee_rates: FeeRates,
@@ -72,14 +74,13 @@ impl MatchSettlement {
         } = output;
         let mut order_updates = BTreeMap::new();
 
-        let mut groups: Vec<SettlementGroup> =
-            Vec::with_capacity(fills.len() + expired_orders.len());
+        let mut units: Vec<SettlementUnit> = Vec::with_capacity(fills.len() + expired_orders.len());
         for fill in fills {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
             let mut balance_operations = Vec::with_capacity(3);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(&mut order_updates);
-            groups.push(SettlementGroup {
+            units.push(SettlementUnit {
                 balance_operations,
                 fill: Some(settlement.fill_event()),
             });
@@ -88,13 +89,13 @@ impl MatchSettlement {
             let mut balance_operations = Vec::with_capacity(1);
             RemovedOrderSettlement::new(*seq, removed, base_scale)
                 .push_balance_operations(&mut balance_operations);
-            groups.push(SettlementGroup {
+            units.push(SettlementUnit {
                 balance_operations,
                 fill: None,
             });
         }
 
-        let settling_batches = pack_settlement_groups(groups, max_settlement_units_per_event);
+        let settling_batches = pack_settlement_units(units, max_settlement_units_per_event);
 
         for seq in &resting_orders {
             order_updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
@@ -112,14 +113,15 @@ impl MatchSettlement {
     }
 }
 
-/// Cut a stream of [`SettlementGroup`]s into [`SettlementBatch`]es bounded on
-/// balance-operation count. A running batch accumulates groups; before adding
-/// the next group, if the batch is non-empty and would exceed
-/// `max_settlement_units_per_event` operations, it is flushed and a fresh batch
-/// started. A group is never split across batches, so every fill stays
-/// co-located with the operations that reference its taker and maker seqs.
-fn pack_settlement_groups(
-    groups: Vec<SettlementGroup>,
+/// Cut a stream of [`SettlementUnit`]s into [`SettlementBatch`]es holding at
+/// most `max_settlement_units_per_event` whole units each. A running batch
+/// accumulates units; once it already holds the cap, it is flushed and a fresh
+/// batch started before the next unit is added. A unit is atomic and counted as
+/// one, so an event never exceeds the cap and a unit is never split across
+/// batches, keeping every fill co-located with the operations that reference its
+/// taker and maker seqs.
+fn pack_settlement_units(
+    units: Vec<SettlementUnit>,
     max_settlement_units_per_event: NonZeroU32,
 ) -> Vec<SettlementBatch> {
     let cap = max_settlement_units_per_event.get() as usize;
@@ -128,10 +130,9 @@ fn pack_settlement_groups(
         balance_operations: Vec::new(),
         fills: Vec::new(),
     };
-    for group in groups {
-        if !current.is_empty()
-            && current.balance_operations.len() + group.balance_operations.len() > cap
-        {
+    let mut units_in_current = 0usize;
+    for unit in units {
+        if units_in_current == cap {
             batches.push(std::mem::replace(
                 &mut current,
                 SettlementBatch {
@@ -139,11 +140,13 @@ fn pack_settlement_groups(
                     fills: Vec::new(),
                 },
             ));
+            units_in_current = 0;
         }
-        current.balance_operations.extend(group.balance_operations);
-        if let Some(fill) = group.fill {
+        current.balance_operations.extend(unit.balance_operations);
+        if let Some(fill) = unit.fill {
             current.fills.push(fill);
         }
+        units_in_current += 1;
     }
     if !current.is_empty() {
         batches.push(current);

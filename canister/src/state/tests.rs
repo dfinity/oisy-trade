@@ -3686,7 +3686,6 @@ mod pending_state_predicates {
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
-    const OPS_PER_FILL: usize = 2;
 
     #[test]
     fn should_report_no_pending_state_on_fresh_state() {
@@ -3722,10 +3721,10 @@ mod pending_state_predicates {
     }
 
     /// A taker whose fills produce more than `max_settlement_units_per_event`
-    /// balance operations splits the round into several operation-bounded
-    /// settling events, and draining all of them leaves exactly the state a
-    /// single unsplit event would have — the split is a pure batching of the
-    /// same operations.
+    /// settlement units splits the round into several unit-bounded settling
+    /// events, and draining all of them leaves exactly the state a single
+    /// unsplit event would have — the split is a pure batching of the same
+    /// operations.
     #[test]
     fn sweeping_over_cap_makers_splits_into_bounded_events_equivalent_to_one() {
         let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
@@ -3736,11 +3735,11 @@ mod pending_state_predicates {
         while let Some(event) = split_state.take_next_pending_settling_event() {
             events.push(event);
         }
-        assert_eq!(events.len(), (num_makers * OPS_PER_FILL).div_ceil(cap));
+        assert_eq!(events.len(), num_makers.div_ceil(cap));
         for event in &events {
             assert!(
-                event.balance_operations.len() <= cap,
-                "each settling event stays within the operation cap",
+                unit_count(event) <= cap,
+                "each settling event holds at most the unit cap",
             );
         }
         for event in &events {
@@ -3795,22 +3794,19 @@ mod pending_state_predicates {
         while let Some(event) = state.take_next_pending_settling_event() {
             events.push(event);
         }
-        assert_eq!(
-            events.len(),
-            (num_makers * OPS_PER_FILL).div_ceil(small_cap as usize)
-        );
+        assert_eq!(events.len(), num_makers.div_ceil(small_cap as usize));
         for event in &events {
             assert!(
-                event.balance_operations.len() <= small_cap as usize,
-                "each settling event stays within the policy operation cap",
+                unit_count(event) <= small_cap as usize,
+                "each settling event holds at most the policy unit cap",
             );
         }
     }
 
     /// A round that both fills and kills a fill-or-kill order packs the killed
-    /// order's refund through the same operation packer as the fills: it flows
+    /// order's refund unit through the same packer as the fill units: it flows
     /// into the trailing event rather than being crammed onto an already-full
-    /// event, so every event still respects the operation cap.
+    /// event, so every event still holds at most the unit cap.
     #[test]
     fn expired_refunds_pack_through_the_settling_events() {
         let mut state = setup_one_book();
@@ -3818,8 +3814,8 @@ mod pending_state_predicates {
         let lot = u128::from(LOT_SIZE.get());
         let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
         let num_makers = cap;
-        let refund_ops = 1;
-        let total_ops = num_makers * OPS_PER_FILL + refund_ops;
+        let refund_units = 1;
+        let total_units = num_makers + refund_units;
 
         place_sweep(&mut state, num_makers);
         let killed = test_fixtures::order(SELLER, &pair, Side::Buy, 50 * PRICE_SCALE, lot)
@@ -3831,11 +3827,11 @@ mod pending_state_predicates {
         while let Some(event) = state.take_next_pending_settling_event() {
             events.push(event);
         }
-        assert_eq!(events.len(), total_ops.div_ceil(cap));
+        assert_eq!(events.len(), total_units.div_ceil(cap));
         for event in &events {
             assert!(
-                event.balance_operations.len() <= cap,
-                "the refund never pushes an event past the operation cap",
+                unit_count(event) <= cap,
+                "the refund never pushes an event past the unit cap",
             );
         }
 
@@ -3855,6 +3851,15 @@ mod pending_state_predicates {
             refund_events, 1,
             "the kill refund appears in exactly one event"
         );
+    }
+
+    fn unit_count(event: &crate::state::event::SettlingEvent) -> usize {
+        let refunds = event
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, crate::state::event::BalanceOperation::Unreserve { .. }))
+            .count();
+        event.fills.len() + refunds
     }
 
     fn matched_sweep(
