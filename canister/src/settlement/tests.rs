@@ -120,15 +120,14 @@ mod settling_batches {
     use crate::order::{
         FeeRates, Fill, FillSeq, MatchingOutput, OrderSeq, Price, Quantity, RemovedOrder, Side,
     };
-    use crate::settlement::{
-        FillSettlement, MAX_FILLS_PER_SETTLING_EVENT, MatchSettlement, RemovedOrderSettlement,
-    };
+    use crate::settlement::{FillSettlement, MatchSettlement, RemovedOrderSettlement};
     use crate::state::event::BalanceOperation;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU64;
 
     const BASE_SCALE: u64 = 100_000_000;
+    const CAP: usize = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
 
     struct TestCase {
         desc: &'static str,
@@ -142,7 +141,7 @@ mod settling_batches {
     /// produced.
     #[test]
     fn partitions_fills_into_bounded_batches_preserving_flat_order() {
-        let cap = MAX_FILLS_PER_SETTLING_EVENT;
+        let cap = CAP;
         let cases = vec![
             TestCase {
                 desc: "no fills",
@@ -176,8 +175,12 @@ mod settling_batches {
             let all_fills = fills(case.num_fills);
             let (expected_ops, expected_fills) = flat_reference(&all_fills, base_scale);
 
-            let settlement =
-                MatchSettlement::from_matching(output(all_fills), FeeRates::default(), base_scale);
+            let settlement = MatchSettlement::from_matching(
+                output(all_fills),
+                FeeRates::default(),
+                base_scale,
+                cap,
+            );
 
             assert_eq!(
                 settlement.settling_batches.len(),
@@ -227,7 +230,7 @@ mod settling_batches {
     /// reproduces the flat order (all fill ops, then the refunds).
     #[test]
     fn appends_expired_refunds_to_the_last_batch() {
-        let cap = MAX_FILLS_PER_SETTLING_EVENT;
+        let cap = CAP;
         let cases = vec![
             RefundCase {
                 desc: "one over the cap: partial trailing batch",
@@ -320,7 +323,7 @@ mod settling_batches {
             filled_orders: BTreeSet::new(),
             expired_orders,
         };
-        MatchSettlement::from_matching(out, FeeRates::default(), base_scale)
+        MatchSettlement::from_matching(out, FeeRates::default(), base_scale, CAP)
     }
 
     fn expired_ops(num_expired: usize, base_scale: NonZeroU64) -> Vec<BalanceOperation> {

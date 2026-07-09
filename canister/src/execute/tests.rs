@@ -97,7 +97,7 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
-/// A single taker sweeping more than `MAX_FILLS_PER_SETTLING_EVENT` resting
+/// A single taker sweeping more than `max_fills_per_settling_event` resting
 /// makers produces several bounded settling events; under an unlimited budget
 /// one `run_once` matches and drains all of them, leaving no pending work and
 /// every order `Filled`.
@@ -108,7 +108,7 @@ fn should_drain_all_split_settling_events_in_one_run() {
     let runtime = runtime();
     let pair = icp_ckbtc_trading_pair();
     let lot = u64::from(LOT_SIZE);
-    let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
     let num_makers = cap + 2;
 
     let maker_ids: Vec<(Principal, OrderId)> = (0..num_makers)
@@ -477,7 +477,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
     // Minimum budget; mock returns a counter already past it.
-    state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
+    state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1, u32::MAX).unwrap());
     let mut mock = MockRuntime::new();
     mock.expect_time().return_const(crate::Timestamp::EPOCH);
     mock.expect_instruction_counter().return_const(1u64);
@@ -492,7 +492,12 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
 
 fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
     state.set_execution_policy(
-        ExecutionPolicy::try_new(max_orders_per_chunk, MAX_INSTRUCTION_BUDGET).unwrap(),
+        ExecutionPolicy::try_new(
+            max_orders_per_chunk,
+            MAX_INSTRUCTION_BUDGET,
+            oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
+        )
+        .unwrap(),
     );
 }
 

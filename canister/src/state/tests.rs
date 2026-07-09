@@ -56,6 +56,8 @@ mod assert_caller_is_allowed {
                 mode,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_fills_per_settling_event:
+                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
             },
             crate::state::OrderHistory::new(
                 ic_stable_structures::VectorMemory::default(),
@@ -3326,6 +3328,7 @@ mod execution_policy {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: 17,
                 instruction_budget: 12_345,
+                max_fills_per_settling_event: 42,
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
@@ -3340,7 +3343,7 @@ mod execution_policy {
 
         assert_eq!(
             state.execution_policy(),
-            &ExecutionPolicy::try_new(17, 12_345).unwrap()
+            &ExecutionPolicy::try_new(17, 12_345, 42).unwrap()
         );
     }
 }
@@ -3731,13 +3734,13 @@ mod pending_state_predicates {
         assert!(state.has_pending_settling_events());
     }
 
-    /// A taker sweeping more than `MAX_FILLS_PER_SETTLING_EVENT` resting makers
+    /// A taker sweeping more than `max_fills_per_settling_event` resting makers
     /// splits the round into several bounded settling events, and draining all
     /// of them leaves exactly the state a single unsplit event would have — the
     /// split is a pure batching of the same operations.
     #[test]
     fn sweeping_over_cap_makers_splits_into_bounded_events_equivalent_to_one() {
-        let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+        let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
         let num_makers = cap + 2;
 
         let mut split_state = matched_sweep(num_makers);
@@ -3780,6 +3783,67 @@ mod pending_state_predicates {
         );
     }
 
+    /// Lowering `max_fills_per_settling_event` on the `ExecutionPolicy` splits
+    /// the same round into more settling events, proving the cap is driven by
+    /// the policy rather than hardcoded.
+    #[test]
+    fn smaller_max_fills_per_settling_event_produces_more_events() {
+        let num_makers = 20usize;
+        let small_cap = 4u32;
+
+        let mut state = setup_one_book();
+        state.set_execution_policy(
+            crate::state::ExecutionPolicy::try_new(
+                u32::MAX,
+                oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                small_cap,
+            )
+            .unwrap(),
+        );
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for i in 0..num_makers {
+            test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                Side::Sell,
+                100 * PRICE_SCALE,
+                lot,
+            )
+            .place(&mut state);
+        }
+        test_fixtures::order(
+            BUYER,
+            &pair,
+            Side::Buy,
+            100 * PRICE_SCALE,
+            num_makers as u128 * lot,
+        )
+        .place(&mut state);
+        let book = state.order_book(&OrderBookId::ZERO).unwrap();
+        let matching_event = crate::state::event::MatchingEvent {
+            book_id: OrderBookId::ZERO,
+            orders: book.pending_order_seqs().collect(),
+        };
+        state.record_matching_event(
+            &matching_event,
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        assert_eq!(events.len(), num_makers.div_ceil(small_cap as usize));
+        for event in &events {
+            assert!(
+                event.fills.len() <= small_cap as usize,
+                "each settling event carries at most the policy cap fills",
+            );
+        }
+    }
+
     /// A round that both fills and kills a fill-or-kill order appends the killed
     /// order's refund to the last settling event, never to an earlier one.
     #[test]
@@ -3787,7 +3851,7 @@ mod pending_state_predicates {
         let mut state = setup_one_book();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
-        let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+        let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
         let num_makers = cap + 1;
 
         for i in 0..num_makers {

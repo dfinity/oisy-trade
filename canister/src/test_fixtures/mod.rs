@@ -83,6 +83,8 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_fills_per_settling_event:
+                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
         },
         order_history(),
         trade_history(),
@@ -100,6 +102,8 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_fills_per_settling_event:
+                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
         },
         crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
@@ -313,6 +317,8 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 mode: oisy_trade_types_internal::Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_fills_per_settling_event:
+                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
             },
             order_history,
             trade_history,
@@ -806,13 +812,22 @@ pub mod arbitrary {
 
     pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
         // Stay within ExecutionPolicy's validation bounds so `State::new` won't panic.
-        (arb_mode(), 1..=10_000u32, 1..=40_000_000_000u64).prop_map(
-            |(mode, max_orders_per_chunk, instruction_budget)| InitArg {
-                mode,
-                max_orders_per_chunk,
-                instruction_budget,
-            },
+        (
+            arb_mode(),
+            1..=10_000u32,
+            1..=40_000_000_000u64,
+            1..=10_000u32,
         )
+            .prop_map(
+                |(mode, max_orders_per_chunk, instruction_budget, max_fills_per_settling_event)| {
+                    InitArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_fills_per_settling_event,
+                    }
+                },
+            )
     }
 
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
@@ -820,12 +835,16 @@ pub mod arbitrary {
             option::of(arb_mode()),
             option::of(1..=10_000u32),
             option::of(1..=40_000_000_000u64),
+            option::of(1..=10_000u32),
         )
             .prop_map(
-                |(mode, max_orders_per_chunk, instruction_budget)| UpgradeArg {
-                    mode,
-                    max_orders_per_chunk,
-                    instruction_budget,
+                |(mode, max_orders_per_chunk, instruction_budget, max_fills_per_settling_event)| {
+                    UpgradeArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_fills_per_settling_event,
+                    }
                 },
             )
     }

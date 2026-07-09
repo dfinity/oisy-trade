@@ -57,15 +57,21 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             mode: new_mode,
             max_orders_per_chunk,
             instruction_budget,
+            max_fills_per_settling_event,
         }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
             }
-            if max_orders_per_chunk.is_some() || instruction_budget.is_some() {
+            if max_orders_per_chunk.is_some()
+                || instruction_budget.is_some()
+                || max_fills_per_settling_event.is_some()
+            {
                 let current = state.execution_policy();
                 let policy = crate::state::ExecutionPolicy::try_new(
                     max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
                     instruction_budget.unwrap_or_else(|| current.instruction_budget()),
+                    max_fills_per_settling_event
+                        .unwrap_or_else(|| current.max_fills_per_settling_event()),
                 )
                 .unwrap_or_else(|e| panic!("BUG: invalid ExecutionPolicy: {e}"));
                 state.set_execution_policy(policy);

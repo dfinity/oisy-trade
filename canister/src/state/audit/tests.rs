@@ -79,7 +79,7 @@ impl Scenario {
         if let Some(ref m) = mode {
             self.state.set_mode(m.clone());
         }
-        self.events.push(upgrade_event(mode, None, None));
+        self.events.push(upgrade_event(mode, None, None, None));
         self
     }
 
@@ -87,15 +87,21 @@ impl Scenario {
         mut self,
         max_orders_per_chunk: u32,
         instruction_budget: u64,
+        max_fills_per_settling_event: u32,
     ) -> Self {
         self.state.set_execution_policy(
-            crate::state::ExecutionPolicy::try_new(max_orders_per_chunk, instruction_budget)
-                .unwrap(),
+            crate::state::ExecutionPolicy::try_new(
+                max_orders_per_chunk,
+                instruction_budget,
+                max_fills_per_settling_event,
+            )
+            .unwrap(),
         );
         self.events.push(upgrade_event(
             None,
             Some(max_orders_per_chunk),
             Some(instruction_budget),
+            Some(max_fills_per_settling_event),
         ));
         self
     }
@@ -426,7 +432,7 @@ fn should_replay_upgrade_without_mode_change() {
 #[test]
 fn should_replay_execution_policy_change_on_upgrade() {
     Scenario::new()
-        .with_upgrade_execution_policy(123, 4_567_890)
+        .with_upgrade_execution_policy(123, 4_567_890, 64)
         .assert_replay_matches();
 }
 
@@ -722,7 +728,7 @@ fn should_replay_matching_with_price_improvement() {
         .assert_replay_matches();
 }
 
-/// A matching round with more than `MAX_FILLS_PER_SETTLING_EVENT` fills is
+/// A matching round with more than `max_fills_per_settling_event` fills is
 /// enqueued as several bounded settling events; replaying that multi-event log
 /// must reconstruct exactly the same state the primary path produced.
 #[test]
@@ -731,7 +737,7 @@ fn should_replay_matching_round_split_across_multiple_settling_events() {
     let price = 100u128;
     let quantity = 1_000_000u128;
     let book_id = OrderBookId::ZERO;
-    let cap = crate::settlement::MAX_FILLS_PER_SETTLING_EVENT;
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT as usize;
     let num_makers = cap + 1;
 
     let mut scenario = Scenario::new().with_trading_pair().with_deposit(
@@ -954,7 +960,7 @@ fn should_panic_on_empty_events() {
 #[should_panic(expected = "the first event must be an Init event")]
 fn should_panic_when_first_event_is_not_init() {
     replay_events(
-        vec![upgrade_event(None, None, None)],
+        vec![upgrade_event(None, None, None, None)],
         order_history(),
         trade_history(),
         user_registry(),

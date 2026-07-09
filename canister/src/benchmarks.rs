@@ -467,6 +467,8 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             mode: Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_fills_per_settling_event:
+                oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
         },
         OrderHistory::new(
             storage::order_history_memory(),
@@ -715,8 +717,8 @@ where
 /// One taker crossing many resting makers used to produce a single oversized
 /// settling event applied in one message, whose cost scaled with the number of
 /// fills until it trapped the message. The round now partitions its fills into
-/// bounded settling events (`crate::settlement::MAX_FILLS_PER_SETTLING_EVENT`
-/// fills each), and the executor checks the instruction budget between events,
+/// bounded settling events (`max_fills_per_settling_event` fills each), and the
+/// executor checks the instruction budget between events,
 /// so the same sweep drains as many small events. This bench keeps the worst
 /// case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
 /// resting min-notional sell orders (each from a distinct principal, one fill
@@ -862,7 +864,7 @@ mod settling_event_sweep {
         // One fill-or-kill buy sized to the whole book: it crosses every maker
         // at `MAKER_PRICE` and fully fills, emptying the book across the bounded
         // settling events its fills partition into (each at most
-        // `MAX_FILLS_PER_SETTLING_EVENT` fills), whose combined application cost
+        // `max_fills_per_settling_event` fills), whose combined application cost
         // scales with `num_makers`.
         let taker = super::user(num_makers);
         super::fund_user(&mut state, taker);
@@ -904,6 +906,8 @@ mod settling_event_sweep {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_fills_per_settling_event:
+                    oisy_trade_types_internal::DEFAULT_MAX_FILLS_PER_SETTLING_EVENT,
             },
             OrderHistory::new(
                 storage::order_history_memory(),

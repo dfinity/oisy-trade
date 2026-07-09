@@ -11,15 +11,6 @@ use std::num::NonZeroU64;
 #[cfg(test)]
 mod tests;
 
-/// The maximum number of [`FillEvent`]s packed into a single settling event, so
-/// a matching chunk emits `ceil(N / cap)` bounded events instead of one, and the
-/// per-message cost of applying any one event stays well under the instruction
-/// cap. At ~1.75M instructions per fill applied, a full event costs ≈ 224M
-/// instructions — ~4.5× under the 1B `DEFAULT_INSTRUCTION_BUDGET` and ~178×
-/// under the 40B `MAX_INSTRUCTION_BUDGET` — and above every existing test's
-/// per-round fill count, so only the dedicated sweep tests exercise the split.
-pub const MAX_FILLS_PER_SETTLING_EVENT: usize = 128;
-
 /// The full set of stable-memory state changes a matching round settles into:
 /// the per-order record updates (fill deltas plus terminal status) applied in
 /// one pass, and the balance operations and lean per-fill [`FillEvent`]s
@@ -32,7 +23,7 @@ pub struct MatchSettlement {
 }
 
 /// A bounded slice of a matching round's settlement: at most
-/// [`MAX_FILLS_PER_SETTLING_EVENT`] fills together with the balance operations
+/// `max_fills_per_settling_event` fills together with the balance operations
 /// they produced. A fill and its operations are always kept in the same batch so
 /// that the settling phase can resolve each fill's taker/maker order seqs from
 /// the operations of the same event.
@@ -52,6 +43,7 @@ impl MatchSettlement {
         output: MatchingOutput,
         fee_rates: FeeRates,
         base_scale: NonZeroU64,
+        max_fills_per_settling_event: usize,
     ) -> Self {
         let MatchingOutput {
             fills,
@@ -59,25 +51,23 @@ impl MatchSettlement {
             filled_orders,
             expired_orders,
         } = output;
+        let batch_capacity = max_fills_per_settling_event.min(fills.len());
         let mut order_updates = BTreeMap::new();
         let mut settling_batches: Vec<SettlementBatch> = Vec::new();
-        let mut balance_operations = Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT * 3);
-        let mut batch_fills = Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT);
+        let mut balance_operations = Vec::with_capacity(batch_capacity * 3);
+        let mut batch_fills = Vec::with_capacity(batch_capacity);
         for fill in fills {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
             settlement.push_balance_operations(&mut balance_operations);
             settlement.accrue_fill(&mut order_updates);
             batch_fills.push(settlement.fill_event());
-            if batch_fills.len() == MAX_FILLS_PER_SETTLING_EVENT {
+            if batch_fills.len() == max_fills_per_settling_event {
                 settling_batches.push(SettlementBatch {
                     balance_operations: std::mem::replace(
                         &mut balance_operations,
-                        Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT * 3),
+                        Vec::with_capacity(batch_capacity * 3),
                     ),
-                    fills: std::mem::replace(
-                        &mut batch_fills,
-                        Vec::with_capacity(MAX_FILLS_PER_SETTLING_EVENT),
-                    ),
+                    fills: std::mem::replace(&mut batch_fills, Vec::with_capacity(batch_capacity)),
                 });
             }
         }

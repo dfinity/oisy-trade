@@ -109,8 +109,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
-        let execution_policy =
-            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
+        let execution_policy = ExecutionPolicy::try_new(
+            init_arg.max_orders_per_chunk,
+            init_arg.instruction_budget,
+            init_arg.max_fills_per_settling_event,
+        )?;
         Ok(Self {
             mode: init_arg.mode,
             execution_policy,
@@ -400,7 +403,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let settlement = MatchSettlement::from_matching(output, fee_rates, base_scale);
+            let max_fills_per_settling_event =
+                self.execution_policy.max_fills_per_settling_event() as usize;
+            let settlement = MatchSettlement::from_matching(
+                output,
+                fee_rates,
+                base_scale,
+                max_fills_per_settling_event,
+            );
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");

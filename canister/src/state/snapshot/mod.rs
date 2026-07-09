@@ -6,7 +6,8 @@
 //! snapshot. Everything else [`State`] carries — `mode`, `next_book_id`,
 //! `tokens`, `trading_pairs`, `order_books`, `ledger_fee_cache`,
 //! `pending_settling_events`, the chunked-matching `execution_policy`
-//! (`max_orders_per_chunk` + `instruction_budget`), and the heap-resident
+//! (`max_orders_per_chunk` + `instruction_budget` +
+//! `max_fills_per_settling_event`), and the heap-resident
 //! `fee_pool` inside [`crate::balance::TokenBalance`] — is serialized
 //! here at `pre_upgrade` and restored at `post_upgrade`.
 
@@ -24,7 +25,7 @@ use crate::user::UserRegistry;
 use candid::Nat;
 use ic_stable_structures::Memory;
 use minicbor::{Decode, Encode};
-use oisy_trade_types_internal::Mode;
+use oisy_trade_types_internal::{DEFAULT_MAX_FILLS_PER_SETTLING_EVENT, Mode};
 use std::collections::{BTreeMap, VecDeque};
 
 #[cfg(test)]
@@ -61,6 +62,8 @@ pub struct StateSnapshot {
     /// an absent field (e.g. a pre-change snapshot) decodes to the default.
     #[n(10)]
     pub permissions: Option<PermissionsSnapshot>,
+    #[n(11)]
+    pub max_fills_per_settling_event: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -153,6 +156,7 @@ impl StateSnapshot {
             },
             max_orders_per_chunk: Some(execution_policy.max_orders_per_chunk()),
             instruction_budget: Some(execution_policy.instruction_budget()),
+            max_fills_per_settling_event: Some(execution_policy.max_fills_per_settling_event()),
             fee_pool: {
                 let snapshot = balances.fee_pool_snapshot();
                 if snapshot.is_empty() {
@@ -225,18 +229,30 @@ impl StateSnapshot {
 
         let permissions = self.permissions.map(Permissions::from).unwrap_or_default();
 
-        let execution_policy = match (self.max_orders_per_chunk, self.instruction_budget) {
-            (Some(max), Some(budget)) => ExecutionPolicy::try_new(max, budget)
+        let execution_policy = match (
+            self.max_orders_per_chunk,
+            self.instruction_budget,
+            self.max_fills_per_settling_event,
+        ) {
+            (Some(max), Some(budget), Some(fills)) => ExecutionPolicy::try_new(max, budget, fills)
                 .expect("BUG: snapshot carried an invalid ExecutionPolicy"),
-            // Snapshots written before this PR carry neither field; fall
-            // back to the production default. Partial states (exactly one
-            // field) imply a schema regression and trap so the bug
+            // Snapshots written after the two-field policy but before this
+            // PR carry no `max_fills_per_settling_event`; fall back to the
+            // production default for that field alone.
+            (Some(max), Some(budget), None) => {
+                ExecutionPolicy::try_new(max, budget, DEFAULT_MAX_FILLS_PER_SETTLING_EVENT)
+                    .expect("BUG: snapshot carried an invalid ExecutionPolicy")
+            }
+            // Snapshots written before the policy was persisted carry no
+            // fields; fall back to the production default. Any other partial
+            // combination implies a schema regression and traps so the bug
             // surfaces instead of silently reverting to defaults.
-            (None, None) => ExecutionPolicy::default(),
-            (max, budget) => panic!(
+            (None, None, None) => ExecutionPolicy::default(),
+            (max, budget, fills) => panic!(
                 "invalid snapshot: partial execution policy fields \
-                 (max_orders_per_chunk={:?}, instruction_budget={:?})",
-                max, budget,
+                 (max_orders_per_chunk={:?}, instruction_budget={:?}, \
+                 max_fills_per_settling_event={:?})",
+                max, budget, fills,
             ),
         };
 
