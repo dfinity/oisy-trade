@@ -318,14 +318,8 @@ pub async fn deposit(
             .permit_deposit(caller, s.is_trading_account(&caller))
     })
     .map_err(|e| match e {
-        state::permissions::UnauthorizedError::TradingAccountCannotFund => DepositError::request(
-            oisy_trade_types::DepositRequestError::TradingAccountCannotDeposit,
-        ),
-        state::permissions::UnauthorizedError::TradingHalted => {
-            unreachable!("permit_deposit does not check trading halt")
-        }
-        state::permissions::UnauthorizedError::NotController => {
-            unreachable!("permit_deposit is not controller-gated")
+        state::permissions::FundingDenied::TradingAccountForbidden => {
+            DepositError::request(oisy_trade_types::DepositRequestError::TradingAccountForbidden)
         }
     })?;
 
@@ -400,14 +394,8 @@ pub async fn withdraw(
             .permit_withdraw(caller, s.is_trading_account(&caller))
     })
     .map_err(|e| match e {
-        state::permissions::UnauthorizedError::TradingAccountCannotFund => WithdrawError::request(
-            oisy_trade_types::WithdrawRequestError::TradingAccountCannotWithdraw,
-        ),
-        state::permissions::UnauthorizedError::TradingHalted => {
-            unreachable!("permit_withdraw does not check trading halt")
-        }
-        state::permissions::UnauthorizedError::NotController => {
-            unreachable!("permit_withdraw is not controller-gated")
+        state::permissions::FundingDenied::TradingAccountForbidden => {
+            WithdrawError::request(oisy_trade_types::WithdrawRequestError::TradingAccountForbidden)
         }
     })?;
 

@@ -1307,9 +1307,6 @@ impl From<permissions::UnauthorizedError> for AddLimitOrderError {
             permissions::UnauthorizedError::NotController => {
                 unreachable!("permit_trading is not controller-gated")
             }
-            permissions::UnauthorizedError::TradingAccountCannotFund => {
-                unreachable!("permit_trading does not deny trading accounts")
-            }
         }
     }
 }

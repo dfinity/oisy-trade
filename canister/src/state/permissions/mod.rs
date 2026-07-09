@@ -15,9 +15,14 @@ pub struct Permissions {
 pub enum UnauthorizedError {
     TradingHalted,
     NotController,
+}
+
+/// Why a funding operation (deposit / withdraw) was denied admission.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FundingDenied {
     /// The caller is a trading account, which can never hold DEX balances and
     /// so cannot deposit or withdraw.
-    TradingAccountCannotFund,
+    TradingAccountForbidden,
 }
 
 /// Proof that a synchronous admission check ran and passed.
@@ -133,9 +138,9 @@ impl Permissions {
         &self,
         _caller: Principal,
         caller_is_trading_account: bool,
-    ) -> Result<PreAsyncPermit, UnauthorizedError> {
+    ) -> Result<PreAsyncPermit, FundingDenied> {
         if caller_is_trading_account {
-            return Err(UnauthorizedError::TradingAccountCannotFund);
+            return Err(FundingDenied::TradingAccountForbidden);
         }
         Ok(PreAsyncPermit(()))
     }
@@ -149,9 +154,9 @@ impl Permissions {
         &self,
         _caller: Principal,
         caller_is_trading_account: bool,
-    ) -> Result<PreAsyncPermit, UnauthorizedError> {
+    ) -> Result<PreAsyncPermit, FundingDenied> {
         if caller_is_trading_account {
-            return Err(UnauthorizedError::TradingAccountCannotFund);
+            return Err(FundingDenied::TradingAccountForbidden);
         }
         Ok(PreAsyncPermit(()))
     }
