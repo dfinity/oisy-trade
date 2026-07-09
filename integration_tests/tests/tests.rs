@@ -4111,6 +4111,7 @@ mod trading_accounts {
         // synchronous, before any ledger interaction.
         let trading_client = setup.oisy_trade_client_with_caller(trading);
         let token = setup.quote_token_id();
+        let events_before = setup.get_all_events().await.len();
 
         let deposit_err = trading_client
             .deposit(DepositRequest {
@@ -4121,7 +4122,7 @@ mod trading_accounts {
             .unwrap_err();
         assert_matches!(
             deposit_err.kind,
-            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountCannotDeposit))
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
         );
 
         let withdraw_err = trading_client
@@ -4133,7 +4134,13 @@ mod trading_accounts {
             .unwrap_err();
         assert_matches!(
             withdraw_err.kind,
-            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountCannotWithdraw))
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountForbidden))
+        );
+
+        assert_eq!(
+            setup.get_all_events().await.len(),
+            events_before,
+            "the denied funding operations record no events"
         );
 
         setup.drop().await;
