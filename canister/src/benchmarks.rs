@@ -710,20 +710,27 @@ where
     res
 }
 
-/// DEFI-2913 — bound settling-event application cost during matching.
+/// Bound settling-event application cost during matching.
 ///
 /// One taker crossing many resting makers used to produce a single oversized
-/// settling event applied in one message, whose cost scaled linearly with the
-/// number of fills and, past ~23_000 fills, trapped the message. The round now
-/// partitions its fills into bounded settling events
-/// (`crate::settlement::MAX_FILLS_PER_SETTLING_EVENT` fills each), and the
-/// executor checks the instruction budget between events, so the same sweep
-/// drains as many small events. This bench keeps the worst case under the
-/// mainnet ICP/ckUSDT listing parameters: a book of 22_900 resting min-notional
-/// sell orders (each from a distinct principal, one fill each) swept by a single
-/// fill-or-kill buy that empties the book. Under an unlimited per-message budget
+/// settling event applied in one message, whose cost scaled with the number of
+/// fills until it trapped the message. The round now partitions its fills into
+/// bounded settling events (`crate::settlement::MAX_FILLS_PER_SETTLING_EVENT`
+/// fills each), and the executor checks the instruction budget between events,
+/// so the same sweep drains as many small events. This bench keeps the worst
+/// case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
+/// resting min-notional sell orders (each from a distinct principal, one fill
+/// each) swept by a single fill-or-kill buy that empties the book. Under an
+/// unlimited per-message budget
 /// (`crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`, 40B instructions)
 /// all the resulting bounded events drain in one `run_once`.
+///
+/// 22_900 is the largest sweep that measured under the 40B cap before the fix
+/// (~38.46B). Cost near the cap was step-wise, not smooth — the ~1.68M
+/// instructions/maker average alone would extrapolate the crossing to ~23_800,
+/// but the stable memory grew another chunk just above 22_900, pushing the
+/// ~23_000 sweep to ~40.30B (both canbench measurements). The fix removes the
+/// trap regardless of the exact crossing point.
 mod settling_event_sweep {
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderStatus, PendingOrder, Price, Quantity, Side, TickSize,
