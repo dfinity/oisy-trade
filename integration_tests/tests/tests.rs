@@ -3931,11 +3931,12 @@ mod halt {
 
 mod trading_accounts {
     use assert_matches::assert_matches;
-    use candid::Principal;
+    use candid::{Nat, Principal};
     use oisy_trade_int_tests::Setup;
     use oisy_trade_types::{
-        AddTradingAccountRequestError, AddTradingAccountTemporaryError, ErrorKind,
-        RemoveTradingAccountRequestError,
+        AddTradingAccountRequestError, AddTradingAccountTemporaryError, DepositRequest,
+        DepositRequestError, ErrorKind, RemoveTradingAccountRequestError, WithdrawRequest,
+        WithdrawRequestError,
     };
     use std::time::Duration;
 
@@ -4093,6 +4094,54 @@ mod trading_accounts {
         // lifecycle needs caller resolution on orders (PR 5/6); the spec
         // sequences the full deposit→grant→trade→revoke→stranger lifecycle into
         // PR 6, so it is intentionally not covered here.
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_deny_funding_operations_to_a_trading_account() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let owner = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        owner.add_trading_account(trading).await.unwrap();
+
+        // The trading account can neither deposit nor withdraw — the denial is
+        // synchronous, before any ledger interaction.
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+        let token = setup.quote_token_id();
+        let events_before = setup.get_all_events().await.len();
+
+        let deposit_err = trading_client
+            .deposit(DepositRequest {
+                token_id: token.clone(),
+                amount: Nat::from(1_000u64),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(
+            deposit_err.kind,
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
+        );
+
+        let withdraw_err = trading_client
+            .withdraw(WithdrawRequest {
+                token_id: token,
+                amount: Nat::from(1_000u64),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(
+            withdraw_err.kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountForbidden))
+        );
+
+        assert_eq!(
+            setup.get_all_events().await.len(),
+            events_before,
+            "the denied funding operations record no events"
+        );
 
         setup.drop().await;
     }

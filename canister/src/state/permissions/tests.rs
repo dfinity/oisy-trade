@@ -1,6 +1,6 @@
-use super::{Permissions, UnauthorizedError};
+use super::{FundingDenied, Permissions, UnauthorizedError};
 use crate::order::OrderBookId;
-use crate::test_fixtures::arbitrary::arb_book_halted_permissions;
+use crate::test_fixtures::arbitrary::{arb_book_halted_permissions, arb_principal};
 use candid::Principal;
 use proptest::prelude::*;
 
@@ -25,8 +25,8 @@ proptest! {
             Err(UnauthorizedError::TradingHalted)
         ));
 
-        let _ = permissions.permit_deposit(caller);
-        let _ = permissions.permit_withdraw(caller);
+        prop_assert!(permissions.permit_deposit(caller, false).is_ok());
+        prop_assert!(permissions.permit_withdraw(caller, false).is_ok());
         let _ = permissions.permit_cancel();
         let _ = permissions.permit_settling();
         let _ = permissions.permit_add_trading_pair();
@@ -57,12 +57,35 @@ fn should_permit_every_event_on_empty_permissions() {
 
     assert!(permissions.permit_trading(caller, BOOK).is_ok());
     assert!(permissions.permit_matching(BOOK).is_ok());
-    let _ = permissions.permit_deposit(caller);
-    let _ = permissions.permit_withdraw(caller);
+    assert!(permissions.permit_deposit(caller, false).is_ok());
+    assert!(permissions.permit_withdraw(caller, false).is_ok());
     let _ = permissions.permit_cancel();
     let _ = permissions.permit_settling();
     let _ = permissions.permit_add_trading_pair();
     let _ = permissions.permit_admin();
+}
+
+proptest! {
+    /// The funding permits gate solely on `caller_is_trading_account`, never on
+    /// the principal: for any caller, a trading account is denied and any other
+    /// caller is admitted. Guards against a future change that consulted the
+    /// principal.
+    #[test]
+    fn should_gate_funding_only_on_trading_account_status(
+        caller in arb_principal(),
+        is_trading_account in any::<bool>(),
+    ) {
+        let permissions = Permissions::default();
+        let deposit = permissions.permit_deposit(caller, is_trading_account);
+        let withdraw = permissions.permit_withdraw(caller, is_trading_account);
+        if is_trading_account {
+            prop_assert!(matches!(deposit, Err(FundingDenied::TradingAccountForbidden)));
+            prop_assert!(matches!(withdraw, Err(FundingDenied::TradingAccountForbidden)));
+        } else {
+            prop_assert!(deposit.is_ok());
+            prop_assert!(withdraw.is_ok());
+        }
+    }
 }
 
 #[test]

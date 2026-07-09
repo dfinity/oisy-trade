@@ -454,6 +454,8 @@ type DepositError = record {
             InsufficientFunds : record { balance : nat };
             // The caller's ICRC-2 allowance to the canister is not large enough.
             InsufficientAllowance : record { allowance : nat };
+            // The caller is a trading account, which can never hold DEX balances.
+            TradingAccountForbidden;
         };
         TemporaryError : opt variant {
             // Another deposit or withdrawal is already in flight for this
@@ -525,6 +527,8 @@ type WithdrawError = record {
             UnsupportedToken : record { token_id : TokenId };
             // The caller does not have enough free balance.
             InsufficientBalance : record { available : nat };
+            // The caller is a trading account, which can never hold DEX balances.
+            TradingAccountForbidden;
         };
         TemporaryError : opt variant {
             // Another deposit or withdrawal is already in flight for this

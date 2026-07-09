@@ -249,6 +249,10 @@ pub enum DepositRequestError {
         /// The current allowance.
         allowance: Nat,
     },
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot deposit.
+    #[error("a trading account cannot deposit")]
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a deposit can fail.
@@ -321,6 +325,10 @@ pub enum WithdrawRequestError {
         /// The caller's available free balance.
         available: Nat,
     },
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot withdraw.
+    #[error("a trading account cannot withdraw")]
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a withdrawal can fail.

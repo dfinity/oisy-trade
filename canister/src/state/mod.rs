@@ -878,6 +878,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.user_registry.trading_accounts_of(funding)
     }
 
+    /// Returns `true` if `principal` is currently a trading account (delegate)
+    /// of some funding account. Used to deny funding operations to trading
+    /// accounts.
+    pub fn is_trading_account(&self, principal: &Principal) -> bool {
+        self.user_registry.is_trading_account(principal)
+    }
+
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
         self.ledger_fee_cache
             .get(token_id)
