@@ -925,8 +925,6 @@ mod resolution_on_reads {
         }
     }
 
-    /// Funds `FUNDING`, gives it a filled order (and thus balances, an order,
-    /// and trades), then whitelists `TRADING` as its trading account.
     fn setup_funding_with_activity() {
         init_state_with_order_book();
         fund_user(FUNDING);
@@ -998,8 +996,6 @@ mod resolution_on_reads {
 
     #[test]
     fn should_return_empty_reads_for_an_unknown_principal() {
-        // The genuine resolve-to-self is covered by the registry unit test in
-        // `user::tests`; here we only assert an unknown principal reads empty.
         setup_funding_with_activity();
 
         assert_eq!(get_balances(None, UNKNOWN), Ok(vec![]));
