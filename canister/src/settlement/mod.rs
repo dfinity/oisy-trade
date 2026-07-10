@@ -39,10 +39,12 @@ pub struct SettlementBatch {
 
 /// The atomic, indivisible piece of settlement work the packer counts and cuts
 /// settling batches from: a fill (its `Some(fill_event())` together with its 2–3
-/// balance operations) or a removed (canceled, killed, or expired) order (its
-/// single `Unreserve` operation with `None`). A unit is never split across
-/// batches, which keeps every fill co-located with the operations that reference
-/// its taker and maker seqs.
+/// balance operations) or an order killed/expired during matching — a marketable
+/// or FOK order dropped as `MatchResult::Killed` on the matching walk — releasing
+/// its reservation via its single `Unreserve` operation with `None`. User
+/// cancellations run through a separate path and are not settled here. A unit is
+/// never split across batches, which keeps every fill co-located with the
+/// operations that reference its taker and maker seqs.
 struct SettlementUnit {
     balance_operations: Vec<event::BalanceOperation>,
     fill: Option<FillEvent>,
