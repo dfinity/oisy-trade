@@ -32,9 +32,23 @@ pub struct MatchSettlement {
 /// operations — so co-locating them is what keeps the fill's taker and maker
 /// seqs resolvable from that cache (an absent seq would panic the resolution
 /// `.expect(...)`).
+#[derive(Default)]
 pub struct SettlementBatch {
     pub balance_operations: Vec<event::BalanceOperation>,
     pub fills: Vec<FillEvent>,
+}
+
+impl SettlementBatch {
+    fn add_unit(&mut self, unit: SettlementUnit) {
+        self.balance_operations.extend(unit.balance_operations);
+        if let Some(fill) = unit.fill {
+            self.fills.push(fill);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.balance_operations.is_empty() && self.fills.is_empty()
+    }
 }
 
 /// The atomic, indivisible piece of settlement work the packer counts and cuts
@@ -132,38 +146,20 @@ fn pack_settlement_units(
 ) -> Vec<SettlementBatch> {
     let cap = max_settlement_units_per_event.get() as usize;
     let mut batches: Vec<SettlementBatch> = Vec::new();
-    let mut current = SettlementBatch {
-        balance_operations: Vec::new(),
-        fills: Vec::new(),
-    };
+    let mut current = SettlementBatch::default();
     let mut units_in_current = 0usize;
     for unit in units {
         if units_in_current == cap {
-            batches.push(std::mem::replace(
-                &mut current,
-                SettlementBatch {
-                    balance_operations: Vec::new(),
-                    fills: Vec::new(),
-                },
-            ));
+            batches.push(std::mem::take(&mut current));
             units_in_current = 0;
         }
-        current.balance_operations.extend(unit.balance_operations);
-        if let Some(fill) = unit.fill {
-            current.fills.push(fill);
-        }
+        current.add_unit(unit);
         units_in_current += 1;
     }
     if !current.is_empty() {
         batches.push(current);
     }
     batches
-}
-
-impl SettlementBatch {
-    pub fn is_empty(&self) -> bool {
-        self.balance_operations.is_empty() && self.fills.is_empty()
-    }
 }
 
 /// A single [`Fill`] together with the realized values derived from it, computed

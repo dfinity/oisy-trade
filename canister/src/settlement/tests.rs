@@ -120,7 +120,9 @@ mod settling_batches {
     use crate::order::{
         FeeRates, Fill, FillSeq, MatchingOutput, OrderSeq, Price, Quantity, RemovedOrder, Side,
     };
-    use crate::settlement::{FillSettlement, MatchSettlement, RemovedOrderSettlement};
+    use crate::settlement::{
+        FillSettlement, MatchSettlement, RemovedOrderSettlement, SettlementBatch,
+    };
     use crate::state::event::BalanceOperation;
     use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
     use std::collections::{BTreeMap, BTreeSet};
@@ -244,6 +246,11 @@ mod settling_batches {
             );
             assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
         }
+    }
+
+    #[test]
+    fn should_be_empty_when_default_batch_instantiated() {
+        assert!(SettlementBatch::default().is_empty());
     }
 
     fn removed_order_units(batch: &crate::settlement::SettlementBatch) -> usize {
