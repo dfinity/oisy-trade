@@ -952,6 +952,11 @@ mod resolution_on_reads {
             get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
             "a trading account sees its funding account's orders"
         );
+        let orders = get_my_orders(Some(GetMyOrdersArgs::default()), TRADING).unwrap();
+        assert!(
+            orders.iter().all(|o| o.order.owner == FUNDING),
+            "a trading account's orders are owned by the funding account (resolution returned FUNDING)"
+        );
         assert_eq!(
             get_my_trades(account_trades(), TRADING),
             get_my_trades(account_trades(), FUNDING),
