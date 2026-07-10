@@ -10,6 +10,9 @@ fn init_arg() -> InitArg {
         mode: Mode::GeneralAvailability,
         max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
         instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+        max_settlement_units_per_event: Some(
+            oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+        ),
     }
 }
 

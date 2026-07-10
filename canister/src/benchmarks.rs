@@ -467,6 +467,9 @@ fn new_state_with_fees(fee_rates: FeeRates) -> State<storage::VMem, storage::VMe
             mode: Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         },
         OrderHistory::new(
             storage::order_history_memory(),
@@ -710,25 +713,28 @@ where
     res
 }
 
-/// Worst-case settling-event application cost during matching: an unbounded
-/// single-event maker sweep (the DoS/trap surface).
+/// Bound settling-event application cost during matching.
 ///
-/// One taker crossing many resting makers produces a single oversized settling
-/// event that is applied in one message with no per-op instruction check, so
-/// its cost scales with the number of fills. This bench reproduces the worst
+/// One taker crossing many resting makers used to produce a single oversized
+/// settling event applied in one message, whose cost scaled with the number of
+/// settlement units until it trapped the message. The round now partitions its
+/// settlement units into bounded settling events (at most
+/// `max_settlement_units_per_event` units each), and the executor checks
+/// the instruction budget between events,
+/// so the same sweep drains as many small events. This bench keeps the worst
 /// case under the mainnet ICP/ckUSDT listing parameters: a book of 22_900
 /// resting min-notional sell orders (each from a distinct principal, one fill
-/// each) swept by a single fill-or-kill buy that empties the book in one
-/// settling event.
+/// each) swept by a single fill-or-kill buy that empties the book. Under an
+/// unlimited per-message budget
+/// (`crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`, 40B instructions)
+/// all the resulting bounded events drain in one `run_once`.
 ///
-/// 22_900 is the largest maker count whose sweep still fits under the IC
-/// per-message cap (40B instructions,
-/// `crate::state::execution_policy::MAX_INSTRUCTION_BUDGET`): it measures
-/// ~38.46B. Cost near the cap is step-wise, not smooth — the ~1.68M
+/// 22_900 is the largest sweep that measured under the 40B cap before the fix
+/// (~38.46B). Cost near the cap was step-wise, not smooth — the ~1.68M
 /// instructions/maker average alone would extrapolate the crossing to ~23_800,
-/// but the stable memory grows another chunk just above 22_900, and that
-/// discrete jump pushes the ~23_000 sweep to ~40.30B, over the cap. Both
-/// figures are canbench measurements.
+/// but the stable memory grew another chunk just above 22_900, pushing the
+/// ~23_000 sweep to ~40.30B (both canbench measurements). The fix removes the
+/// trap regardless of the exact crossing point.
 mod settling_event_sweep {
     use crate::order::{
         FeeRates, LotSize, OrderBookId, OrderStatus, PendingOrder, Price, Quantity, Side, TickSize,
@@ -736,7 +742,8 @@ mod settling_event_sweep {
     };
     use crate::order::{OrderHistory, TradeHistory};
     use crate::state::State;
-    use crate::state::execution_policy::ExecutionPolicy;
+    use crate::state::event::EventType;
+    use crate::state::execution_policy::{ExecutionPolicy, MAX_INSTRUCTION_BUDGET};
     use crate::storage;
     use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
     use async_trait::async_trait;
@@ -851,15 +858,24 @@ mod settling_event_sweep {
                 },
             );
         }
-        state.set_execution_policy(ExecutionPolicy::MAX);
+        state.set_execution_policy(
+            ExecutionPolicy::try_new(
+                u32::MAX,
+                MAX_INSTRUCTION_BUDGET,
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            )
+            .unwrap(),
+        );
         EXECUTOR.run_once(&mut state, &SweepRuntime::new());
         let book = state.get_order_book(&pair).unwrap();
         assert_eq!(book.pending_orders_len(), 0);
         assert_eq!(book.resting_orders_len(), num_makers as usize);
 
         // One fill-or-kill buy sized to the whole book: it crosses every maker
-        // at `MAKER_PRICE` and fully fills, emptying the book in a single
-        // settling event whose application cost scales with `num_makers`.
+        // at `MAKER_PRICE` and fully fills, emptying the book across the bounded
+        // settling events its settlement units partition into (each at most
+        // `max_settlement_units_per_event` units), whose combined application
+        // cost scales with `num_makers`.
         let taker = super::user(num_makers);
         super::fund_user(&mut state, taker);
         let buy = super::place_order(
@@ -873,6 +889,7 @@ mod settling_event_sweep {
             },
         );
 
+        let events_before = storage::total_event_count();
         let res = canbench_rs::bench_fn(|| {
             EXECUTOR.run_once(&mut state, &SweepRuntime::new());
         });
@@ -887,6 +904,19 @@ mod settling_event_sweep {
         let (_, _, buy_record) = state.get_user_order(&taker, buy).unwrap();
         assert_eq!(buy_record.status, OrderStatus::Filled);
 
+        let settling_events = (events_before..storage::total_event_count())
+            .filter_map(storage::get_event)
+            .filter(|event| matches!(event.payload, EventType::Settling(_)))
+            .count();
+        assert_eq!(
+            settling_events,
+            (num_makers as usize).div_ceil(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize
+            ),
+            "the sweep must partition its settlement units into more than one bounded \
+             settling event, not drain a single oversized event"
+        );
+
         res
     }
 
@@ -900,6 +930,9 @@ mod settling_event_sweep {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             },
             OrderHistory::new(
                 storage::order_history_memory(),
