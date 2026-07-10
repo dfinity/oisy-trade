@@ -6,21 +6,62 @@ use crate::order::{
 use crate::state::event;
 use minicbor::{Decode, Encode};
 use std::collections::BTreeMap;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 
 #[cfg(test)]
 mod tests;
 
 /// The full set of stable-memory state changes a matching round settles into:
-/// the balance operations to apply, the per-order record updates (fill deltas
-/// plus terminal status), and the lean per-fill [`FillEvent`]s to persist and
-/// later replay into trades. Built once from a [`MatchingOutput`] during the
-/// matching phase; consumed to update `order_history` and enqueue the
-/// `SettlingEvent`.
+/// the per-order record updates (fill deltas plus terminal status) applied in
+/// one pass, and the balance operations and lean per-fill [`FillEvent`]s
+/// partitioned into bounded [`SettlementBatch`]es, each enqueued as its own
+/// `SettlingEvent`. Built once from a [`MatchingOutput`] during the matching
+/// phase; consumed to update `order_history` and enqueue the settling events.
 pub struct MatchSettlement {
-    pub balance_operations: Vec<event::BalanceOperation>,
     pub order_updates: BTreeMap<OrderSeq, OrderUpdate>,
+    pub settling_batches: Vec<SettlementBatch>,
+}
+
+/// A bounded slice of a matching round's settlement: at most
+/// `max_settlement_units_per_event` settlement units, carrying the balance
+/// operations of those units together with the fills that produced them. A fill
+/// and the balance operations it generated are always kept in the same batch so
+/// that every order seq the fill references appears in that event's operations:
+/// `record_settling_event` resolves each seq's owner, side, and price only for
+/// seqs its `resolve_op_orders` cache was built from — the event's own balance
+/// operations — so co-locating them is what keeps the fill's taker and maker
+/// seqs resolvable from that cache (an absent seq would panic the resolution
+/// `.expect(...)`).
+#[derive(Default)]
+pub struct SettlementBatch {
+    pub balance_operations: Vec<event::BalanceOperation>,
     pub fills: Vec<FillEvent>,
+}
+
+impl SettlementBatch {
+    fn add_unit(&mut self, unit: SettlementUnit) {
+        self.balance_operations.extend(unit.balance_operations);
+        if let Some(fill) = unit.fill {
+            self.fills.push(fill);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.balance_operations.is_empty() && self.fills.is_empty()
+    }
+}
+
+/// The atomic, indivisible piece of settlement work the packer counts and cuts
+/// settling batches from: a fill (its `Some(fill_event())` together with its 2–3
+/// balance operations) or an order killed/expired during matching — a marketable
+/// or FOK order dropped as `MatchResult::Killed` on the matching walk — releasing
+/// its reservation via its single `Unreserve` operation with `None`. User
+/// cancellations run through a separate path and are not settled here. A unit is
+/// never split across batches, which keeps every fill co-located with the
+/// operations that reference its taker and maker seqs.
+struct SettlementUnit {
+    balance_operations: Vec<event::BalanceOperation>,
+    fill: Option<FillEvent>,
 }
 
 impl MatchSettlement {
@@ -30,10 +71,20 @@ impl MatchSettlement {
     /// reservation-releasing balance operation; and, overlaid onto the same
     /// `order_updates` map, the terminal status of every resting, filled, and
     /// expired order.
+    ///
+    /// The settling batches are bounded on the number of **settlement units** —
+    /// each a fill (with its balance operations) or a removed order (with its
+    /// `Unreserve` operation). A unit's per-message cost is dominated by its
+    /// writes against the balance stable map, which drive the instruction cost
+    /// of [`crate::state::State::record_settling_event`], so bounding the number
+    /// of units per event is what bounds that cost — and, unlike a fill-based
+    /// bound, it also covers the `Unreserve` operations emitted by killed and
+    /// expired orders, which carry no fill yet still write to the balance map.
     pub fn from_matching(
         output: MatchingOutput,
         fee_rates: FeeRates,
         base_scale: NonZeroU64,
+        max_settlement_units_per_event: NonZeroU32,
     ) -> Self {
         let MatchingOutput {
             fills,
@@ -41,19 +92,29 @@ impl MatchSettlement {
             filled_orders,
             expired_orders,
         } = output;
-        let mut balance_operations = Vec::with_capacity(fills.len() * 3 + expired_orders.len());
         let mut order_updates = BTreeMap::new();
-        let mut settled_fills = Vec::with_capacity(fills.len());
+
+        let mut units: Vec<SettlementUnit> = Vec::with_capacity(fills.len() + expired_orders.len());
         for fill in fills {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
-            settlement.push_balance_operations(&mut balance_operations);
+            let balance_operations = settlement.balance_operations();
             settlement.accrue_fill(&mut order_updates);
-            settled_fills.push(settlement.fill_event());
+            units.push(SettlementUnit {
+                balance_operations,
+                fill: Some(settlement.fill_event()),
+            });
         }
         for (seq, removed) in &expired_orders {
-            RemovedOrderSettlement::new(*seq, removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
+            let balance_operations =
+                RemovedOrderSettlement::new(*seq, removed, base_scale).balance_operations();
+            units.push(SettlementUnit {
+                balance_operations,
+                fill: None,
+            });
         }
+
+        let settling_batches = pack_settlement_units(units, max_settlement_units_per_event);
+
         for seq in &resting_orders {
             order_updates.entry(*seq).or_default().status = Some(OrderStatus::Open);
         }
@@ -64,11 +125,39 @@ impl MatchSettlement {
             order_updates.entry(*seq).or_default().status = Some(OrderStatus::Expired);
         }
         Self {
-            balance_operations,
             order_updates,
-            fills: settled_fills,
+            settling_batches,
         }
     }
+}
+
+/// Cut a stream of [`SettlementUnit`]s into [`SettlementBatch`]es holding at
+/// most `max_settlement_units_per_event` whole units each. A running batch
+/// accumulates units; once it already holds the cap, it is flushed and a fresh
+/// batch started before the next unit is added. A unit is atomic and counted as
+/// one, so an event never exceeds the cap and a unit is never split across
+/// batches, keeping every fill co-located with the operations that reference its
+/// taker and maker seqs.
+fn pack_settlement_units(
+    units: Vec<SettlementUnit>,
+    max_settlement_units_per_event: NonZeroU32,
+) -> Vec<SettlementBatch> {
+    let cap = max_settlement_units_per_event.get() as usize;
+    let mut batches: Vec<SettlementBatch> = Vec::new();
+    let mut current = SettlementBatch::default();
+    let mut units_in_current = 0usize;
+    for unit in units {
+        if units_in_current == cap {
+            batches.push(std::mem::take(&mut current));
+            units_in_current = 0;
+        }
+        current.add_unit(unit);
+        units_in_current += 1;
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
 }
 
 /// A single [`Fill`] together with the realized values derived from it, computed
@@ -129,8 +218,8 @@ impl FillSettlement {
         }
     }
 
-    /// Push the (up to three) balance operations a single fill settles into `ops`.
-    pub fn push_balance_operations(&self, ops: &mut Vec<event::BalanceOperation>) {
+    /// The (up to three) balance operations a single fill settles into.
+    pub fn balance_operations(&self) -> Vec<event::BalanceOperation> {
         let fill = &self.fill;
         let (buyer_seq, seller_seq) = match fill.taker_side {
             Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
@@ -140,6 +229,7 @@ impl FillSettlement {
             Side::Buy => (self.maker_fee, self.taker_fee),
             Side::Sell => (self.taker_fee, self.maker_fee),
         };
+        let mut ops = Vec::with_capacity(3);
         ops.push(event::BalanceOperation::Transfer {
             from_order: buyer_seq,
             to_order: seller_seq,
@@ -161,6 +251,7 @@ impl FillSettlement {
             amount: fill.quantity,
             fee: nonzero(base_fee),
         });
+        ops
     }
 
     /// Update maker and taker orders based on this fill.
@@ -333,13 +424,13 @@ impl RemovedOrderSettlement {
         }
     }
 
-    /// Push the single unreserve operation that releases the reservation.
-    pub fn push_balance_operations(&self, ops: &mut Vec<event::BalanceOperation>) {
-        ops.push(event::BalanceOperation::Unreserve {
+    /// The single unreserve operation that releases the reservation.
+    pub fn balance_operations(&self) -> Vec<event::BalanceOperation> {
+        vec![event::BalanceOperation::Unreserve {
             order: self.order_seq,
             token: self.token,
             amount: self.amount,
-        });
+        }]
     }
 }
 

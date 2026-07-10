@@ -141,6 +141,7 @@ mod schema_stability {
             // Non-default policy.
             max_orders_per_chunk: Some(200),
             instruction_budget: Some(5_000_000_000),
+            max_settlement_units_per_event: Some(90),
             fee_pool: None,
             permissions: None,
         }
@@ -160,11 +161,11 @@ mod schema_stability {
     /// will cause [`should_match_golden_encoding`] to fail and print the
     /// current hex for pasting back here if the drift was intentional.
     const GOLDEN_HEX: &str = "\
-        8982008008828281410182614108828141028261420681828281410181410207818c0703810a811a00\
-        0f42408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281186e\
-        8183021a0007a12082008081048281008100051923280281828141011a000186a08183078282008505\
-        068201801a05f5e1001a0003d09082008506058200801a000f4240f681850205061a000f4240828100\
-        810018c81b000000012a05f200";
+        8c82008008828281410182614108828141028261420681828281410181410207818c0703810a811a000f42\
+        408185008200808118641a000f4240820180818281185a8183011a0007a120820080818281186e8183021a\
+        0007a12082008081048281008100051923280281828141011a000186a08183078282008505068201801a05\
+        f5e1001a0003d09082008506058200801a000f4240f681850205061a000f4240828100810018c81b000000\
+        012a05f200f6f6185a";
 
     #[test]
     fn should_match_golden_encoding() {
@@ -199,7 +200,7 @@ fn should_roundtrip_state_through_snapshot() {
     // Non-default policy so the round-trip exercises the new
     // `execution_policy` field rather than silently relying on the
     // `into_state` fallback.
-    state.set_execution_policy(crate::state::ExecutionPolicy::try_new(42, 12_345).unwrap());
+    state.set_execution_policy(crate::state::ExecutionPolicy::try_new(42, 12_345, 90).unwrap());
     let pair = icp_ckbtc_trading_pair();
     state.record_trading_pair(
         OrderBookId::ZERO,
@@ -501,6 +502,78 @@ fn should_decode_old_format_snapshot_to_default_permissions() {
         state.trade_history.clone(),
         state.balances.clone(),
         state.user_registry.clone(),
+    );
+    assert_eq!(state, restored);
+}
+
+/// A snapshot written after `permissions` but before the
+/// `max_settlement_units_per_event` field existed (the `#[n(11)]` slot absent)
+/// decodes with that field `None` and rebuilds the default cap on `into_state`.
+#[test]
+fn should_decode_snapshot_without_settlement_units_to_default_cap() {
+    use crate::state::event::SettlingEvent;
+    use oisy_trade_types_internal::Mode;
+
+    let state = fresh_state();
+    let snapshot = StateSnapshot::from_state(&state);
+
+    #[derive(minicbor::Encode)]
+    struct PreSettlementUnitsSnapshot<'a> {
+        #[n(0)]
+        mode: &'a Mode,
+        #[n(1)]
+        next_book_id: &'a OrderBookId,
+        #[n(2)]
+        tokens: &'a Vec<super::TokenEntry>,
+        #[n(3)]
+        trading_pairs: &'a Vec<super::TradingPairEntry>,
+        #[n(4)]
+        order_books: &'a Vec<crate::order::OrderBookSnapshot>,
+        #[n(5)]
+        ledger_fee_cache: &'a Vec<super::LedgerFeeEntry>,
+        #[n(6)]
+        pending_settling_events: &'a Option<Vec<SettlingEvent>>,
+        #[n(7)]
+        max_orders_per_chunk: &'a Option<u32>,
+        #[n(8)]
+        instruction_budget: &'a Option<u64>,
+        #[n(9)]
+        fee_pool: &'a Option<Vec<crate::balance::FeeEntry>>,
+        #[n(10)]
+        permissions: &'a Option<super::PermissionsSnapshot>,
+    }
+
+    let pre = PreSettlementUnitsSnapshot {
+        mode: &snapshot.mode,
+        next_book_id: &snapshot.next_book_id,
+        tokens: &snapshot.tokens,
+        trading_pairs: &snapshot.trading_pairs,
+        order_books: &snapshot.order_books,
+        ledger_fee_cache: &snapshot.ledger_fee_cache,
+        pending_settling_events: &snapshot.pending_settling_events,
+        max_orders_per_chunk: &snapshot.max_orders_per_chunk,
+        instruction_budget: &snapshot.instruction_budget,
+        fee_pool: &snapshot.fee_pool,
+        permissions: &snapshot.permissions,
+    };
+
+    let mut buf = vec![];
+    minicbor::encode(&pre, &mut buf).unwrap();
+    let decoded: StateSnapshot = minicbor::decode(&buf).unwrap();
+
+    assert_eq!(decoded.max_settlement_units_per_event, None);
+    let restored = decoded.into_state(
+        state.order_history.clone(),
+        state.trade_history.clone(),
+        state.balances.clone(),
+        state.user_registry.clone(),
+    );
+    assert_eq!(
+        restored
+            .execution_policy()
+            .max_settlement_units_per_event()
+            .get(),
+        oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
     );
     assert_eq!(state, restored);
 }

@@ -11,7 +11,7 @@ use crate::state::event::{
 };
 use crate::test_fixtures::event::{add_trading_pair_event, init_event, upgrade_event};
 use crate::test_fixtures::{
-    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata,
+    LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, PRICE_SCALE, TICK_SIZE, balances, base_metadata, maker,
     order_history, quote_metadata, state, trade_history, user_registry,
 };
 use candid::Principal;
@@ -79,7 +79,7 @@ impl Scenario {
         if let Some(ref m) = mode {
             self.state.set_mode(m.clone());
         }
-        self.events.push(upgrade_event(mode, None, None));
+        self.events.push(upgrade_event(mode, None, None, None));
         self
     }
 
@@ -87,15 +87,21 @@ impl Scenario {
         mut self,
         max_orders_per_chunk: u32,
         instruction_budget: u64,
+        max_settlement_units_per_event: u32,
     ) -> Self {
         self.state.set_execution_policy(
-            crate::state::ExecutionPolicy::try_new(max_orders_per_chunk, instruction_budget)
-                .unwrap(),
+            crate::state::ExecutionPolicy::try_new(
+                max_orders_per_chunk,
+                instruction_budget,
+                max_settlement_units_per_event,
+            )
+            .unwrap(),
         );
         self.events.push(upgrade_event(
             None,
             Some(max_orders_per_chunk),
             Some(instruction_budget),
+            Some(max_settlement_units_per_event),
         ));
         self
     }
@@ -426,7 +432,7 @@ fn should_replay_upgrade_without_mode_change() {
 #[test]
 fn should_replay_execution_policy_change_on_upgrade() {
     Scenario::new()
-        .with_upgrade_execution_policy(123, 4_567_890)
+        .with_upgrade_execution_policy(123, 4_567_890, 64)
         .assert_replay_matches();
 }
 
@@ -722,6 +728,71 @@ fn should_replay_matching_with_price_improvement() {
         .assert_replay_matches();
 }
 
+/// A matching round with more than `max_settlement_units_per_event` fills is
+/// enqueued as several bounded settling events; replaying that multi-event log
+/// must reconstruct exactly the same state the primary path produced.
+#[test]
+fn should_replay_matching_round_split_across_multiple_settling_events() {
+    let buyer = user_1();
+    let price = 100u128;
+    let quantity = 1_000_000u128;
+    let book_id = OrderBookId::ZERO;
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+    let num_makers = cap + 1;
+
+    let mut scenario = Scenario::new().with_trading_pair().with_deposit(
+        buyer,
+        TokenId::new(quote()),
+        Quantity::from(price * quantity * num_makers as u128),
+    );
+
+    let mut maker_seqs = Vec::new();
+    for i in 0..num_makers {
+        let seller = maker(i);
+        scenario = scenario.with_deposit(seller, TokenId::new(base()), Quantity::from(quantity));
+        let (next, sell_id) = scenario.with_limit_order(
+            seller,
+            Side::Sell,
+            Price::new(price * PRICE_SCALE),
+            Quantity::from(quantity),
+        );
+        scenario = next;
+        maker_seqs.push(sell_id.seq());
+    }
+    let (scenario, buy_id) = scenario.with_limit_order(
+        buyer,
+        Side::Buy,
+        Price::new(price * PRICE_SCALE),
+        Quantity::from(num_makers as u128 * quantity),
+    );
+
+    let mut expected_ops = Vec::new();
+    for maker_seq in &maker_seqs {
+        expected_ops.push(BalanceOperation::Transfer {
+            from_order: buy_id.seq(),
+            to_order: *maker_seq,
+            token: PairToken::Quote,
+            amount: Quantity::from(price * quantity),
+            fee: None,
+        });
+        expected_ops.push(BalanceOperation::Transfer {
+            from_order: *maker_seq,
+            to_order: buy_id.seq(),
+            token: PairToken::Base,
+            amount: Quantity::from(quantity),
+            fee: None,
+        });
+    }
+
+    let mut orders = maker_seqs;
+    orders.push(buy_id.seq());
+
+    scenario
+        .with_matching_round(MatchingEvent { book_id, orders }, expected_ops)
+        .assert_order_status(buy_id, OrderStatus::Filled)
+        .assert_replay_matches();
+}
+
 #[test]
 fn should_replay_cancel_pending_order() {
     let price = 100u128;
@@ -889,7 +960,7 @@ fn should_panic_on_empty_events() {
 #[should_panic(expected = "the first event must be an Init event")]
 fn should_panic_when_first_event_is_not_init() {
     replay_events(
-        vec![upgrade_event(None, None, None)],
+        vec![upgrade_event(None, None, None, None)],
         order_history(),
         trade_history(),
         user_registry(),

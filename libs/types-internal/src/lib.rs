@@ -34,6 +34,18 @@ pub const DEFAULT_MAX_ORDERS_PER_CHUNK: u32 = 1_000;
 /// per-message instruction cap.
 pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
+/// Conservative production default for [`InitArg::max_settlement_units_per_event`]:
+/// the maximum number of settlement units packed into a single settling event,
+/// so a matching round emits `ceil(total_units / cap)` bounded events instead of
+/// one. A settlement unit is a fill (with its 2–3 balance operations) or a killed
+/// or expired order (with its single `Unreserve`); its apply cost is dominated by
+/// its writes against the balance stable map, so bounding units per event bounds
+/// that per-message instruction cost. The value keeps a full event well under the
+/// 1B [`DEFAULT_INSTRUCTION_BUDGET`] and far under the 40B `MAX_INSTRUCTION_BUDGET`,
+/// and above every existing test's per-round unit count, so only the dedicated
+/// sweep tests exercise the split.
+pub const DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT: u32 = 256;
+
 /// Argument for canister initialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 #[cfg_attr(feature = "event", derive(minicbor::Encode, minicbor::Decode))]
@@ -47,6 +59,11 @@ pub struct InitArg {
     /// Maximum instructions consumed before a chunk yields.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: u64,
+    /// Maximum settlement units (a fill, or a removed-order refund) packed into
+    /// a single settling event; `None` in `Init` events persisted before this
+    /// field existed, falling back to [`DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT`].
+    #[cfg_attr(feature = "event", n(3))]
+    pub max_settlement_units_per_event: Option<u32>,
 }
 
 /// Argument for canister upgrade.
@@ -62,6 +79,9 @@ pub struct UpgradeArg {
     /// If set, overrides the current `instruction_budget`.
     #[cfg_attr(feature = "event", n(2))]
     pub instruction_budget: Option<u64>,
+    /// If set, overrides the current `max_settlement_units_per_event`.
+    #[cfg_attr(feature = "event", n(3))]
+    pub max_settlement_units_per_event: Option<u32>,
 }
 
 /// Controls who may call update endpoints on the OISY TRADE canister.
