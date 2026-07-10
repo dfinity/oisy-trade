@@ -4158,8 +4158,6 @@ mod trading_accounts {
         let funding = setup.user();
         let funding_client = setup.oisy_trade_client_with_caller(funding);
 
-        // Give the funding account balances, a filled order, and a trade: a
-        // resting sell it placed, crossed by a separate buyer.
         let quantity = 1_000_000u64;
         let price = 9_000 * PRICE_SCALE;
         setup.fund_base(funding, quantity).await;
