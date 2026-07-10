@@ -3683,6 +3683,8 @@ mod pending_state_predicates {
         icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
+    use proptest::prelude::{Strategy, any};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -3718,89 +3720,6 @@ mod pending_state_predicates {
         record_matching_round(&mut state);
 
         assert!(state.has_pending_settling_events());
-    }
-
-    /// A taker whose fills produce more than `max_settlement_units_per_event`
-    /// settlement units splits the round into several unit-bounded settling
-    /// events, and draining all of them leaves exactly the state a single
-    /// unsplit event would have — the split is a pure batching of the same
-    /// operations.
-    #[test]
-    fn sweeping_over_cap_makers_splits_into_bounded_events_equivalent_to_one() {
-        let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
-        let num_makers = cap + 2;
-
-        let mut split_state = matched_sweep(num_makers);
-        let mut events = Vec::new();
-        while let Some(event) = split_state.take_next_pending_settling_event() {
-            events.push(event);
-        }
-        assert_eq!(events.len(), num_makers.div_ceil(cap));
-        for event in &events {
-            assert!(
-                unit_count(event) <= cap,
-                "each settling event holds at most the unit cap",
-            );
-        }
-        for event in &events {
-            split_state.record_settling_event(
-                event,
-                crate::Timestamp::EPOCH,
-                crate::state::StableMemoryOptions::Write,
-            );
-        }
-
-        let mut combined_state = matched_sweep(num_makers);
-        let mut combined = combined_state
-            .take_next_pending_settling_event()
-            .expect("matching must produce at least one settling event");
-        while let Some(event) = combined_state.take_next_pending_settling_event() {
-            combined.balance_operations.extend(event.balance_operations);
-            combined.fills.extend(event.fills);
-        }
-        combined_state.record_settling_event(
-            &combined,
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
-
-        assert_eq!(
-            split_state, combined_state,
-            "splitting the settling events must not change the final state",
-        );
-    }
-
-    /// Lowering `max_settlement_units_per_event` on the `ExecutionPolicy` splits
-    /// the same round into more settling events, proving the cap is driven by
-    /// the policy rather than hardcoded.
-    #[test]
-    fn smaller_max_settlement_units_per_event_produces_more_events() {
-        let num_makers = 20usize;
-        let small_cap = 4u32;
-
-        let mut state = setup_one_book();
-        state.set_execution_policy(
-            crate::state::ExecutionPolicy::try_new(
-                u32::MAX,
-                oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
-                small_cap,
-            )
-            .unwrap(),
-        );
-        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
-        record_matching_round(&mut state);
-
-        let mut events = Vec::new();
-        while let Some(event) = state.take_next_pending_settling_event() {
-            events.push(event);
-        }
-        assert_eq!(events.len(), num_makers.div_ceil(small_cap as usize));
-        for event in &events {
-            assert!(
-                unit_count(event) <= small_cap as usize,
-                "each settling event holds at most the policy unit cap",
-            );
-        }
     }
 
     /// A round that both fills and kills a fill-or-kill order packs the killed
@@ -3896,6 +3815,37 @@ mod pending_state_predicates {
         }
     }
 
+    proptest! {
+        /// The final settled state is invariant to `max_settlement_units_per_event`:
+        /// matching an arbitrary set of orders under an arbitrary small cap and
+        /// draining every bounded settling event leaves exactly the state produced
+        /// by draining a single unbounded event. The bounded run must still honor
+        /// the cap — every event holds at most `cap` units and the round splits
+        /// into `total_units.div_ceil(cap)` events — so an implementation that
+        /// ignored the cap could not satisfy the invariance vacuously.
+        #[test]
+        fn draining_is_invariant_to_the_settlement_unit_cap(
+            specs in arb_order_specs(),
+            cap in 1u32..=8,
+        ) {
+            let (mut bounded_state, bounded_events) = run_round(&specs, cap);
+            let (mut single_state, _) = run_round(&specs, u32::MAX);
+
+            let total_units: usize = bounded_events.iter().map(unit_count).sum();
+            prop_assert_eq!(bounded_events.len(), total_units.div_ceil(cap as usize));
+            for event in &bounded_events {
+                prop_assert!(unit_count(event) <= cap as usize);
+            }
+
+            let canonical =
+                crate::state::ExecutionPolicy::try_new(u32::MAX, oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET, 1)
+                    .unwrap();
+            bounded_state.set_execution_policy(canonical.clone());
+            single_state.set_execution_policy(canonical);
+            prop_assert_eq!(bounded_state, single_state);
+        }
+    }
+
     fn unit_count(event: &crate::state::event::SettlingEvent) -> usize {
         let taker_seqs: std::collections::BTreeSet<_> = event
             .fills
@@ -3913,16 +3863,6 @@ mod pending_state_predicates {
             })
             .count();
         event.fills.len() + removed_order_units
-    }
-
-    fn matched_sweep(
-        num_makers: usize,
-    ) -> crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>
-    {
-        let mut state = setup_one_book();
-        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
-        record_matching_round(&mut state);
-        state
     }
 
     fn place_sweep(
@@ -3983,5 +3923,75 @@ mod pending_state_predicates {
             FeeRates::default(),
         );
         state
+    }
+
+    #[derive(Clone, Debug)]
+    struct OrderSpec {
+        side: Side,
+        price_ticks: u128,
+        qty_lots: u64,
+        fill_or_kill: bool,
+    }
+
+    fn arb_order_specs() -> impl Strategy<Value = Vec<OrderSpec>> {
+        let spec = (any::<bool>(), 1u128..=10, 1u64..=4, any::<bool>()).prop_map(
+            |(is_buy, price_ticks, qty_lots, fill_or_kill)| OrderSpec {
+                side: if is_buy { Side::Buy } else { Side::Sell },
+                price_ticks,
+                qty_lots,
+                fill_or_kill,
+            },
+        );
+        proptest::collection::vec(spec, 0..=24)
+    }
+
+    fn run_round(
+        specs: &[OrderSpec],
+        max_settlement_units_per_event: u32,
+    ) -> (
+        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
+        Vec<crate::state::event::SettlingEvent>,
+    ) {
+        let mut state = setup_one_book();
+        state.set_execution_policy(
+            crate::state::ExecutionPolicy::try_new(
+                u32::MAX,
+                oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event,
+            )
+            .unwrap(),
+        );
+
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for (i, spec) in specs.iter().enumerate() {
+            let placement = test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                spec.side,
+                spec.price_ticks * PRICE_SCALE,
+                spec.qty_lots as u128 * lot,
+            );
+            let placement = if spec.fill_or_kill {
+                placement.fill_or_kill()
+            } else {
+                placement
+            };
+            placement.place(&mut state);
+        }
+        record_matching_round(&mut state);
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        for event in &events {
+            state.record_settling_event(
+                event,
+                crate::Timestamp::EPOCH,
+                crate::state::StableMemoryOptions::Write,
+            );
+        }
+        (state, events)
     }
 }
