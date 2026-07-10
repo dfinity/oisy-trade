@@ -82,9 +82,7 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
 
     /// Write each buffered row back to the stable map exactly once, eliding
     /// rows that neither existed before the batch nor hold a non-zero balance —
-    /// matching the empty-row elision of [`TokenBalance::update`].
-    ///
-    /// [`TokenBalance::update`]: super::TokenBalance
+    /// matching the empty-row elision of `TokenBalance::update`.
     pub fn flush(self) {
         bench_scopes!("balances", "balances::flush");
         for (key, buffered) in self.buffer {
