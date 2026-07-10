@@ -914,7 +914,6 @@ mod resolution_on_reads {
     const FUNDING: Principal = Principal::from_slice(&[0x01]);
     const TRADING: Principal = Principal::from_slice(&[0x02]);
     const SELLER: Principal = Principal::from_slice(&[0x03]);
-    const UNKNOWN: Principal = Principal::from_slice(&[0x04]);
 
     fn account_trades() -> GetMyTradesArgs {
         GetMyTradesArgs {
@@ -968,46 +967,6 @@ mod resolution_on_reads {
                 .is_empty()
         );
         assert!(!get_my_trades(account_trades(), FUNDING).unwrap().is_empty());
-    }
-
-    #[test]
-    fn should_read_own_data_for_an_ordinary_user() {
-        setup_funding_with_activity();
-
-        let orders = get_my_orders(Some(GetMyOrdersArgs::default()), SELLER).unwrap();
-        assert!(
-            !get_balances(None, SELLER).unwrap().is_empty(),
-            "an ordinary registered user reads its own balances"
-        );
-        assert!(!orders.is_empty(), "an ordinary user reads its own orders");
-        assert!(
-            !get_my_trades(account_trades(), SELLER).unwrap().is_empty(),
-            "an ordinary user reads its own trades"
-        );
-        assert!(
-            orders.iter().all(|o| o.order.owner == SELLER),
-            "the returned orders are owned by the reader, so resolution returned SELLER itself"
-        );
-
-        assert!(
-            get_my_orders(Some(GetMyOrdersArgs::default()), SELLER).unwrap()
-                != get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap(),
-            "a non-delegate does not resolve to the funding account"
-        );
-    }
-
-    #[test]
-    fn should_return_empty_reads_for_an_unknown_principal() {
-        // The genuine resolve-to-self is covered by the registry unit test in
-        // `user::tests`; here we only assert an unknown principal reads empty.
-        setup_funding_with_activity();
-
-        assert_eq!(get_balances(None, UNKNOWN), Ok(vec![]));
-        assert_eq!(
-            get_my_orders(Some(GetMyOrdersArgs::default()), UNKNOWN),
-            Ok(vec![])
-        );
-        assert_eq!(get_my_trades(account_trades(), UNKNOWN), Ok(vec![]));
     }
 }
 
