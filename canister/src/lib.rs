@@ -496,15 +496,17 @@ pub fn get_my_orders(
     args: Option<GetMyOrdersArgs>,
     caller: candid::Principal,
 ) -> Result<Vec<UserOrder>, GetMyOrdersError> {
-    let caller = state::with_state(|s| s.resolve_account(caller));
     let filter = args.unwrap_or_default().filter;
     let results = match filter {
         oisy_trade_types::GetMyOrdersFilter::ById(id) => {
             let id = id
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
-            let order = state::with_state(|s| s.get_user_order(&caller, id))
-                .ok_or(GetMyOrdersError::OrderNotFound)?;
+            let order = state::with_state(|s| {
+                let caller = s.resolve_account(caller);
+                s.get_user_order(&caller, id)
+            })
+            .ok_or(GetMyOrdersError::OrderNotFound)?;
             vec![order]
         }
         oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
@@ -514,8 +516,11 @@ pub fn get_my_orders(
                 .transpose()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
-            state::with_state(|s| s.get_user_orders(&caller, after, length))
-                .map_err(|_| GetMyOrdersError::OrderNotFound)?
+            state::with_state(|s| {
+                let caller = s.resolve_account(caller);
+                s.get_user_orders(&caller, after, length)
+            })
+            .map_err(|_| GetMyOrdersError::OrderNotFound)?
         }
     };
     Ok(results
@@ -547,7 +552,6 @@ pub fn get_my_trades(
     caller: candid::Principal,
 ) -> Result<Vec<oisy_trade_types::Trade>, GetMyTradesError> {
     use oisy_trade_types::TradesFilter;
-    let caller = state::with_state(|s| s.resolve_account(caller));
     let trades = match args.filter {
         TradesFilter::ByOrder(by_order) => {
             let order_id = by_order
@@ -560,7 +564,10 @@ pub fn get_my_trades(
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
-            match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
+            match state::with_state(|s| {
+                let caller = s.resolve_account(caller);
+                s.get_user_order_trades(&caller, order_id, after, length)
+            }) {
                 Ok(trades) => trades
                     .into_iter()
                     .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
@@ -578,7 +585,10 @@ pub fn get_my_trades(
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
-            match state::with_state(|s| s.get_user_trades(&caller, after, length)) {
+            match state::with_state(|s| {
+                let caller = s.resolve_account(caller);
+                s.get_user_trades(&caller, after, length)
+            }) {
                 Ok(trades) => trades
                     .into_iter()
                     .map(|(id, trade)| trade.into_public(id))
