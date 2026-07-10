@@ -924,8 +924,6 @@ mod resolution_on_reads {
         }
     }
 
-    /// Funds `FUNDING`, gives it a filled order (and thus balances, an order,
-    /// and trades), then whitelists `TRADING` as its trading account.
     fn setup_funding_with_activity() {
         init_state_with_order_book();
         fund_user(FUNDING);
