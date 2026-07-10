@@ -1011,15 +1011,21 @@ mod resolution_on_reads {
             "a trading account resolves to F and cannot reach a non-F order"
         );
 
+        let trades = get_my_trades(by_order(funding_order.clone()), TRADING).unwrap();
         assert_eq!(
             get_my_trades(by_order(funding_order.clone()), TRADING),
             get_my_trades(by_order(funding_order.clone()), FUNDING),
             "a trading account's ByOrder trades resolve to the funding account"
         );
-        assert!(
-            !get_my_trades(by_order(funding_order), FUNDING)
-                .unwrap()
-                .is_empty()
+        assert_eq!(trades.len(), 1);
+        assert_eq!(
+            trades[0].order_id, funding_order,
+            "the trade belongs to the funding account's order"
+        );
+        assert_eq!(
+            trades[0].side,
+            Side::Buy,
+            "the funding account placed a buy"
         );
     }
 }
