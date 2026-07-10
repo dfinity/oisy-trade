@@ -148,11 +148,11 @@ impl<M: Memory> TokenBalance<M> {
     /// Open a write-back buffer over the balance map, scoped to a single
     /// settling event. Each `(token, user)` row touched while the batch is
     /// live is read from the stable map at most once and written back at most
-    /// once, on [`SettlingBatch::flush`]. Preserves the per-op accounting of
+    /// once, on [`BalanceSettlingBatch::flush`]. Preserves the per-op accounting of
     /// [`transfer`](Self::transfer) / [`unreserve`](Self::unreserve) exactly,
     /// including the fee-pool accrual and the empty-row elision.
-    pub fn settling_batch(&mut self) -> SettlingBatch<'_, M> {
-        SettlingBatch {
+    pub fn settling_batch(&mut self) -> BalanceSettlingBatch<'_, M> {
+        BalanceSettlingBatch {
             balances: &mut self.balances,
             fee_balances: &mut self.fee_balances,
             buffer: BTreeMap::new(),
@@ -241,7 +241,7 @@ impl<M: Memory> TokenBalance<M> {
 
 /// Assert `fee <= gross`, accrue `fee` into the token's fee pool, and return
 /// the net `gross - fee` owed to the creditor. Shared by the per-op
-/// [`TokenBalance::transfer`] and the buffered [`SettlingBatch::transfer`] so
+/// [`TokenBalance::transfer`] and the buffered [`BalanceSettlingBatch::transfer`] so
 /// the money-accounting lives in one place.
 fn split_net_fee(
     fee_balances: &mut BTreeMap<TokenId, Quantity>,
@@ -271,9 +271,9 @@ fn split_net_fee(
 /// that to a single stable read per row on first touch and a single write-back
 /// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
 /// on the heap as in [`TokenBalance::transfer`].
-#[must_use = "SettlingBatch buffers balance mutations that are only applied by `flush()`; \
+#[must_use = "BalanceSettlingBatch buffers balance mutations that are only applied by `flush()`; \
               dropping it without flushing silently discards them"]
-pub struct SettlingBatch<'a, M: Memory> {
+pub struct BalanceSettlingBatch<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
     fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
     buffer: BTreeMap<BalanceKey, BufferedBalance>,
@@ -284,7 +284,7 @@ struct BufferedBalance {
     existed: bool,
 }
 
-impl<M: Memory> SettlingBatch<'_, M> {
+impl<M: Memory> BalanceSettlingBatch<'_, M> {
     /// Buffered counterpart of [`TokenBalance::transfer`]: debits `gross` from
     /// the debtor's reserved, credits `gross - fee` to the creditor's free, and
     /// accrues `fee` to the token's fee pool. A self-transfer lands the credit
