@@ -370,13 +370,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
-            let mut balance_operations = Vec::with_capacity(1);
-            RemovedOrderSettlement::new(seq, &removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,
-                    balance_operations,
+                    balance_operations: RemovedOrderSettlement::new(seq, &removed, base_scale)
+                        .balance_operations(),
                     fills: Vec::new(),
                 });
         }

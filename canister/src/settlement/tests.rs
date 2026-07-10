@@ -26,8 +26,7 @@ mod settled_fill {
             let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
             let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
 
-            let mut ops = Vec::new();
-            settlement.push_balance_operations(&mut ops);
+            let ops = settlement.balance_operations();
             let (mut quote_amount, mut quote_fee, mut base_fee) = (None, None, None);
             for op in &ops {
                 if let BalanceOperation::Transfer { token, amount, fee, .. } = op {
@@ -284,8 +283,10 @@ mod settling_batches {
         let mut ops = Vec::new();
         for i in 0..num_expired as u64 {
             let removed = removed_order();
-            RemovedOrderSettlement::new(OrderSeq::new(1_000_000 + i), &removed, base_scale)
-                .push_balance_operations(&mut ops);
+            ops.extend(
+                RemovedOrderSettlement::new(OrderSeq::new(1_000_000 + i), &removed, base_scale)
+                    .balance_operations(),
+            );
         }
         ops
     }
@@ -306,7 +307,7 @@ mod settling_batches {
         let mut settled = Vec::new();
         for fill in fills {
             let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
-            settlement.push_balance_operations(&mut ops);
+            ops.extend(settlement.balance_operations());
             settled.push(settlement.fill_event());
         }
         (ops, settled)
@@ -343,7 +344,7 @@ mod settlement_shape {
     use proptest::prelude::*;
 
     proptest! {
-        /// `FillSettlement::new` + `push_balance_operations` preserve structural invariants
+        /// `FillSettlement::new` + `balance_operations` preserve structural invariants
         /// over any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
@@ -362,11 +363,12 @@ mod settlement_shape {
             let mut ops = Vec::new();
             for fill in &output.fills {
                 let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
-                settlement.push_balance_operations(&mut ops);
+                ops.extend(settlement.balance_operations());
             }
             for (seq, killed) in &output.expired_orders {
-                RemovedOrderSettlement::new(*seq, killed, base_scale)
-                    .push_balance_operations(&mut ops);
+                ops.extend(
+                    RemovedOrderSettlement::new(*seq, killed, base_scale).balance_operations(),
+                );
             }
 
             prop_assert!(

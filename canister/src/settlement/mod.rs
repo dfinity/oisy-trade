@@ -97,8 +97,7 @@ impl MatchSettlement {
         let mut units: Vec<SettlementUnit> = Vec::with_capacity(fills.len() + expired_orders.len());
         for fill in fills {
             let settlement = FillSettlement::new(fill, fee_rates, base_scale);
-            let mut balance_operations = Vec::with_capacity(3);
-            settlement.push_balance_operations(&mut balance_operations);
+            let balance_operations = settlement.balance_operations();
             settlement.accrue_fill(&mut order_updates);
             units.push(SettlementUnit {
                 balance_operations,
@@ -106,9 +105,8 @@ impl MatchSettlement {
             });
         }
         for (seq, removed) in &expired_orders {
-            let mut balance_operations = Vec::with_capacity(1);
-            RemovedOrderSettlement::new(*seq, removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
+            let balance_operations =
+                RemovedOrderSettlement::new(*seq, removed, base_scale).balance_operations();
             units.push(SettlementUnit {
                 balance_operations,
                 fill: None,
@@ -220,8 +218,8 @@ impl FillSettlement {
         }
     }
 
-    /// Push the (up to three) balance operations a single fill settles into `ops`.
-    pub fn push_balance_operations(&self, ops: &mut Vec<event::BalanceOperation>) {
+    /// The (up to three) balance operations a single fill settles into.
+    pub fn balance_operations(&self) -> Vec<event::BalanceOperation> {
         let fill = &self.fill;
         let (buyer_seq, seller_seq) = match fill.taker_side {
             Side::Buy => (fill.taker_order_seq, fill.maker_order_seq),
@@ -231,6 +229,7 @@ impl FillSettlement {
             Side::Buy => (self.maker_fee, self.taker_fee),
             Side::Sell => (self.taker_fee, self.maker_fee),
         };
+        let mut ops = Vec::with_capacity(3);
         ops.push(event::BalanceOperation::Transfer {
             from_order: buyer_seq,
             to_order: seller_seq,
@@ -252,6 +251,7 @@ impl FillSettlement {
             amount: fill.quantity,
             fee: nonzero(base_fee),
         });
+        ops
     }
 
     /// Update maker and taker orders based on this fill.
@@ -424,13 +424,13 @@ impl RemovedOrderSettlement {
         }
     }
 
-    /// Push the single unreserve operation that releases the reservation.
-    pub fn push_balance_operations(&self, ops: &mut Vec<event::BalanceOperation>) {
-        ops.push(event::BalanceOperation::Unreserve {
+    /// The single unreserve operation that releases the reservation.
+    pub fn balance_operations(&self) -> Vec<event::BalanceOperation> {
+        vec![event::BalanceOperation::Unreserve {
             order: self.order_seq,
             token: self.token,
             amount: self.amount,
-        });
+        }]
     }
 }
 
