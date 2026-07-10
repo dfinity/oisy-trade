@@ -383,11 +383,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     }
 
     /// Drive engine matching for the given book; when `persistence` is
-    /// [`StableMemoryOptions::Write`], flip every touched order's status
-    /// in `order_history`. Push the paired balance-only
-    /// [`event::SettlingEvent`] (if any balance operations were produced)
-    /// onto [`State::pending_settling_events`] for the settling-event
-    /// dispatch to drain.
+    /// [`StableMemoryOptions::Write`], apply the resulting order-record
+    /// updates in one pass over `order_history`, then enqueue one
+    /// [`event::SettlingEvent`] per [`crate::settlement::SettlementBatch`] the packer cut from
+    /// the round — each carrying a bounded number of settlement units (fills
+    /// with their balance operations, plus removed-order refunds) — onto
+    /// [`State::pending_settling_events`] for the settling-event dispatch to
+    /// drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,

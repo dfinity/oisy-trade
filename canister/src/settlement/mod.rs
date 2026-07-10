@@ -25,9 +25,13 @@ pub struct MatchSettlement {
 /// A bounded slice of a matching round's settlement: at most
 /// `max_settlement_units_per_event` settlement units, carrying the balance
 /// operations of those units together with the fills that produced them. A fill
-/// and its operations are always kept in the same batch so that the settling
-/// phase can resolve each fill's taker/maker order seqs from the operations of
-/// the same event.
+/// and the balance operations it generated are always kept in the same batch so
+/// that every order seq the fill references appears in that event's operations:
+/// `record_settling_event` resolves each seq's owner, side, and price only for
+/// seqs its `resolve_op_orders` cache was built from — the event's own balance
+/// operations — so co-locating them is what keeps the fill's taker and maker
+/// seqs resolvable from that cache (an absent seq would panic the resolution
+/// `.expect(...)`).
 pub struct SettlementBatch {
     pub balance_operations: Vec<event::BalanceOperation>,
     pub fills: Vec<FillEvent>,
