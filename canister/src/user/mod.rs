@@ -262,20 +262,22 @@ impl<M: Memory> UserRegistry<M> {
     /// [`UserAccount::Funding`], a whitelisted trading principal a
     /// [`UserAccount::Trading`], and an unknown principal `None`. Read paths use
     /// this so that merely querying a never-seen principal does not create an
-    /// entry. `users` is consulted first; the two maps are mutually exclusive (a
-    /// trading account is never registered), asserted in debug builds.
+    /// entry. `trading_accounts` is consulted first; the two maps are mutually
+    /// exclusive (a trading account is never registered), asserted in debug
+    /// builds. Preferring `Trading` on a (never-reachable) conflict keeps the
+    /// safe default — such a principal stays denied funding operations.
     pub fn lookup(&self, principal: Principal) -> Option<UserAccount> {
         let key = PrincipalKey(principal);
-        if let Some(id) = self.users.get(&key) {
+        if let Some(grant) = self.trading_accounts.get(&key) {
             debug_assert!(
-                !self.trading_accounts.contains_key(&key),
+                !self.users.contains_key(&key),
                 "BUG: principal is both a funding and a trading account"
             );
-            return Some(UserAccount::Funding { id, principal });
+            return Some(UserAccount::Trading { principal, grant });
         }
-        self.trading_accounts
+        self.users
             .get(&key)
-            .map(|grant| UserAccount::Trading { principal, grant })
+            .map(|id| UserAccount::Funding { id, principal })
     }
 
     /// Checks the grant preconditions for whitelisting `trading` under funding
