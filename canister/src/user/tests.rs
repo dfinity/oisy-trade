@@ -18,7 +18,12 @@ fn lookup_does_not_assign() {
     let mut registry = user_registry();
     assert_eq!(registry.lookup(principal(1)), None);
     let id = registry.get_or_register(principal(1));
-    assert_eq!(registry.lookup(principal(1)), Some(id));
+    assert_eq!(
+        registry
+            .lookup(principal(1))
+            .and_then(|account| account.funding_id()),
+        Some(id)
+    );
     // A never-registered principal still has no id, and looking it up didn't
     // assign one (the next registration is still 1, not 2).
     assert_eq!(registry.lookup(principal(9)), None);
@@ -46,12 +51,16 @@ mod trading_accounts {
     use crate::user::{
         FundingAccount, GrantError, MAX_TRADING_ACCOUNTS_PER_USER, RevokeError,
         TRADING_ACCOUNT_GRANT_COOLDOWN, TradingAccount, TradingAccountList, TradingGrant,
-        UserRegistry,
+        UserAccount, UserRegistry,
     };
     use ic_stable_structures::{Storable, VectorMemory};
     use proptest::collection::vec;
     use proptest::prelude::proptest;
     use proptest::prop_assert_eq;
+
+    fn is_trading_account(registry: &UserRegistry<VectorMemory>, p: candid::Principal) -> bool {
+        matches!(registry.lookup(p), Some(UserAccount::Trading { .. }))
+    }
 
     /// The funding account under test.
     fn funding() -> candid::Principal {
@@ -270,8 +279,8 @@ mod trading_accounts {
 
         revoke(&mut registry, funding(), principal(2));
 
-        assert!(!registry.is_trading_account(&principal(2)));
-        assert!(registry.is_trading_account(&principal(3)));
+        assert!(!is_trading_account(&registry, principal(2)));
+        assert!(is_trading_account(&registry, principal(3)));
         assert_eq!(
             registry.trading_accounts_of(funding()),
             vec![principal(3)],
@@ -342,29 +351,56 @@ mod trading_accounts {
             registry.trading_accounts_of(funding()),
             vec![principal(2), principal(3)]
         );
-        assert!(registry.is_trading_account(&principal(2)));
-        assert!(registry.is_trading_account(&principal(3)));
-        assert!(!registry.is_trading_account(&funding()));
+        assert!(is_trading_account(&registry, principal(2)));
+        assert!(is_trading_account(&registry, principal(3)));
+        assert!(!is_trading_account(&registry, funding()));
     }
 
     #[test]
-    fn should_resolve_trading_accounts_to_their_funding_account() {
+    fn should_classify_and_resolve_accounts_via_lookup() {
         let mut registry = user_registry();
-        register(&mut registry, funding());
+        let funding_id = registry.get_or_register(funding());
         record(&mut registry, funding(), trading(), Timestamp::new(1));
 
         assert_eq!(
-            registry.resolve_account(trading()),
+            registry.lookup(funding()),
+            Some(UserAccount::Funding {
+                id: funding_id,
+                principal: funding()
+            }),
+            "a registered user classifies as its funding account"
+        );
+        assert!(
+            matches!(
+                registry.lookup(trading()),
+                Some(UserAccount::Trading { .. })
+            ),
+            "a whitelisted principal classifies as a trading account"
+        );
+        assert_eq!(
+            registry.lookup(principal(9)),
+            None,
+            "an unknown principal is neither"
+        );
+
+        let effective = |p: candid::Principal| {
+            registry
+                .lookup(p)
+                .map(|account| account.effective_principal())
+                .unwrap_or(p)
+        };
+        assert_eq!(
+            effective(trading()),
             funding(),
             "a trading account resolves to its funding account"
         );
         assert_eq!(
-            registry.resolve_account(funding()),
+            effective(funding()),
             funding(),
             "a funding account resolves to itself"
         );
         assert_eq!(
-            registry.resolve_account(principal(9)),
+            effective(principal(9)),
             principal(9),
             "an unknown principal resolves to itself"
         );

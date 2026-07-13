@@ -314,8 +314,12 @@ pub async fn deposit(
     // operations up front — before the in-flight guard or any ledger call. The
     // check acts on the raw caller (deposit is never delegation-resolved).
     let pre = state::with_state(|s| {
+        let caller_is_trading_account = matches!(
+            s.lookup_account(caller),
+            Some(crate::user::UserAccount::Trading { .. })
+        );
         s.permissions()
-            .permit_deposit(caller, s.is_trading_account(&caller))
+            .permit_deposit(caller, caller_is_trading_account)
     })
     .map_err(|e| match e {
         state::permissions::FundingDenied::TradingAccountForbidden => {
@@ -390,8 +394,12 @@ pub async fn withdraw(
     // any ledger call. The check acts on the raw caller (withdraw is never
     // delegation-resolved).
     let pre = state::with_state(|s| {
+        let caller_is_trading_account = matches!(
+            s.lookup_account(caller),
+            Some(crate::user::UserAccount::Trading { .. })
+        );
         s.permissions()
-            .permit_withdraw(caller, s.is_trading_account(&caller))
+            .permit_withdraw(caller, caller_is_trading_account)
     })
     .map_err(|e| match e {
         state::permissions::FundingDenied::TradingAccountForbidden => {
@@ -467,7 +475,7 @@ pub fn get_balances(
 ) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     validate_filter_len(filter.as_deref())?;
     state::with_state(|s| {
-        let caller = s.resolve_account(caller);
+        let caller = s.effective_account(caller);
         s.get_balances(&caller, filter.as_deref())
     })
 }
@@ -503,7 +511,7 @@ pub fn get_my_orders(
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let order = state::with_state(|s| {
-                let caller = s.resolve_account(caller);
+                let caller = s.effective_account(caller);
                 s.get_user_order(&caller, id)
             })
             .ok_or(GetMyOrdersError::OrderNotFound)?;
@@ -517,7 +525,7 @@ pub fn get_my_orders(
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
             state::with_state(|s| {
-                let caller = s.resolve_account(caller);
+                let caller = s.effective_account(caller);
                 s.get_user_orders(&caller, after, length)
             })
             .map_err(|_| GetMyOrdersError::OrderNotFound)?
@@ -565,7 +573,7 @@ pub fn get_my_trades(
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
             match state::with_state(|s| {
-                let caller = s.resolve_account(caller);
+                let caller = s.effective_account(caller);
                 s.get_user_order_trades(&caller, order_id, after, length)
             }) {
                 Ok(trades) => trades
@@ -586,7 +594,7 @@ pub fn get_my_trades(
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
             match state::with_state(|s| {
-                let caller = s.resolve_account(caller);
+                let caller = s.effective_account(caller);
                 s.get_user_trades(&caller, after, length)
             }) {
                 Ok(trades) => trades
