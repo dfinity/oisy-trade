@@ -30,7 +30,7 @@ use crate::user::{
 };
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
-use oisy_trade_types_internal::{InitArg, Mode};
+use oisy_trade_types_internal::{DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT, InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
@@ -111,8 +111,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
-        let execution_policy =
-            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
+        let execution_policy = ExecutionPolicy::try_new(
+            init_arg.max_orders_per_chunk,
+            init_arg.instruction_budget,
+            init_arg
+                .max_settlement_units_per_event
+                .unwrap_or(DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT),
+        )?;
         Ok(Self {
             mode: init_arg.mode,
             execution_policy,
@@ -369,24 +374,24 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                 OrderUpdate::status(OrderStatus::Canceled),
                 now,
             );
-            let mut balance_operations = Vec::with_capacity(1);
-            RemovedOrderSettlement::new(seq, &removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,
-                    balance_operations,
+                    balance_operations: RemovedOrderSettlement::new(seq, &removed, base_scale)
+                        .balance_operations(),
                     fills: Vec::new(),
                 });
         }
     }
 
     /// Drive engine matching for the given book; when `persistence` is
-    /// [`StableMemoryOptions::Write`], flip every touched order's status
-    /// in `order_history`. Push the paired balance-only
-    /// [`event::SettlingEvent`] (if any balance operations were produced)
-    /// onto [`State::pending_settling_events`] for the settling-event
-    /// dispatch to drain.
+    /// [`StableMemoryOptions::Write`], apply the resulting order-record
+    /// updates in one pass over `order_history`, then enqueue one
+    /// [`event::SettlingEvent`] per [`crate::settlement::SettlementBatch`] the packer cut from
+    /// the round — each carrying a bounded number of settlement units (fills
+    /// with their balance operations, plus removed-order refunds) — onto
+    /// [`State::pending_settling_events`] for the settling-event dispatch to
+    /// drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -404,21 +409,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let settlement = MatchSettlement::from_matching(output, fee_rates, base_scale);
+            let MatchSettlement {
+                order_updates,
+                settling_batches,
+            } = MatchSettlement::from_matching(
+                output,
+                fee_rates,
+                base_scale,
+                self.execution_policy.max_settlement_units_per_event(),
+            );
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
-                for (seq, update) in settlement.order_updates {
+                for (seq, update) in order_updates {
                     self.order_history
                         .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            if !settlement.balance_operations.is_empty() || !settlement.fills.is_empty() {
+            for batch in settling_batches {
                 self.pending_settling_events
                     .push_back(event::SettlingEvent {
                         book_id: event.book_id,
-                        balance_operations: settlement.balance_operations,
-                        fills: settlement.fills,
+                        balance_operations: batch.balance_operations,
+                        fills: batch.fills,
                     });
             }
         }

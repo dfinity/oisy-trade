@@ -83,6 +83,9 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         },
         order_history(),
         trade_history(),
@@ -100,6 +103,9 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         },
         crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
@@ -313,6 +319,9 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 mode: oisy_trade_types_internal::Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             },
             order_history,
             trade_history,
@@ -434,6 +443,12 @@ pub fn user_registry() -> UserRegistry<VectorMemory> {
 /// A deterministic test principal seeded by a single byte.
 pub fn principal(seed: u8) -> Principal {
     Principal::from_slice(&[seed])
+}
+
+/// A deterministic maker principal seeded by an index, kept clear of the
+/// single-byte [`principal`] seeds.
+pub fn maker(i: usize) -> Principal {
+    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
 }
 
 /// Construct a [`ic_cdk::call::Response`] from Candid-encoded bytes.
@@ -800,13 +815,27 @@ pub mod arbitrary {
 
     pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
         // Stay within ExecutionPolicy's validation bounds so `State::new` won't panic.
-        (arb_mode(), 1..=10_000u32, 1..=40_000_000_000u64).prop_map(
-            |(mode, max_orders_per_chunk, instruction_budget)| InitArg {
-                mode,
-                max_orders_per_chunk,
-                instruction_budget,
-            },
+        (
+            arb_mode(),
+            1..=10_000u32,
+            1..=40_000_000_000u64,
+            option::of(1..=10_000u32),
         )
+            .prop_map(
+                |(
+                    mode,
+                    max_orders_per_chunk,
+                    instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
+                    InitArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_settlement_units_per_event,
+                    }
+                },
+            )
     }
 
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
@@ -814,12 +843,21 @@ pub mod arbitrary {
             option::of(arb_mode()),
             option::of(1..=10_000u32),
             option::of(1..=40_000_000_000u64),
+            option::of(1..=10_000u32),
         )
             .prop_map(
-                |(mode, max_orders_per_chunk, instruction_budget)| UpgradeArg {
+                |(
                     mode,
                     max_orders_per_chunk,
                     instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
+                    UpgradeArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_settlement_units_per_event,
+                    }
                 },
             )
     }

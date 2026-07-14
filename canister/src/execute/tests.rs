@@ -97,6 +97,49 @@ fn should_signal_more_work_until_all_orders_are_drained() {
     }
 }
 
+/// A single taker sweeping more than `max_settlement_units_per_event` resting
+/// makers produces several bounded settling events; under an unlimited budget
+/// one `run_once` matches and drains all of them, leaving no pending work and
+/// every order `Filled`.
+#[test]
+fn should_drain_all_split_settling_events_in_one_run() {
+    let mut state = setup_one_book();
+    set_unlimited_policy(&mut state);
+    let runtime = runtime();
+    let pair = icp_ckbtc_trading_pair();
+    let lot = u64::from(LOT_SIZE);
+    let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+    let num_makers = cap + 2;
+
+    let maker_ids: Vec<(Principal, OrderId)> = (0..num_makers)
+        .map(|i| {
+            let owner = test_fixtures::maker(i);
+            let id = test_fixtures::order(owner, &pair, Side::Sell, 100 * PRICE_SCALE, lot)
+                .place(&mut state);
+            (owner, id)
+        })
+        .collect();
+    let buy_id = test_fixtures::order(
+        BUYER,
+        &pair,
+        Side::Buy,
+        100 * PRICE_SCALE,
+        num_makers as u64 * lot,
+    )
+    .place(&mut state);
+
+    let status = EXECUTOR.run_once(&mut state, &runtime);
+
+    assert_eq!(status, ExecutionStatus::Complete);
+    assert!(!state.has_pending_orders());
+    assert!(!state.has_pending_settling_events());
+    assert_eq!(status_of(&state, buy_id), Some(OrderStatus::Filled));
+    for (owner, id) in maker_ids {
+        let status = state.get_user_order(&owner, id).map(|(_, _, r)| r.status);
+        assert_eq!(status, Some(OrderStatus::Filled));
+    }
+}
+
 #[test]
 fn should_be_a_no_op_when_globally_halted() {
     let mut state = setup_one_book();
@@ -434,7 +477,7 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
     test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
     // Minimum budget; mock returns a counter already past it.
-    state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1).unwrap());
+    state.set_execution_policy(ExecutionPolicy::try_new(u32::MAX, 1, u32::MAX).unwrap());
     let mut mock = MockRuntime::new();
     mock.expect_time().return_const(crate::Timestamp::EPOCH);
     mock.expect_instruction_counter().return_const(1u64);
@@ -449,7 +492,12 @@ fn should_exit_early_when_instruction_budget_already_exceeded() {
 
 fn set_chunk_policy(state: &mut TestState, max_orders_per_chunk: u32) {
     state.set_execution_policy(
-        ExecutionPolicy::try_new(max_orders_per_chunk, MAX_INSTRUCTION_BUDGET).unwrap(),
+        ExecutionPolicy::try_new(
+            max_orders_per_chunk,
+            MAX_INSTRUCTION_BUDGET,
+            oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+        )
+        .unwrap(),
     );
 }
 
