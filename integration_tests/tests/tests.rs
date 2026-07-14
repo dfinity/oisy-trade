@@ -4152,4 +4152,87 @@ mod trading_accounts {
 
         setup.drop().await;
     }
+
+    #[tokio::test]
+    async fn should_resolve_reads_to_the_funding_account() {
+        use oisy_trade_int_tests::PRICE_SCALE;
+        use oisy_trade_types::{
+            GetMyOrdersArgs, GetMyTradesArgs, LimitOrderRequest, Side, TradesByAccount,
+            TradesFilter,
+        };
+
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        let funding_client = setup.oisy_trade_client_with_caller(funding);
+
+        let quantity = 1_000_000u64;
+        let price = 9_000 * PRICE_SCALE;
+        setup.fund_base(funding, quantity).await;
+        funding_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let buyer = Principal::from_slice(&[0x0B]);
+        let notional = price as u128 * quantity as u128 / 1_000_000_000u128;
+        setup.fund_quote(buyer, notional as u64).await;
+        setup
+            .oisy_trade_client_with_caller(buyer)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let trading = trading_account(1);
+        funding_client.add_trading_account(trading).await.unwrap();
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+
+        let account_trades = GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        };
+
+        assert_eq!(
+            trading_client.get_balances(None).await.unwrap(),
+            funding_client.get_balances(None).await.unwrap(),
+            "the trading account sees the funding account's balances"
+        );
+        assert_eq!(
+            trading_client
+                .get_my_orders(GetMyOrdersArgs::default())
+                .await
+                .unwrap(),
+            funding_client
+                .get_my_orders(GetMyOrdersArgs::default())
+                .await
+                .unwrap(),
+            "the trading account sees the funding account's orders"
+        );
+        assert_eq!(
+            trading_client
+                .get_my_trades(account_trades.clone())
+                .await
+                .unwrap(),
+            funding_client.get_my_trades(account_trades).await.unwrap(),
+            "the trading account sees the funding account's trades"
+        );
+        assert!(!funding_client.get_balances(None).await.unwrap().is_empty());
+
+        setup.drop().await;
+    }
 }

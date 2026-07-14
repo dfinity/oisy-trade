@@ -229,6 +229,15 @@ impl<M: Memory> UserRegistry<M> {
             .contains_key(&PrincipalKey(*principal))
     }
 
+    /// Resolves `caller` to the account whose data it acts on: a trading
+    /// account resolves to its funding account, any other principal to itself.
+    pub fn resolve_account(&self, caller: Principal) -> Principal {
+        self.trading_accounts
+            .get(&PrincipalKey(caller))
+            .map(|grant| grant.funding)
+            .unwrap_or(caller)
+    }
+
     /// Checks the grant preconditions for whitelisting `trading` under funding
     /// account `funding` at time `now`, without mutating anything. Encodes the
     /// identity and cap rules and the grant cooldown; the caller records the

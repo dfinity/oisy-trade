@@ -901,6 +901,135 @@ mod order_status_via_get_my_orders {
     }
 }
 
+mod resolution_on_reads {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{
+        add_limit_order, add_trading_account, get_balances, get_my_orders, get_my_trades,
+        process_pending_orders,
+    };
+    use candid::Principal;
+    use oisy_trade_types::{GetMyOrdersArgs, GetMyTradesArgs, Side, TradesByAccount, TradesFilter};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const SELLER: Principal = Principal::from_slice(&[0x03]);
+
+    fn account_trades() -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        }
+    }
+
+    fn setup_funding_with_activity() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(SELLER);
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+        let mut sell = limit_order_request();
+        sell.side = Side::Sell;
+        add_limit_order(sell, &mock_runtime_for(SELLER)).unwrap();
+        process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+    }
+
+    #[test]
+    fn should_return_funding_data_when_read_by_a_trading_account() {
+        setup_funding_with_activity();
+
+        assert_eq!(
+            get_balances(None, TRADING),
+            get_balances(None, FUNDING),
+            "a trading account sees its funding account's balances"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "a trading account sees its funding account's orders"
+        );
+        let orders = get_my_orders(Some(GetMyOrdersArgs::default()), TRADING).unwrap();
+        assert!(
+            orders.iter().all(|o| o.order.owner == FUNDING),
+            "a trading account's orders are owned by the funding account (resolution returned FUNDING)"
+        );
+        assert_eq!(
+            get_my_trades(account_trades(), TRADING),
+            get_my_trades(account_trades(), FUNDING),
+            "a trading account sees its funding account's trades"
+        );
+
+        assert!(!get_balances(None, FUNDING).unwrap().is_empty());
+        assert!(
+            !get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!get_my_trades(account_trades(), FUNDING).unwrap().is_empty());
+    }
+
+    #[test]
+    fn should_resolve_by_id_reads_for_a_trading_account() {
+        use crate::GetMyOrdersError;
+        use oisy_trade_types::{OrderId, TradesByOrder};
+
+        setup_funding_with_activity();
+
+        let by_order = |order_id: OrderId| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after: None,
+                length: 10,
+            }),
+        };
+        let first_order_id = |who: Principal| {
+            get_my_orders(Some(GetMyOrdersArgs::default()), who)
+                .unwrap()
+                .first()
+                .unwrap()
+                .id
+                .clone()
+        };
+        let funding_order = first_order_id(FUNDING);
+        let seller_order = first_order_id(SELLER);
+
+        let found =
+            get_my_orders(Some(GetMyOrdersArgs::by_id(funding_order.clone())), TRADING).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].order.owner, FUNDING,
+            "a trading account's ById read resolves to the funding account's order"
+        );
+
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::by_id(seller_order)), TRADING),
+            Err(GetMyOrdersError::OrderNotFound),
+            "a trading account resolves to F and cannot reach a non-F order"
+        );
+
+        let trades = get_my_trades(by_order(funding_order.clone()), TRADING).unwrap();
+        assert_eq!(
+            get_my_trades(by_order(funding_order.clone()), TRADING),
+            get_my_trades(by_order(funding_order.clone()), FUNDING),
+            "a trading account's ByOrder trades resolve to the funding account"
+        );
+        assert_eq!(trades.len(), 1);
+        assert_eq!(
+            trades[0].order_id, funding_order,
+            "the trade belongs to the funding account's order"
+        );
+        assert_eq!(
+            trades[0].side,
+            Side::Buy,
+            "the funding account placed a buy"
+        );
+    }
+}
+
 mod deposit {
     use crate::deposit;
     use crate::guard::UserOpGuard;

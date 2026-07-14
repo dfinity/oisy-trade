@@ -898,6 +898,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.user_registry.is_trading_account(principal)
     }
 
+    /// Resolves `caller` to the account whose data it reads: a trading account
+    /// resolves to its funding account, any other principal to itself.
+    pub fn resolve_account(&self, caller: Principal) -> Principal {
+        self.user_registry.resolve_account(caller)
+    }
+
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
         self.ledger_fee_cache
             .get(token_id)

@@ -348,6 +348,29 @@ mod trading_accounts {
     }
 
     #[test]
+    fn should_resolve_trading_accounts_to_their_funding_account() {
+        let mut registry = user_registry();
+        register(&mut registry, funding());
+        record(&mut registry, funding(), trading(), Timestamp::new(1));
+
+        assert_eq!(
+            registry.resolve_account(trading()),
+            funding(),
+            "a trading account resolves to its funding account"
+        );
+        assert_eq!(
+            registry.resolve_account(funding()),
+            funding(),
+            "a funding account resolves to itself"
+        );
+        assert_eq!(
+            registry.resolve_account(principal(9)),
+            principal(9),
+            "an unknown principal resolves to itself"
+        );
+    }
+
+    #[test]
     fn should_return_empty_list_for_unregistered_or_ungranted_principal() {
         let mut registry = user_registry();
         assert_eq!(registry.trading_accounts_of(principal(9)), vec![]);
