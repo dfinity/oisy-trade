@@ -728,6 +728,7 @@ pub mod arbitrary {
             arb_timestamp(),             // created_at
             option::of(arb_timestamp()), // last_updated_at
             arb_time_in_force(),
+            option::of(arb_principal()), // placed_by
         )
             .prop_flat_map(
                 move |(
@@ -739,6 +740,7 @@ pub mod arbitrary {
                     created_at,
                     last_updated_at,
                     time_in_force,
+                    placed_by,
                 )| {
                     (0..=qty_lots).prop_map(move |filled_lots| {
                         let price = Price::new(price_ticks as u128 * tick);
@@ -765,7 +767,7 @@ pub mod arbitrary {
                             time_in_force,
                             filled_quote,
                             filled_fee: Quantity::from(u128::from(filled_lots)),
-                            placed_by: None,
+                            placed_by,
                         }
                     })
                 },
