@@ -591,7 +591,11 @@ mod record_limit_order {
         let first = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
         let second = order(OWNER, &pair, Side::Buy, 100, lot).place(&mut state);
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
         assert_eq!(
             state.order_history.orders_after(owner_id, None, 10),
             Ok(vec![second, first])
@@ -712,8 +716,16 @@ mod get_user_order_trades {
         let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
         let unknown_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
-        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
+        let stranger_id = state
+            .user_registry
+            .lookup(STRANGER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
 
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
@@ -2849,6 +2861,7 @@ mod settle_fills {
             let user = state
                 .user_registry
                 .lookup(owner)
+                .and_then(|account| account.funding_id())
                 .expect("owner should be registered after settlement");
             state
                 .trade_history

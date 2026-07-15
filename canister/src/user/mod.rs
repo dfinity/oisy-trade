@@ -160,6 +160,48 @@ pub enum GrantError {
     },
 }
 
+/// Classification of a principal by the [`UserRegistry`]: either a funding
+/// account (a registered user) or a trading account (a whitelisted delegate).
+/// The two are mutually exclusive — a trading account is never registered — so
+/// [`UserRegistry::lookup`] returns exactly one, or `None` for an unknown
+/// principal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserAccount {
+    /// A registered user, holding balances, orders, and trades under `id`.
+    Funding {
+        /// The compact, stable id keying the user's per-account state.
+        id: UserId,
+        /// The user's own principal.
+        principal: Principal,
+    },
+    /// A whitelisted trading principal acting on its funding account's behalf.
+    Trading {
+        /// The trading principal itself.
+        principal: Principal,
+        /// The standing authorization naming the funding account it acts for.
+        grant: TradingGrant,
+    },
+}
+
+impl UserAccount {
+    /// The account whose data this principal reads and acts on: a funding
+    /// account is itself; a trading account is its funding account.
+    pub fn effective_principal(&self) -> Principal {
+        match self {
+            UserAccount::Funding { principal, .. } => *principal,
+            UserAccount::Trading { grant, .. } => grant.funding,
+        }
+    }
+
+    /// This account's funding [`UserId`], present only for a funding account.
+    pub fn funding_id(&self) -> Option<UserId> {
+        match self {
+            UserAccount::Funding { id, .. } => Some(*id),
+            UserAccount::Trading { .. } => None,
+        }
+    }
+}
+
 /// Why [`UserRegistry::validate_remove_trading_account`] rejected a revocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevokeError {
@@ -216,26 +258,26 @@ impl<M: Memory> UserRegistry<M> {
         id
     }
 
-    /// Returns `principal`'s id if it has been registered, without assigning
-    /// one. Read paths use this so that merely querying a never-seen principal
-    /// does not create an entry.
-    pub fn lookup(&self, principal: Principal) -> Option<UserId> {
-        self.users.get(&PrincipalKey(principal))
-    }
-
-    /// Returns `true` if `principal` is currently a trading account.
-    pub fn is_trading_account(&self, principal: &Principal) -> bool {
-        self.trading_accounts
-            .contains_key(&PrincipalKey(*principal))
-    }
-
-    /// Resolves `caller` to the account whose data it acts on: a trading
-    /// account resolves to its funding account, any other principal to itself.
-    pub fn resolve_account(&self, caller: Principal) -> Principal {
-        self.trading_accounts
-            .get(&PrincipalKey(caller))
-            .map(|grant| grant.funding)
-            .unwrap_or(caller)
+    /// Classifies `principal` without assigning an id: a registered user is a
+    /// [`UserAccount::Funding`], a whitelisted trading principal a
+    /// [`UserAccount::Trading`], and an unknown principal `None`. Read paths use
+    /// this so that merely querying a never-seen principal does not create an
+    /// entry. `trading_accounts` is consulted first; the two maps are mutually
+    /// exclusive (a trading account is never registered), asserted in debug
+    /// builds. Preferring `Trading` on a (never-reachable) conflict keeps the
+    /// safe default — such a principal stays denied funding operations.
+    pub fn lookup(&self, principal: Principal) -> Option<UserAccount> {
+        let key = PrincipalKey(principal);
+        if let Some(grant) = self.trading_accounts.get(&key) {
+            debug_assert!(
+                !self.users.contains_key(&key),
+                "BUG: principal is both a funding and a trading account"
+            );
+            return Some(UserAccount::Trading { principal, grant });
+        }
+        self.users
+            .get(&key)
+            .map(|id| UserAccount::Funding { id, principal })
     }
 
     /// Checks the grant preconditions for whitelisting `trading` under funding
@@ -250,23 +292,21 @@ impl<M: Memory> UserRegistry<M> {
     ) -> Result<(), GrantError> {
         let FundingAccount(funding) = funding;
         let TradingAccount(trading) = trading;
-        // Checked before the registration lookup: a trading account is
-        // unregistered by design, so a delegate granter would otherwise be
-        // reported as merely `GranterNotRegistered`, losing the specific reason.
-        if self.is_trading_account(&funding) {
-            return Err(GrantError::GranterIsTradingAccount);
-        }
-        let funding_id = self
-            .lookup(funding)
-            .ok_or(GrantError::GranterNotRegistered)?;
+        // A trading account is unregistered by design, so the delegate-granter
+        // case is reported before the registration case would swallow it as a
+        // plain `GranterNotRegistered`.
+        let funding_id = match self.lookup(funding) {
+            Some(UserAccount::Trading { .. }) => return Err(GrantError::GranterIsTradingAccount),
+            None => return Err(GrantError::GranterNotRegistered),
+            Some(UserAccount::Funding { id, .. }) => id,
+        };
         if trading == funding {
             return Err(GrantError::SelfGrant);
         }
-        if self.is_trading_account(&trading) {
-            return Err(GrantError::AlreadyTradingAccount);
-        }
-        if self.lookup(trading).is_some() {
-            return Err(GrantError::AlreadyRegisteredUser);
+        match self.lookup(trading) {
+            Some(UserAccount::Trading { .. }) => return Err(GrantError::AlreadyTradingAccount),
+            Some(UserAccount::Funding { .. }) => return Err(GrantError::AlreadyRegisteredUser),
+            None => {}
         }
         if let Some(list) = self.trading_accounts_by_funding.get(&funding_id) {
             // Cap first (permanent) then cooldown (retryable): a permanent
@@ -318,6 +358,7 @@ impl<M: Memory> UserRegistry<M> {
         let TradingAccount(trading) = trading;
         let funding_id = self
             .lookup(funding)
+            .and_then(|account| account.funding_id())
             .expect("BUG: record_add_trading_account on an unregistered funding account");
         let previous = self
             .trading_accounts
@@ -350,6 +391,7 @@ impl<M: Memory> UserRegistry<M> {
         let TradingAccount(trading) = trading;
         let funding_id = self
             .lookup(funding)
+            .and_then(|account| account.funding_id())
             .expect("BUG: record_remove_trading_account on an unregistered funding account");
         let removed = self
             .trading_accounts
@@ -370,6 +412,7 @@ impl<M: Memory> UserRegistry<M> {
     /// is unregistered). Acts on the raw principal; never resolves delegation.
     pub fn trading_accounts_of(&self, funding: Principal) -> Vec<Principal> {
         self.lookup(funding)
+            .and_then(|account| account.funding_id())
             .and_then(|funding_id| self.trading_accounts_by_funding.get(&funding_id))
             .map(|list| list.accounts)
             .unwrap_or_default()

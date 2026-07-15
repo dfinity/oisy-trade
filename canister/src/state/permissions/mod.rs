@@ -132,7 +132,7 @@ impl Permissions {
     /// Admits a deposit unless the caller is a trading account, which can never
     /// hold DEX balances. `caller_is_trading_account` is whether the calling
     /// principal is a trading account, computed by the canister from the
-    /// registry (via `State::is_trading_account`); it is derived internally and
+    /// registry (via `State::lookup_account`); it is derived internally and
     /// must never be treated as caller-supplied input.
     pub fn permit_deposit(
         &self,
@@ -148,7 +148,7 @@ impl Permissions {
     /// Admits a withdrawal unless the caller is a trading account, which can
     /// never hold DEX balances. `caller_is_trading_account` is whether the
     /// calling principal is a trading account, computed by the canister from the
-    /// registry (via `State::is_trading_account`); it is derived internally and
+    /// registry (via `State::lookup_account`); it is derived internally and
     /// must never be treated as caller-supplied input.
     pub fn permit_withdraw(
         &self,
