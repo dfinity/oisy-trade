@@ -584,6 +584,41 @@ mod record_limit_order {
     }
 
     #[test]
+    fn stores_the_placed_by_on_the_record() {
+        const TRADING: Principal = Principal::from_slice(&[0x02]);
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        state.deposit(OWNER, pair.base, lot.into(), StableMemoryOptions::Write);
+        let (order_id, order) = state
+            .validate_limit_order(
+                OWNER,
+                pair.clone(),
+                PendingOrder {
+                    side: Side::Sell,
+                    price: Price::new(100 * PRICE_SCALE),
+                    quantity: lot.into(),
+                    time_in_force: TimeInForce::GoodTilCanceled,
+                },
+            )
+            .unwrap();
+
+        state.record_limit_order(
+            OWNER,
+            order_id.book_id(),
+            order,
+            Some(TRADING),
+            crate::Timestamp::new(1_700_000_000_000_000_000),
+            StableMemoryOptions::Write,
+        );
+
+        assert_eq!(
+            state.order_history.get(&order_id).unwrap().placed_by,
+            Some(TRADING)
+        );
+    }
+
+    #[test]
     fn populates_the_per_user_index_newest_first() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
