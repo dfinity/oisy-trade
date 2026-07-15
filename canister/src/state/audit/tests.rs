@@ -204,6 +204,7 @@ impl Scenario {
             user,
             order_id.book_id(),
             order,
+            None,
             timestamp,
             StableMemoryOptions::Write,
         );
@@ -216,6 +217,7 @@ impl Scenario {
                 price,
                 quantity,
                 time_in_force,
+                placed_by: None,
             }),
         });
         (self, order_id)

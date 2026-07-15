@@ -305,6 +305,10 @@ type OrderRecord = record {
     /// Cumulative realized fee charged across the order's fills, in the order's
     /// receive token — base for a buy, quote for a sell.
     filled_fee : nat;
+    /// The principal that placed the order when it differs from `owner` (a
+    /// trading account acting for the funding account); null when the owner
+    /// placed it itself.
+    placed_by : opt principal;
 };
 
 /// Request for `get_my_orders`.
@@ -787,6 +791,7 @@ type AddLimitOrderEvent = record {
     price : nat;
     quantity : nat;
     time_in_force : TimeInForce;
+    placed_by : opt principal;
 };
 
 // Event payload for a deposit.

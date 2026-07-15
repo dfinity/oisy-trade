@@ -1274,6 +1274,7 @@ mod cancel_limit_order {
                 // Buyer rested first, so it is the maker: a base-token fee at the
                 // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
                 filled_fee: Nat::from(1_000u64),
+                placed_by: None,
             }
         );
 
@@ -1819,6 +1820,7 @@ async fn should_replay_events_on_upgrade() {
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+                placed_by: None,
             });
         });
         assert_matches!(&events[4], EventType::Matching(e) => {
@@ -1894,6 +1896,7 @@ async fn should_replay_events_on_upgrade() {
                 price: Nat::from(price),
                 quantity: Nat::from(deposit_amount),
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+                placed_by: None,
             });
         });
         assert_matches!(&events[7], EventType::Matching(e) => {

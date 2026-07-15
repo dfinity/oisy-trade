@@ -69,9 +69,10 @@ fn should_display_principals_as_text() {
                 time_in_force: TimeInForce::GoodTilCanceled,
                 filled_quote: Nat::from(0u64),
                 filled_fee: Nat::from(0u64),
+                placed_by: None,
             }
             .to_string(),
-            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0)",
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=None)",
         },
         TestCase {
             desc: "DepositRequest",
