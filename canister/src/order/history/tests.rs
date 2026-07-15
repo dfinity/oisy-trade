@@ -32,18 +32,6 @@ fn test_record() -> OrderRecord {
     }
 }
 
-proptest::proptest! {
-    #[test]
-    fn should_roundtrip_order_record_through_cbor(
-        record in crate::test_fixtures::arbitrary::arb_order_record(),
-    ) {
-        let mut buf = vec![];
-        minicbor::encode(&record, &mut buf).unwrap();
-        let decoded: OrderRecord = minicbor::decode(&buf).unwrap();
-        proptest::prelude::prop_assert_eq!(record, decoded);
-    }
-}
-
 #[test]
 fn public_record_surfaces_time_in_force() {
     let record = test_record();

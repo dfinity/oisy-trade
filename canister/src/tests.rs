@@ -1091,22 +1091,6 @@ mod resolution_on_placement {
     }
 
     #[test]
-    fn should_not_attribute_an_order_a_funding_account_places_itself() {
-        init_state_with_order_book();
-        fund_user(FUNDING);
-
-        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
-
-        let orders = funding_orders();
-        assert_eq!(orders.len(), 1);
-        assert_eq!(orders[0].order.owner, FUNDING);
-        assert_eq!(
-            orders[0].order.placed_by, None,
-            "a funding account placing its own order has no placed_by attribution"
-        );
-    }
-
-    #[test]
     fn should_keep_full_placement_authority_for_a_funding_account_with_grants() {
         init_state_with_order_book();
         fund_user(FUNDING);

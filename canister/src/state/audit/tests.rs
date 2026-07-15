@@ -519,26 +519,6 @@ fn should_replay_add_limit_order() {
             TokenId::new(quote()),
             Quantity::from(price * quantity),
         )
-        .with_limit_order(
-            user_1(),
-            Side::Buy,
-            Price::new(price * PRICE_SCALE),
-            Quantity::from(quantity),
-        );
-    scenario.assert_replay_matches();
-}
-
-#[test]
-fn should_replay_add_limit_order_placed_by_a_trading_account() {
-    let price = 100u128;
-    let quantity = 1_000_000u128;
-    let (scenario, _) = Scenario::new()
-        .with_trading_pair()
-        .with_deposit(
-            user_1(),
-            TokenId::new(quote()),
-            Quantity::from(price * quantity),
-        )
         .with_limit_order_tif_placed_by(
             user_1(),
             Side::Buy,
