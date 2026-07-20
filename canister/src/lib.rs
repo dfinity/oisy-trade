@@ -105,12 +105,14 @@ pub fn cancel_limit_order(
 ) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
+    let owner = state::with_state(|s| s.effective_account(caller));
+    let canceled_by = (caller != owner).then_some(caller);
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
             oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
         )
     })?;
-    let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
+    let record = state::with_state_mut(|s| s.cancel_limit_order(&owner, canceled_by, id, runtime))?;
     Ok(record.into())
 }
 

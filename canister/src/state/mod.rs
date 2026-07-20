@@ -295,16 +295,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        user: &Principal,
+        owner: &Principal,
+        canceled_by: Option<Principal>,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(user, &order_id)?;
+        self.validate_cancel_limit_order(owner, &order_id)?;
 
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
-            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }),
             permit.into(),
             runtime,
         );
@@ -337,14 +341,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        caller: &Principal,
+        owner: &Principal,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != caller {
+        if &record.owner != owner {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {

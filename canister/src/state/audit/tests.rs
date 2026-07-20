@@ -240,7 +240,12 @@ impl Scenario {
     /// book mutation, then a `SettlingEvent` for the refund + status
     /// transition). Panics if validation would reject (the test is expected
     /// to set up a cancelable order first).
-    fn with_cancel(mut self, user: Principal, order_id: OrderId) -> Self {
+    fn with_cancel(
+        mut self,
+        user: Principal,
+        order_id: OrderId,
+        canceled_by: Option<Principal>,
+    ) -> Self {
         self.state
             .validate_cancel_limit_order(&user, &order_id)
             .expect("test setup: order must be cancelable");
@@ -256,7 +261,10 @@ impl Scenario {
             .record_settling_event(&settling_event, settling_ts, StableMemoryOptions::Write);
         self.events.push(Event {
             timestamp: cancel_ts,
-            payload: EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }),
+            payload: EventType::CancelLimitOrder(CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }),
         });
         self.events.push(Event {
             timestamp: settling_ts,
@@ -828,7 +836,7 @@ fn should_replay_cancel_pending_order() {
     // Cancel before any matching round runs — the order is still pending and
     // the full reserve returns to free.
     scenario
-        .with_cancel(user_1(), buy_id)
+        .with_cancel(user_1(), buy_id, Some(user_2()))
         .assert_balance(user_1(), TokenId::new(quote()), reserved, 0u64)
         .assert_order_status(buy_id, OrderStatus::Canceled)
         // Never matched: remaining (quantity − filled_quantity) is the full
@@ -894,7 +902,7 @@ fn should_replay_cancel_partially_filled_order() {
     );
 
     scenario
-        .with_cancel(buyer, buy_id)
+        .with_cancel(buyer, buy_id, None)
         // Buyer: 1 lot base from the fill, 2 lots × price quote refunded.
         .assert_balance(buyer, TokenId::new(base()), quantity, 0u64)
         .assert_balance(buyer, TokenId::new(quote()), price * 2 * quantity, 0u64)

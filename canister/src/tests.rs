@@ -1118,6 +1118,128 @@ mod resolution_on_placement {
     }
 }
 
+mod resolution_on_cancel {
+    use crate::state::event::{CancelLimitOrderEvent, Event, EventType};
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{add_limit_order, add_trading_account, cancel_limit_order, get_my_orders, storage};
+    use candid::Principal;
+    use oisy_trade_types::{CancelLimitOrderRequestError, ErrorKind, GetMyOrdersArgs, OrderStatus};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_FUNDING: Principal = Principal::from_slice(&[0x03]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x04]);
+    const STRANGER: Principal = Principal::from_slice(&[0x05]);
+
+    fn place_funding_order() -> String {
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap()
+    }
+
+    fn unique_cancel_event() -> CancelLimitOrderEvent {
+        let events: Vec<CancelLimitOrderEvent> = storage::with_event_iter(|it| {
+            it.filter_map(|Event { payload, .. }| match payload {
+                EventType::CancelLimitOrder(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+        });
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one CancelLimitOrderEvent"
+        );
+        events.into_iter().next().unwrap()
+    }
+
+    fn cancel_event_count() -> usize {
+        storage::with_event_iter(|it| {
+            it.filter(|Event { payload, .. }| matches!(payload, EventType::CancelLimitOrder(_)))
+                .count()
+        })
+    }
+
+    #[test]
+    fn should_let_a_trading_account_cancel_the_funding_account_order() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+        let order_id = place_funding_order();
+
+        let record = cancel_limit_order(order_id, &mock_runtime_for(TRADING)).unwrap();
+
+        assert_eq!(record.owner, FUNDING);
+        assert_eq!(record.status, OrderStatus::Canceled);
+        assert_eq!(
+            unique_cancel_event().canceled_by,
+            Some(TRADING),
+            "the acting trading account is attributed as canceled_by"
+        );
+    }
+
+    #[test]
+    fn should_record_no_attribution_when_the_funding_account_cancels() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        let order_id = place_funding_order();
+
+        let record = cancel_limit_order(order_id, &mock_runtime_for(FUNDING)).unwrap();
+
+        assert_eq!(record.owner, FUNDING);
+        assert_eq!(record.status, OrderStatus::Canceled);
+        assert_eq!(
+            unique_cancel_event().canceled_by,
+            None,
+            "the funding account's own cancel is unattributed"
+        );
+    }
+
+    #[test]
+    fn should_reject_cancel_by_a_foreign_caller() {
+        struct TestCase {
+            desc: &'static str,
+            caller: Principal,
+        }
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(OTHER_FUNDING);
+        add_trading_account(OTHER_TRADING, &mock_runtime_for(OTHER_FUNDING)).unwrap();
+        let order_id = place_funding_order();
+
+        let cases = vec![
+            TestCase {
+                desc: "a stranger cannot cancel the funding account's order",
+                caller: STRANGER,
+            },
+            TestCase {
+                desc: "a different funding account's trading account cannot cancel the order",
+                caller: OTHER_TRADING,
+            },
+        ];
+
+        for case in cases {
+            let result = cancel_limit_order(order_id.clone(), &mock_runtime_for(case.caller));
+
+            assert_eq!(
+                result.unwrap_err().kind,
+                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
+                "{}",
+                case.desc
+            );
+            assert_eq!(
+                get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()[0]
+                    .order
+                    .status,
+                OrderStatus::Pending,
+                "{}: the order stays open",
+                case.desc
+            );
+            assert_eq!(cancel_event_count(), 0, "{}: no cancel event", case.desc);
+        }
+    }
+}
+
 mod deposit {
     use crate::deposit;
     use crate::guard::UserOpGuard;

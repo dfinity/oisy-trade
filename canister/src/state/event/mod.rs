@@ -192,6 +192,10 @@ pub enum BalanceOperation {
 pub struct CancelLimitOrderEvent {
     #[n(0)]
     pub order_id: OrderId,
+    /// The acting caller when it differs from the resolved owner; `None` when
+    /// the caller is the owner.
+    #[cbor(n(1), with = "icrc_cbor::principal::option")]
+    pub canceled_by: Option<Principal>,
 }
 
 #[derive(Clone, PartialEq, Debug, Decode, Encode)]
