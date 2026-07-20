@@ -232,6 +232,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: Principal,
         book_id: OrderBookId,
         order: Order,
+        placed_by: Option<Principal>,
         timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -285,6 +286,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     time_in_force: order.time_in_force(),
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by,
                 },
             );
         }

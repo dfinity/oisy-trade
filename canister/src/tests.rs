@@ -758,6 +758,7 @@ mod cancel_limit_order {
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
                 filled_quote: candid::Nat::from(0u64),
                 filled_fee: candid::Nat::from(0u64),
+                placed_by: None,
             })
         );
 
@@ -819,6 +820,7 @@ mod cancel_limit_order {
             time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             filled_quote: candid::Nat::from(0u64),
             filled_fee: candid::Nat::from(0u64),
+            placed_by: None,
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(
@@ -1026,6 +1028,92 @@ mod resolution_on_reads {
             trades[0].side,
             Side::Buy,
             "the funding account placed a buy"
+        );
+    }
+}
+
+mod resolution_on_placement {
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::user::TRADING_ACCOUNT_GRANT_COOLDOWN;
+    use crate::{Timestamp, add_limit_order, add_trading_account, get_balances, get_my_orders};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{GetMyOrdersArgs, UserOrder};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x03]);
+
+    fn reserved_total(who: Principal) -> Nat {
+        get_balances(None, who)
+            .unwrap()
+            .into_iter()
+            .fold(Nat::from(0u64), |acc, b| acc + b.balance.reserved)
+    }
+
+    fn funding_orders() -> Vec<UserOrder> {
+        get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()
+    }
+
+    #[test]
+    fn should_place_a_trading_account_order_on_the_funding_account() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        let reserved_before = reserved_total(FUNDING);
+        add_limit_order(limit_order_request(), &mock_runtime_for(TRADING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the order is visible in the funding account's orders"
+        );
+        assert_eq!(
+            orders[0].order.owner, FUNDING,
+            "a trading account's order is owned by the funding account"
+        );
+        assert_eq!(
+            orders[0].order.placed_by,
+            Some(TRADING),
+            "the acting trading account is attributed as placed_by"
+        );
+        assert!(
+            reserved_total(FUNDING) > reserved_before,
+            "the order reserves from the funding account's balance"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "the trading account reads back the funding account's order"
+        );
+    }
+
+    #[test]
+    fn should_keep_full_placement_authority_for_a_funding_account_with_grants() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        add_trading_account(TRADING, &mock_runtime_at(FUNDING, Timestamp::new(0))).unwrap();
+        add_trading_account(
+            OTHER_TRADING,
+            &mock_runtime_at(FUNDING, Timestamp::new(cooldown)),
+        )
+        .unwrap();
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the funding account places orders regardless of its grants"
+        );
+        assert_eq!(orders[0].order.owner, FUNDING);
+        assert_eq!(
+            orders[0].order.placed_by, None,
+            "the funding account's own order is unattributed even with whitelisted trading accounts"
         );
     }
 }

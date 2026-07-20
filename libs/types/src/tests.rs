@@ -24,6 +24,7 @@ fn should_display_principals_as_text() {
     }
 
     let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
+    let acting = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap();
     let token_id = TokenId {
         ledger_id: principal,
     };
@@ -69,9 +70,29 @@ fn should_display_principals_as_text() {
                 time_in_force: TimeInForce::GoodTilCanceled,
                 filled_quote: Nat::from(0u64),
                 filled_fee: Nat::from(0u64),
+                placed_by: Some(acting),
             }
             .to_string(),
-            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0)",
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=Some(mxzaz-hqaaa-aaaar-qaada-cai))",
+        },
+        TestCase {
+            desc: "OrderRecord placed_by=None",
+            rendered: OrderRecord {
+                owner: principal,
+                side: Side::Sell,
+                price: Nat::from(100u64),
+                quantity: Nat::from(1_000_000u64),
+                filled_quantity: Nat::from(0u64),
+                status: OrderStatus::Open,
+                created_at: 42,
+                last_updated_at: None,
+                time_in_force: TimeInForce::GoodTilCanceled,
+                filled_quote: Nat::from(0u64),
+                filled_fee: Nat::from(0u64),
+                placed_by: None,
+            }
+            .to_string(),
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=None)",
         },
         TestCase {
             desc: "DepositRequest",

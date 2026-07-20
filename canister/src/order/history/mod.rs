@@ -53,6 +53,10 @@ pub struct OrderRecord {
     /// the order's receive token — base for a buy, quote for a sell.
     #[n(10)]
     pub filled_fee: Quantity,
+    /// The acting caller when it differs from `owner`; `None` when the owner
+    /// placed the order itself.
+    #[cbor(n(11), with = "icrc_cbor::principal::option")]
+    pub placed_by: Option<Principal>,
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -69,6 +73,7 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             time_in_force: record.time_in_force.into(),
             filled_quote: record.filled_quote.into(),
             filled_fee: record.filled_fee.into(),
+            placed_by: record.placed_by,
         }
     }
 }

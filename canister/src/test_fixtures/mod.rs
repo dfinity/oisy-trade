@@ -878,17 +878,21 @@ pub mod arbitrary {
             arb_price(),
             arb_quantity(),
             arb_time_in_force(),
+            option::of(arb_principal()),
         )
-            .prop_map(|(user, order_id, side, price, quantity, time_in_force)| {
-                AddLimitOrderEvent {
-                    user,
-                    order_id,
-                    side,
-                    price,
-                    quantity,
-                    time_in_force,
-                }
-            })
+            .prop_map(
+                |(user, order_id, side, price, quantity, time_in_force, placed_by)| {
+                    AddLimitOrderEvent {
+                        user,
+                        order_id,
+                        side,
+                        price,
+                        quantity,
+                        time_in_force,
+                        placed_by,
+                    }
+                },
+            )
     }
 
     pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {

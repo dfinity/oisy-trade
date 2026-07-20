@@ -64,26 +64,29 @@ pub fn add_limit_order(
 ) -> Result<OrderId, AddLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
+    let owner = state::with_state(|s| s.effective_account(caller));
+    let placed_by = (caller != owner).then_some(caller);
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::try_from(request).map_err(|_| {
         AddLimitOrderError::request(
             oisy_trade_types::AddLimitOrderRequestError::AmountExceedsMaximum,
         )
     })?;
-    let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
+    let (order_id, order) = state::with_state(|s| s.validate_limit_order(owner, pair, pending))?;
 
     state::with_state_mut(|s| {
         let permit = s
             .permissions()
-            .permit_trading(caller, order_id.book_id())
+            .permit_trading(owner, order_id.book_id())
             .map_err(|e| AddLimitOrderError::from(state::AddLimitOrderError::from(e)))?;
         let event = state::event::AddLimitOrderEvent {
-            user: caller,
+            user: owner,
             order_id,
             side: order.side(),
             price: order.price(),
             quantity: *order.remaining_quantity(),
             time_in_force: order.time_in_force(),
+            placed_by,
         };
         state::audit::process_event(
             s,

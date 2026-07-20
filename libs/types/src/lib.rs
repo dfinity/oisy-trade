@@ -233,6 +233,10 @@ pub struct OrderRecord {
     /// Cumulative realized fee charged across the order's fills, denominated in
     /// the order's receive token — base for a buy, quote for a sell.
     pub filled_fee: Nat,
+    /// The principal that placed the order when it differs from `owner` (a
+    /// trading account acting for the funding account); `None` when the owner
+    /// placed it itself.
+    pub placed_by: Option<Principal>,
 }
 
 impl fmt::Display for OrderRecord {
@@ -249,10 +253,15 @@ impl fmt::Display for OrderRecord {
             time_in_force,
             filled_quote,
             filled_fee,
+            placed_by,
         } = self;
+        let placed_by = match placed_by {
+            Some(principal) => format!("Some({principal})"),
+            None => "None".to_string(),
+        };
         write!(
             f,
-            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee})"
+            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee}, placed_by={placed_by})"
         )
     }
 }

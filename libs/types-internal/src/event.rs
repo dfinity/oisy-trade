@@ -63,6 +63,7 @@ pub struct AddLimitOrderEvent {
     pub price: Nat,
     pub quantity: Nat,
     pub time_in_force: TimeInForce,
+    pub placed_by: Option<Principal>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

@@ -28,6 +28,7 @@ fn test_record() -> OrderRecord {
         time_in_force: TimeInForce::FillOrKill,
         filled_quote: Quantity::ZERO,
         filled_fee: Quantity::ZERO,
+        placed_by: None,
     }
 }
 
