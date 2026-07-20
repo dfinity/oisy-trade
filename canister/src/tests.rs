@@ -1136,20 +1136,15 @@ mod resolution_on_cancel {
         add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap()
     }
 
-    fn unique_cancel_event() -> CancelLimitOrderEvent {
-        let events: Vec<CancelLimitOrderEvent> = storage::with_event_iter(|it| {
+    fn last_cancel_event() -> CancelLimitOrderEvent {
+        storage::with_event_iter(|it| {
             it.filter_map(|Event { payload, .. }| match payload {
                 EventType::CancelLimitOrder(e) => Some(e),
                 _ => None,
             })
-            .collect()
-        });
-        assert_eq!(
-            events.len(),
-            1,
-            "expected exactly one CancelLimitOrderEvent"
-        );
-        events.into_iter().next().unwrap()
+            .last()
+        })
+        .expect("expected at least one CancelLimitOrderEvent")
     }
 
     fn cancel_event_count() -> usize {
@@ -1160,38 +1155,53 @@ mod resolution_on_cancel {
     }
 
     #[test]
-    fn should_let_a_trading_account_cancel_the_funding_account_order() {
+    fn should_cancel_the_funding_account_order_and_attribute_the_acting_caller() {
+        struct TestCase {
+            desc: &'static str,
+            canceller: Principal,
+            expected_canceled_by: Option<Principal>,
+        }
+
+        let cases = vec![
+            TestCase {
+                desc: "a trading account cancels its funding account's order",
+                canceller: TRADING,
+                expected_canceled_by: Some(TRADING),
+            },
+            TestCase {
+                desc: "the funding account cancels its own order",
+                canceller: FUNDING,
+                expected_canceled_by: None,
+            },
+        ];
+
         init_state_with_order_book();
         fund_user(FUNDING);
         add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
-        let order_id = place_funding_order();
 
-        let record = cancel_limit_order(order_id, &mock_runtime_for(TRADING)).unwrap();
+        for case in cases {
+            let order_id = place_funding_order();
 
-        assert_eq!(record.owner, FUNDING);
-        assert_eq!(record.status, OrderStatus::Canceled);
-        assert_eq!(
-            unique_cancel_event().canceled_by,
-            Some(TRADING),
-            "the acting trading account is attributed as canceled_by"
-        );
-    }
+            let record = cancel_limit_order(order_id, &mock_runtime_for(case.canceller)).unwrap();
 
-    #[test]
-    fn should_record_no_attribution_when_the_funding_account_cancels() {
-        init_state_with_order_book();
-        fund_user(FUNDING);
-        let order_id = place_funding_order();
-
-        let record = cancel_limit_order(order_id, &mock_runtime_for(FUNDING)).unwrap();
-
-        assert_eq!(record.owner, FUNDING);
-        assert_eq!(record.status, OrderStatus::Canceled);
-        assert_eq!(
-            unique_cancel_event().canceled_by,
-            None,
-            "the funding account's own cancel is unattributed"
-        );
+            assert_eq!(
+                record.owner, FUNDING,
+                "{}: the order resolves to the funding account",
+                case.desc
+            );
+            assert_eq!(
+                record.status,
+                OrderStatus::Canceled,
+                "{}: the order transitions to Canceled",
+                case.desc
+            );
+            assert_eq!(
+                last_cancel_event().canceled_by,
+                case.expected_canceled_by,
+                "{}: the acting caller is attributed as canceled_by",
+                case.desc
+            );
+        }
     }
 
     #[test]

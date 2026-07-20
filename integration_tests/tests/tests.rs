@@ -4280,7 +4280,7 @@ mod trading_accounts {
             "the acting trading account is attributed as placed_by"
         );
 
-        // R4: F cancels an order T placed.
+        // F cancels an order T placed.
         assert_eq!(
             funding_client
                 .cancel_limit_order(t_order)
@@ -4291,7 +4291,7 @@ mod trading_accounts {
             "the funding account cancels the order its trading account placed"
         );
 
-        // R4: T cancels an order F placed.
+        // T cancels an order F placed.
         let f_order = funding_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;
         let canceled = trading_client.cancel_limit_order(f_order).await.unwrap();
@@ -4312,7 +4312,7 @@ mod trading_accounts {
             .await
             .unwrap();
 
-        // R6: the revoked T is now a stranger and can no longer cancel F's orders.
+        // The revoked T is now a stranger and can no longer cancel F's orders.
         assert_eq!(
             trading_client
                 .cancel_limit_order(surviving.clone())
@@ -4322,7 +4322,7 @@ mod trading_accounts {
             ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
             "a revoked trading account is treated as a stranger"
         );
-        // R6: F's open orders — including those T placed — stay open ...
+        // F's open orders — including those T placed — stay open ...
         assert_eq!(
             funding_client
                 .get_my_order(surviving.clone())
