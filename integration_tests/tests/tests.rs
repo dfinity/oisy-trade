@@ -4262,7 +4262,6 @@ mod trading_accounts {
         setup.fund_base(funding, quantity * 4).await;
         funding_client.add_trading_account(trading).await.unwrap();
 
-        // T places an order acting on F's balance: owner = F, placed_by = Some(T).
         let t_order = trading_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;
         let record = funding_client
@@ -4280,7 +4279,6 @@ mod trading_accounts {
             "the acting trading account is attributed as placed_by"
         );
 
-        // F cancels an order T placed.
         assert_eq!(
             funding_client
                 .cancel_limit_order(t_order)
@@ -4291,7 +4289,6 @@ mod trading_accounts {
             "the funding account cancels the order its trading account placed"
         );
 
-        // T cancels an order F placed.
         let f_order = funding_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;
         let canceled = trading_client.cancel_limit_order(f_order).await.unwrap();
@@ -4302,17 +4299,14 @@ mod trading_accounts {
             "the trading account cancels the funding account's own order"
         );
 
-        // An order T placed that outlives the grant.
         let surviving = trading_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;
 
-        // Revoke: F removes T.
         funding_client
             .remove_trading_account(trading)
             .await
             .unwrap();
 
-        // The revoked T is now a stranger and can no longer cancel F's orders.
         assert_eq!(
             trading_client
                 .cancel_limit_order(surviving.clone())
@@ -4322,7 +4316,7 @@ mod trading_accounts {
             ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
             "a revoked trading account is treated as a stranger"
         );
-        // F's open orders — including those T placed — stay open ...
+        // The order the revoked key placed stays open and cancellable by F.
         assert_eq!(
             funding_client
                 .get_my_order(surviving.clone())
@@ -4333,7 +4327,6 @@ mod trading_accounts {
             OrderStatus::Open,
             "an order the revoked key placed stays open"
         );
-        // ... and remain cancellable by F.
         assert_eq!(
             funding_client
                 .cancel_limit_order(surviving)

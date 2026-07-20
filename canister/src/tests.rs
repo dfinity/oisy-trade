@@ -1181,6 +1181,7 @@ mod resolution_on_cancel {
 
         for case in cases {
             let order_id = place_funding_order();
+            let expected_order_id = order_id.parse::<crate::order::OrderId>().unwrap();
 
             let record = cancel_limit_order(order_id, &mock_runtime_for(case.canceller)).unwrap();
 
@@ -1196,9 +1197,12 @@ mod resolution_on_cancel {
                 case.desc
             );
             assert_eq!(
-                last_cancel_event().canceled_by,
-                case.expected_canceled_by,
-                "{}: the acting caller is attributed as canceled_by",
+                last_cancel_event(),
+                CancelLimitOrderEvent {
+                    order_id: expected_order_id,
+                    canceled_by: case.expected_canceled_by,
+                },
+                "{}: the cancel event records the order id and acting caller",
                 case.desc
             );
         }
