@@ -1246,7 +1246,7 @@ mod resolution_on_cancel {
                     .order
                     .status,
                 OrderStatus::Pending,
-                "{}: the order stays open",
+                "{}: the order stays pending",
                 case.desc
             );
             assert_eq!(cancel_event_count(), 0, "{}: no cancel event", case.desc);
