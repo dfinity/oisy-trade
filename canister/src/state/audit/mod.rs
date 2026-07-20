@@ -131,6 +131,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             price,
             quantity,
             time_in_force,
+            placed_by,
         }) => {
             let pending = order::PendingOrder {
                 side: *side,
@@ -140,7 +141,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            state.record_limit_order(*user, book_id, order, timestamp, persistence);
+            state.record_limit_order(*user, book_id, order, *placed_by, timestamp, persistence);
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
             state.record_cancel_limit_order(*order_id, timestamp, persistence);

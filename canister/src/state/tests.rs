@@ -549,7 +549,8 @@ mod record_limit_order {
     }
 
     #[test]
-    fn stores_the_submission_timestamp_on_the_record() {
+    fn stores_submission_metadata_on_the_record() {
+        const TRADING: Principal = Principal::from_slice(&[0x02]);
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
@@ -572,14 +573,14 @@ mod record_limit_order {
             OWNER,
             order_id.book_id(),
             order,
+            Some(TRADING),
             timestamp,
             StableMemoryOptions::Write,
         );
 
-        assert_eq!(
-            state.order_history.get(&order_id).unwrap().created_at,
-            timestamp
-        );
+        let record = state.order_history.get(&order_id).unwrap();
+        assert_eq!(record.created_at, timestamp);
+        assert_eq!(record.placed_by, Some(TRADING));
     }
 
     #[test]
@@ -1223,6 +1224,7 @@ mod settle_fills {
                 user,
                 order_id.book_id(),
                 order,
+                None,
                 Timestamp::EPOCH,
                 StableMemoryOptions::Write,
             );
@@ -1756,6 +1758,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1789,6 +1792,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1807,6 +1811,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
                 },
             );
         }
@@ -1877,6 +1882,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot + 101 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
                 },
             );
         }
@@ -1972,6 +1978,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
                 },
             );
             assert_eq!(buy.last_updated_at, None);
@@ -2085,6 +2092,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(base_fee),
+                    placed_by: None,
                 },
             );
             let sell = test_fixtures::record_of(&state, SELLER, seller_id);
@@ -2102,6 +2110,7 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(quote_fee),
+                    placed_by: None,
                 },
             );
         }

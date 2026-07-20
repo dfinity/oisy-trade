@@ -249,6 +249,7 @@ fn should_roundtrip_state_through_snapshot() {
         buyer,
         buy_id.book_id(),
         buy_order,
+        None,
         crate::Timestamp::EPOCH,
         StableMemoryOptions::Write,
     );
@@ -268,6 +269,7 @@ fn should_roundtrip_state_through_snapshot() {
         seller,
         sell_id.book_id(),
         sell_order,
+        None,
         crate::Timestamp::EPOCH,
         StableMemoryOptions::Write,
     );

@@ -179,12 +179,24 @@ impl Scenario {
     }
 
     fn with_limit_order_tif(
+        self,
+        user: Principal,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
+    ) -> (Self, OrderId) {
+        self.with_limit_order_tif_placed_by(user, side, price, quantity, time_in_force, None)
+    }
+
+    fn with_limit_order_tif_placed_by(
         mut self,
         user: Principal,
         side: Side,
         price: Price,
         quantity: Quantity,
         time_in_force: TimeInForce,
+        placed_by: Option<Principal>,
     ) -> (Self, OrderId) {
         let (order_id, order) = self
             .state
@@ -204,6 +216,7 @@ impl Scenario {
             user,
             order_id.book_id(),
             order,
+            placed_by,
             timestamp,
             StableMemoryOptions::Write,
         );
@@ -216,6 +229,7 @@ impl Scenario {
                 price,
                 quantity,
                 time_in_force,
+                placed_by,
             }),
         });
         (self, order_id)
@@ -505,11 +519,13 @@ fn should_replay_add_limit_order() {
             TokenId::new(quote()),
             Quantity::from(price * quantity),
         )
-        .with_limit_order(
+        .with_limit_order_tif_placed_by(
             user_1(),
             Side::Buy,
             Price::new(price * PRICE_SCALE),
             Quantity::from(quantity),
+            TimeInForce::GoodTilCanceled,
+            Some(user_2()),
         );
     scenario.assert_replay_matches();
 }
