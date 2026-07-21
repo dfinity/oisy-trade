@@ -89,30 +89,12 @@ impl<M: Memory> TokenBalance<M> {
         self.try_update(user, *token, |b| b.reserve(amount))
     }
 
-    /// Move `amount` from a user's reserved back to their free balance for
-    /// the given token.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the user has no balance entry for the token, or if the
-    /// reserved balance is insufficient.
-    pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
-        bench_scopes!("balances", "balances::unreserve");
-        let key = BalanceKey::new(*token, user);
-        let mut balance = self
-            .balances
-            .get(&key)
-            .expect("BUG: user balance missing for unreserve");
-        balance.unreserve(amount);
-        self.balances.insert(key, balance);
-    }
-
     /// Open a write-back buffer over the balance map, scoped to a single
     /// settling event. Each `(token, user)` row touched while the batch is
     /// live is read from the stable map at most once and written back at most
     /// once, on [`BalanceSettlingBatch::flush`]. Preserves the fee-pool accrual
     /// and empty-row elision of [`BalanceSettlingBatch::transfer`] and
-    /// [`unreserve`](Self::unreserve) exactly.
+    /// [`BalanceSettlingBatch::unreserve`] exactly.
     pub fn settling_batch(&mut self) -> BalanceSettlingBatch<'_, M> {
         BalanceSettlingBatch::new(&mut self.balances, &mut self.fee_balances)
     }

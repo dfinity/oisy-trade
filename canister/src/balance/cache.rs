@@ -63,10 +63,7 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
             .deposit(net);
     }
 
-    /// Buffered counterpart of [`TokenBalance::unreserve`]: moves `amount` from
-    /// the user's reserved to their free balance.
-    ///
-    /// [`TokenBalance::unreserve`]: super::TokenBalance::unreserve
+    /// Moves `amount` from the user's reserved to their free balance.
     pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::unreserve");
         self.load_existing(
@@ -91,10 +88,8 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
     /// Buffer a row that must already exist in the balance map, or have been
     /// created earlier in this settling event, as required by the debtor read
     /// in [`transfer`](Self::transfer) and the target read in
-    /// [`TokenBalance::unreserve`]. On the row's first touch this batch, traps
+    /// [`unreserve`](Self::unreserve). On the row's first touch this batch, traps
     /// with `msg` if it is absent from the stable map.
-    ///
-    /// [`TokenBalance::unreserve`]: super::TokenBalance::unreserve
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
             existed: true,
