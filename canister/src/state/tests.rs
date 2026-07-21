@@ -430,7 +430,7 @@ mod cancel_limit_order {
         );
         assert!(state.has_pending_settling_events());
 
-        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(OWNER, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -462,7 +462,7 @@ mod cancel_limit_order {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
-        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(OWNER, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -487,9 +487,7 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
-        let order = state
-            .cancel_limit_order(&user, None, order_id, &runtime)
-            .unwrap();
+        let order = state.cancel_limit_order(user, order_id, &runtime).unwrap();
         assert_eq!(order.status, OrderStatus::Canceled);
         assert_eq!(
             order.quantity.checked_sub(order.filled_quantity),

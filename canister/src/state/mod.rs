@@ -172,6 +172,36 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
+    pub fn add_limit_order(
+        &mut self,
+        caller: Principal,
+        pair: TradingPair,
+        pending: PendingOrder,
+        runtime: &impl Runtime,
+    ) -> Result<OrderId, AddLimitOrderError> {
+        let (owner, placed_by) = self.resolve_order_caller(caller);
+        let (order_id, order) = self.validate_limit_order(owner, pair, pending)?;
+        let permit = self
+            .permissions()
+            .permit_trading(owner, order_id.book_id())?;
+        let event = event::AddLimitOrderEvent {
+            user: owner,
+            order_id,
+            side: order.side(),
+            price: order.price(),
+            quantity: *order.remaining_quantity(),
+            time_in_force: order.time_in_force(),
+            placed_by,
+        };
+        audit::process_event(
+            self,
+            event::EventType::AddLimitOrder(event),
+            permit.into(),
+            runtime,
+        );
+        Ok(order_id)
+    }
+
     pub fn validate_limit_order(
         &self,
         user: Principal,
@@ -296,12 +326,12 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        owner: &Principal,
-        canceled_by: Option<Principal>,
+        caller: Principal,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(owner, &order_id)?;
+        let (owner, canceled_by) = self.resolve_order_caller(caller);
+        self.validate_cancel_limit_order(&owner, &order_id)?;
 
         let permit = self.permissions().permit_cancel();
         audit::process_event(
@@ -930,7 +960,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     /// behalf (owner is the funding principal, attributed to the trading key);
     /// a funding account or an unknown principal acts as itself with no
     /// separate acting key.
-    pub fn resolve_order_caller(&self, caller: Principal) -> (Principal, Option<Principal>) {
+    fn resolve_order_caller(&self, caller: Principal) -> (Principal, Option<Principal>) {
         self.user_registry
             .lookup(caller)
             .map(|account| account.order_actor())
