@@ -310,8 +310,8 @@ type OrderRecord = record {
     /// placed it itself.
     placed_by : opt principal;
     /// The principal that canceled the order when it differs from `owner` (a
-    /// trading account acting for the funding account); null when the owner
-    /// canceled it itself.
+    /// trading account acting for the funding account); null if the order is
+    /// not canceled, or was canceled by the owner itself.
     canceled_by : opt principal;
 };
 
