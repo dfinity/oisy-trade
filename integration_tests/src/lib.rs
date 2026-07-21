@@ -586,6 +586,12 @@ pub struct PocketIcRuntime<'a> {
     caller: Principal,
 }
 
+impl<'a> PocketIcRuntime<'a> {
+    pub fn new(env: &'a PocketIc, caller: Principal) -> Self {
+        Self { env, caller }
+    }
+}
+
 #[async_trait]
 impl<'a> Runtime for PocketIcRuntime<'a> {
     async fn call<In, Out>(
