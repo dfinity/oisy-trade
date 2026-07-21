@@ -12,10 +12,9 @@ use std::collections::BTreeMap;
 /// would otherwise be read-modify-written on each fill. The buffer collapses
 /// that to a single stable read per row on first touch and a single write-back
 /// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
-/// on the heap as in [`TokenBalance::transfer`].
+/// on the heap.
 ///
 /// [`TokenBalance::settling_batch`]: super::TokenBalance::settling_batch
-/// [`TokenBalance::transfer`]: super::TokenBalance::transfer
 #[must_use = "BalanceSettlingBatch buffers balance mutations that are only applied by `flush()`; \
               dropping it without flushing silently discards them"]
 pub struct BalanceSettlingBatch<'a, M: Memory> {
@@ -41,12 +40,9 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
         }
     }
 
-    /// Buffered counterpart of [`TokenBalance::transfer`]: debits `gross` from
-    /// the debtor's reserved, credits `gross - fee` to the creditor's free, and
-    /// accrues `fee` to the token's fee pool. A self-transfer lands the credit
-    /// on the just-debited buffered row.
-    ///
-    /// [`TokenBalance::transfer`]: super::TokenBalance::transfer
+    /// Debits `gross` from the debtor's reserved, credits `gross - fee` to the
+    /// creditor's free, and accrues `fee` to the token's fee pool. A
+    /// self-transfer lands the credit on the just-debited buffered row.
     pub fn transfer(
         &mut self,
         debtor: UserId,
@@ -93,12 +89,11 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
     }
 
     /// Buffer a row that must already exist in the balance map, or have been
-    /// created earlier in this settling event, mirroring the `expect(...)` of
-    /// the debtor read in [`TokenBalance::transfer`] and the target read in
+    /// created earlier in this settling event, as required by the debtor read
+    /// in [`transfer`](Self::transfer) and the target read in
     /// [`TokenBalance::unreserve`]. On the row's first touch this batch, traps
     /// with `msg` if it is absent from the stable map.
     ///
-    /// [`TokenBalance::transfer`]: super::TokenBalance::transfer
     /// [`TokenBalance::unreserve`]: super::TokenBalance::unreserve
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
@@ -108,10 +103,8 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
         &mut entry.balance
     }
 
-    /// Buffer a row that may not yet exist, mirroring the creditor credit in
-    /// [`TokenBalance::transfer`], which creates the entry on demand.
-    ///
-    /// [`TokenBalance::transfer`]: super::TokenBalance::transfer
+    /// Buffer a row that may not yet exist, as required by the creditor credit
+    /// in [`transfer`](Self::transfer), which creates the entry on demand.
     fn load_or_create(&mut self, key: BalanceKey) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| {
             let prev = self.balances.get(&key);

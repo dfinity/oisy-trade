@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 /// - Per-`(token, user)` `Balance` entries in a stable [`StableBTreeMap`]
 ///   (auto-survives upgrades via the memory ID).
 /// - A heap-resident fee pool indexed by `TokenId`, accrued by fills via
-///   [`TokenBalance::transfer`] and persisted across upgrades
+///   [`BalanceSettlingBatch::transfer`] and persisted across upgrades
 ///   through the [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
 ///   [`restore_fee_pool`](Self::restore_fee_pool) pair plumbed through
 ///   `StateSnapshot`.
@@ -107,51 +107,12 @@ impl<M: Memory> TokenBalance<M> {
         self.balances.insert(key, balance);
     }
 
-    /// Transfer `gross` from `debtor`'s reserved into `creditor`'s free,
-    /// withholding `fee` for the canister-owned fee pool of `token`. The
-    /// creditor receives exactly `gross - fee`; the fee pool gains `fee`.
-    /// `fee = ZERO` is the non-fee case.
-    ///
-    /// Conserves `gross` units of `token` across the per-token invariant
-    /// `Σ users(free + reserved) + fee_pool = Σ deposits − Σ withdrawals`.
-    ///
-    /// # Panics
-    ///
-    /// - `fee > gross` (preconditions are the caller's responsibility; the
-    ///   per-pair `BasisPoint` invariant guarantees this at the fill path).
-    /// - The debtor has no balance entry, or `gross` exceeds the debtor's
-    ///   reserved balance.
-    pub fn transfer(
-        &mut self,
-        debtor: UserId,
-        creditor: UserId,
-        token: &TokenId,
-        gross: Quantity,
-        fee: Quantity,
-    ) {
-        bench_scopes!("balances", "balances::transfer");
-        let net = split_net_fee(&mut self.fee_balances, token, gross, fee);
-
-        let debtor_key = BalanceKey::new(*token, debtor);
-        let mut debtor_balance = self
-            .balances
-            .get(&debtor_key)
-            .expect("BUG: debtor balance missing");
-        debtor_balance.debit_reserved(&gross);
-        self.balances.insert(debtor_key, debtor_balance);
-
-        // Self-transfer: debtor and creditor are the same user, so the
-        // credit must land on the just-updated balance — `update` re-reads
-        // before depositing to avoid clobbering the debit.
-        self.update(creditor, *token, |b| b.deposit(net));
-    }
-
     /// Open a write-back buffer over the balance map, scoped to a single
     /// settling event. Each `(token, user)` row touched while the batch is
     /// live is read from the stable map at most once and written back at most
-    /// once, on [`BalanceSettlingBatch::flush`]. Preserves the per-op accounting of
-    /// [`transfer`](Self::transfer) / [`unreserve`](Self::unreserve) exactly,
-    /// including the fee-pool accrual and the empty-row elision.
+    /// once, on [`BalanceSettlingBatch::flush`]. Preserves the fee-pool accrual
+    /// and empty-row elision of [`BalanceSettlingBatch::transfer`] and
+    /// [`unreserve`](Self::unreserve) exactly.
     pub fn settling_batch(&mut self) -> BalanceSettlingBatch<'_, M> {
         BalanceSettlingBatch::new(&mut self.balances, &mut self.fee_balances)
     }
@@ -237,9 +198,9 @@ impl<M: Memory> TokenBalance<M> {
 }
 
 /// Assert `fee <= gross`, accrue `fee` into the token's fee pool, and return
-/// the net `gross - fee` owed to the creditor. Shared by the per-op
-/// [`TokenBalance::transfer`] and the buffered [`BalanceSettlingBatch::transfer`] so
-/// the money-accounting lives in one place.
+/// the net `gross - fee` owed to the creditor. Used by
+/// [`BalanceSettlingBatch::transfer`] so the money-accounting lives in one
+/// place.
 pub(super) fn split_net_fee(
     fee_balances: &mut BTreeMap<TokenId, Quantity>,
     token: &TokenId,
