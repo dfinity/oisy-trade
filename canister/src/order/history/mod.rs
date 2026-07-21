@@ -57,8 +57,8 @@ pub struct OrderRecord {
     /// placed the order itself.
     #[cbor(n(11), with = "icrc_cbor::principal::option")]
     pub placed_by: Option<Principal>,
-    /// The acting caller that canceled the order, when it differs from `owner`.
-    /// `None` if the order is not canceled, or was canceled by the owner itself.
+    /// The acting caller of the cancel when it differs from `owner`; `None` when
+    /// the owner canceled the order itself.
     #[cbor(n(12), with = "icrc_cbor::principal::option")]
     pub canceled_by: Option<Principal>,
 }

@@ -238,8 +238,8 @@ pub struct OrderRecord {
     /// placed it itself.
     pub placed_by: Option<Principal>,
     /// The principal that canceled the order when it differs from `owner` (a
-    /// trading account acting for the funding account); `None` if the order is
-    /// not canceled, or was canceled by the owner itself.
+    /// trading account acting for the funding account); `None` when the owner
+    /// canceled it itself.
     pub canceled_by: Option<Principal>,
 }
 
