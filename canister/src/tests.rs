@@ -2760,26 +2760,31 @@ mod get_fee_balances {
     }
 }
 
-mod process_pending_orders {
-    use crate::execute::ExecutionStatus;
-    use crate::test_fixtures::init_state_with_order_book;
-    use crate::test_fixtures::mocks::mock_runtime_for;
-    use candid::Principal;
+mod matching_timer_coalescing {
+    use crate::state;
+    use crate::test_fixtures::state_vmem;
 
     #[test]
-    fn should_return_already_running_when_guard_is_held() {
-        init_state_with_order_book();
-        // Simulate a concurrent matching task holding the guard.
-        crate::state::with_state_mut(|s| {
+    fn should_schedule_a_single_timer_until_it_fires() {
+        state::init_state(state_vmem());
+        state::with_state_mut(|s| {
             assert!(
-                s.active_tasks_mut()
-                    .insert(crate::Task::ProcessPendingOrders)
+                s.try_mark_matching_timer_scheduled(),
+                "first kickoff schedules a timer"
+            );
+            assert!(
+                !s.try_mark_matching_timer_scheduled(),
+                "a burst of further kickoffs must not schedule more timers"
+            );
+
+            // The timer fires and clears the flag, allowing the next kickoff
+            // (or the `MoreWork` self-reschedule) to arm a fresh timer.
+            s.clear_matching_timer_scheduled();
+            assert!(
+                s.try_mark_matching_timer_scheduled(),
+                "a kickoff after the timer fired schedules again"
             );
         });
-
-        let status = crate::process_pending_orders(&mock_runtime_for(Principal::anonymous()));
-
-        assert_eq!(status, ExecutionStatus::AlreadyRunning);
     }
 }
 
