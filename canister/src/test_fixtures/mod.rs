@@ -497,8 +497,8 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
-        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
-        RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        OrderId, OrderSeq, PairToken, PendingOrder, Price, Quantity, RemovedOrder, Side, TickSize,
+        TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::settlement::FillEvent;
     use crate::state::event::{
@@ -671,16 +671,6 @@ pub mod arbitrary {
         prop_oneof![Just(Side::Buy), Just(Side::Sell)]
     }
 
-    pub fn arb_order_status() -> impl Strategy<Value = OrderStatus> {
-        prop_oneof![
-            Just(OrderStatus::Pending),
-            Just(OrderStatus::Open),
-            Just(OrderStatus::Filled),
-            Just(OrderStatus::Canceled),
-            Just(OrderStatus::Expired),
-        ]
-    }
-
     pub fn arb_time_in_force() -> impl Strategy<Value = TimeInForce> {
         prop_oneof![
             Just(TimeInForce::GoodTilCanceled),
@@ -710,71 +700,6 @@ pub mod arbitrary {
 
     pub fn arb_balance() -> impl Strategy<Value = Balance> {
         (arb_quantity(), arb_quantity()).prop_map(|(free, reserved)| Balance::new(free, reserved))
-    }
-
-    /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
-    /// lot-aligned non-zero quantity. `filled_quantity` is a lot multiple
-    /// within `[0, quantity]`, upholding the `filled_quantity <= quantity`
-    /// invariant.
-    pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
-        let tick = TICK_SIZE.get();
-        let lot = u64::from(LOT_SIZE);
-        (
-            arb_principal(),
-            arb_side(),
-            1..1_000u64, // price in ticks
-            1..1_000u64, // quantity in lots
-            arb_order_status(),
-            arb_timestamp(),             // created_at
-            option::of(arb_timestamp()), // last_updated_at
-            arb_time_in_force(),
-            option::of(arb_principal()), // placed_by
-            option::of(arb_principal()), // canceled_by
-        )
-            .prop_flat_map(
-                move |(
-                    owner,
-                    side,
-                    price_ticks,
-                    qty_lots,
-                    status,
-                    created_at,
-                    last_updated_at,
-                    time_in_force,
-                    placed_by,
-                    canceled_by,
-                )| {
-                    (0..=qty_lots).prop_map(move |filled_lots| {
-                        let price = Price::new(price_ticks as u128 * tick);
-                        let filled_quantity = Quantity::from(filled_lots * lot);
-                        // Realized quote notional, derived exactly as the engine
-                        // does: `maker_price × filled_quantity / base_scale`
-                        // (cf. `Fill::quote_amount`), with `base_scale = 10^8`
-                        // for this fixture.
-                        let filled_quote = price
-                            .checked_mul_quantity_scaled(
-                                &filled_quantity,
-                                NonZeroU64::new(100_000_000).unwrap(),
-                            )
-                            .expect("fixture notional fits in 256 bits");
-                        OrderRecord {
-                            owner,
-                            side,
-                            price,
-                            quantity: Quantity::from(qty_lots * lot),
-                            filled_quantity,
-                            status,
-                            created_at,
-                            last_updated_at,
-                            time_in_force,
-                            filled_quote,
-                            filled_fee: Quantity::from(u128::from(filled_lots)),
-                            placed_by,
-                            canceled_by,
-                        }
-                    })
-                },
-            )
     }
 
     pub fn arb_price() -> impl Strategy<Value = Price> {
