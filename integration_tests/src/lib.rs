@@ -534,7 +534,7 @@ fn default_init_arg() -> InitArg {
     }
 }
 
-fn oisy_trade_wasm() -> Vec<u8> {
+pub fn oisy_trade_wasm() -> Vec<u8> {
     let path = std::env::var("OISY_TRADE_CANISTER_WASM_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
