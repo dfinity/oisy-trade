@@ -276,7 +276,7 @@ mod token_balance {
         tb.reserve(alice(), &token_a(), Quantity::from(80u64))
             .unwrap();
 
-        tb.unreserve(alice(), &token_a(), Quantity::from(30u64));
+        unreserve(&mut tb, alice(), &token_a(), Quantity::from(30u64));
 
         assert_eq!(
             tb.get_balance(alice(), &token_a()),
@@ -288,7 +288,7 @@ mod token_balance {
     #[should_panic(expected = "BUG: user balance missing for unreserve")]
     fn should_panic_unreserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        tb.unreserve(alice(), &token_a(), Quantity::from(10u64));
+        unreserve(&mut tb, alice(), &token_a(), Quantity::from(10u64));
     }
 
     fn transfer(
@@ -301,6 +301,17 @@ mod token_balance {
     ) {
         let mut batch = tb.settling_batch();
         batch.transfer(debtor, creditor, token, gross, fee);
+        batch.flush();
+    }
+
+    fn unreserve(
+        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
+        user: UserId,
+        token: &TokenId,
+        amount: Quantity,
+    ) {
+        let mut batch = tb.settling_batch();
+        batch.unreserve(user, token, amount);
         batch.flush();
     }
 
@@ -397,7 +408,7 @@ mod fee_pool {
         );
         tb.reserve(bob(), &token_a(), Quantity::from(10u64))
             .unwrap();
-        tb.unreserve(bob(), &token_a(), Quantity::from(5u64));
+        unreserve(&mut tb, bob(), &token_a(), Quantity::from(5u64));
         transfer(
             &mut tb,
             alice(),
@@ -519,6 +530,17 @@ mod fee_pool {
     ) {
         let mut batch = tb.settling_batch();
         batch.transfer(debtor, creditor, token, gross, fee);
+        batch.flush();
+    }
+
+    fn unreserve(
+        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
+        user: UserId,
+        token: &TokenId,
+        amount: Quantity,
+    ) {
+        let mut batch = tb.settling_batch();
+        batch.unreserve(user, token, amount);
         batch.flush();
     }
 
