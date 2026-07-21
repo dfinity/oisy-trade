@@ -213,7 +213,8 @@ mod token_balance {
         tb.reserve(alice(), &token_a(), Quantity::from(100u64))
             .unwrap();
 
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob,
             &token_a(),
@@ -238,7 +239,8 @@ mod token_balance {
         tb.reserve(alice(), &token_a(), Quantity::from(60u64))
             .unwrap();
 
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             alice(),
             &token_a(),
@@ -257,7 +259,8 @@ mod token_balance {
     fn should_panic_transfer_missing_debtor() {
         let bob = UserId::new(2);
         let mut tb = TokenBalance::default();
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob,
             &token_a(),
@@ -286,6 +289,19 @@ mod token_balance {
     fn should_panic_unreserve_missing_entry() {
         let mut tb = TokenBalance::default();
         tb.unreserve(alice(), &token_a(), Quantity::from(10u64));
+    }
+
+    fn transfer(
+        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
+        debtor: UserId,
+        creditor: UserId,
+        token: &TokenId,
+        gross: Quantity,
+        fee: Quantity,
+    ) {
+        let mut batch = tb.settling_batch();
+        batch.transfer(debtor, creditor, token, gross, fee);
+        batch.flush();
     }
 
     fn alice() -> UserId {
@@ -317,7 +333,8 @@ mod fee_pool {
     fn transfer_credits_net_to_creditor_and_accrues_to_pool() {
         let mut tb = setup_alice_reserve(100);
 
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -341,14 +358,16 @@ mod fee_pool {
     #[test]
     fn multiple_accruals_sum_per_token() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
             Quantity::from(40u64),
             Quantity::from(3u64),
         );
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -368,7 +387,8 @@ mod fee_pool {
         tb.deposit(bob(), token_b(), Quantity::from(50u64));
 
         // Several operations against token_a:
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -378,7 +398,8 @@ mod fee_pool {
         tb.reserve(bob(), &token_a(), Quantity::from(10u64))
             .unwrap();
         tb.unreserve(bob(), &token_a(), Quantity::from(5u64));
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -403,7 +424,8 @@ mod fee_pool {
     #[should_panic(expected = "fee")]
     fn should_panic_when_fee_exceeds_gross() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -415,7 +437,8 @@ mod fee_pool {
     #[test]
     fn snapshot_roundtrips_through_save_and_restore() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -425,7 +448,8 @@ mod fee_pool {
         tb.deposit(alice(), token_b(), Quantity::from(50u64));
         tb.reserve(alice(), &token_b(), Quantity::from(20u64))
             .unwrap();
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_b(),
@@ -450,7 +474,8 @@ mod fee_pool {
     #[test]
     fn restore_replaces_any_existing_pool() {
         let mut tb = setup_alice_reserve(100);
-        tb.transfer(
+        transfer(
+            &mut tb,
             alice(),
             bob(),
             &token_a(),
@@ -482,6 +507,19 @@ mod fee_pool {
                 amount: Quantity::from(2u64),
             },
         ]);
+    }
+
+    fn transfer(
+        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
+        debtor: UserId,
+        creditor: UserId,
+        token: &TokenId,
+        gross: Quantity,
+        fee: Quantity,
+    ) {
+        let mut batch = tb.settling_batch();
+        batch.transfer(debtor, creditor, token, gross, fee);
+        batch.flush();
     }
 
     fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
@@ -552,10 +590,12 @@ mod settling_batch {
         desc: &'static str,
         setup: Vec<(UserId, TokenId, u64, u64)>,
         ops: Vec<Op>,
+        expected_balances: Vec<(UserId, TokenId, u64, u64)>,
+        expected_fees: Vec<(TokenId, u64)>,
     }
 
     #[test]
-    fn batch_matches_per_op_semantics() {
+    fn batch_settles_to_expected_balances() {
         let cases = vec![
             TestCase {
                 desc: "taker party to several fills, no fees",
@@ -587,6 +627,12 @@ mod settling_batch {
                         fee: 0,
                     },
                 ],
+                expected_balances: vec![
+                    (taker(), base(), 0, 0),
+                    (maker1(), base(), 150, 0),
+                    (maker2(), base(), 150, 0),
+                ],
+                expected_fees: vec![],
             },
             TestCase {
                 desc: "taker party to several fills, with fees",
@@ -618,6 +664,12 @@ mod settling_batch {
                         fee: 1,
                     },
                 ],
+                expected_balances: vec![
+                    (taker(), base(), 0, 0),
+                    (maker1(), base(), 146, 0),
+                    (maker2(), base(), 143, 0),
+                ],
+                expected_fees: vec![(base(), 11)],
             },
             TestCase {
                 desc: "self-transfer credits the just-debited row",
@@ -629,6 +681,8 @@ mod settling_batch {
                     gross: 60,
                     fee: 0,
                 }],
+                expected_balances: vec![(taker(), base(), 100, 0)],
+                expected_fees: vec![],
             },
             TestCase {
                 desc: "self-transfer with fee",
@@ -640,6 +694,8 @@ mod settling_batch {
                     gross: 60,
                     fee: 4,
                 }],
+                expected_balances: vec![(taker(), base(), 96, 0)],
+                expected_fees: vec![(base(), 4)],
             },
             TestCase {
                 desc: "unreserve interleaved with transfers",
@@ -665,6 +721,8 @@ mod settling_batch {
                         fee: 0,
                     },
                 ],
+                expected_balances: vec![(taker(), base(), 40, 20), (maker1(), base(), 138, 0)],
+                expected_fees: vec![(base(), 2)],
             },
             TestCase {
                 desc: "creditor row created within the event",
@@ -676,6 +734,8 @@ mod settling_batch {
                     gross: 100,
                     fee: 5,
                 }],
+                expected_balances: vec![(taker(), base(), 0, 0), (maker1(), base(), 95, 0)],
+                expected_fees: vec![(base(), 5)],
             },
             TestCase {
                 desc: "two tokens touched in one event",
@@ -696,15 +756,17 @@ mod settling_batch {
                         fee: 3,
                     },
                 ],
+                expected_balances: vec![
+                    (taker(), base(), 0, 0),
+                    (maker1(), base(), 96, 0),
+                    (maker1(), quote(), 0, 0),
+                    (taker(), quote(), 87, 0),
+                ],
+                expected_fees: vec![(base(), 4), (quote(), 3)],
             },
         ];
 
         for case in cases {
-            let mut expected = seeded(&case.setup);
-            for op in &case.ops {
-                apply_per_op(&mut expected, op);
-            }
-
             let mut actual = seeded(&case.setup);
             {
                 let mut batch = actual.settling_batch();
@@ -733,34 +795,22 @@ mod settling_batch {
                 batch.flush();
             }
 
-            assert_eq!(
-                actual, expected,
-                "batch and per-op balances diverged: {}",
-                case.desc
-            );
-        }
-    }
+            for (user, token, free, reserved) in &case.expected_balances {
+                assert_eq!(
+                    actual.get_balance(*user, token),
+                    Some(Balance::new(*free, *reserved)),
+                    "{}: balance for user {user:?} token {token:?}",
+                    case.desc,
+                );
+            }
 
-    fn apply_per_op(tb: &mut TokenBalance<VectorMemory>, op: &Op) {
-        match op {
-            Op::Transfer {
-                debtor,
-                creditor,
-                token,
-                gross,
-                fee,
-            } => tb.transfer(
-                *debtor,
-                *creditor,
-                token,
-                Quantity::from(*gross),
-                Quantity::from(*fee),
-            ),
-            Op::Unreserve {
-                user,
-                token,
-                amount,
-            } => tb.unreserve(*user, token, Quantity::from(*amount)),
+            let actual_fees: Vec<(TokenId, Quantity)> = actual.iter_fee_balances().collect();
+            let expected_fees: Vec<(TokenId, Quantity)> = case
+                .expected_fees
+                .iter()
+                .map(|(token, fee)| (*token, Quantity::from(*fee)))
+                .collect();
+            assert_eq!(actual_fees, expected_fees, "{}: fee pool", case.desc);
         }
     }
 

@@ -285,13 +285,15 @@ pub fn accrue_fee<MB: Memory>(balances: &mut TokenBalance<MB>, token: TokenId, f
     balances
         .reserve(alice, &token, Quantity::from(100u64))
         .unwrap();
-    balances.transfer(
+    let mut batch = balances.settling_batch();
+    batch.transfer(
         alice,
         bob,
         &token,
         Quantity::from(100u64),
         Quantity::from(fee),
     );
+    batch.flush();
 }
 
 pub fn init_state_with_order_book() {
