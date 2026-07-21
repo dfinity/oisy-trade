@@ -287,6 +287,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
                     placed_by,
+                    canceled_by: None,
                 },
             );
         }
@@ -362,6 +363,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        canceled_by: Option<Principal>,
         now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -375,11 +377,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.apply_update(
-                &order_id,
-                OrderUpdate::status(OrderStatus::Canceled),
-                now,
-            );
+            self.order_history
+                .apply_update(&order_id, OrderUpdate::cancel(canceled_by), now);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,

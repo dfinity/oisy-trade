@@ -759,6 +759,7 @@ mod cancel_limit_order {
                 filled_quote: candid::Nat::from(0u64),
                 filled_fee: candid::Nat::from(0u64),
                 placed_by: None,
+                canceled_by: None,
             })
         );
 
@@ -821,6 +822,7 @@ mod cancel_limit_order {
             filled_quote: candid::Nat::from(0u64),
             filled_fee: candid::Nat::from(0u64),
             placed_by: None,
+            canceled_by: None,
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(
@@ -1194,6 +1196,11 @@ mod resolution_on_cancel {
                 record.status,
                 OrderStatus::Canceled,
                 "{}: the order transitions to Canceled",
+                case.desc
+            );
+            assert_eq!(
+                record.canceled_by, case.expected_canceled_by,
+                "{}: the record attributes the acting caller as canceled_by",
                 case.desc
             );
             assert_eq!(

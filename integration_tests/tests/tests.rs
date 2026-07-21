@@ -1275,6 +1275,7 @@ mod cancel_limit_order {
                 // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
                 filled_fee: Nat::from(1_000u64),
                 placed_by: None,
+                canceled_by: None,
             }
         );
 
@@ -4240,7 +4241,6 @@ mod trading_accounts {
         use oisy_trade_types::{
             CancelLimitOrderRequestError, LimitOrderRequest, OrderStatus, Side,
         };
-        use oisy_trade_types_internal::event::EventType;
 
         let setup = Setup::new().await.with_trading_pair().await;
         let funding = setup.user();
@@ -4321,20 +4321,10 @@ mod trading_accounts {
             OrderStatus::Canceled,
             "a sibling trading account cancels an order another trading account placed"
         );
-        let sibling_cancels = setup
-            .get_all_events()
-            .await
-            .into_iter()
-            .filter(|e| {
-                matches!(
-                    &e.payload,
-                    EventType::CancelLimitOrder(c) if c.canceled_by == Some(trading2)
-                )
-            })
-            .count();
         assert_eq!(
-            sibling_cancels, 1,
-            "the sibling key is attributed as canceled_by on the cancel it performed"
+            sibling_canceled.canceled_by,
+            Some(trading2),
+            "the sibling key is attributed as canceled_by on the record"
         );
 
         let surviving = trading_client.add_limit_order(sell()).await.unwrap();

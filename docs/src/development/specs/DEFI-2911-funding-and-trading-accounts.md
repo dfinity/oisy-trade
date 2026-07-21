@@ -89,10 +89,12 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   in the restricted-mode allowlist to call anything.
 - **R13 — Attribution.** Every caller-initiated order action records the acting key:
   `OrderRecord` and the order-placement event gain `placed_by` (optional principal; absent =
-  placed by the funding account itself), and the cancel event records `canceled_by` likewise.
-  `placed_by` is exposed through `get_my_orders`, so after a key compromise `F` can list — and
-  cancel — exactly the orders that key placed; the events preserve the same trail durably.
-  Attribution is forensic only: it grants no authority and does not restrict cancel (R4).
+  placed by the funding account itself), and the cancel — both the cancel event and
+  `OrderRecord` — records `canceled_by` likewise (absent = canceled by the funding account
+  itself). Both `placed_by` and `canceled_by` are exposed through `get_my_orders`, so after a
+  key compromise `F` can list — and cancel — exactly the orders that key placed, and see which
+  orders a rogue key canceled; the events preserve the same trail durably. Attribution is
+  forensic only: it grants no authority and does not restrict cancel (R4).
 - **R14 — Grant rate bound.** Successful grants are rate-limited per funding account:
   `add_trading_account` fails with a retryable error (the envelope's `TemporaryError` class) if
   less than `TRADING_ACCOUNT_GRANT_COOLDOWN` has elapsed since `F`'s previous successful grant.
@@ -307,12 +309,13 @@ integrator needs more — trivially raisable later). `TRADING_ACCOUNT_GRANT_COOL
 (a code constant — key rotation happens on a timescale of weeks, so an hour between grants
 costs legitimate users nothing).
 
-For attribution (R13), `OrderRecord` gains `placed_by : opt principal` (absent = placed by the
-owner itself), surfaced by `get_my_orders`. Adding an `opt` field to a returned record is a
-backward-compatible Candid evolution; on the stable-memory side it is a new trailing minicbor
-field decoding absent as `None` (an `Option` field — minicbor's absent-field behavior, as
-`last_updated_at` already relies on; codec `icrc_cbor::principal::option`), so records written before this
-feature still decode — the post-launch requirement.
+For attribution (R13), `OrderRecord` gains `placed_by : opt principal` and `canceled_by : opt
+principal` (each absent = placed/canceled by the owner itself), surfaced by `get_my_orders`.
+Adding an `opt` field to a returned record is a backward-compatible Candid evolution; on the
+stable-memory side each is a new trailing minicbor field decoding absent as `None` (an `Option`
+field — minicbor's absent-field behavior, as `last_updated_at` already relies on; codec
+`icrc_cbor::principal::option`), so records written before this feature still decode — the
+post-launch requirement.
 
 ### Whitelist registry — `canister/src/user`
 
@@ -393,10 +396,12 @@ Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14),
   `UserRegistry` whitelist maps under the `Write` gate (R10). Rejected calls record nothing.
 - **Attribution (R13).** The order-placement path threads the raw caller alongside the resolved
   owner: `AddLimitOrderEvent` gains `placed_by: Option<Principal>` (`None` when the caller *is*
-  the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel event gains
-  `canceled_by: Option<Principal>` likewise. Optional trailing fields (absent decodes as `None`)
-  keep the event log and order history decoding pre-existing entries (post-launch
-  compatibility); replay is byte-faithful since the events carry the attribution themselves.
+  the owner) and `record_limit_order` stores it on the `OrderRecord`; the cancel path is the
+  mirror — `CancelLimitOrderEvent` gains `canceled_by: Option<Principal>` and the cancel
+  apply/replay handler stores it on the `OrderRecord` when it transitions the order to
+  `Canceled`. Optional trailing fields (absent decodes as `None`) keep the event log and order
+  history decoding pre-existing entries (post-launch compatibility); replay is byte-faithful
+  since the events carry the attribution themselves.
 
 ### Endpoints — `canister/src/lib.rs`, `canister/src/main.rs`
 
@@ -418,7 +423,7 @@ endpoint resolves.
 | 3 | Funding-operation denial | `permit_deposit` / `permit_withdraw` become caller-aware; `deposit` / `withdraw` by a trading account fail with the dedicated envelope variant before any ledger call. | R3 |
 | 4 | Resolution on reads | `get_balances`, `get_my_orders`, `get_my_trades` resolve the caller to its funding account. | R5 |
 | 5 | Resolution on order placement | `add_limit_order` resolves the order owner (validation, reservation, record, event); `placed_by` attribution on `OrderRecord`, the placement event, and `get_my_orders`. | R2, R8, R13 (placement) |
-| 6 | Resolution on cancel | `cancel_limit_order` checks ownership against the resolved account; `canceled_by` on the cancel event; end-to-end integration lifecycle (deposit → grant → trade → revoke → stranger). | R4, R6 (end-to-end), R12, R13 (cancel) |
+| 6 | Resolution on cancel | `cancel_limit_order` checks ownership against the resolved account; `canceled_by` on the cancel event and `OrderRecord`; end-to-end integration lifecycle (deposit → grant → trade → revoke → stranger). | R4, R6 (end-to-end), R12, R13 (cancel) |
 
 ## Discussed Alternatives
 

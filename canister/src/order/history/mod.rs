@@ -57,6 +57,10 @@ pub struct OrderRecord {
     /// placed the order itself.
     #[cbor(n(11), with = "icrc_cbor::principal::option")]
     pub placed_by: Option<Principal>,
+    /// The acting caller of the cancel when it differs from `owner`; `None` when
+    /// the owner canceled the order itself.
+    #[cbor(n(12), with = "icrc_cbor::principal::option")]
+    pub canceled_by: Option<Principal>,
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -74,6 +78,7 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             filled_quote: record.filled_quote.into(),
             filled_fee: record.filled_fee.into(),
             placed_by: record.placed_by,
+            canceled_by: record.canceled_by,
         }
     }
 }
@@ -88,6 +93,7 @@ pub struct OrderUpdate {
     pub filled_delta: Quantity,
     pub quote_delta: Quantity,
     pub fee_delta: Quantity,
+    pub canceled_by: Option<Principal>,
 }
 
 impl OrderUpdate {
@@ -98,6 +104,19 @@ impl OrderUpdate {
             filled_delta: Quantity::ZERO,
             quote_delta: Quantity::ZERO,
             fee_delta: Quantity::ZERO,
+            canceled_by: None,
+        }
+    }
+
+    /// A cancel transition to [`OrderStatus::Canceled`] recording the acting
+    /// caller (`None` when the owner canceled the order itself).
+    pub fn cancel(canceled_by: Option<Principal>) -> Self {
+        Self {
+            status: Some(OrderStatus::Canceled),
+            filled_delta: Quantity::ZERO,
+            quote_delta: Quantity::ZERO,
+            fee_delta: Quantity::ZERO,
+            canceled_by,
         }
     }
 
@@ -108,6 +127,7 @@ impl OrderUpdate {
             filled_delta,
             quote_delta: Quantity::ZERO,
             fee_delta: Quantity::ZERO,
+            canceled_by: None,
         }
     }
 
@@ -126,6 +146,7 @@ impl OrderUpdate {
             filled_delta,
             quote_delta,
             fee_delta,
+            canceled_by,
         } = self;
 
         if let Some(new_status) = status
@@ -133,6 +154,9 @@ impl OrderUpdate {
         {
             changed = true;
             order.status = new_status;
+            if new_status == OrderStatus::Canceled {
+                order.canceled_by = canceled_by;
+            }
         }
 
         if filled_delta != Quantity::ZERO {

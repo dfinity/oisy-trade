@@ -145,9 +145,9 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
         }
         EventType::CancelLimitOrder(CancelLimitOrderEvent {
             order_id,
-            canceled_by: _,
+            canceled_by,
         }) => {
-            state.record_cancel_limit_order(*order_id, timestamp, persistence);
+            state.record_cancel_limit_order(*order_id, *canceled_by, timestamp, persistence);
         }
         EventType::Matching(event) => {
             state.record_matching_event(event, timestamp, persistence);
