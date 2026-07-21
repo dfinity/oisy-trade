@@ -925,6 +925,18 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .unwrap_or(caller)
     }
 
+    /// Resolves `caller` to the `(owner, acting_key)` pair for placing or
+    /// canceling an order: a trading account acts on its funding account's
+    /// behalf (owner is the funding principal, attributed to the trading key);
+    /// a funding account or an unknown principal acts as itself with no
+    /// separate acting key.
+    pub fn resolve_order_caller(&self, caller: Principal) -> (Principal, Option<Principal>) {
+        self.user_registry
+            .lookup(caller)
+            .map(|account| account.order_actor())
+            .unwrap_or((caller, None))
+    }
+
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
         self.ledger_fee_cache
             .get(token_id)

@@ -64,8 +64,7 @@ pub fn add_limit_order(
 ) -> Result<OrderId, AddLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let placed_by = (caller != owner).then_some(caller);
+    let (owner, placed_by) = state::with_state(|s| s.resolve_order_caller(caller));
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::try_from(request).map_err(|_| {
         AddLimitOrderError::request(
@@ -105,8 +104,7 @@ pub fn cancel_limit_order(
 ) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let canceled_by = (caller != owner).then_some(caller);
+    let (owner, canceled_by) = state::with_state(|s| s.resolve_order_caller(caller));
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
             oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
