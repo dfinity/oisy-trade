@@ -651,6 +651,44 @@ fn unique_suffix() -> String {
     )
 }
 
+/// Creates a canister at the mainnet id, uploads the extracted snapshot, and
+/// loads it, returning the running environment and the mainnet canister id.
+/// Consumes `snapshot_dir` (passed to `canister_snapshot_upload`).
+pub async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Principal) {
+    let env = PocketIcBuilder::new()
+        .with_fiduciary_subnet()
+        .build_async()
+        .await;
+
+    let canister_id = Principal::from_text(MAINNET_OISY_TRADE_ID).unwrap();
+    env.create_canister_with_id(
+        Some(CONTROLLER),
+        Some(CanisterSettings {
+            controllers: Some(vec![CONTROLLER]),
+            ..CanisterSettings::default()
+        }),
+        canister_id,
+    )
+    .await
+    .expect("failed to create canister at the mainnet id");
+    env.add_cycles(canister_id, u128::MAX).await;
+
+    let snapshot_id = env
+        .canister_snapshot_upload(canister_id, CONTROLLER, None, snapshot_dir)
+        .await;
+    env.stop_canister(canister_id, Some(CONTROLLER))
+        .await
+        .expect("failed to stop canister before loading snapshot");
+    env.load_canister_snapshot(canister_id, Some(CONTROLLER), snapshot_id)
+        .await
+        .expect("failed to load mainnet snapshot");
+    env.start_canister(canister_id, Some(CONTROLLER))
+        .await
+        .expect("failed to start canister after loading snapshot");
+
+    (env, canister_id)
+}
+
 pub fn sha256_hex(path: &Path) -> String {
     let output = Command::new("sha256sum")
         .arg(path)
