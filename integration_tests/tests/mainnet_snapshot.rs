@@ -95,14 +95,12 @@ async fn should_replay_mainnet_events_and_reconstruct_state() {
     let snapshot_mem: VectorMemory = Rc::new(RefCell::new(stable_memory));
     let snapshot_mm = MemoryManager::init(snapshot_mem);
 
-    let events: Vec<StoredEvent> = StableLog::init(
+    let event_log: StableLog<StoredEvent, Mem, Mem> = StableLog::init(
         snapshot_mm.get(EVENT_LOG_INDEX),
         snapshot_mm.get(EVENT_LOG_DATA),
-    )
-    .iter()
-    .collect();
+    );
     assert!(
-        !events.is_empty(),
+        !event_log.is_empty(),
         "the snapshot event log must not be empty"
     );
 
@@ -113,7 +111,7 @@ async fn should_replay_mainnet_events_and_reconstruct_state() {
     let (order_history, trade_history, user_registry, balances) = open_collections(&recon_mm);
 
     let state = replay_events(
-        events,
+        event_log.iter(),
         order_history,
         trade_history,
         user_registry,

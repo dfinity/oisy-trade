@@ -653,7 +653,8 @@ fn unique_suffix() -> String {
 
 /// Creates a canister at the mainnet id, uploads the extracted snapshot, and
 /// loads it, returning the running environment and the mainnet canister id.
-/// Consumes `snapshot_dir` (passed to `canister_snapshot_upload`).
+/// Removes `snapshot_dir` once uploaded so per-call extraction directories do
+/// not accumulate across test runs.
 pub async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Principal) {
     let env = PocketIcBuilder::new()
         .with_fiduciary_subnet()
@@ -674,8 +675,9 @@ pub async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Pr
     env.add_cycles(canister_id, u128::MAX).await;
 
     let snapshot_id = env
-        .canister_snapshot_upload(canister_id, CONTROLLER, None, snapshot_dir)
+        .canister_snapshot_upload(canister_id, CONTROLLER, None, snapshot_dir.clone())
         .await;
+    let _ = std::fs::remove_dir_all(&snapshot_dir);
     env.stop_canister(canister_id, Some(CONTROLLER))
         .await
         .expect("failed to stop canister before loading snapshot");
