@@ -26,7 +26,15 @@ use pocket_ic::{
     CanisterId, CanisterSettings, PocketIcBuilder, RejectResponse, nonblocking::PocketIc,
 };
 use serde::de::DeserializeOwned;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Publicly hosted mainnet snapshot tarball, pinned by [`SNAPSHOT_SHA256`].
+pub const SNAPSHOT_URL: &str = "https://dfinity-download-public.s3.eu-central-1.amazonaws.com/testdata/oisy_trade/2026_07_10_oisy_trade_snapshot_00000000000000000000000002300fe50101.tar.gz";
+pub const SNAPSHOT_SHA256: &str =
+    "f31fe17fcb222b08d12d6b12884680e8f11091a1b34e8ad1272d773ee72df58b";
+pub const MAINNET_OISY_TRADE_ID: &str = "sy2xe-miaaa-aaaar-qb7sq-cai";
+pub const CONTROLLER: Principal = Principal::from_slice(&[0x9d, 0xf7, 0x02]);
 
 pub const TICK_SIZE: u64 = 1000;
 pub const LOT_SIZE: u64 = 1_000_000;
@@ -564,6 +572,143 @@ pub fn ledger_wasm() -> Vec<u8> {
             e
         )
     })
+}
+
+/// Downloads the mainnet snapshot tarball and extracts it into a directory laid
+/// out as `canister_snapshot_upload` expects (metadata.json plus the memory
+/// dumps). Mirrors the repo's curl-based external-artifact download: the archive
+/// is cached under the target dir and verified against a pinned SHA-256, so a
+/// truncated or tampered download is rejected instead of silently reused.
+///
+/// The extraction directory is unique per call, so concurrent tests sharing the
+/// cached archive never race on the same directory.
+pub fn download_and_extract_snapshot() -> PathBuf {
+    let tmp = std::env::var("CARGO_TARGET_TMPDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let archive = tmp.join("oisy_trade_mainnet_snapshot.tar.gz");
+    ensure_snapshot_archive(&archive);
+
+    let snapshot_dir = tmp.join(format!("oisy_trade_mainnet_snapshot_{}", unique_suffix()));
+    let _ = std::fs::remove_dir_all(&snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+    let status = Command::new("tar")
+        .args(["xzf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&snapshot_dir)
+        .args(["--strip-components=1"])
+        .status()
+        .expect("failed to run tar to extract the snapshot");
+    if !status.success() {
+        let _ = std::fs::remove_file(&archive);
+        panic!(
+            "tar failed to extract the snapshot; removed the cached archive so the next run re-downloads"
+        );
+    }
+    snapshot_dir
+}
+
+/// Ensures the pinned snapshot archive is present at `archive`, downloading it if
+/// missing or if the cached copy fails the SHA-256 check. The download lands in a
+/// per-call temporary file that is verified and only then atomically renamed into
+/// place, so concurrent callers never observe a partially written archive.
+pub fn ensure_snapshot_archive(archive: &Path) {
+    if archive.exists() && sha256_hex(archive) == SNAPSHOT_SHA256 {
+        return;
+    }
+    let download = archive.with_file_name(format!(
+        "oisy_trade_mainnet_snapshot.tar.gz.tmp.{}",
+        unique_suffix()
+    ));
+    let status = Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&download)
+        .arg(SNAPSHOT_URL)
+        .status()
+        .expect("failed to run curl to download the snapshot");
+    if !status.success() {
+        let _ = std::fs::remove_file(&download);
+        panic!("curl failed to download the snapshot");
+    }
+    let actual = sha256_hex(&download);
+    if actual != SNAPSHOT_SHA256 {
+        let _ = std::fs::remove_file(&download);
+        panic!("snapshot SHA-256 mismatch: expected {SNAPSHOT_SHA256}, got {actual}");
+    }
+    std::fs::rename(&download, archive).expect("failed to move the downloaded snapshot into place");
+}
+
+/// A process-unique, monotonically increasing suffix for temp file/directory
+/// names, so concurrent tests never collide on a shared path.
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}_{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Creates a canister at the mainnet id, uploads the extracted snapshot, and
+/// loads it, returning the running environment and the mainnet canister id.
+/// Removes `snapshot_dir` once uploaded so per-call extraction directories do
+/// not accumulate across test runs.
+pub async fn load_snapshot_into_pocketic(snapshot_dir: PathBuf) -> (PocketIc, Principal) {
+    let env = PocketIcBuilder::new()
+        .with_fiduciary_subnet()
+        .build_async()
+        .await;
+
+    let canister_id = Principal::from_text(MAINNET_OISY_TRADE_ID).unwrap();
+    env.create_canister_with_id(
+        Some(CONTROLLER),
+        Some(CanisterSettings {
+            controllers: Some(vec![CONTROLLER]),
+            ..CanisterSettings::default()
+        }),
+        canister_id,
+    )
+    .await
+    .expect("failed to create canister at the mainnet id");
+    env.add_cycles(canister_id, u128::MAX).await;
+
+    let snapshot_id = env
+        .canister_snapshot_upload(canister_id, CONTROLLER, None, snapshot_dir.clone())
+        .await;
+    let _ = std::fs::remove_dir_all(&snapshot_dir);
+    env.stop_canister(canister_id, Some(CONTROLLER))
+        .await
+        .expect("failed to stop canister before loading snapshot");
+    env.load_canister_snapshot(canister_id, Some(CONTROLLER), snapshot_id)
+        .await
+        .expect("failed to load mainnet snapshot");
+    env.start_canister(canister_id, Some(CONTROLLER))
+        .await
+        .expect("failed to start canister after loading snapshot");
+
+    (env, canister_id)
+}
+
+pub fn sha256_hex(path: &Path) -> String {
+    let output = Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .or_else(|_| {
+            Command::new("shasum")
+                .args(["-a", "256"])
+                .arg(path)
+                .output()
+        })
+        .expect("no SHA-256 tool found (need sha256sum or shasum)");
+    assert!(output.status.success(), "SHA-256 computation failed");
+    String::from_utf8(output.stdout)
+        .expect("SHA-256 output is not UTF-8")
+        .split_whitespace()
+        .next()
+        .expect("empty SHA-256 output")
+        .to_string()
 }
 
 #[async_trait]

@@ -25,4 +25,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+ic-stable-structures = { workspace = true }
+oisy_trade_canister = { path = "../canister", version = "0.3.0" }
 tokio = { workspace = true }

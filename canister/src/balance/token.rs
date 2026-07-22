@@ -227,8 +227,9 @@ impl<M: Memory> TokenBalance<M> {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (BalanceKey, Balance)> + '_ {
+    /// Iterates the stored `(key, balance)` entries in key order. Excludes the
+    /// heap-resident fee pool.
+    pub fn iter(&self) -> impl Iterator<Item = (BalanceKey, Balance)> + '_ {
         self.balances
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
