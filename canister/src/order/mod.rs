@@ -8,7 +8,7 @@ mod queue;
 mod tests;
 mod trades;
 
-pub use crate::history::CursorNotFound;
+pub use crate::history::{CursorNotFound, InsertionSeq, InsertionSeqMarker};
 pub use book::{
     MatchOrderError, MatchResult, MatchingOutput, NotionalError, OrderBook, OrderBookSnapshot,
     PriceLevel, RemovedOrder,

@@ -1,6 +1,6 @@
 use super::{FillSeq, OrderId, PairToken, Price, Quantity, Side, TradeId};
 use crate::Timestamp;
-use crate::history::{CursorNotFound, History};
+use crate::history::{CursorNotFound, History, InsertionSeq};
 use crate::user::UserId;
 use ic_stable_structures::Memory;
 use std::fmt;
@@ -171,7 +171,7 @@ impl<M: Memory> TradeHistory<M> {
 
     /// Iterates the per-user trade index as `(user, insertion sequence, trade
     /// id)` in index order.
-    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, u64, TradeId)> + '_ {
+    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, InsertionSeq, TradeId)> + '_ {
         self.0.iter_by_user()
     }
 }

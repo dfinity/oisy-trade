@@ -1,6 +1,6 @@
 use super::{OrderId, OrderStatus, Price, Quantity, Side, TimeInForce};
 use crate::Timestamp;
-use crate::history::{CursorNotFound, History};
+use crate::history::{CursorNotFound, History, InsertionSeq};
 use crate::user::UserId;
 use candid::Principal;
 use ic_stable_structures::Memory;
@@ -268,7 +268,7 @@ impl<M: Memory> OrderHistory<M> {
 
     /// Iterates the per-user order index as `(user, insertion sequence, order
     /// id)` in index order.
-    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, u64, OrderId)> + '_ {
+    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, InsertionSeq, OrderId)> + '_ {
         self.0.iter_by_user()
     }
 }
