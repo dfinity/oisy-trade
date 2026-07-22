@@ -218,6 +218,22 @@ where
             .map(|entry| (entry.key().clone(), entry.value().record))
             .collect()
     }
+
+    /// Iterates the primary store's `(key, record)` entries in key order.
+    pub fn iter_primary(&self) -> impl Iterator<Item = (K, V)> + '_ {
+        self.primary
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().record))
+    }
+
+    /// Iterates the per-user index as `(user, insertion sequence, key)` in index
+    /// order.
+    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, u64, K)> + '_ {
+        self.by_user.iter().map(|entry| {
+            let key = entry.key();
+            (*key.first(), key.second().get(), entry.value())
+        })
+    }
 }
 
 #[cfg(test)]

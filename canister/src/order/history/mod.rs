@@ -260,6 +260,17 @@ impl<M: Memory> OrderHistory<M> {
         bench_scopes!("order_history", "order_history::orders_after");
         self.0.page_by_user(user, after, length)
     }
+
+    /// Iterates every order record as `(order id, record)` in key order.
+    pub fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+        self.0.iter_primary()
+    }
+
+    /// Iterates the per-user order index as `(user, insertion sequence, order
+    /// id)` in index order.
+    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, u64, OrderId)> + '_ {
+        self.0.iter_by_user()
+    }
 }
 
 #[cfg(test)]

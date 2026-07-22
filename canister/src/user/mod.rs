@@ -417,23 +417,24 @@ impl<M: Memory> UserRegistry<M> {
             .map(|list| list.accounts)
             .unwrap_or_default()
     }
-}
 
-#[cfg(test)]
-impl UserRegistry<ic_stable_structures::VectorMemory> {
-    fn iter(&self) -> impl Iterator<Item = (PrincipalKey, UserId)> + '_ {
+    /// Iterates the user registry as `(principal, id)` in key order.
+    pub fn iter_users(&self) -> impl Iterator<Item = (Principal, UserId)> + '_ {
         self.users
             .iter()
-            .map(|entry| (entry.key().clone(), entry.value()))
+            .map(|entry| (entry.key().0, entry.value()))
     }
 
-    fn iter_trading_accounts(&self) -> impl Iterator<Item = (PrincipalKey, TradingGrant)> + '_ {
+    /// Iterates the trading-account grants as `(trading principal, grant)` in
+    /// key order.
+    pub fn iter_trading_accounts(&self) -> impl Iterator<Item = (Principal, TradingGrant)> + '_ {
         self.trading_accounts
             .iter()
-            .map(|entry| (entry.key().clone(), entry.value()))
+            .map(|entry| (entry.key().0, entry.value()))
     }
 
-    fn iter_trading_accounts_by_funding(
+    /// Iterates the per-funding whitelists as `(funding id, list)` in key order.
+    pub fn iter_trading_accounts_by_funding(
         &self,
     ) -> impl Iterator<Item = (UserId, TradingAccountList)> + '_ {
         self.trading_accounts_by_funding
@@ -450,11 +451,13 @@ impl Clone for UserRegistry<ic_stable_structures::VectorMemory> {
             ic_stable_structures::VectorMemory::default(),
             ic_stable_structures::VectorMemory::default(),
         );
-        for (key, id) in self.iter() {
-            fresh.users.insert(key, id);
+        for (principal, id) in self.iter_users() {
+            fresh.users.insert(PrincipalKey(principal), id);
         }
-        for (key, grant) in self.iter_trading_accounts() {
-            fresh.trading_accounts.insert(key, grant);
+        for (principal, grant) in self.iter_trading_accounts() {
+            fresh
+                .trading_accounts
+                .insert(PrincipalKey(principal), grant);
         }
         for (funding_id, list) in self.iter_trading_accounts_by_funding() {
             fresh.trading_accounts_by_funding.insert(funding_id, list);
@@ -466,7 +469,7 @@ impl Clone for UserRegistry<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for UserRegistry<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
+        self.iter_users().eq(other.iter_users())
             && self
                 .iter_trading_accounts()
                 .eq(other.iter_trading_accounts())
