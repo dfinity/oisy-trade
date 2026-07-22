@@ -261,7 +261,7 @@ mod add_limit_order {
             quantity: Quantity::from(LOT_SIZE.get()),
             time_in_force: TimeInForce::GoodTilCanceled,
         };
-        let result = state.validate_limit_order(user, pair, pending);
+        let result = state.validate_limit_order(state.lookup_account(user).as_ref(), pair, pending);
 
         assert_matches!(result, Err(AddLimitOrderError::InsufficientBalance { .. }));
     }
@@ -576,7 +576,7 @@ mod record_limit_order {
         state.deposit(OWNER, pair.base, lot.into(), StableMemoryOptions::Write);
         let (order_id, order) = state
             .validate_limit_order(
-                OWNER,
+                state.lookup_account(OWNER).as_ref(),
                 pair.clone(),
                 PendingOrder {
                     side: Side::Sell,
@@ -907,7 +907,7 @@ mod validate_overflow_invariant {
                 .is_some();
 
             let result = state.validate_limit_order(
-                Principal::from_slice(&[0x01]),
+                state.lookup_account(Principal::from_slice(&[0x01])).as_ref(),
                 pair,
                 PendingOrder {
                     side,
@@ -979,7 +979,11 @@ mod validate_limit_order {
             time_in_force: TimeInForce::GoodTilCanceled,
         };
         state
-            .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
+            .validate_limit_order(
+                state.lookup_account(USER).as_ref(),
+                icp_ckbtc_trading_pair(),
+                pending,
+            )
             .map(|_| ())
     }
 
@@ -1064,7 +1068,11 @@ mod validate_limit_order {
             time_in_force: TimeInForce::GoodTilCanceled,
         };
         assert_matches!(
-            state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
+            state.validate_limit_order(
+                state.lookup_account(USER).as_ref(),
+                icp_ckbtc_trading_pair(),
+                off_tick
+            ),
             Err(AddLimitOrderError::InvalidOrder(_))
         );
     }
@@ -1229,7 +1237,7 @@ mod settle_fills {
             );
             let (order_id, order) = state
                 .validate_limit_order(
-                    user,
+                    state.lookup_account(user).as_ref(),
                     pair.clone(),
                     PendingOrder {
                         side,

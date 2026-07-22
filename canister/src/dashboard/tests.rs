@@ -300,7 +300,9 @@ fn place(
         Side::Sell => (pair.base, pending.quantity),
     };
     state.deposit(user, token, required, StableMemoryOptions::Write);
-    let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+    let (order_id, order) = state
+        .validate_limit_order(state.lookup_account(user).as_ref(), pair, pending)
+        .unwrap();
     state.record_limit_order(
         user,
         order_id.book_id(),

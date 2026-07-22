@@ -622,7 +622,9 @@ fn place_order(
     pending: PendingOrder,
 ) -> OrderId {
     let pair = trading_pair();
-    let (order_id, order) = state.validate_limit_order(user, pair, pending).unwrap();
+    let (order_id, order) = state
+        .validate_limit_order(None, user, pair, pending)
+        .unwrap();
     state.record_limit_order(
         user,
         order_id.book_id(),

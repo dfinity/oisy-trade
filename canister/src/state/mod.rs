@@ -179,8 +179,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         pending: PendingOrder,
         runtime: &impl Runtime,
     ) -> Result<OrderId, AddLimitOrderError> {
-        let (owner, placed_by) = self.resolve_order_caller(caller);
-        let (order_id, order) = self.validate_limit_order(owner, pair, pending)?;
+        let account = self.lookup_account(caller);
+        let (order_id, order) = self.validate_limit_order(account.as_ref(), pair, pending)?;
+        let (owner, placed_by) = account.map_or((caller, None), |account| account.order_actor());
         let permit = self
             .permissions()
             .permit_trading(owner, order_id.book_id())?;
@@ -204,7 +205,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn validate_limit_order(
         &self,
-        user: Principal,
+        account: Option<&UserAccount>,
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<(OrderId, Order), AddLimitOrderError> {
@@ -237,10 +238,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Buy => (pair.quote, amount),
             Side::Sell => (pair.base, pending.quantity),
         };
-        let free = self
-            .user_registry
-            .lookup(user)
-            .and_then(|account| account.funding_id())
+        let free = account
+            .map(UserAccount::effective_principal)
+            .and_then(|owner| self.user_registry.lookup(owner))
+            .and_then(|funding_account| funding_account.funding_id())
             .and_then(|u| self.balances.get_balance(u, &token))
             .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
@@ -330,8 +331,9 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        let (owner, canceled_by) = self.resolve_order_caller(caller);
-        self.validate_cancel_limit_order(&owner, &order_id)?;
+        let account = self.lookup_account(caller);
+        self.validate_cancel_limit_order(account.as_ref(), &order_id)?;
+        let canceled_by = account.and_then(|account| account.order_actor().1);
 
         let permit = self.permissions().permit_cancel();
         audit::process_event(
@@ -372,14 +374,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        owner: &Principal,
+        account: Option<&UserAccount>,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != owner {
+        if account.map(UserAccount::effective_principal) != Some(record.owner) {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
@@ -953,18 +955,6 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             .lookup(caller)
             .map(|account| account.effective_principal())
             .unwrap_or(caller)
-    }
-
-    /// Resolves `caller` to the `(owner, acting_key)` pair for placing or
-    /// canceling an order: a trading account acts on its funding account's
-    /// behalf (owner is the funding principal, attributed to the trading key);
-    /// a funding account or an unknown principal acts as itself with no
-    /// separate acting key.
-    fn resolve_order_caller(&self, caller: Principal) -> (Principal, Option<Principal>) {
-        self.user_registry
-            .lookup(caller)
-            .map(|account| account.order_actor())
-            .unwrap_or((caller, None))
     }
 
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
