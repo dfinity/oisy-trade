@@ -237,6 +237,10 @@ pub struct OrderRecord {
     /// trading account acting for the funding account); `None` when the owner
     /// placed it itself.
     pub placed_by: Option<Principal>,
+    /// The principal that canceled the order when it differs from `owner` (a
+    /// trading account acting for the funding account); `None` if the order is
+    /// not canceled, or was canceled by the owner itself.
+    pub canceled_by: Option<Principal>,
 }
 
 impl fmt::Display for OrderRecord {
@@ -254,14 +258,17 @@ impl fmt::Display for OrderRecord {
             filled_quote,
             filled_fee,
             placed_by,
+            canceled_by,
         } = self;
-        let placed_by = match placed_by {
+        let render_opt = |p: &Option<Principal>| match p {
             Some(principal) => format!("Some({principal})"),
             None => "None".to_string(),
         };
+        let placed_by = render_opt(placed_by);
+        let canceled_by = render_opt(canceled_by);
         write!(
             f,
-            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee}, placed_by={placed_by})"
+            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee}, placed_by={placed_by}, canceled_by={canceled_by})"
         )
     }
 }

@@ -71,12 +71,13 @@ fn should_display_principals_as_text() {
                 filled_quote: Nat::from(0u64),
                 filled_fee: Nat::from(0u64),
                 placed_by: Some(acting),
+                canceled_by: Some(acting),
             }
             .to_string(),
-            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=Some(mxzaz-hqaaa-aaaar-qaada-cai))",
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=Some(mxzaz-hqaaa-aaaar-qaada-cai), canceled_by=Some(mxzaz-hqaaa-aaaar-qaada-cai))",
         },
         TestCase {
-            desc: "OrderRecord placed_by=None",
+            desc: "OrderRecord attribution None",
             rendered: OrderRecord {
                 owner: principal,
                 side: Side::Sell,
@@ -90,9 +91,10 @@ fn should_display_principals_as_text() {
                 filled_quote: Nat::from(0u64),
                 filled_fee: Nat::from(0u64),
                 placed_by: None,
+                canceled_by: None,
             }
             .to_string(),
-            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=None)",
+            expected: "OrderRecord(owner=ryjl3-tyaaa-aaaaa-aaaba-cai, side=Sell, price=100, quantity=1_000_000, filled_quantity=0, status=Open, created_at=42, last_updated_at=None, time_in_force=GoodTilCanceled, filled_quote=0, filled_fee=0, placed_by=None, canceled_by=None)",
         },
         TestCase {
             desc: "DepositRequest",

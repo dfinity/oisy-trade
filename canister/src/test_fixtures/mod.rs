@@ -896,7 +896,12 @@ pub mod arbitrary {
     }
 
     pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {
-        arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
+        (arb_order_id(), option::of(arb_principal())).prop_map(|(order_id, canceled_by)| {
+            CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }
+        })
     }
 
     pub fn arb_removed_order() -> impl Strategy<Value = RemovedOrder> {

@@ -305,6 +305,25 @@ mod cancel_limit_order {
     }
 
     #[test]
+    fn stores_the_canceling_caller_on_the_record() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+
+        state.record_cancel_limit_order(
+            buy_id,
+            Some(STRANGER),
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        let record = state.order_history.get(&buy_id).unwrap();
+        assert_eq!(record.status, OrderStatus::Canceled);
+        assert_eq!(record.canceled_by, Some(STRANGER));
+    }
+
+    #[test]
     fn should_refund_base_for_pending_sell() {
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
@@ -411,7 +430,7 @@ mod cancel_limit_order {
         );
         assert!(state.has_pending_settling_events());
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -443,7 +462,7 @@ mod cancel_limit_order {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -468,7 +487,9 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
-        let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
+        let order = state
+            .cancel_limit_order(&user, None, order_id, &runtime)
+            .unwrap();
         assert_eq!(order.status, OrderStatus::Canceled);
         assert_eq!(
             order.quantity.checked_sub(order.filled_quantity),
@@ -1759,6 +1780,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1793,6 +1815,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1812,6 +1835,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1883,6 +1907,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(100 * lot + 101 * lot),
                     filled_fee: Quantity::ZERO,
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1979,6 +2004,7 @@ mod settle_fills {
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(buy.last_updated_at, None);
@@ -2093,6 +2119,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(base_fee),
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
             let sell = test_fixtures::record_of(&state, SELLER, seller_id);
@@ -2111,6 +2138,7 @@ mod settle_fills {
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(quote_fee),
                     placed_by: None,
+                    canceled_by: None,
                 },
             );
         }

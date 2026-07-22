@@ -29,6 +29,7 @@ fn test_record() -> OrderRecord {
         filled_quote: Quantity::ZERO,
         filled_fee: Quantity::ZERO,
         placed_by: None,
+        canceled_by: None,
     }
 }
 
@@ -98,6 +99,7 @@ fn apply_update_status_and_delta_in_one_write() {
             filled_delta: Quantity::from(300_000u64),
             quote_delta: Quantity::from(3u64),
             fee_delta: Quantity::from(1u64),
+            canceled_by: None,
         },
         Timestamp::new(11),
     );
@@ -108,6 +110,7 @@ fn apply_update_status_and_delta_in_one_write() {
             filled_delta: Quantity::from(700_000u64),
             quote_delta: Quantity::from(7u64),
             fee_delta: Quantity::from(2u64),
+            canceled_by: None,
         },
         Timestamp::new(13),
     );
@@ -137,6 +140,7 @@ fn apply_update_accumulates_quote_and_fee_in_one_write() {
             filled_delta: Quantity::from(200_000u64),
             quote_delta: Quantity::from(20_000_000u64),
             fee_delta: Quantity::from(10_000u64),
+            canceled_by: None,
         },
         Timestamp::new(5),
     );
@@ -162,6 +166,7 @@ fn apply_update_traps_on_filled_quote_overflow() {
         filled_delta: Quantity::ZERO,
         quote_delta: Quantity::from(1u64),
         fee_delta: Quantity::ZERO,
+        canceled_by: None,
     }
     .apply(&mut record);
 }
@@ -176,6 +181,7 @@ fn apply_update_traps_on_filled_fee_overflow() {
         filled_delta: Quantity::ZERO,
         quote_delta: Quantity::ZERO,
         fee_delta: Quantity::from(1u64),
+        canceled_by: None,
     }
     .apply(&mut record);
 }

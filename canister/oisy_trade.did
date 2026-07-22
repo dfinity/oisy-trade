@@ -309,6 +309,10 @@ type OrderRecord = record {
     /// trading account acting for the funding account); null when the owner
     /// placed it itself.
     placed_by : opt principal;
+    /// The principal that canceled the order when it differs from `owner` (a
+    /// trading account acting for the funding account); null if the order is
+    /// not canceled, or was canceled by the owner itself.
+    canceled_by : opt principal;
 };
 
 /// Request for `get_my_orders`.
@@ -812,6 +816,10 @@ type WithdrawEvent = record {
 /// Event payload for canceling a limit order.
 type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
+    /// The principal that canceled the order when it differs from the owner (a
+    /// trading account acting for the funding account); null when the owner
+    /// canceled it itself.
+    canceled_by : opt principal;
 };
 
 // Event payload recording a halt status change. `book_ids` is null for a

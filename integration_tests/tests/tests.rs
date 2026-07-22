@@ -1275,6 +1275,7 @@ mod cancel_limit_order {
                 // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
                 filled_fee: Nat::from(1_000u64),
                 placed_by: None,
+                canceled_by: None,
             }
         );
 
@@ -4100,11 +4101,6 @@ mod trading_accounts {
             vec![trading]
         );
 
-        // NOTE: the "a revoked trading account can no longer place orders"
-        // lifecycle needs caller resolution on orders (PR 5/6); the spec
-        // sequences the full deposit→grant→trade→revoke→stranger lifecycle into
-        // PR 6, so it is intentionally not covered here.
-
         setup.drop().await;
     }
 
@@ -4235,6 +4231,139 @@ mod trading_accounts {
             "the trading account sees the funding account's trades"
         );
         assert!(!funding_client.get_balances(None).await.unwrap().is_empty());
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_run_the_deposit_grant_trade_revoke_lifecycle() {
+        use oisy_trade_int_tests::PRICE_SCALE;
+        use oisy_trade_types::{
+            CancelLimitOrderRequestError, LimitOrderRequest, OrderStatus, Side,
+        };
+
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        let funding_client = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+
+        let quantity = 1_000_000u64;
+        let price = 9_000 * PRICE_SCALE;
+        let sell = || LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: Nat::from(price),
+            quantity: quantity.into(),
+            time_in_force: None,
+        };
+
+        // Deposit registers F and funds every resting sell (each reserves
+        // `quantity` base); grant whitelists T.
+        setup.fund_base(funding, quantity * 4).await;
+        funding_client.add_trading_account(trading).await.unwrap();
+
+        let t_order = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let record = funding_client
+            .get_my_order(t_order.clone())
+            .await
+            .unwrap()
+            .order;
+        assert_eq!(
+            record.owner, funding,
+            "the order is owned by the funding account"
+        );
+        assert_eq!(
+            record.placed_by,
+            Some(trading),
+            "the acting trading account is attributed as placed_by"
+        );
+
+        assert_eq!(
+            funding_client
+                .cancel_limit_order(t_order)
+                .await
+                .unwrap()
+                .status,
+            OrderStatus::Canceled,
+            "the funding account cancels the order its trading account placed"
+        );
+
+        let f_order = funding_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let canceled = trading_client.cancel_limit_order(f_order).await.unwrap();
+        assert_eq!(canceled.owner, funding);
+        assert_eq!(
+            canceled.status,
+            OrderStatus::Canceled,
+            "the trading account cancels the funding account's own order"
+        );
+
+        setup.env().advance_time(GRANT_COOLDOWN).await;
+        setup.env().tick().await;
+        let trading2 = trading_account(2);
+        let trading2_client = setup.oisy_trade_client_with_caller(trading2);
+        funding_client.add_trading_account(trading2).await.unwrap();
+
+        let sibling_order = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let sibling_canceled = trading2_client
+            .cancel_limit_order(sibling_order)
+            .await
+            .unwrap();
+        assert_eq!(
+            sibling_canceled.owner, funding,
+            "a sibling key's cancel resolves to the funding account"
+        );
+        assert_eq!(
+            sibling_canceled.status,
+            OrderStatus::Canceled,
+            "a sibling trading account cancels an order another trading account placed"
+        );
+        assert_eq!(
+            sibling_canceled.canceled_by,
+            Some(trading2),
+            "the sibling key is attributed as canceled_by on the record"
+        );
+
+        let surviving = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+
+        funding_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            trading_client
+                .cancel_limit_order(surviving.clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
+            "a revoked trading account is treated as a stranger"
+        );
+        // The order the revoked key placed stays open and cancellable by F.
+        assert_eq!(
+            funding_client
+                .get_my_order(surviving.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open,
+            "an order the revoked key placed stays open"
+        );
+        assert_eq!(
+            funding_client
+                .cancel_limit_order(surviving)
+                .await
+                .unwrap()
+                .status,
+            OrderStatus::Canceled,
+            "the funding account still cancels the revoked key's order"
+        );
 
         setup.drop().await;
     }

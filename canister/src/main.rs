@@ -383,12 +383,16 @@ fn get_events(
                     placed_by,
                 }),
                 EventType::CancelLimitOrder(
-                    oisy_trade_canister::state::event::CancelLimitOrderEvent { order_id },
+                    oisy_trade_canister::state::event::CancelLimitOrderEvent {
+                        order_id,
+                        canceled_by,
+                    },
                 ) => event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
                     order_id: event::OrderId {
                         book_id: order_id.book_id().get(),
                         seq: order_id.seq().get(),
                     },
+                    canceled_by,
                 }),
                 EventType::Matching(oisy_trade_canister::state::event::MatchingEvent {
                     book_id,

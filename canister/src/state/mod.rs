@@ -287,6 +287,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
                     placed_by,
+                    canceled_by: None,
                 },
             );
         }
@@ -295,16 +296,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        user: &Principal,
+        owner: &Principal,
+        canceled_by: Option<Principal>,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(user, &order_id)?;
+        self.validate_cancel_limit_order(owner, &order_id)?;
 
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
-            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }),
             permit.into(),
             runtime,
         );
@@ -337,14 +342,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        caller: &Principal,
+        owner: &Principal,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != caller {
+        if &record.owner != owner {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
@@ -358,6 +363,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        canceled_by: Option<Principal>,
         now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -371,11 +377,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.apply_update(
-                &order_id,
-                OrderUpdate::status(OrderStatus::Canceled),
-                now,
-            );
+            self.order_history
+                .apply_update(&order_id, OrderUpdate::cancel(canceled_by), now);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,
