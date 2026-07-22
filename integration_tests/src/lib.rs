@@ -579,6 +579,9 @@ pub fn ledger_wasm() -> Vec<u8> {
 /// dumps). Mirrors the repo's curl-based external-artifact download: the archive
 /// is cached under the target dir and verified against a pinned SHA-256, so a
 /// truncated or tampered download is rejected instead of silently reused.
+///
+/// The extraction directory is unique per call, so concurrent tests sharing the
+/// cached archive never race on the same directory.
 pub fn download_and_extract_snapshot() -> PathBuf {
     let tmp = std::env::var("CARGO_TARGET_TMPDIR")
         .map(PathBuf::from)
@@ -586,7 +589,7 @@ pub fn download_and_extract_snapshot() -> PathBuf {
     let archive = tmp.join("oisy_trade_mainnet_snapshot.tar.gz");
     ensure_snapshot_archive(&archive);
 
-    let snapshot_dir = tmp.join("oisy_trade_mainnet_snapshot");
+    let snapshot_dir = tmp.join(format!("oisy_trade_mainnet_snapshot_{}", unique_suffix()));
     let _ = std::fs::remove_dir_all(&snapshot_dir);
     std::fs::create_dir_all(&snapshot_dir).unwrap();
     let status = Command::new("tar")
@@ -606,25 +609,46 @@ pub fn download_and_extract_snapshot() -> PathBuf {
     snapshot_dir
 }
 
+/// Ensures the pinned snapshot archive is present at `archive`, downloading it if
+/// missing or if the cached copy fails the SHA-256 check. The download lands in a
+/// per-call temporary file that is verified and only then atomically renamed into
+/// place, so concurrent callers never observe a partially written archive.
 pub fn ensure_snapshot_archive(archive: &Path) {
     if archive.exists() && sha256_hex(archive) == SNAPSHOT_SHA256 {
         return;
     }
+    let download = archive.with_file_name(format!(
+        "oisy_trade_mainnet_snapshot.tar.gz.tmp.{}",
+        unique_suffix()
+    ));
     let status = Command::new("curl")
         .args(["-fsSL", "-o"])
-        .arg(archive)
+        .arg(&download)
         .arg(SNAPSHOT_URL)
         .status()
         .expect("failed to run curl to download the snapshot");
     if !status.success() {
-        let _ = std::fs::remove_file(archive);
+        let _ = std::fs::remove_file(&download);
         panic!("curl failed to download the snapshot");
     }
-    let actual = sha256_hex(archive);
+    let actual = sha256_hex(&download);
     if actual != SNAPSHOT_SHA256 {
-        let _ = std::fs::remove_file(archive);
+        let _ = std::fs::remove_file(&download);
         panic!("snapshot SHA-256 mismatch: expected {SNAPSHOT_SHA256}, got {actual}");
     }
+    std::fs::rename(&download, archive).expect("failed to move the downloaded snapshot into place");
+}
+
+/// A process-unique, monotonically increasing suffix for temp file/directory
+/// names, so concurrent tests never collide on a shared path.
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}_{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 pub fn sha256_hex(path: &Path) -> String {
