@@ -350,6 +350,8 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 - **time_in_force**: the order's time-in-force policy — `GoodTilCanceled` or `FillOrKill` (see Order Lifecycle / Time-in-Force).
 - **created_at**: the time the order was submitted, in nanoseconds since the Unix epoch.
 - **last_updated_at**: the time of the most recent modifying event (fill, status transition, or cancel), in nanoseconds since the Unix epoch; optional — `null` until the order is first modified.
+- **placed_by**: the acting principal that submitted the order, when it differs from `owner` — i.e. a trading account acting on the funding account's balance; optional — `null` when the funding account placed the order itself.
+- **canceled_by**: the acting principal that canceled the order, likewise; optional — `null` when the funding account canceled it itself, or the order was never canceled.
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
