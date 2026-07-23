@@ -42,6 +42,14 @@ Users speak human ("0.01 SOL"); OISY TRADE speaks base units (`10^decimals`). Al
 
 **On any error** → translate the variant name into plain language plus a concrete next step (e.g. `InsufficientAllowance { allowance }` → "your allowance is X but you need X + fee — let me re-approve").
 
+## Trading accounts (delegated keys)
+
+A **funding account** (an ordinary depositing principal) can whitelist a **trading account** — a separate principal that places and cancels orders on the funding account's balance but can never move funds. If the user has you sign with a trading key:
+
+- `add_limit_order`, `cancel_limit_order`, `get_balances`, `get_my_orders`, and `get_my_trades` resolve to the funding account automatically — you see and act on the funding account's balances and orders, no extra argument needed.
+- `deposit` and `withdraw` are **rejected** with `TradingAccountForbidden` — a trading key can never move funds. Route deposits/withdrawals through the funding key.
+- Grant/revoke (`add_trading_account` / `remove_trading_account`) and `get_my_trading_accounts` act on the **raw caller** — call them as the funding account, not the trading account.
+
 ## Absolute don'ts
 
 - **Don't fabricate** canister IDs, method names, field names, or error variants. Run `/canhelp oisy_trade`.
@@ -50,3 +58,4 @@ Users speak human ("0.01 SOL"); OISY TRADE speaks base units (`10^decimals`). Al
 - **Don't invoke a signing call** with an identity the user hasn't authorized for this conversation.
 - **Don't claim an order filled** because `add_limit_order` returned `Ok` — that's acceptance, not execution. Confirm via `get_my_orders` (with the `ById` filter).
 - **Don't over-deposit "for safety"** — on ledgers with high fees, it's expensive and usually not what the user wants.
+- **Don't `deposit` or `withdraw` with a trading key** — it fails with `TradingAccountForbidden`; funding operations require the funding account.
