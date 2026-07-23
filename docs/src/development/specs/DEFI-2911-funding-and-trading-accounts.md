@@ -292,11 +292,13 @@ remove_trading_account : (principal) -> (variant { Ok; Err : RemoveTradingAccoun
 get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradingAccountsError }) query;
 ```
 
-All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries one request-error
-variant per R7 precondition (granter not registered, self-grant, already a trading account,
-already a registered user, caller is a trading account, too many trading accounts) plus, in
-its `TemporaryError` class, the R14 cooldown and the in-flight-funding-operation rejection;
-`RemoveTradingAccountError` covers "not your trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
+All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries request-error variants
+covering the R7 preconditions — `FundingAccountNotFound` (granter unregistered or itself a
+trading account), `InvalidTradingAccount` (self-grant or already-registered `T`),
+`AlreadyTradingAccount`, and `TooManyTradingAccounts`; the two collapsed cases are distinguished
+by the advisory `message` — plus, in its `TemporaryError` class, the R14 cooldown (`RateLimit`)
+and the in-flight-funding-operation rejection (`FundingOperationInProgress`);
+`RemoveTradingAccountError` covers "not your trading account" (`NotAllowed`). `DepositError` and `WithdrawError` gain a variant denying funding operations
 to trading accounts (R3), added *inside* the envelope's `opt variant` request-error class —
 the extension point DEFI-2801 built in exactly for this: a client compiled against the old
 interface decodes the unknown variant as `null` and falls back to the envelope's `message`,
@@ -341,7 +343,7 @@ The two value types:
 ```rust
 /// A trading account's standing authorization.
 pub struct TradingGrant {
-    /// The funding account this key acts for — the result of `resolve_account`.
+    /// The funding account this key acts for — the result of `effective_account`.
     #[cbor(n(0), with = "icrc_cbor::principal")]
     funding: Principal,
 }
@@ -370,16 +372,18 @@ spans both maps and `users`: `grant` checks "`F` is registered", "`T` is unregis
 the type that owns the data. Registration itself stays deposit-only — grant reads `users` but
 never writes it.
 
-API on `UserRegistry`: `grant(funding: Principal, trading: Principal, now: Timestamp) ->
-Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14),
-`revoke(funding: Principal, trading: Principal) -> Result<(), RevokeError>`,
-`resolve_account(caller: Principal) -> Principal` (delegate → funding principal, else the caller),
-`is_trading_account(&Principal) -> bool` (the R3 deny check),
-`trading_accounts_of(funding: Principal) -> Vec<Principal>` (R9).
+API on `UserRegistry`, split into a validation half and an event-application half per the
+event-sourcing pattern: `validate_add_trading_account` / `record_add_trading_account` (the
+identity, cap, and cooldown checks — R7 and R14 — then the whitelist mutation under the `Write`
+gate), `validate_remove_trading_account` / `record_remove_trading_account`, and
+`trading_accounts_of(funding: Principal) -> Vec<Principal>` (R9). Resolution and the R3 deny
+check are served by `lookup(caller) -> Option<UserAccount>`, which `State::effective_account`
+uses to resolve a delegate to its funding principal (else the caller) and `State::lookup_account`
+uses to classify a caller as a trading account.
 
 ### State wiring — `canister/src/state`
 
-- **Resolution.** `State` delegates to `user_registry.resolve_account(caller)`. Applied once,
+- **Resolution.** `State::effective_account(caller)` resolves the caller via the `UserRegistry`. Applied once,
   at the entry of:
   `validate_limit_order` / `record_limit_order` (order owner, balance reservation — R2),
   `validate_cancel_limit_order` (ownership check — R4), `get_balances`, `get_user_order(s)`,
