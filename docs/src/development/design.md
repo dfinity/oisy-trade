@@ -71,9 +71,11 @@ This separation means the matching engine never waits on async inter-canister ca
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
 | **Admin** (controller)     | Add pairs (fees set at pair creation), halt/resume trading, upgrade canister |
-| **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance |
+| **Funding account** (any principal) | Deposit, withdraw, place and cancel own orders, whitelist/revoke trading accounts |
+| **Trading account** (whitelisted principal) | Place and cancel orders acting on its funding account's balance; cannot deposit or withdraw and never holds funds |
 
-- No allowlisting: any principal can trade on any active pair.
+- No allowlisting for trading: any principal can trade on any active pair.
+- A principal is either a funding account or a trading account, never both. A funding account may whitelist a trading account (a delegate principal that trades on the funding account's balance but can never move funds); see [DEFI-2911](specs/DEFI-2911-funding-and-trading-accounts.md).
 - Admin operations are guarded by `ic_cdk::api::is_controller()`.
 
 ## Trading
