@@ -3993,6 +3993,55 @@ mod trading_accounts {
     }
 
     #[tokio::test]
+    async fn should_persist_the_whitelist_and_cooldown_across_upgrade() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+
+        client.add_trading_account(trading).await.unwrap();
+
+        // The whitelist lives in stable memory and the cooldown anchor in the
+        // event log; both must survive an upgrade.
+        setup.upgrade(None).await;
+
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the whitelist survives the upgrade"
+        );
+
+        // Delegation still resolves after the upgrade: the trading account is
+        // still denied funding operations.
+        let deposit_err = setup
+            .oisy_trade_client_with_caller(trading)
+            .deposit(DepositRequest {
+                token_id: setup.quote_token_id(),
+                amount: Nat::from(1_000u64),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(
+            deposit_err.kind,
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
+        );
+
+        // The cooldown anchor survived too: an immediate second grant is still
+        // rate-limited rather than treated as a first grant.
+        let rate_err = client
+            .add_trading_account(trading_account(2))
+            .await
+            .unwrap_err();
+        assert_matches!(
+            rate_err.kind,
+            ErrorKind::TemporaryError(Some(AddTradingAccountTemporaryError::RateLimit { .. }))
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
     async fn should_reject_grant_past_the_cap() {
         let setup = Setup::new().await.with_trading_pair().await;
         let funding = setup.user();
