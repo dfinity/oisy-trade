@@ -193,6 +193,17 @@ impl UserAccount {
         }
     }
 
+    /// The order owner and the acting key to attribute a placement or cancel
+    /// to: a funding account acts as itself with no separate attribution; a
+    /// trading account acts on its funding account's behalf, attributed to the
+    /// trading principal.
+    pub fn order_actor(&self) -> (Principal, Option<Principal>) {
+        match self {
+            UserAccount::Funding { principal, .. } => (*principal, None),
+            UserAccount::Trading { principal, grant } => (grant.funding, Some(*principal)),
+        }
+    }
+
     /// This account's funding [`UserId`], present only for a funding account.
     pub fn funding_id(&self) -> Option<UserId> {
         match self {

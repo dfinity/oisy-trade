@@ -261,7 +261,7 @@ mod add_limit_order {
             quantity: Quantity::from(LOT_SIZE.get()),
             time_in_force: TimeInForce::GoodTilCanceled,
         };
-        let result = state.validate_limit_order(user, pair, pending);
+        let result = state.validate_limit_order(state.lookup_account(user).as_ref(), pair, pending);
 
         assert_matches!(result, Err(AddLimitOrderError::InsufficientBalance { .. }));
     }
@@ -430,7 +430,7 @@ mod cancel_limit_order {
         );
         assert!(state.has_pending_settling_events());
 
-        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(OWNER, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -462,7 +462,7 @@ mod cancel_limit_order {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
-        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(OWNER, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -487,9 +487,7 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
-        let order = state
-            .cancel_limit_order(&user, None, order_id, &runtime)
-            .unwrap();
+        let order = state.cancel_limit_order(user, order_id, &runtime).unwrap();
         assert_eq!(order.status, OrderStatus::Canceled);
         assert_eq!(
             order.quantity.checked_sub(order.filled_quantity),
@@ -578,7 +576,7 @@ mod record_limit_order {
         state.deposit(OWNER, pair.base, lot.into(), StableMemoryOptions::Write);
         let (order_id, order) = state
             .validate_limit_order(
-                OWNER,
+                state.lookup_account(OWNER).as_ref(),
                 pair.clone(),
                 PendingOrder {
                     side: Side::Sell,
@@ -909,7 +907,7 @@ mod validate_overflow_invariant {
                 .is_some();
 
             let result = state.validate_limit_order(
-                Principal::from_slice(&[0x01]),
+                state.lookup_account(Principal::from_slice(&[0x01])).as_ref(),
                 pair,
                 PendingOrder {
                     side,
@@ -981,7 +979,11 @@ mod validate_limit_order {
             time_in_force: TimeInForce::GoodTilCanceled,
         };
         state
-            .validate_limit_order(USER, icp_ckbtc_trading_pair(), pending)
+            .validate_limit_order(
+                state.lookup_account(USER).as_ref(),
+                icp_ckbtc_trading_pair(),
+                pending,
+            )
             .map(|_| ())
     }
 
@@ -1066,7 +1068,11 @@ mod validate_limit_order {
             time_in_force: TimeInForce::GoodTilCanceled,
         };
         assert_matches!(
-            state.validate_limit_order(USER, icp_ckbtc_trading_pair(), off_tick),
+            state.validate_limit_order(
+                state.lookup_account(USER).as_ref(),
+                icp_ckbtc_trading_pair(),
+                off_tick
+            ),
             Err(AddLimitOrderError::InvalidOrder(_))
         );
     }
@@ -1231,7 +1237,7 @@ mod settle_fills {
             );
             let (order_id, order) = state
                 .validate_limit_order(
-                    user,
+                    state.lookup_account(user).as_ref(),
                     pair.clone(),
                     PendingOrder {
                         side,

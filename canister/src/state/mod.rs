@@ -172,9 +172,40 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
+    pub fn add_limit_order(
+        &mut self,
+        caller: Principal,
+        pair: TradingPair,
+        pending: PendingOrder,
+        runtime: &impl Runtime,
+    ) -> Result<OrderId, AddLimitOrderError> {
+        let account = self.lookup_account(caller);
+        let (order_id, order) = self.validate_limit_order(account.as_ref(), pair, pending)?;
+        let (owner, placed_by) = account.map_or((caller, None), |account| account.order_actor());
+        let permit = self
+            .permissions()
+            .permit_trading(owner, order_id.book_id())?;
+        let event = event::AddLimitOrderEvent {
+            user: owner,
+            order_id,
+            side: order.side(),
+            price: order.price(),
+            quantity: *order.remaining_quantity(),
+            time_in_force: order.time_in_force(),
+            placed_by,
+        };
+        audit::process_event(
+            self,
+            event::EventType::AddLimitOrder(event),
+            permit.into(),
+            runtime,
+        );
+        Ok(order_id)
+    }
+
     pub fn validate_limit_order(
         &self,
-        user: Principal,
+        account: Option<&UserAccount>,
         pair: TradingPair,
         pending: PendingOrder,
     ) -> Result<(OrderId, Order), AddLimitOrderError> {
@@ -207,10 +238,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             Side::Buy => (pair.quote, amount),
             Side::Sell => (pair.base, pending.quantity),
         };
-        let free = self
-            .user_registry
-            .lookup(user)
-            .and_then(|account| account.funding_id())
+        let free = account
+            .map(UserAccount::effective_principal)
+            .and_then(|owner| self.user_registry.lookup(owner))
+            .and_then(|funding_account| funding_account.funding_id())
             .and_then(|u| self.balances.get_balance(u, &token))
             .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
@@ -296,12 +327,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        owner: &Principal,
-        canceled_by: Option<Principal>,
+        caller: Principal,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(owner, &order_id)?;
+        let account = self.lookup_account(caller);
+        self.validate_cancel_limit_order(account.as_ref(), &order_id)?;
+        let canceled_by = account.and_then(|account| account.order_actor().1);
 
         let permit = self.permissions().permit_cancel();
         audit::process_event(
@@ -342,14 +374,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        owner: &Principal,
+        account: Option<&UserAccount>,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != owner {
+        if account.map(UserAccount::effective_principal) != Some(record.owner) {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
