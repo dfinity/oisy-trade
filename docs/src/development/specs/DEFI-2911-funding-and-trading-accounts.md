@@ -123,11 +123,12 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
 - **Consent by the trading principal (two-step grant).** `add_trading_account` is unilateral,
   like Hyperliquid's `approveAgent`. Accepted residual: `F` can claim any *unregistered*,
   authenticating principal as its trading key — the anonymous principal and the management
-  canister are refused, so a grant can never target an identity that is not a single keyholder's. The consequence falls on `F` (the claimed key gains trading
-  power over `F`'s own funds); a principal claimed against its will simply cannot deposit while
-  whitelisted and its owner would use a different principal. R7's registered-user check ensures
-  no principal with existing funds or history can ever be claimed, and claiming is not free —
-  the claimer must itself be a deposited funding account, one grant per cooldown (R7, R14).
+  canister are refused, so a grant can never target an identity that is not a single
+  keyholder's. The consequence falls on `F` (the claimed key gains trading power over `F`'s
+  own funds); a principal claimed against its will simply cannot deposit while whitelisted and
+  its owner would use a different principal. R7's registered-user check ensures no principal
+  with existing funds or history can ever be claimed, and claiming is not free — the claimer
+  must itself be a deposited funding account, one grant per cooldown (R7, R14).
 - **Automatic order cancellation on revocation (typed revocation).** Revoking a key could
   cancel the open orders it placed (`placed_by`, R13, would make them identifiable), and one
   could distinguish a "compromised key" revocation (cancel everything) from a "scheduled
