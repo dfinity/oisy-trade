@@ -3161,6 +3161,22 @@ mod add_trading_account {
                 message_contains: "whitelist itself",
             },
             RejectionCase {
+                desc: "trading principal is the anonymous principal",
+                setup: || fund_user(principal(0x5b)),
+                granter: principal(0x5b),
+                trading: candid::Principal::anonymous(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
+                desc: "trading principal is the management canister",
+                setup: || fund_user(principal(0x5c)),
+                granter: principal(0x5c),
+                trading: candid::Principal::management_canister(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
                 desc: "principal already a registered user",
                 setup: || {
                     fund_user(principal(0x53));

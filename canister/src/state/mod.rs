@@ -1227,6 +1227,7 @@ pub enum GetUserOrderTradesError {
 pub enum AddTradingAccountError {
     GranterNotRegistered,
     SelfGrant,
+    NonAuthenticatingTradingAccount,
     AlreadyTradingAccount,
     AlreadyRegisteredUser,
     GranterIsTradingAccount,
@@ -1240,6 +1241,9 @@ impl From<GrantError> for AddTradingAccountError {
         match err {
             GrantError::GranterNotRegistered => AddTradingAccountError::GranterNotRegistered,
             GrantError::SelfGrant => AddTradingAccountError::SelfGrant,
+            GrantError::NonAuthenticatingTradingAccount => {
+                AddTradingAccountError::NonAuthenticatingTradingAccount
+            }
             GrantError::AlreadyTradingAccount => AddTradingAccountError::AlreadyTradingAccount,
             GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
             GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
@@ -1295,6 +1299,10 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
                 AddTradingAccountError::SelfGrant => (
                     ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
                     "a funding account cannot whitelist itself",
+                ),
+                AddTradingAccountError::NonAuthenticatingTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::NonAuthenticatingTradingAccount)),
+                    "the proposed trading account is a non-authenticating principal",
                 ),
                 AddTradingAccountError::AlreadyRegisteredUser => (
                     ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
