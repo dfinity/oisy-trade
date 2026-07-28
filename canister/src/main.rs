@@ -105,19 +105,19 @@ fn get_order_book_depth(
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    let deposit_desc = format!("{request}");
-    let result = oisy_trade_canister::deposit(request, &oisy_trade_canister::IC_RUNTIME).await;
+    let result =
+        oisy_trade_canister::deposit(request.clone(), &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
-            "[deposit]: successful deposit for request {deposit_desc}, block_index={}",
+            "[deposit]: successful deposit for request {request}, block_index={}",
             response.block_index
         ),
         Err(err) => {
             if should_log_deposit_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[deposit]: deposit for request {deposit_desc} failed, error={}",
+                    "[deposit]: deposit for request {request} failed, error={}",
                     err
                 )
             }
@@ -128,19 +128,19 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 
 #[ic_cdk::update]
 async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
-    let withdraw_desc = format!("{request}");
-    let result = oisy_trade_canister::withdraw(request, &oisy_trade_canister::IC_RUNTIME).await;
+    let result =
+        oisy_trade_canister::withdraw(request.clone(), &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
-            "[withdraw]: successful withdrawal for request {withdraw_desc}, block_index={}",
+            "[withdraw]: successful withdrawal for request {request}, block_index={}",
             response.block_index
         ),
         Err(err) => {
             if should_log_withdraw_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[withdraw]: withdrawal for request {withdraw_desc} failed, error={}",
+                    "[withdraw]: withdrawal for request {request} failed, error={}",
                     err
                 )
             }
@@ -177,6 +177,9 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
         ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
     }
 }
+
+#[cfg(test)]
+mod should_log_tests;
 
 #[ic_cdk::query]
 fn get_balances(

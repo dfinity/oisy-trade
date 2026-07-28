@@ -1391,6 +1391,34 @@ mod deposit {
     }
 
     #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum_before_any_ledger_call() {
+        use std::str::FromStr;
+
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = deposit(
+            DepositRequest {
+                token_id: icp_token_id().into(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+        assert!(
+            runtime.captured_calls().is_empty(),
+            "an out-of-range amount is rejected before any ledger interaction"
+        );
+        assert_in_flight_empty();
+    }
+
+    #[tokio::test]
     async fn should_deny_deposit_by_trading_account_before_any_ledger_call() {
         use crate::test_fixtures::{fund_user, mocks::mock_runtime_for};
 
@@ -1783,6 +1811,34 @@ mod withdraw {
             }))
         );
         // Balance untouched — no debit happened.
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum() {
+        use std::str::FromStr;
+
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = withdraw(
+            WithdrawRequest {
+                token_id: token_id(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
         assert_balance(deposit);
         assert_no_withdraw_event();
     }
