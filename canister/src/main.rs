@@ -105,8 +105,7 @@ fn get_order_book_depth(
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    let result =
-        oisy_trade_canister::deposit(request.clone(), &oisy_trade_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::deposit(&request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
@@ -128,8 +127,7 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 
 #[ic_cdk::update]
 async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
-    let result =
-        oisy_trade_canister::withdraw(request.clone(), &oisy_trade_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::withdraw(&request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,

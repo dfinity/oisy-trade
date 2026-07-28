@@ -299,7 +299,7 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
 }
 
 pub async fn deposit(
-    request: DepositRequest,
+    request: &DepositRequest,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
@@ -368,7 +368,7 @@ pub async fn deposit(
 }
 
 pub async fn withdraw(
-    request: WithdrawRequest,
+    request: &WithdrawRequest,
     runtime: &impl Runtime,
 ) -> Result<WithdrawResponse, WithdrawError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
@@ -426,7 +426,7 @@ pub async fn withdraw(
     })?;
 
     // Perform the ledger transfer (with automatic BadFee retry).
-    let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
+    let outcome = ledger::withdraw(&token_id, caller, amount.to_nat(), cached_fee, runtime).await;
 
     // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
     if let Some(fee) = outcome.ledger_fee {

@@ -1304,7 +1304,7 @@ mod deposit {
         let _held = UserOpGuard::new(USER, icp_token_id()).expect("test setup: acquire guard");
         let runtime = CapturingRuntime::new(USER, vec![]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1320,7 +1320,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -1333,7 +1333,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -1344,7 +1344,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
         assert_in_flight_empty();
@@ -1364,7 +1364,7 @@ mod deposit {
             )))],
         );
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1379,7 +1379,7 @@ mod deposit {
         let runtime = CapturingRuntime::new(USER, vec![]);
 
         let unsupported = TokenId::new(Principal::from_slice(&[0xAB]));
-        let result = deposit(deposit_request(unsupported), &runtime).await;
+        let result = deposit(&deposit_request(unsupported), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1399,7 +1399,7 @@ mod deposit {
 
         let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
         let result = deposit(
-            DepositRequest {
+            &DepositRequest {
                 token_id: icp_token_id().into(),
                 amount: oversized,
             },
@@ -1428,7 +1428,7 @@ mod deposit {
 
         let runtime = CapturingRuntime::new(USER, vec![]);
         let events_before = crate::storage::total_event_count();
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1605,7 +1605,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1647,7 +1647,7 @@ mod withdraw {
         ]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1677,7 +1677,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1724,7 +1724,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1769,7 +1769,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(1_000_000u64),
             },
@@ -1796,7 +1796,7 @@ mod withdraw {
         // No call_unbounded_wait expectations — the ledger should never be called.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(0u64),
             },
@@ -1827,7 +1827,7 @@ mod withdraw {
 
         let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: oversized,
             },
@@ -1866,7 +1866,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1902,7 +1902,7 @@ mod withdraw {
         // async call is made.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit + 1),
             },
@@ -1959,7 +1959,7 @@ mod withdraw {
 
         let events_before = crate::storage::total_event_count();
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(1_000u64),
             },
@@ -1991,7 +1991,7 @@ mod withdraw {
         // No ledger expectation: the guard short-circuits before any ledger call.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -2019,7 +2019,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -2042,7 +2042,7 @@ mod withdraw {
         let runtime = mock_runtime_returning(vec![transfer_response(Ok(Nat::from(42u64)))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -2064,7 +2064,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
