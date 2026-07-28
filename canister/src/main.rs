@@ -176,9 +176,6 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
     }
 }
 
-#[cfg(test)]
-mod should_log_tests;
-
 #[ic_cdk::query]
 fn get_balances(
     filter: Option<Vec<FilterToken>>,
