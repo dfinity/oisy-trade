@@ -303,7 +303,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<OrderRecord, CancelLimitOrderError> {
         self.validate_cancel_limit_order(owner, &order_id)?;
 
-        let from = self.pending_settling_events.len();
+        let settling_backlog_len = self.pending_settling_events.len();
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
@@ -315,7 +315,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
-        for event in self.pending_settling_events.split_off(from) {
+        for event in self.pending_settling_events.split_off(settling_backlog_len) {
             let permit = self.permissions().permit_settling();
             audit::process_event(
                 self,
