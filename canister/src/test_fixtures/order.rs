@@ -74,6 +74,7 @@ impl<'a> PlaceOrder<'a> {
             self.user,
             order_id.book_id(),
             order,
+            None,
             Timestamp::EPOCH,
             StableMemoryOptions::Write,
         );

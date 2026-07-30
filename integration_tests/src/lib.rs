@@ -534,7 +534,7 @@ fn default_init_arg() -> InitArg {
     }
 }
 
-fn oisy_trade_wasm() -> Vec<u8> {
+pub fn oisy_trade_wasm() -> Vec<u8> {
     let path = std::env::var("OISY_TRADE_CANISTER_WASM_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -584,6 +584,12 @@ impl AsyncCanisterHttpQuery<RejectResponse> for &Setup {
 pub struct PocketIcRuntime<'a> {
     env: &'a PocketIc,
     caller: Principal,
+}
+
+impl<'a> PocketIcRuntime<'a> {
+    pub fn new(env: &'a PocketIc, caller: Principal) -> Self {
+        Self { env, caller }
+    }
 }
 
 #[async_trait]

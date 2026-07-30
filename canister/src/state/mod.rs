@@ -25,7 +25,9 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{FundingAccount, GrantError, RevokeError, TradingAccount, UserId, UserRegistry};
+use crate::user::{
+    FundingAccount, GrantError, RevokeError, TradingAccount, UserAccount, UserId, UserRegistry,
+};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
 use oisy_trade_types_internal::{DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT, InitArg, Mode};
@@ -208,6 +210,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let free = self
             .user_registry
             .lookup(user)
+            .and_then(|account| account.funding_id())
             .and_then(|u| self.balances.get_balance(u, &token))
             .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
@@ -229,6 +232,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: Principal,
         book_id: OrderBookId,
         order: Order,
+        placed_by: Option<Principal>,
         timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -260,6 +264,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             let user_id = self
                 .user_registry
                 .lookup(user)
+                .and_then(|account| account.funding_id())
                 .expect("BUG: order owner not registered — deposit registers every user");
             self.balances
                 .reserve(user_id, &token, required)
@@ -281,6 +286,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     time_in_force: order.time_in_force(),
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by,
+                    canceled_by: None,
                 },
             );
         }
@@ -289,26 +296,26 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        user: &Principal,
+        owner: &Principal,
+        canceled_by: Option<Principal>,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(user, &order_id)?;
+        self.validate_cancel_limit_order(owner, &order_id)?;
 
+        let settling_backlog_len = self.pending_settling_events.len();
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
-            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }),
             permit.into(),
             runtime,
         );
 
-        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
-        // leave settling events queued across messages, draining the whole
-        // queue here lets an unrelated cancel apply balance ops from a
-        // previous matching round and inherit its instruction debt. Pop
-        // only the event this cancel just pushed.
-        while let Some(event) = self.take_next_pending_settling_event() {
+        for event in self.pending_settling_events.split_off(settling_backlog_len) {
             let permit = self.permissions().permit_settling();
             audit::process_event(
                 self,
@@ -331,14 +338,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        caller: &Principal,
+        owner: &Principal,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != caller {
+        if &record.owner != owner {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
@@ -352,6 +359,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        canceled_by: Option<Principal>,
         now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -365,11 +373,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.apply_update(
-                &order_id,
-                OrderUpdate::status(OrderStatus::Canceled),
-                now,
-            );
+            self.order_history
+                .apply_update(&order_id, OrderUpdate::cancel(canceled_by), now);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,
@@ -528,7 +533,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         after: Option<OrderId>,
         length: usize,
     ) -> Result<Vec<(OrderId, TradingPair, OrderRecord)>, CursorNotFound> {
-        let Some(user_id) = self.user_registry.lookup(*owner) else {
+        let Some(user_id) = self
+            .user_registry
+            .lookup(*owner)
+            .and_then(|account| account.funding_id())
+        else {
             return match after {
                 Some(_) => Err(CursorNotFound),
                 None => Ok(Vec::new()),
@@ -611,7 +620,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         after: Option<TradeId>,
         length: usize,
     ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
-        let Some(user_id) = self.user_registry.lookup(*owner) else {
+        let Some(user_id) = self
+            .user_registry
+            .lookup(*owner)
+            .and_then(|account| account.funding_id())
+        else {
             return Ok(Vec::new());
         };
         self.trade_history.trades_after(user_id, after, length)
@@ -736,13 +749,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         amount: Quantity,
     ) -> Result<(), crate::balance::InsufficientBalanceError> {
         // A user with no interned id has never deposited, so has no balance.
-        let user_id =
-            self.user_registry
-                .lookup(user)
-                .ok_or(crate::balance::InsufficientBalanceError {
-                    available: Quantity::ZERO,
-                    required: amount,
-                })?;
+        let user_id = self
+            .user_registry
+            .lookup(user)
+            .and_then(|account| account.funding_id())
+            .ok_or(crate::balance::InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: amount,
+            })?;
         self.balances.withdraw(user_id, &token_id, amount)
     }
 
@@ -892,11 +906,20 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.user_registry.trading_accounts_of(funding)
     }
 
-    /// Returns `true` if `principal` is currently a trading account (delegate)
-    /// of some funding account. Used to deny funding operations to trading
-    /// accounts.
-    pub fn is_trading_account(&self, principal: &Principal) -> bool {
-        self.user_registry.is_trading_account(principal)
+    /// Classifies `principal` as a funding or trading account, or `None` if it
+    /// is neither. Used to deny funding operations to trading accounts.
+    pub fn lookup_account(&self, principal: Principal) -> Option<UserAccount> {
+        self.user_registry.lookup(principal)
+    }
+
+    /// Resolves `caller` to the account whose data it reads and acts on: a
+    /// trading account resolves to its funding account, any other principal to
+    /// itself.
+    pub fn effective_account(&self, caller: Principal) -> Principal {
+        self.user_registry
+            .lookup(caller)
+            .map(|account| account.effective_principal())
+            .unwrap_or(caller)
     }
 
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
@@ -913,6 +936,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
         self.user_registry
             .lookup(*user)
+            .and_then(|account| account.funding_id())
             .and_then(|u| self.balances.get_balance(u, token_id))
             .unwrap_or_default()
     }
@@ -924,7 +948,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<Vec<oisy_trade_types::UserTokenBalance>, oisy_trade_types::GetBalancesError> {
         // `lookup` (not `intern`) so mere queriers don't pollute the registry.
         // `None` ⇒ the user has never held a balance, so every balance is zero.
-        let user_id = self.user_registry.lookup(*user);
+        let user_id = self
+            .user_registry
+            .lookup(*user)
+            .and_then(|account| account.funding_id());
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
                 user_id
@@ -1046,6 +1073,7 @@ fn resolve_op_orders<MH: Memory, MB: Memory>(
                 .expect("BUG: missing order_history entry for BalanceOperation");
             let user = registry
                 .lookup(record.owner)
+                .and_then(|account| account.funding_id())
                 .expect("BUG: order owner not registered");
             (
                 seq,

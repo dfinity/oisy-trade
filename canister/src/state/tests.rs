@@ -282,6 +282,7 @@ mod cancel_limit_order {
 
     const OWNER: Principal = Principal::from_slice(&[0x01]);
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
+    const STRANGER2: Principal = Principal::from_slice(&[0x03]);
 
     /// Status of `order_id` as `OWNER` would see it via `get_user_order`, or
     /// `None` if absent / not owned by `OWNER`.
@@ -302,6 +303,25 @@ mod cancel_limit_order {
         let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn stores_the_canceling_caller_on_the_record() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+
+        state.record_cancel_limit_order(
+            buy_id,
+            Some(STRANGER),
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        let record = state.order_history.get(&buy_id).unwrap();
+        assert_eq!(record.status, OrderStatus::Canceled);
+        assert_eq!(record.canceled_by, Some(STRANGER));
     }
 
     #[test]
@@ -392,28 +412,76 @@ mod cancel_limit_order {
         let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
         let _sell_id = order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
-        // Record only the matching half: the book pops both orders into
-        // `filled_orders` and the paired `SettlingEvent` lands on the queue
-        // without being drained — exactly the state left behind by a chunk
-        // whose inline drain was budget-interrupted.
-        let orders: Vec<_> = state
-            .order_book(&OrderBookId::ZERO)
-            .unwrap()
-            .pending_order_seqs()
-            .collect();
-        state.record_matching_event(
-            &crate::state::event::MatchingEvent {
-                book_id: OrderBookId::ZERO,
-                orders,
-            },
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
-        assert!(state.has_pending_settling_events());
+        queue_matching_backlog(&mut state);
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_leave_unrelated_settling_backlog_for_the_executor() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        order(STRANGER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        order(STRANGER2, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy = order(OWNER, &pair, Side::Buy, 50 * PRICE_SCALE, lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+
+        let backlog_len = state.pending_settling_events.len();
+        let stranger_before = balances_pair(&state, &STRANGER, &pair);
+        let stranger2_before = balances_pair(&state, &STRANGER2, &pair);
+
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            owner_buy,
+            PairToken::Quote,
+            50 * lot,
+            lot,
+        );
+
+        assert_eq!(state.pending_settling_events.len(), backlog_len);
+        assert!(state.has_pending_settling_events());
+        assert_eq!(balances_pair(&state, &STRANGER, &pair), stranger_before);
+        assert_eq!(balances_pair(&state, &STRANGER2, &pair), stranger2_before);
+    }
+
+    #[test]
+    fn should_settle_the_same_regardless_of_cancel_and_drain_order() {
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let baseline = {
+            let mut state = setup();
+            order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+            let owner_buy =
+                order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            state
+                .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+                .unwrap();
+            balances_pair(&state, &OWNER, &pair)
+        };
+
+        let mut state = setup();
+        order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy =
+            order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+        state
+            .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+            .unwrap();
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+        let (base_after, quote_after) = balances_pair(&state, &OWNER, &pair);
+        assert_eq!(*base_after.reserved(), Quantity::ZERO);
+        assert_eq!(*quote_after.reserved(), Quantity::ZERO);
+        assert_eq!((base_after, quote_after), baseline);
     }
 
     #[test]
@@ -443,7 +511,7 @@ mod cancel_limit_order {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -468,7 +536,9 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
-        let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
+        let order = state
+            .cancel_limit_order(&user, None, order_id, &runtime)
+            .unwrap();
         assert_eq!(order.status, OrderStatus::Canceled);
         assert_eq!(
             order.quantity.checked_sub(order.filled_quantity),
@@ -501,6 +571,25 @@ mod cancel_limit_order {
             untouched_before, untouched_after,
             "the non-refund token balance should not change",
         );
+    }
+
+    /// Matches every pending order in book `ZERO` and leaves the resulting
+    /// settling events queued but undrained.
+    fn queue_matching_backlog(state: &mut State<VectorMemory, VectorMemory>) {
+        let orders: Vec<_> = state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_order_seqs()
+            .collect();
+        state.record_matching_event(
+            &crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders,
+            },
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+        assert!(state.has_pending_settling_events());
     }
 
     fn setup() -> State<VectorMemory, VectorMemory> {
@@ -549,7 +638,8 @@ mod record_limit_order {
     }
 
     #[test]
-    fn stores_the_submission_timestamp_on_the_record() {
+    fn stores_submission_metadata_on_the_record() {
+        const TRADING: Principal = Principal::from_slice(&[0x02]);
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
@@ -572,14 +662,14 @@ mod record_limit_order {
             OWNER,
             order_id.book_id(),
             order,
+            Some(TRADING),
             timestamp,
             StableMemoryOptions::Write,
         );
 
-        assert_eq!(
-            state.order_history.get(&order_id).unwrap().created_at,
-            timestamp
-        );
+        let record = state.order_history.get(&order_id).unwrap();
+        assert_eq!(record.created_at, timestamp);
+        assert_eq!(record.placed_by, Some(TRADING));
     }
 
     #[test]
@@ -591,7 +681,11 @@ mod record_limit_order {
         let first = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
         let second = order(OWNER, &pair, Side::Buy, 100, lot).place(&mut state);
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
         assert_eq!(
             state.order_history.orders_after(owner_id, None, 10),
             Ok(vec![second, first])
@@ -712,8 +806,16 @@ mod get_user_order_trades {
         let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
         let unknown_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
-        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
+        let stranger_id = state
+            .user_registry
+            .lookup(STRANGER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
 
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
@@ -1211,6 +1313,7 @@ mod settle_fills {
                 user,
                 order_id.book_id(),
                 order,
+                None,
                 Timestamp::EPOCH,
                 StableMemoryOptions::Write,
             );
@@ -1744,6 +1847,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1777,6 +1882,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1795,6 +1902,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1865,6 +1974,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot + 101 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1960,6 +2071,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(buy.last_updated_at, None);
@@ -2073,6 +2186,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(base_fee),
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             let sell = test_fixtures::record_of(&state, SELLER, seller_id);
@@ -2090,6 +2205,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(quote_fee),
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -2849,6 +2966,7 @@ mod settle_fills {
             let user = state
                 .user_registry
                 .lookup(owner)
+                .and_then(|account| account.funding_id())
                 .expect("owner should be registered after settlement");
             state
                 .trade_history

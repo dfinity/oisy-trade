@@ -758,6 +758,8 @@ mod cancel_limit_order {
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
                 filled_quote: candid::Nat::from(0u64),
                 filled_fee: candid::Nat::from(0u64),
+                placed_by: None,
+                canceled_by: None,
             })
         );
 
@@ -819,6 +821,8 @@ mod cancel_limit_order {
             time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             filled_quote: candid::Nat::from(0u64),
             filled_fee: candid::Nat::from(0u64),
+            placed_by: None,
+            canceled_by: None,
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(
@@ -898,6 +902,383 @@ mod order_status_via_get_my_orders {
             result,
             Err(crate::GetMyOrdersError::InvalidOrderId(_))
         ));
+    }
+}
+
+mod resolution_on_reads {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{
+        add_limit_order, add_trading_account, get_balances, get_my_orders, get_my_trades,
+        process_pending_orders,
+    };
+    use candid::Principal;
+    use oisy_trade_types::{GetMyOrdersArgs, GetMyTradesArgs, Side, TradesByAccount, TradesFilter};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const SELLER: Principal = Principal::from_slice(&[0x03]);
+
+    fn account_trades() -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        }
+    }
+
+    fn setup_funding_with_activity() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(SELLER);
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+        let mut sell = limit_order_request();
+        sell.side = Side::Sell;
+        add_limit_order(sell, &mock_runtime_for(SELLER)).unwrap();
+        process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+    }
+
+    #[test]
+    fn should_return_funding_data_when_read_by_a_trading_account() {
+        setup_funding_with_activity();
+
+        assert_eq!(
+            get_balances(None, TRADING),
+            get_balances(None, FUNDING),
+            "a trading account sees its funding account's balances"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "a trading account sees its funding account's orders"
+        );
+        let orders = get_my_orders(Some(GetMyOrdersArgs::default()), TRADING).unwrap();
+        assert!(
+            orders.iter().all(|o| o.order.owner == FUNDING),
+            "a trading account's orders are owned by the funding account (resolution returned FUNDING)"
+        );
+        assert_eq!(
+            get_my_trades(account_trades(), TRADING),
+            get_my_trades(account_trades(), FUNDING),
+            "a trading account sees its funding account's trades"
+        );
+
+        assert!(!get_balances(None, FUNDING).unwrap().is_empty());
+        assert!(
+            !get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!get_my_trades(account_trades(), FUNDING).unwrap().is_empty());
+    }
+
+    #[test]
+    fn should_resolve_by_id_reads_for_a_trading_account() {
+        use crate::GetMyOrdersError;
+        use oisy_trade_types::{OrderId, TradesByOrder};
+
+        setup_funding_with_activity();
+
+        let by_order = |order_id: OrderId| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after: None,
+                length: 10,
+            }),
+        };
+        let first_order_id = |who: Principal| {
+            get_my_orders(Some(GetMyOrdersArgs::default()), who)
+                .unwrap()
+                .first()
+                .unwrap()
+                .id
+                .clone()
+        };
+        let funding_order = first_order_id(FUNDING);
+        let seller_order = first_order_id(SELLER);
+
+        let found =
+            get_my_orders(Some(GetMyOrdersArgs::by_id(funding_order.clone())), TRADING).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].order.owner, FUNDING,
+            "a trading account's ById read resolves to the funding account's order"
+        );
+
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::by_id(seller_order)), TRADING),
+            Err(GetMyOrdersError::OrderNotFound),
+            "a trading account resolves to F and cannot reach a non-F order"
+        );
+
+        let trades = get_my_trades(by_order(funding_order.clone()), TRADING).unwrap();
+        assert_eq!(
+            get_my_trades(by_order(funding_order.clone()), TRADING),
+            get_my_trades(by_order(funding_order.clone()), FUNDING),
+            "a trading account's ByOrder trades resolve to the funding account"
+        );
+        assert_eq!(trades.len(), 1);
+        assert_eq!(
+            trades[0].order_id, funding_order,
+            "the trade belongs to the funding account's order"
+        );
+        assert_eq!(
+            trades[0].side,
+            Side::Buy,
+            "the funding account placed a buy"
+        );
+    }
+}
+
+mod resolution_on_placement {
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::user::TRADING_ACCOUNT_GRANT_COOLDOWN;
+    use crate::{Timestamp, add_limit_order, add_trading_account, get_balances, get_my_orders};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{GetMyOrdersArgs, UserOrder};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x03]);
+
+    fn reserved_total(who: Principal) -> Nat {
+        get_balances(None, who)
+            .unwrap()
+            .into_iter()
+            .fold(Nat::from(0u64), |acc, b| acc + b.balance.reserved)
+    }
+
+    fn funding_orders() -> Vec<UserOrder> {
+        get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()
+    }
+
+    #[test]
+    fn should_place_a_trading_account_order_on_the_funding_account() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        let reserved_before = reserved_total(FUNDING);
+        add_limit_order(limit_order_request(), &mock_runtime_for(TRADING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the order is visible in the funding account's orders"
+        );
+        assert_eq!(
+            orders[0].order.owner, FUNDING,
+            "a trading account's order is owned by the funding account"
+        );
+        assert_eq!(
+            orders[0].order.placed_by,
+            Some(TRADING),
+            "the acting trading account is attributed as placed_by"
+        );
+        assert!(
+            reserved_total(FUNDING) > reserved_before,
+            "the order reserves from the funding account's balance"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "the trading account reads back the funding account's order"
+        );
+    }
+
+    #[test]
+    fn should_keep_full_placement_authority_for_a_funding_account_with_grants() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        add_trading_account(TRADING, &mock_runtime_at(FUNDING, Timestamp::new(0))).unwrap();
+        add_trading_account(
+            OTHER_TRADING,
+            &mock_runtime_at(FUNDING, Timestamp::new(cooldown)),
+        )
+        .unwrap();
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the funding account places orders regardless of its grants"
+        );
+        assert_eq!(orders[0].order.owner, FUNDING);
+        assert_eq!(
+            orders[0].order.placed_by, None,
+            "the funding account's own order is unattributed even with whitelisted trading accounts"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
+    fn should_not_bypass_restricted_mode_via_delegation() {
+        use crate::state::with_state_mut;
+        use oisy_trade_types_internal::Mode;
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        // Restrict updates to the funding account only. The trading account is a
+        // delegate of an allowlisted funder but is not itself allowlisted.
+        with_state_mut(|s| s.set_mode(Mode::restricted_to(vec![FUNDING])));
+
+        // The raw-caller allowlist check runs before caller resolution, so the
+        // delegate is rejected even though its funding account would be allowed.
+        let mut runtime = mock_runtime_for(TRADING);
+        runtime.expect_is_controller().return_const(false);
+        let _panic = add_limit_order(limit_order_request(), &runtime);
+    }
+}
+
+mod resolution_on_cancel {
+    use crate::state::event::{CancelLimitOrderEvent, Event, EventType};
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{add_limit_order, add_trading_account, cancel_limit_order, get_my_orders, storage};
+    use candid::Principal;
+    use oisy_trade_types::{CancelLimitOrderRequestError, ErrorKind, GetMyOrdersArgs, OrderStatus};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_FUNDING: Principal = Principal::from_slice(&[0x03]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x04]);
+    const STRANGER: Principal = Principal::from_slice(&[0x05]);
+
+    fn place_funding_order() -> String {
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap()
+    }
+
+    fn last_cancel_event() -> CancelLimitOrderEvent {
+        storage::with_event_iter(|it| {
+            it.filter_map(|Event { payload, .. }| match payload {
+                EventType::CancelLimitOrder(e) => Some(e),
+                _ => None,
+            })
+            .last()
+        })
+        .expect("expected at least one CancelLimitOrderEvent")
+    }
+
+    fn cancel_event_count() -> usize {
+        storage::with_event_iter(|it| {
+            it.filter(|Event { payload, .. }| matches!(payload, EventType::CancelLimitOrder(_)))
+                .count()
+        })
+    }
+
+    #[test]
+    fn should_cancel_the_funding_account_order_and_attribute_the_acting_caller() {
+        struct TestCase {
+            desc: &'static str,
+            canceller: Principal,
+            expected_canceled_by: Option<Principal>,
+        }
+
+        let cases = vec![
+            TestCase {
+                desc: "a trading account cancels its funding account's order",
+                canceller: TRADING,
+                expected_canceled_by: Some(TRADING),
+            },
+            TestCase {
+                desc: "the funding account cancels its own order",
+                canceller: FUNDING,
+                expected_canceled_by: None,
+            },
+        ];
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        for case in cases {
+            let order_id = place_funding_order();
+            let expected_order_id = order_id.parse::<crate::order::OrderId>().unwrap();
+
+            let record = cancel_limit_order(order_id, &mock_runtime_for(case.canceller)).unwrap();
+
+            assert_eq!(
+                record.owner, FUNDING,
+                "{}: the order resolves to the funding account",
+                case.desc
+            );
+            assert_eq!(
+                record.status,
+                OrderStatus::Canceled,
+                "{}: the order transitions to Canceled",
+                case.desc
+            );
+            assert_eq!(
+                record.canceled_by, case.expected_canceled_by,
+                "{}: the record attributes the acting caller as canceled_by",
+                case.desc
+            );
+            assert_eq!(
+                last_cancel_event(),
+                CancelLimitOrderEvent {
+                    order_id: expected_order_id,
+                    canceled_by: case.expected_canceled_by,
+                },
+                "{}: the cancel event records the order id and acting caller",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_cancel_by_a_foreign_caller() {
+        struct TestCase {
+            desc: &'static str,
+            caller: Principal,
+        }
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(OTHER_FUNDING);
+        add_trading_account(OTHER_TRADING, &mock_runtime_for(OTHER_FUNDING)).unwrap();
+        let order_id = place_funding_order();
+
+        let cases = vec![
+            TestCase {
+                desc: "a stranger cannot cancel the funding account's order",
+                caller: STRANGER,
+            },
+            TestCase {
+                desc: "a different funding account's trading account cannot cancel the order",
+                caller: OTHER_TRADING,
+            },
+        ];
+
+        for case in cases {
+            let result = cancel_limit_order(order_id.clone(), &mock_runtime_for(case.caller));
+
+            assert_eq!(
+                result.unwrap_err().kind,
+                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
+                "{}",
+                case.desc
+            );
+            assert_eq!(
+                get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()[0]
+                    .order
+                    .status,
+                OrderStatus::Pending,
+                "{}: the order stays pending",
+                case.desc
+            );
+            assert_eq!(cancel_event_count(), 0, "{}: no cancel event", case.desc);
+        }
     }
 }
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Separate funding and trading accounts: a funding account can whitelist trading-account principals via `add_trading_account` / `remove_trading_account` / `get_my_trading_accounts`. A trading account places and cancels orders on the funding account's balance but can never deposit or withdraw (`deposit` / `withdraw` are denied with a `TradingAccountForbidden` request-error variant). Orders and reads by a trading account resolve to the funding account, and each order records the acting key via the new `placed_by` / `canceled_by` fields on `OrderRecord`. Grants require a registered granter and are rate-limited by a per-account cooldown; revocation is never rate-limited. All additions are backward-compatible Candid ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#219](https://github.com/dfinity/oisy-trade/pull/219), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
+
 ## [0.3.0] - 2026-07-02
 
 ### Added

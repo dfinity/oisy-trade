@@ -64,26 +64,29 @@ pub fn add_limit_order(
 ) -> Result<OrderId, AddLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
+    let owner = state::with_state(|s| s.effective_account(caller));
+    let placed_by = (caller != owner).then_some(caller);
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::try_from(request).map_err(|_| {
         AddLimitOrderError::request(
             oisy_trade_types::AddLimitOrderRequestError::AmountExceedsMaximum,
         )
     })?;
-    let (order_id, order) = state::with_state(|s| s.validate_limit_order(caller, pair, pending))?;
+    let (order_id, order) = state::with_state(|s| s.validate_limit_order(owner, pair, pending))?;
 
     state::with_state_mut(|s| {
         let permit = s
             .permissions()
-            .permit_trading(caller, order_id.book_id())
+            .permit_trading(owner, order_id.book_id())
             .map_err(|e| AddLimitOrderError::from(state::AddLimitOrderError::from(e)))?;
         let event = state::event::AddLimitOrderEvent {
-            user: caller,
+            user: owner,
             order_id,
             side: order.side(),
             price: order.price(),
             quantity: *order.remaining_quantity(),
             time_in_force: order.time_in_force(),
+            placed_by,
         };
         state::audit::process_event(
             s,
@@ -102,12 +105,14 @@ pub fn cancel_limit_order(
 ) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
+    let owner = state::with_state(|s| s.effective_account(caller));
+    let canceled_by = (caller != owner).then_some(caller);
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
             oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
         )
     })?;
-    let record = state::with_state_mut(|s| s.cancel_limit_order(&caller, id, runtime))?;
+    let record = state::with_state_mut(|s| s.cancel_limit_order(&owner, canceled_by, id, runtime))?;
     Ok(record.into())
 }
 
@@ -314,8 +319,12 @@ pub async fn deposit(
     // operations up front — before the in-flight guard or any ledger call. The
     // check acts on the raw caller (deposit is never delegation-resolved).
     let pre = state::with_state(|s| {
+        let caller_is_trading_account = matches!(
+            s.lookup_account(caller),
+            Some(crate::user::UserAccount::Trading { .. })
+        );
         s.permissions()
-            .permit_deposit(caller, s.is_trading_account(&caller))
+            .permit_deposit(caller, caller_is_trading_account)
     })
     .map_err(|e| match e {
         state::permissions::FundingDenied::TradingAccountForbidden => {
@@ -390,8 +399,12 @@ pub async fn withdraw(
     // any ledger call. The check acts on the raw caller (withdraw is never
     // delegation-resolved).
     let pre = state::with_state(|s| {
+        let caller_is_trading_account = matches!(
+            s.lookup_account(caller),
+            Some(crate::user::UserAccount::Trading { .. })
+        );
         s.permissions()
-            .permit_withdraw(caller, s.is_trading_account(&caller))
+            .permit_withdraw(caller, caller_is_trading_account)
     })
     .map_err(|e| match e {
         state::permissions::FundingDenied::TradingAccountForbidden => {
@@ -466,7 +479,10 @@ pub fn get_balances(
     caller: candid::Principal,
 ) -> Result<Vec<UserTokenBalance>, GetBalancesError> {
     validate_filter_len(filter.as_deref())?;
-    state::with_state(|s| s.get_balances(&caller, filter.as_deref()))
+    state::with_state(|s| {
+        let caller = s.effective_account(caller);
+        s.get_balances(&caller, filter.as_deref())
+    })
 }
 
 pub fn get_fee_balances(
@@ -499,8 +515,11 @@ pub fn get_my_orders(
             let id = id
                 .parse::<order::OrderId>()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
-            let order = state::with_state(|s| s.get_user_order(&caller, id))
-                .ok_or(GetMyOrdersError::OrderNotFound)?;
+            let order = state::with_state(|s| {
+                let caller = s.effective_account(caller);
+                s.get_user_order(&caller, id)
+            })
+            .ok_or(GetMyOrdersError::OrderNotFound)?;
             vec![order]
         }
         oisy_trade_types::GetMyOrdersFilter::ByPage(page) => {
@@ -510,8 +529,11 @@ pub fn get_my_orders(
                 .transpose()
                 .map_err(GetMyOrdersError::InvalidOrderId)?;
             let length = page.length.min(MAX_ORDERS_PER_RESPONSE) as usize;
-            state::with_state(|s| s.get_user_orders(&caller, after, length))
-                .map_err(|_| GetMyOrdersError::OrderNotFound)?
+            state::with_state(|s| {
+                let caller = s.effective_account(caller);
+                s.get_user_orders(&caller, after, length)
+            })
+            .map_err(|_| GetMyOrdersError::OrderNotFound)?
         }
     };
     Ok(results
@@ -555,7 +577,10 @@ pub fn get_my_trades(
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_order.length.min(MAX_TRADES_PER_RESPONSE) as usize;
-            match state::with_state(|s| s.get_user_order_trades(&caller, order_id, after, length)) {
+            match state::with_state(|s| {
+                let caller = s.effective_account(caller);
+                s.get_user_order_trades(&caller, order_id, after, length)
+            }) {
                 Ok(trades) => trades
                     .into_iter()
                     .map(|(seq, trade)| trade.into_public(order::TradeId::new(order_id, seq)))
@@ -573,7 +598,10 @@ pub fn get_my_trades(
                 .transpose()
                 .map_err(GetMyTradesError::InvalidTradeId)?;
             let length = by_account.length.min(MAX_TRADES_PER_RESPONSE) as usize;
-            match state::with_state(|s| s.get_user_trades(&caller, after, length)) {
+            match state::with_state(|s| {
+                let caller = s.effective_account(caller);
+                s.get_user_trades(&caller, after, length)
+            }) {
                 Ok(trades) => trades
                     .into_iter()
                     .map(|(id, trade)| trade.into_public(id))
