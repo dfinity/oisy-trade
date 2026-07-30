@@ -18,16 +18,15 @@ import os
 artifacts_dir = os.environ["ARTIFACTS_DIR"]
 benchmarks = []
 
-for directory in sorted(glob.glob(os.path.join(artifacts_dir, "canbench_result_*"))):
-    if os.path.isdir(directory):
-        name = os.path.basename(directory)
-        result_path = os.path.join(directory, f"{name}.md")
-        if os.path.exists(result_path):
-            with open(result_path, encoding="utf-8") as fh:
-                benchmarks.append({
-                    "title": name,
-                    "result": fh.read(),
-                })
+for result_path in sorted(
+    glob.glob(os.path.join(artifacts_dir, "**", "canbench_result_*.md"), recursive=True)
+):
+    name = os.path.basename(result_path)[: -len(".md")]
+    with open(result_path, encoding="utf-8") as fh:
+        benchmarks.append({
+            "title": name,
+            "result": fh.read(),
+        })
 
 print(json.dumps({"benchmark": benchmarks}))
 PY
