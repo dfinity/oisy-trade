@@ -1,4 +1,4 @@
-use super::token::split_net_fee;
+use super::token::{split_net_fee, worth_persisting};
 use super::{Balance, BalanceKey};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
@@ -74,12 +74,11 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
     }
 
     /// Write each buffered row back to the stable map exactly once, eliding
-    /// rows that neither existed before the batch nor hold a non-zero balance —
-    /// matching the empty-row elision of `TokenBalance::update`.
+    /// rows that are not [`worth_persisting`].
     pub fn flush(self) {
         bench_scopes!("balances", "balances::flush");
         for (key, buffered) in self.buffer {
-            if buffered.existed || !buffered.balance.is_zero() {
+            if worth_persisting(buffered.existed, &buffered.balance) {
                 self.balances.insert(key, buffered.balance);
             }
         }

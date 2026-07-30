@@ -149,7 +149,7 @@ impl<M: Memory> TokenBalance<M> {
         let existed = prev.is_some();
         let mut balance = prev.unwrap_or_default();
         f(&mut balance);
-        if existed || !balance.is_zero() {
+        if worth_persisting(existed, &balance) {
             self.balances.insert(key, balance);
         }
     }
@@ -201,6 +201,12 @@ pub(super) fn split_net_fee(
         *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
     }
     net
+}
+
+/// A row is worth persisting iff it existed before the operation or now holds a
+/// non-zero balance; empty never-existed rows are elided.
+pub(super) fn worth_persisting(existed: bool, balance: &Balance) -> bool {
+    existed || !balance.is_zero()
 }
 
 /// CBOR-serializable entry of the fee pool, used by
