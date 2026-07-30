@@ -1152,7 +1152,7 @@ mod resolution_on_cancel {
     const FUNDING: Principal = Principal::from_slice(&[0x01]);
     const TRADING: Principal = Principal::from_slice(&[0x02]);
     const OTHER_FUNDING: Principal = Principal::from_slice(&[0x03]);
-    const OTHER_TRADING: Principal = Principal::from_slice(&[0x04]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x06]);
     const STRANGER: Principal = Principal::from_slice(&[0x05]);
 
     fn place_funding_order() -> String {
@@ -3159,6 +3159,22 @@ mod add_trading_account {
                 trading: principal(0x50),
                 expected: AddTradingAccountRequestError::InvalidTradingAccount,
                 message_contains: "whitelist itself",
+            },
+            RejectionCase {
+                desc: "trading principal is the anonymous principal",
+                setup: || fund_user(principal(0x5b)),
+                granter: principal(0x5b),
+                trading: candid::Principal::anonymous(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
+                desc: "trading principal is the management canister",
+                setup: || fund_user(principal(0x5c)),
+                granter: principal(0x5c),
+                trading: candid::Principal::management_canister(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
             },
             RejectionCase {
                 desc: "principal already a registered user",
