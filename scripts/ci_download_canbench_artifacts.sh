@@ -16,11 +16,30 @@ import json
 import os
 
 artifacts_dir = os.environ["ARTIFACTS_DIR"]
+root = os.path.realpath(artifacts_dir)
+
+candidates = set(
+    glob.glob(os.path.join(artifacts_dir, "canbench_result_*.md"))
+) | set(
+    glob.glob(os.path.join(artifacts_dir, "canbench_result_*", "canbench_result_*.md"))
+)
+
+
+def is_safe(path):
+    rel = os.path.relpath(path, artifacts_dir)
+    current = artifacts_dir
+    for part in rel.split(os.sep):
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return False
+    return os.path.realpath(path).startswith(root + os.sep)
+
+
 benchmarks = []
 
-for result_path in sorted(
-    glob.glob(os.path.join(artifacts_dir, "**", "canbench_result_*.md"), recursive=True)
-):
+for result_path in sorted(candidates):
+    if not is_safe(result_path):
+        continue
     name = os.path.basename(result_path)[: -len(".md")]
     with open(result_path, encoding="utf-8") as fh:
         benchmarks.append({
