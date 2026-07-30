@@ -1607,25 +1607,41 @@ fn oversized_amount() -> Nat {
     Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
 }
 
+async fn call_endpoint_with_oversized_amount<Req, Resp, Err>(
+    setup: &Setup,
+    user: Principal,
+    method: &str,
+    request: Req,
+) -> Result<Resp, Err>
+where
+    Req: candid::CandidType,
+    Resp: candid::CandidType + serde::de::DeserializeOwned,
+    Err: candid::CandidType + serde::de::DeserializeOwned,
+{
+    let args = candid::encode_args((request,)).expect("encode endpoint args");
+    let bytes = setup
+        .env()
+        .update_call(setup.oisy_trade_id(), user, method, args)
+        .await
+        .expect("the handler must reject an out-of-range amount as a request error, not trap");
+    candid::decode_one(&bytes).expect("decode endpoint response")
+}
+
 #[tokio::test]
 async fn should_reject_oversized_deposit_amount_without_trapping() {
     let setup = Setup::new().await.with_trading_pair().await;
-    let user = Principal::from_slice(&[0x07]);
-
-    let args = candid::encode_args((DepositRequest {
+    let request = DepositRequest {
         token_id: setup.base_token_id(),
         amount: oversized_amount(),
-    },))
-    .expect("encode deposit args");
+    };
 
-    let bytes = setup
-        .env()
-        .update_call(setup.oisy_trade_id(), user, "deposit", args)
-        .await
-        .expect("the handler must reject an out-of-range amount as a request error, not trap");
-
-    let result: Result<DepositResponse, DepositError> =
-        candid::decode_one(&bytes).expect("decode deposit response");
+    let result: Result<DepositResponse, DepositError> = call_endpoint_with_oversized_amount(
+        &setup,
+        Principal::from_slice(&[0x07]),
+        "deposit",
+        request,
+    )
+    .await;
 
     assert_matches!(
         result.unwrap_err().kind,
@@ -1638,22 +1654,18 @@ async fn should_reject_oversized_deposit_amount_without_trapping() {
 #[tokio::test]
 async fn should_reject_oversized_withdraw_amount_without_trapping() {
     let setup = Setup::new().await.with_trading_pair().await;
-    let user = Principal::from_slice(&[0x08]);
-
-    let args = candid::encode_args((WithdrawRequest {
+    let request = WithdrawRequest {
         token_id: setup.base_token_id(),
         amount: oversized_amount(),
-    },))
-    .expect("encode withdraw args");
+    };
 
-    let bytes = setup
-        .env()
-        .update_call(setup.oisy_trade_id(), user, "withdraw", args)
-        .await
-        .expect("the handler must reject an out-of-range amount as a request error, not trap");
-
-    let result: Result<WithdrawResponse, WithdrawError> =
-        candid::decode_one(&bytes).expect("decode withdraw response");
+    let result: Result<WithdrawResponse, WithdrawError> = call_endpoint_with_oversized_amount(
+        &setup,
+        Principal::from_slice(&[0x08]),
+        "withdraw",
+        request,
+    )
+    .await;
 
     assert_matches!(
         result.unwrap_err().kind,
