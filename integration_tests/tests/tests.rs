@@ -1601,34 +1601,34 @@ async fn should_fail_deposit_with_unsupported_token() {
     setup.drop().await;
 }
 
-const OVERSIZED_LIMBS: usize = 200_000;
-
-fn oversized_amount() -> Nat {
-    Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
-}
-
-type OversizedAmountCase = (&'static str, Vec<u8>, fn(&[u8]));
-
-fn assert_deposit_amount_exceeds_maximum(bytes: &[u8]) {
-    let result: Result<DepositResponse, DepositError> =
-        candid::decode_one(bytes).expect("decode deposit response");
-    assert_matches!(
-        result.unwrap_err().kind,
-        ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
-    );
-}
-
-fn assert_withdraw_amount_exceeds_maximum(bytes: &[u8]) {
-    let result: Result<WithdrawResponse, WithdrawError> =
-        candid::decode_one(bytes).expect("decode withdraw response");
-    assert_matches!(
-        result.unwrap_err().kind,
-        ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
-    );
-}
-
 #[tokio::test]
 async fn oversized_amount_is_rejected_without_trapping() {
+    const OVERSIZED_LIMBS: usize = 200_000;
+
+    fn oversized_amount() -> Nat {
+        Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
+    }
+
+    type OversizedAmountCase = (&'static str, Vec<u8>, fn(&[u8]));
+
+    fn assert_deposit_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<DepositResponse, DepositError> =
+            candid::decode_one(bytes).expect("decode deposit response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    fn assert_withdraw_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<WithdrawResponse, WithdrawError> =
+            candid::decode_one(bytes).expect("decode withdraw response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
+    }
+
     let setup = Setup::new().await.with_trading_pair().await;
     let user = Principal::from_slice(&[0x07]);
     let token = setup.base_token_id();
