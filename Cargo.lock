@@ -1842,6 +1842,7 @@ dependencies = [
  "ic-http-types",
  "ic-metrics-assert",
  "icrc-ledger-types",
+ "num-bigint",
  "oisy_trade_client",
  "oisy_trade_types",
  "oisy_trade_types_internal",

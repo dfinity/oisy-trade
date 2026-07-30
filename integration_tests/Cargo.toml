@@ -25,4 +25,5 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+num-bigint = { workspace = true }
 tokio = { workspace = true }

@@ -6,9 +6,9 @@ use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LED
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    DepositRequestError, DepositTemporaryError, ErrorKind, LimitOrderRequest, OrderStatus, Side,
-    Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus, WithdrawRequest,
-    WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositResponse, DepositTemporaryError, ErrorKind, LimitOrderRequest,
+    OrderStatus, Side, Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus,
+    WithdrawError, WithdrawRequest, WithdrawRequestError, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -1596,6 +1596,68 @@ async fn should_fail_deposit_with_unsupported_token() {
         ErrorKind::RequestError(Some(DepositRequestError::UnsupportedToken {
             token_id: fake_token,
         }))
+    );
+
+    setup.drop().await;
+}
+
+const OVERSIZED_LIMBS: usize = 200_000;
+
+fn oversized_amount() -> Nat {
+    Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
+}
+
+#[tokio::test]
+async fn should_reject_oversized_deposit_amount_without_trapping() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x07]);
+
+    let args = candid::encode_args((DepositRequest {
+        token_id: setup.base_token_id(),
+        amount: oversized_amount(),
+    },))
+    .expect("encode deposit args");
+
+    let bytes = setup
+        .env()
+        .update_call(setup.oisy_trade_id(), user, "deposit", args)
+        .await
+        .expect("the handler must reject an out-of-range amount as a request error, not trap");
+
+    let result: Result<DepositResponse, DepositError> =
+        candid::decode_one(&bytes).expect("decode deposit response");
+
+    assert_matches!(
+        result.unwrap_err().kind,
+        ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+    );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn should_reject_oversized_withdraw_amount_without_trapping() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x08]);
+
+    let args = candid::encode_args((WithdrawRequest {
+        token_id: setup.base_token_id(),
+        amount: oversized_amount(),
+    },))
+    .expect("encode withdraw args");
+
+    let bytes = setup
+        .env()
+        .update_call(setup.oisy_trade_id(), user, "withdraw", args)
+        .await
+        .expect("the handler must reject an out-of-range amount as a request error, not trap");
+
+    let result: Result<WithdrawResponse, WithdrawError> =
+        candid::decode_one(&bytes).expect("decode withdraw response");
+
+    assert_matches!(
+        result.unwrap_err().kind,
+        ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
     );
 
     setup.drop().await;
