@@ -1607,70 +1607,66 @@ fn oversized_amount() -> Nat {
     Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
 }
 
-async fn call_endpoint_with_oversized_amount<Req, Resp, Err>(
-    setup: &Setup,
-    user: Principal,
-    method: &str,
-    request: Req,
-) -> Result<Resp, Err>
-where
-    Req: candid::CandidType,
-    Resp: candid::CandidType + serde::de::DeserializeOwned,
-    Err: candid::CandidType + serde::de::DeserializeOwned,
-{
-    let args = candid::encode_args((request,)).expect("encode endpoint args");
-    let bytes = setup
-        .env()
-        .update_call(setup.oisy_trade_id(), user, method, args)
-        .await
-        .expect("the handler must reject an out-of-range amount as a request error, not trap");
-    candid::decode_one(&bytes).expect("decode endpoint response")
-}
+type OversizedAmountCase = (&'static str, Vec<u8>, fn(&[u8]));
 
-#[tokio::test]
-async fn should_reject_oversized_deposit_amount_without_trapping() {
-    let setup = Setup::new().await.with_trading_pair().await;
-    let request = DepositRequest {
-        token_id: setup.base_token_id(),
-        amount: oversized_amount(),
-    };
-
-    let result: Result<DepositResponse, DepositError> = call_endpoint_with_oversized_amount(
-        &setup,
-        Principal::from_slice(&[0x07]),
-        "deposit",
-        request,
-    )
-    .await;
-
+fn assert_deposit_amount_exceeds_maximum(bytes: &[u8]) {
+    let result: Result<DepositResponse, DepositError> =
+        candid::decode_one(bytes).expect("decode deposit response");
     assert_matches!(
         result.unwrap_err().kind,
         ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
     );
-
-    setup.drop().await;
 }
 
-#[tokio::test]
-async fn should_reject_oversized_withdraw_amount_without_trapping() {
-    let setup = Setup::new().await.with_trading_pair().await;
-    let request = WithdrawRequest {
-        token_id: setup.base_token_id(),
-        amount: oversized_amount(),
-    };
-
-    let result: Result<WithdrawResponse, WithdrawError> = call_endpoint_with_oversized_amount(
-        &setup,
-        Principal::from_slice(&[0x08]),
-        "withdraw",
-        request,
-    )
-    .await;
-
+fn assert_withdraw_amount_exceeds_maximum(bytes: &[u8]) {
+    let result: Result<WithdrawResponse, WithdrawError> =
+        candid::decode_one(bytes).expect("decode withdraw response");
     assert_matches!(
         result.unwrap_err().kind,
         ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
     );
+}
+
+#[tokio::test]
+async fn oversized_amount_is_rejected_without_trapping() {
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x07]);
+    let token = setup.base_token_id();
+
+    let cases: [OversizedAmountCase; 2] = [
+        (
+            "deposit",
+            candid::encode_args((DepositRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode deposit args"),
+            assert_deposit_amount_exceeds_maximum,
+        ),
+        (
+            "withdraw",
+            candid::encode_args((WithdrawRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode withdraw args"),
+            assert_withdraw_amount_exceeds_maximum,
+        ),
+    ];
+
+    for (method, args, assert_rejected) in cases {
+        let bytes = setup
+            .env()
+            .update_call(setup.oisy_trade_id(), user, method, args)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{method} must reject an oversized amount as a request error, not trap on \
+                     super-linear work over the unvalidated amount: {e}"
+                )
+            });
+        assert_rejected(&bytes);
+    }
 
     setup.drop().await;
 }
