@@ -655,14 +655,14 @@ pub fn add_trading_pair(
         max_notional: request.max_notional.clone(),
     };
     let min_notional =
-        order::Quantity::try_from(request.min_notional.clone()).map_err(|_| invalid_notional())?;
+        order::Quantity::try_from(&request.min_notional).map_err(|_| invalid_notional())?;
     if min_notional.is_zero() {
         return Err(invalid_notional());
     }
     let max_notional = match &request.max_notional {
         None => None,
         Some(max) => {
-            let max = order::Quantity::try_from(max.clone()).map_err(|_| invalid_notional())?;
+            let max = order::Quantity::try_from(max).map_err(|_| invalid_notional())?;
             if max < min_notional {
                 return Err(invalid_notional());
             }
