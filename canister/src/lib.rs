@@ -303,7 +303,7 @@ pub async fn deposit(
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
-    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+    let amount = order::Quantity::try_from(&request.amount).map_err(|_| {
         DepositError::request(oisy_trade_types::DepositRequestError::AmountExceedsMaximum)
     })?;
     let token_id = request.token_id.clone();
@@ -348,7 +348,7 @@ pub async fn deposit(
         ));
     }
 
-    let deposit_response = ledger::deposit(request, runtime).await?;
+    let deposit_response = ledger::deposit(&token_id, amount.to_nat(), runtime).await?;
     let event = state::event::DepositEvent {
         user: caller,
         token: order::TokenId::from(token_id),
@@ -372,7 +372,7 @@ pub async fn withdraw(
     runtime: &impl Runtime,
 ) -> Result<WithdrawResponse, WithdrawError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
-    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+    let amount = order::Quantity::try_from(&request.amount).map_err(|_| {
         WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
     })?;
     let token_id = request.token_id.clone();
@@ -384,7 +384,7 @@ pub async fn withdraw(
     }
     let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
 
-    if request.amount == 0u64 {
+    if amount.is_zero() {
         return Err(WithdrawError::request(
             oisy_trade_types::WithdrawRequestError::AmountTooSmall {
                 min_amount: cached_fee + 1u64,

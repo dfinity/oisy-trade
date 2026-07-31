@@ -1,6 +1,6 @@
 use crate::Runtime;
 use oisy_trade_types::{
-    DepositError, DepositInternalError, DepositRequest, DepositRequestError, DepositResponse,
+    DepositError, DepositInternalError, DepositRequestError, DepositResponse,
     DepositTemporaryError, WithdrawError, WithdrawInternalError, WithdrawRequestError,
     WithdrawResponse, WithdrawTemporaryError,
 };
@@ -21,15 +21,18 @@ enum Icrc1TransferError {
     Other(WithdrawError),
 }
 
+/// Transfer `amount` tokens from the caller to this canister via
+/// `icrc2_transfer_from`. The amount is taken as an already range-checked value
+/// rather than read back off the request, so no unvalidated magnitude reaches
+/// the ledger call.
 pub async fn deposit(
-    request: &DepositRequest,
+    token: &oisy_trade_types::TokenId,
+    amount: candid::Nat,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
-    let token = &request.token_id;
-    let amount = &request.amount;
     let caller = runtime.msg_caller();
 
     let transfer_args = TransferFromArgs {
@@ -42,7 +45,7 @@ pub async fn deposit(
             owner: runtime.canister_self(),
             subaccount: None,
         },
-        amount: amount.clone(),
+        amount,
         fee: None,
         memo: None,
         created_at_time: None,
