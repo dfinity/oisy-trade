@@ -1673,8 +1673,8 @@ async fn oversized_amount_is_rejected_without_trapping() {
 
 /// In restricted mode the vulnerable handler rendered the request — exhausting
 /// the instruction budget — before any authorization check, so a
-/// non-allowlisted caller could trap the call. Now the O(1) allowlist check
-/// rejects it first.
+/// non-allowlisted caller could trap the call. Now the allowlist check rejects
+/// it first, at a cost independent of the amount's magnitude.
 ///
 /// The call traps either way, so trap-vs-no-trap proves nothing here: the
 /// guarantee is in *why* it trapped. Assert the trap names the authorization
