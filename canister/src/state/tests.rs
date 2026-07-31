@@ -462,7 +462,7 @@ mod cancel_limit_order {
                 order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
             EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
             state
-                .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+                .cancel_limit_order(OWNER, owner_buy, &mock_runtime_for(OWNER))
                 .unwrap();
             balances_pair(&state, &OWNER, &pair)
         };
@@ -474,7 +474,7 @@ mod cancel_limit_order {
 
         queue_matching_backlog(&mut state);
         state
-            .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+            .cancel_limit_order(OWNER, owner_buy, &mock_runtime_for(OWNER))
             .unwrap();
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
 
