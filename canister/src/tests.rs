@@ -1304,7 +1304,7 @@ mod deposit {
         let _held = UserOpGuard::new(USER, icp_token_id()).expect("test setup: acquire guard");
         let runtime = CapturingRuntime::new(USER, vec![]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1320,7 +1320,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -1333,7 +1333,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -1344,7 +1344,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
         assert_in_flight_empty();
@@ -1364,7 +1364,7 @@ mod deposit {
             )))],
         );
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1379,7 +1379,7 @@ mod deposit {
         let runtime = CapturingRuntime::new(USER, vec![]);
 
         let unsupported = TokenId::new(Principal::from_slice(&[0xAB]));
-        let result = deposit(deposit_request(unsupported), &runtime).await;
+        let result = deposit(&deposit_request(unsupported), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1388,6 +1388,34 @@ mod deposit {
             }))
         );
         assert!(runtime.captured_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum_before_any_ledger_call() {
+        use std::str::FromStr;
+
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = deposit(
+            &DepositRequest {
+                token_id: icp_token_id().into(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+        assert!(
+            runtime.captured_calls().is_empty(),
+            "an out-of-range amount is rejected before any ledger interaction"
+        );
+        assert_in_flight_empty();
     }
 
     #[tokio::test]
@@ -1400,7 +1428,7 @@ mod deposit {
 
         let runtime = CapturingRuntime::new(USER, vec![]);
         let events_before = crate::storage::total_event_count();
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1577,7 +1605,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1619,7 +1647,7 @@ mod withdraw {
         ]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1649,7 +1677,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1696,7 +1724,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1741,7 +1769,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(1_000_000u64),
             },
@@ -1768,7 +1796,7 @@ mod withdraw {
         // No call_unbounded_wait expectations — the ledger should never be called.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(0u64),
             },
@@ -1783,6 +1811,34 @@ mod withdraw {
             }))
         );
         // Balance untouched — no debit happened.
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum() {
+        use std::str::FromStr;
+
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = withdraw(
+            &WithdrawRequest {
+                token_id: token_id(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
         assert_balance(deposit);
         assert_no_withdraw_event();
     }
@@ -1810,7 +1866,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1846,7 +1902,7 @@ mod withdraw {
         // async call is made.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit + 1),
             },
@@ -1903,7 +1959,7 @@ mod withdraw {
 
         let events_before = crate::storage::total_event_count();
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(1_000u64),
             },
@@ -1935,7 +1991,7 @@ mod withdraw {
         // No ledger expectation: the guard short-circuits before any ledger call.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1963,7 +2019,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1986,7 +2042,7 @@ mod withdraw {
         let runtime = mock_runtime_returning(vec![transfer_response(Ok(Nat::from(42u64)))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -2008,7 +2064,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
