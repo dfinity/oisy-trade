@@ -1118,6 +1118,27 @@ mod resolution_on_placement {
             "the funding account's own order is unattributed even with whitelisted trading accounts"
         );
     }
+
+    #[test]
+    #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
+    fn should_not_bypass_restricted_mode_via_delegation() {
+        use crate::state::with_state_mut;
+        use oisy_trade_types_internal::Mode;
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        // Restrict updates to the funding account only. The trading account is a
+        // delegate of an allowlisted funder but is not itself allowlisted.
+        with_state_mut(|s| s.set_mode(Mode::restricted_to(vec![FUNDING])));
+
+        // The raw-caller allowlist check runs before caller resolution, so the
+        // delegate is rejected even though its funding account would be allowed.
+        let mut runtime = mock_runtime_for(TRADING);
+        runtime.expect_is_controller().return_const(false);
+        let _panic = add_limit_order(limit_order_request(), &runtime);
+    }
 }
 
 mod resolution_on_cancel {
@@ -1131,7 +1152,7 @@ mod resolution_on_cancel {
     const FUNDING: Principal = Principal::from_slice(&[0x01]);
     const TRADING: Principal = Principal::from_slice(&[0x02]);
     const OTHER_FUNDING: Principal = Principal::from_slice(&[0x03]);
-    const OTHER_TRADING: Principal = Principal::from_slice(&[0x04]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x06]);
     const STRANGER: Principal = Principal::from_slice(&[0x05]);
 
     fn place_funding_order() -> String {
@@ -3138,6 +3159,22 @@ mod add_trading_account {
                 trading: principal(0x50),
                 expected: AddTradingAccountRequestError::InvalidTradingAccount,
                 message_contains: "whitelist itself",
+            },
+            RejectionCase {
+                desc: "trading principal is the anonymous principal",
+                setup: || fund_user(principal(0x5b)),
+                granter: principal(0x5b),
+                trading: candid::Principal::anonymous(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
+                desc: "trading principal is the management canister",
+                setup: || fund_user(principal(0x5c)),
+                granter: principal(0x5c),
+                trading: candid::Principal::management_canister(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
             },
             RejectionCase {
                 desc: "principal already a registered user",

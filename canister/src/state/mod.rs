@@ -335,6 +335,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         self.validate_cancel_limit_order(account.as_ref(), &order_id)?;
         let canceled_by = account.and_then(|account| account.order_actor().1);
 
+        let settling_backlog_len = self.pending_settling_events.len();
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
@@ -346,12 +347,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             runtime,
         );
 
-        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
-        // leave settling events queued across messages, draining the whole
-        // queue here lets an unrelated cancel apply balance ops from a
-        // previous matching round and inherit its instruction debt. Pop
-        // only the event this cancel just pushed.
-        while let Some(event) = self.take_next_pending_settling_event() {
+        for event in self.pending_settling_events.split_off(settling_backlog_len) {
             let permit = self.permissions().permit_settling();
             audit::process_event(
                 self,
@@ -1259,6 +1255,7 @@ pub enum GetUserOrderTradesError {
 pub enum AddTradingAccountError {
     GranterNotRegistered,
     SelfGrant,
+    NonAuthenticatingTradingAccount,
     AlreadyTradingAccount,
     AlreadyRegisteredUser,
     GranterIsTradingAccount,
@@ -1272,6 +1269,9 @@ impl From<GrantError> for AddTradingAccountError {
         match err {
             GrantError::GranterNotRegistered => AddTradingAccountError::GranterNotRegistered,
             GrantError::SelfGrant => AddTradingAccountError::SelfGrant,
+            GrantError::NonAuthenticatingTradingAccount => {
+                AddTradingAccountError::NonAuthenticatingTradingAccount
+            }
             GrantError::AlreadyTradingAccount => AddTradingAccountError::AlreadyTradingAccount,
             GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
             GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
@@ -1327,6 +1327,10 @@ impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
                 AddTradingAccountError::SelfGrant => (
                     ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
                     "a funding account cannot whitelist itself",
+                ),
+                AddTradingAccountError::NonAuthenticatingTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::NonAuthenticatingTradingAccount)),
+                    "the proposed trading account is a non-authenticating principal",
                 ),
                 AddTradingAccountError::AlreadyRegisteredUser => (
                     ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),

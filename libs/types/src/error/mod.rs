@@ -435,6 +435,11 @@ pub enum AddTradingAccountRequestError {
     /// funding account itself, or an already-registered user.
     #[error("the proposed trading account is not a valid, unregistered principal")]
     InvalidTradingAccount,
+    /// The proposed trading account is a non-authenticating principal (the
+    /// anonymous principal or the management canister) that no single keyholder
+    /// can exclusively exercise.
+    #[error("the proposed trading account is a non-authenticating principal")]
+    NonAuthenticatingTradingAccount,
     /// The principal is already a trading account, of the granter or of
     /// someone else — a trading account maps to exactly one funding account.
     #[error("the principal is already a trading account")]

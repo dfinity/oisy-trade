@@ -282,6 +282,7 @@ mod cancel_limit_order {
 
     const OWNER: Principal = Principal::from_slice(&[0x01]);
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
+    const STRANGER2: Principal = Principal::from_slice(&[0x03]);
 
     /// Status of `order_id` as `OWNER` would see it via `get_user_order`, or
     /// `None` if absent / not owned by `OWNER`.
@@ -411,28 +412,76 @@ mod cancel_limit_order {
         let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
         let _sell_id = order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
-        // Record only the matching half: the book pops both orders into
-        // `filled_orders` and the paired `SettlingEvent` lands on the queue
-        // without being drained — exactly the state left behind by a chunk
-        // whose inline drain was budget-interrupted.
-        let orders: Vec<_> = state
-            .order_book(&OrderBookId::ZERO)
-            .unwrap()
-            .pending_order_seqs()
-            .collect();
-        state.record_matching_event(
-            &crate::state::event::MatchingEvent {
-                book_id: OrderBookId::ZERO,
-                orders,
-            },
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
-        assert!(state.has_pending_settling_events());
+        queue_matching_backlog(&mut state);
 
         let result = state.cancel_limit_order(OWNER, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_leave_unrelated_settling_backlog_for_the_executor() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        order(STRANGER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        order(STRANGER2, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy = order(OWNER, &pair, Side::Buy, 50 * PRICE_SCALE, lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+
+        let backlog_len = state.pending_settling_events.len();
+        let stranger_before = balances_pair(&state, &STRANGER, &pair);
+        let stranger2_before = balances_pair(&state, &STRANGER2, &pair);
+
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            owner_buy,
+            PairToken::Quote,
+            50 * lot,
+            lot,
+        );
+
+        assert_eq!(state.pending_settling_events.len(), backlog_len);
+        assert!(state.has_pending_settling_events());
+        assert_eq!(balances_pair(&state, &STRANGER, &pair), stranger_before);
+        assert_eq!(balances_pair(&state, &STRANGER2, &pair), stranger2_before);
+    }
+
+    #[test]
+    fn should_settle_the_same_regardless_of_cancel_and_drain_order() {
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let baseline = {
+            let mut state = setup();
+            order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+            let owner_buy =
+                order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            state
+                .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+                .unwrap();
+            balances_pair(&state, &OWNER, &pair)
+        };
+
+        let mut state = setup();
+        order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy =
+            order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+        state
+            .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+            .unwrap();
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+        let (base_after, quote_after) = balances_pair(&state, &OWNER, &pair);
+        assert_eq!(*base_after.reserved(), Quantity::ZERO);
+        assert_eq!(*quote_after.reserved(), Quantity::ZERO);
+        assert_eq!((base_after, quote_after), baseline);
     }
 
     #[test]
@@ -520,6 +569,25 @@ mod cancel_limit_order {
             untouched_before, untouched_after,
             "the non-refund token balance should not change",
         );
+    }
+
+    /// Matches every pending order in book `ZERO` and leaves the resulting
+    /// settling events queued but undrained.
+    fn queue_matching_backlog(state: &mut State<VectorMemory, VectorMemory>) {
+        let orders: Vec<_> = state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_order_seqs()
+            .collect();
+        state.record_matching_event(
+            &crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders,
+            },
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+        assert!(state.has_pending_settling_events());
     }
 
     fn setup() -> State<VectorMemory, VectorMemory> {

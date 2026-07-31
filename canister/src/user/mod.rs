@@ -142,6 +142,10 @@ pub enum GrantError {
     GranterNotRegistered,
     /// The funding account tried to whitelist itself.
     SelfGrant,
+    /// The prospective trading account is a non-authenticating principal (the
+    /// anonymous principal or the management canister) that no single keyholder
+    /// can exclusively exercise.
+    NonAuthenticatingTradingAccount,
     /// The prospective trading account is already a trading account.
     AlreadyTradingAccount,
     /// The prospective trading account is already a registered user.
@@ -313,6 +317,9 @@ impl<M: Memory> UserRegistry<M> {
         };
         if trading == funding {
             return Err(GrantError::SelfGrant);
+        }
+        if trading == Principal::anonymous() || trading == Principal::management_canister() {
+            return Err(GrantError::NonAuthenticatingTradingAccount);
         }
         match self.lookup(trading) {
             Some(UserAccount::Trading { .. }) => return Err(GrantError::AlreadyTradingAccount),

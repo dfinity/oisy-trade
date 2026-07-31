@@ -4035,6 +4035,11 @@ mod trading_accounts {
             .await
             .unwrap();
 
+        // Upgrade between the grants: the grant-cooldown anchor lives in the
+        // event log and must survive, otherwise the second grant below would be
+        // treated as a first grant and escape the cooldown.
+        setup.upgrade(None).await;
+
         let err = client
             .add_trading_account(trading_account(2))
             .await
@@ -4262,6 +4267,16 @@ mod trading_accounts {
         // `quantity` base); grant whitelists T.
         setup.fund_base(funding, quantity * 4).await;
         funding_client.add_trading_account(trading).await.unwrap();
+
+        // Upgrade mid-lifecycle: the whitelist (stable memory) and the
+        // deposited balance must survive, and delegation must still resolve —
+        // the trading-account order placed below is the proof it does.
+        setup.upgrade(None).await;
+        assert_eq!(
+            funding_client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the whitelist survives the upgrade"
+        );
 
         let t_order = trading_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;
