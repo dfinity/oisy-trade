@@ -7,17 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-08-06
 
+### Added
+
+- Separate funding and trading accounts: a funding account can whitelist trading-account principals via `add_trading_account` / `remove_trading_account` / `get_my_trading_accounts`. A trading account places and cancels orders on the funding account's balance but can never deposit or withdraw (`deposit` / `withdraw` are denied with a `TradingAccountForbidden` request-error variant). Orders and reads by a trading account resolve to the funding account, and each order records the acting key via the new `placed_by` / `canceled_by` fields on `OrderRecord`. Grants require a registered granter and are rate-limited by a per-account cooldown; revocation is never rate-limited. All additions are backward-compatible Candid ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#219](https://github.com/dfinity/oisy-trade/pull/219), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
+
 ### Changed
 
 - Docs and test follow-ups for funding/trading accounts ([#230](https://github.com/dfinity/oisy-trade/pull/230))
-- Resolve order cancellation to the funding account (DEFI-2911 PR 6/6) ([#226](https://github.com/dfinity/oisy-trade/pull/226))
 - Drop orphaned arb_order_record test fixtures ([#224](https://github.com/dfinity/oisy-trade/pull/224))
-- Resolve order placement to the funding account (DEFI-2911 PR 5/6) ([#223](https://github.com/dfinity/oisy-trade/pull/223))
 - Classify principals via UserAccount lookup ([#222](https://github.com/dfinity/oisy-trade/pull/222))
-- Resolve trading-account reads to the funding account (DEFI-2911 PR 4/6) ([#219](https://github.com/dfinity/oisy-trade/pull/219))
-- Deny funding operations to trading accounts (DEFI-2911 PR 3/6) ([#209](https://github.com/dfinity/oisy-trade/pull/209))
-- Trading-account revocation + grant cooldown (DEFI-2911 PR 2/6) ([#208](https://github.com/dfinity/oisy-trade/pull/208))
-- Trading-account registry (DEFI-2911 PR 1/6) ([#207](https://github.com/dfinity/oisy-trade/pull/207))
 - Render principals textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
 
 ### Fixed
@@ -27,14 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cancel applies only its own settlement ([#240](https://github.com/dfinity/oisy-trade/pull/240))
 - Bound settling-event application cost during matching ([#216](https://github.com/dfinity/oisy-trade/pull/216))
 - Benchmark unbounded settling-event sweep during matching ([#210](https://github.com/dfinity/oisy-trade/pull/210))
-
-[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.3.0..oisy_trade_canister-v0.4.0
-
-## [Unreleased]
-
-### Added
-
-- Separate funding and trading accounts: a funding account can whitelist trading-account principals via `add_trading_account` / `remove_trading_account` / `get_my_trading_accounts`. A trading account places and cancels orders on the funding account's balance but can never deposit or withdraw (`deposit` / `withdraw` are denied with a `TradingAccountForbidden` request-error variant). Orders and reads by a trading account resolve to the funding account, and each order records the acting key via the new `placed_by` / `canceled_by` fields on `OrderRecord`. Grants require a registered granter and are rate-limited by a per-account cooldown; revocation is never rate-limited. All additions are backward-compatible Candid ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#219](https://github.com/dfinity/oisy-trade/pull/219), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
 
 ## [0.3.0] - 2026-07-02
 
@@ -87,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 - Surface trading-pair fee rates in `get_events` ([#134](https://github.com/dfinity/oisy-trade/pull/134))
 
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.3.0..oisy_trade_canister-v0.4.0
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.1.0..oisy_trade_canister-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.0.0..oisy_trade_canister-v0.1.0

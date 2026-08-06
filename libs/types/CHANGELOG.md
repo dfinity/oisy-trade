@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reject non-authenticating trading-account delegation targets ([#238](https://github.com/dfinity/oisy-trade/pull/238))
 
-[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
-
-## [Unreleased]
-
 ## [0.3.0] - 2026-07-02
 
 ### Added
@@ -64,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add an `OperationInProgress` error to guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.0.0..oisy_trade_types-v0.1.0
