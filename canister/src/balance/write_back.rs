@@ -42,6 +42,16 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     /// Debits `gross` from the debtor's reserved, credits `gross - fee` to the
     /// creditor's free, and accrues `fee` to the token's fee pool. A
     /// self-transfer lands the credit on the just-debited buffered row.
+    ///
+    /// Conserves `gross` units of `token` across the per-token invariant
+    /// `Σ users(free + reserved) + fee_pool = Σ deposits − Σ withdrawals`.
+    ///
+    /// # Panics
+    ///
+    /// - `fee > gross`, or the token's accrued fees overflow — see
+    ///   [`FeePool::withhold`].
+    /// - The debtor has no balance entry for `token`, or `gross` exceeds the
+    ///   debtor's reserved balance.
     pub fn transfer(
         &mut self,
         debtor: UserId,
@@ -63,6 +73,11 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     }
 
     /// Moves `amount` from the user's reserved to their free balance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the user has no balance entry for `token`, or if `amount`
+    /// exceeds their reserved balance.
     pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::unreserve");
         self.load_existing(
@@ -83,11 +98,11 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
         }
     }
 
-    /// Buffer a row that must already exist in the balance map, or have been
-    /// created earlier in this settling event, as required by the debtor read
-    /// in [`transfer`](Self::transfer) and the target read in
-    /// [`unreserve`](Self::unreserve). On the row's first touch this buffer, traps
-    /// with `msg` if it is absent from the stable map.
+    /// Buffer a row that a debit requires to exist: the debtor of
+    /// [`transfer`](Self::transfer) and the target of
+    /// [`unreserve`](Self::unreserve). Traps with `msg` if the row is absent
+    /// from the stable map on its first touch this event; a later touch reuses
+    /// the buffered row without re-reading.
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
             existed: true,
