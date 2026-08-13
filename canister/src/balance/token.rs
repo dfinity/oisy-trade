@@ -89,14 +89,23 @@ impl<M: Memory> TokenBalance<M> {
         self.try_update(user, *token, |b| b.reserve(amount))
     }
 
-    /// Open a write-back buffer over the balance map, scoped to a single
-    /// settling event. Each `(token, user)` row touched while the batch is
-    /// live is read from the stable map at most once and written back at most
-    /// once, on [`BalanceWriteBack::flush`]. Preserves the fee-pool accrual
+    /// Apply `operations` to a write-back buffer over the balance map, scoped
+    /// to a single settling event, and flush it before returning. Each
+    /// `(token, user)` row the operations touch is read from the stable map at
+    /// most once and written back at most once. Preserves the fee-pool accrual
     /// and empty-row elision of [`BalanceWriteBack::transfer`] and
     /// [`BalanceWriteBack::unreserve`] exactly.
-    pub fn write_back(&mut self) -> BalanceWriteBack<'_, M> {
-        BalanceWriteBack::new(&mut self.balances, &mut self.fee_balances)
+    ///
+    /// The buffer is only ever lent out, so no caller can drop it unflushed
+    /// and silently discard the operations it applied.
+    pub fn with_write_back<R>(
+        &mut self,
+        operations: impl FnOnce(&mut BalanceWriteBack<'_, M>) -> R,
+    ) -> R {
+        let mut write_back = BalanceWriteBack::new(&mut self.balances, &mut self.fee_balances);
+        let result = operations(&mut write_back);
+        write_back.flush();
+        result
     }
 
     /// Read the accumulated fee balance for `token`. `None` if no fees have

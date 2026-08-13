@@ -492,34 +492,34 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             self.trade_history
                 .append(taker_leg, taker.user, maker_leg, maker.user);
         }
-        let mut write_back = self.balances.write_back();
-        for op in &event.balance_operations {
-            let token = pair.token(match op {
-                event::BalanceOperation::Transfer { token, .. }
-                | event::BalanceOperation::Unreserve { token, .. } => token,
-            });
-            match op {
-                event::BalanceOperation::Transfer {
-                    from_order,
-                    to_order,
-                    amount,
-                    fee,
-                    ..
-                } => {
-                    write_back.transfer(
-                        resolved[from_order].user,
-                        resolved[to_order].user,
-                        &token,
-                        *amount,
-                        fee.unwrap_or(Quantity::ZERO),
-                    );
-                }
-                event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    write_back.unreserve(resolved[order].user, &token, *amount);
+        self.balances.with_write_back(|balances| {
+            for op in &event.balance_operations {
+                let token = pair.token(match op {
+                    event::BalanceOperation::Transfer { token, .. }
+                    | event::BalanceOperation::Unreserve { token, .. } => token,
+                });
+                match op {
+                    event::BalanceOperation::Transfer {
+                        from_order,
+                        to_order,
+                        amount,
+                        fee,
+                        ..
+                    } => {
+                        balances.transfer(
+                            resolved[from_order].user,
+                            resolved[to_order].user,
+                            &token,
+                            *amount,
+                            fee.unwrap_or(Quantity::ZERO),
+                        );
+                    }
+                    event::BalanceOperation::Unreserve { order, amount, .. } => {
+                        balances.unreserve(resolved[order].user, &token, *amount);
+                    }
                 }
             }
-        }
-        write_back.flush();
+        });
     }
 
     /// Returns up to `length` of `owner`'s orders, newest first, resuming

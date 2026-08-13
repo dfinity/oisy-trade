@@ -299,9 +299,7 @@ mod token_balance {
         gross: Quantity,
         fee: Quantity,
     ) {
-        let mut write_back = tb.write_back();
-        write_back.transfer(debtor, creditor, token, gross, fee);
-        write_back.flush();
+        tb.with_write_back(|balances| balances.transfer(debtor, creditor, token, gross, fee));
     }
 
     fn unreserve(
@@ -310,9 +308,7 @@ mod token_balance {
         token: &TokenId,
         amount: Quantity,
     ) {
-        let mut write_back = tb.write_back();
-        write_back.unreserve(user, token, amount);
-        write_back.flush();
+        tb.with_write_back(|balances| balances.unreserve(user, token, amount));
     }
 
     fn alice() -> UserId {
@@ -528,9 +524,7 @@ mod fee_pool {
         gross: Quantity,
         fee: Quantity,
     ) {
-        let mut write_back = tb.write_back();
-        write_back.transfer(debtor, creditor, token, gross, fee);
-        write_back.flush();
+        tb.with_write_back(|balances| balances.transfer(debtor, creditor, token, gross, fee));
     }
 
     fn unreserve(
@@ -539,9 +533,7 @@ mod fee_pool {
         token: &TokenId,
         amount: Quantity,
     ) {
-        let mut write_back = tb.write_back();
-        write_back.unreserve(user, token, amount);
-        write_back.flush();
+        tb.with_write_back(|balances| balances.unreserve(user, token, amount));
     }
 
     fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
@@ -790,8 +782,7 @@ mod write_back {
 
         for case in cases {
             let mut actual = seeded(&case.setup);
-            {
-                let mut write_back = actual.write_back();
+            actual.with_write_back(|balances| {
                 for op in &case.ops {
                     match op {
                         Op::Transfer {
@@ -800,7 +791,7 @@ mod write_back {
                             token,
                             gross,
                             fee,
-                        } => write_back.transfer(
+                        } => balances.transfer(
                             *debtor,
                             *creditor,
                             token,
@@ -811,11 +802,10 @@ mod write_back {
                             user,
                             token,
                             amount,
-                        } => write_back.unreserve(*user, token, Quantity::from(*amount)),
+                        } => balances.unreserve(*user, token, Quantity::from(*amount)),
                     }
                 }
-                write_back.flush();
-            }
+            });
 
             for (user, token, free, reserved) in &case.expected_balances {
                 assert_eq!(
@@ -852,34 +842,30 @@ mod write_back {
     #[test]
     fn flush_elides_untouched_empty_creditor_row() {
         let mut tb = seeded(&[(taker(), base(), 100, 0)]);
-        {
-            let mut write_back = tb.write_back();
-            write_back.transfer(
+        tb.with_write_back(|balances| {
+            balances.transfer(
                 taker(),
                 maker1(),
                 &base(),
                 Quantity::from(0u64),
                 Quantity::from(0u64),
             );
-            write_back.flush();
-        }
+        });
         assert_eq!(tb.get_balance(maker1(), &base()), None);
     }
 
     #[test]
     fn flush_writes_hand_computed_balances() {
         let mut tb = seeded(&[(taker(), base(), 100, 100)]);
-        {
-            let mut write_back = tb.write_back();
-            write_back.transfer(
+        tb.with_write_back(|balances| {
+            balances.transfer(
                 taker(),
                 maker1(),
                 &base(),
                 Quantity::from(100u64),
                 Quantity::from(5u64),
             );
-            write_back.flush();
-        }
+        });
         assert_eq!(
             tb.get_balance(taker(), &base()),
             Some(Balance::new(0u64, 0u64))
@@ -895,22 +881,22 @@ mod write_back {
     #[should_panic(expected = "BUG: debtor balance missing")]
     fn should_panic_write_back_transfer_missing_debtor() {
         let mut tb = TokenBalance::default();
-        let mut write_back = tb.write_back();
-        write_back.transfer(
-            taker(),
-            maker1(),
-            &base(),
-            Quantity::from(10u64),
-            Quantity::ZERO,
-        );
+        tb.with_write_back(|balances| {
+            balances.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(10u64),
+                Quantity::ZERO,
+            );
+        });
     }
 
     #[test]
     #[should_panic(expected = "BUG: user balance missing for unreserve")]
     fn should_panic_write_back_unreserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        let mut write_back = tb.write_back();
-        write_back.unreserve(taker(), &base(), Quantity::from(10u64));
+        tb.with_write_back(|balances| balances.unreserve(taker(), &base(), Quantity::from(10u64)));
     }
 
     fn taker() -> UserId {

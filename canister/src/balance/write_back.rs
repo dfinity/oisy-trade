@@ -6,7 +6,7 @@ use ic_stable_structures::{Memory, StableBTreeMap};
 use std::collections::BTreeMap;
 
 /// In-heap write-back buffer over the balance map for the balance operations
-/// of one settling event, opened by [`TokenBalance::write_back`].
+/// of one settling event, lent out by [`TokenBalance::with_write_back`].
 ///
 /// The taker of a large sweep is party to every fill, so its two balance rows
 /// would otherwise be read-modify-written on each fill. The buffer collapses
@@ -14,9 +14,7 @@ use std::collections::BTreeMap;
 /// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
 /// on the heap.
 ///
-/// [`TokenBalance::write_back`]: super::TokenBalance::write_back
-#[must_use = "BalanceWriteBack buffers balance mutations that are only applied by `flush()`; \
-              dropping it without flushing silently discards them"]
+/// [`TokenBalance::with_write_back`]: super::TokenBalance::with_write_back
 pub struct BalanceWriteBack<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
     fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
@@ -75,7 +73,7 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
 
     /// Write each buffered row back to the stable map exactly once, eliding
     /// rows that are not [`worth_persisting`].
-    pub fn flush(self) {
+    pub(super) fn flush(self) {
         bench_scopes!("balances", "balances::flush");
         for (key, buffered) in self.buffer {
             if worth_persisting(buffered.existed, &buffered.balance) {

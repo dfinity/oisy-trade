@@ -325,17 +325,15 @@ fn should_roundtrip_fee_pool_through_snapshot() {
         .balances
         .reserve(buyer_id, &pair.quote, Quantity::from(500u64))
         .unwrap();
-    {
-        let mut write_back = state.balances.write_back();
-        write_back.transfer(
+    state.balances.with_write_back(|balances| {
+        balances.transfer(
             buyer_id,
             seller_id,
             &pair.quote,
             Quantity::from(100u64),
             Quantity::from(7u64),
         );
-        write_back.flush();
-    }
+    });
 
     let snapshot = StateSnapshot::from_state(&state);
     let mut buf = vec![];
