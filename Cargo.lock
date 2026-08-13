@@ -325,7 +325,7 @@ dependencies = [
  "hex",
  "ic_principal",
  "leb128",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "paste",
  "pretty",
@@ -362,7 +362,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "logos",
- "num-bigint",
+ "num-bigint 0.4.8",
  "pretty",
  "serde",
  "thiserror 1.0.69",
@@ -1320,7 +1320,7 @@ checksum = "90569d2894d9536c5416943556ac6339df249f06611b3c41029196b39e0dd119"
 dependencies = [
  "candid",
  "minicbor",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
 ]
 
@@ -1336,7 +1336,7 @@ dependencies = [
  "hex",
  "icrc-cbor",
  "minicbor",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "serde",
  "serde_bytes",
@@ -1772,6 +1772,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1841,7 +1851,7 @@ dependencies = [
  "icrc-ledger-types",
  "minicbor",
  "mockall",
- "num-bigint",
+ "num-bigint 0.5.1",
  "oisy_trade_types",
  "oisy_trade_types_internal",
  "proptest",
@@ -1875,7 +1885,7 @@ dependencies = [
  "ic-http-types",
  "ic-metrics-assert",
  "icrc-ledger-types",
- "num-bigint",
+ "num-bigint 0.5.1",
  "oisy_trade_client",
  "oisy_trade_types",
  "oisy_trade_types_internal",
