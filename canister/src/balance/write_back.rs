@@ -1,4 +1,5 @@
-use super::token::{split_net_fee, worth_persisting};
+use super::fee_pool::FeePool;
+use super::token::worth_persisting;
 use super::{Balance, BalanceKey};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
@@ -17,7 +18,7 @@ use std::collections::BTreeMap;
 /// [`TokenBalance::with_write_back`]: super::TokenBalance::with_write_back
 pub struct BalanceWriteBack<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
-    fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
+    fee_pool: &'a mut FeePool,
     buffer: BTreeMap<BalanceKey, BufferedBalance>,
 }
 
@@ -29,11 +30,11 @@ struct BufferedBalance {
 impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     pub(super) fn new(
         balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
-        fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
+        fee_pool: &'a mut FeePool,
     ) -> Self {
         Self {
             balances,
-            fee_balances,
+            fee_pool,
             buffer: BTreeMap::new(),
         }
     }
@@ -50,7 +51,7 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
         fee: Quantity,
     ) {
         bench_scopes!("balances", "balances::transfer");
-        let net = split_net_fee(self.fee_balances, token, gross, fee);
+        let net = self.fee_pool.withhold(token, gross, fee);
 
         self.load_existing(
             BalanceKey::new(*token, debtor),

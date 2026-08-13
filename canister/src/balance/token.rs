@@ -1,23 +1,19 @@
+use super::fee_pool::{FeeEntry, FeePool};
 use super::write_back::BalanceWriteBack;
 use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
 use ic_stable_structures::{Memory, StableBTreeMap};
-use std::collections::BTreeMap;
 
 /// Canister-wide token accounting:
 ///
 /// - Per-`(token, user)` `Balance` entries in a stable [`StableBTreeMap`]
 ///   (auto-survives upgrades via the memory ID).
-/// - A heap-resident fee pool indexed by `TokenId`, accrued by fills via
-///   [`BalanceWriteBack::transfer`] and persisted across upgrades
-///   through the [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
+/// - A [`FeePool`] on the heap, accrued by fills via
+///   [`BalanceWriteBack::transfer`] and persisted across upgrades through the
+///   [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
 ///   [`restore_fee_pool`](Self::restore_fee_pool) pair plumbed through
 ///   `StateSnapshot`.
-///
-/// The fee pool lives on the heap because it is bounded by the number of
-/// listed tokens (10s–100s), whereas user balances are unbounded and
-/// belong in stable memory.
 ///
 /// All token-conservation operations route through this type, so the
 /// canister-wide invariant
@@ -30,7 +26,7 @@ use std::collections::BTreeMap;
 /// is enforceable at one API boundary.
 pub struct TokenBalance<M: Memory> {
     balances: StableBTreeMap<BalanceKey, Balance, M>,
-    fee_balances: BTreeMap<TokenId, Quantity>,
+    fee_pool: FeePool,
 }
 
 impl<M: Memory> std::fmt::Debug for TokenBalance<M> {
@@ -45,7 +41,7 @@ impl<M: Memory> TokenBalance<M> {
     pub fn new(memory: M) -> Self {
         Self {
             balances: StableBTreeMap::init(memory),
-            fee_balances: BTreeMap::new(),
+            fee_pool: FeePool::default(),
         }
     }
 
@@ -102,7 +98,7 @@ impl<M: Memory> TokenBalance<M> {
         &mut self,
         operations: impl FnOnce(&mut BalanceWriteBack<'_, M>) -> R,
     ) -> R {
-        let mut write_back = BalanceWriteBack::new(&mut self.balances, &mut self.fee_balances);
+        let mut write_back = BalanceWriteBack::new(&mut self.balances, &mut self.fee_pool);
         let result = operations(&mut write_back);
         write_back.flush();
         result
@@ -111,41 +107,26 @@ impl<M: Memory> TokenBalance<M> {
     /// Read the accumulated fee balance for `token`. `None` if no fees have
     /// ever been accrued for this token.
     pub fn fee_balance(&self, token: &TokenId) -> Option<Quantity> {
-        self.fee_balances.get(token).copied()
+        self.fee_pool.accrued(token)
     }
 
     /// Iterate the fee pool. Order is by `TokenId` (BTreeMap ordering).
     pub fn iter_fee_balances(&self) -> impl Iterator<Item = (TokenId, Quantity)> + '_ {
-        self.fee_balances.iter().map(|(k, v)| (*k, *v))
+        self.fee_pool.iter()
     }
 
     /// Snapshot the heap-resident fee pool for pre-upgrade serialization.
     /// Stable user balances are excluded; they survive upgrades on their
     /// own via the underlying [`StableBTreeMap`].
     pub fn fee_pool_snapshot(&self) -> Vec<FeeEntry> {
-        self.fee_balances
-            .iter()
-            .map(|(token, amount)| FeeEntry {
-                token: *token,
-                amount: *amount,
-            })
-            .collect()
+        self.fee_pool.snapshot()
     }
 
     /// Restore the heap-resident fee pool after a `post_upgrade` decode.
     /// Replaces any existing pool; intended to run exactly once during
     /// post-upgrade. Duplicate `TokenId` entries in `snapshot` trap.
     pub fn restore_fee_pool(&mut self, snapshot: Vec<FeeEntry>) {
-        self.fee_balances.clear();
-        for entry in snapshot {
-            assert!(
-                self.fee_balances
-                    .insert(entry.token, entry.amount)
-                    .is_none(),
-                "invalid snapshot: duplicate fee-pool entry for {:?}",
-                entry.token,
-            );
-        }
+        self.fee_pool.restore(snapshot);
     }
 
     /// Read-modify-write for an infallible mutation. Creates the entry if
@@ -188,44 +169,10 @@ impl<M: Memory> TokenBalance<M> {
     }
 }
 
-/// Assert `fee <= gross`, accrue `fee` into the token's fee pool, and return
-/// the net `gross - fee` owed to the creditor. Used by
-/// [`BalanceWriteBack::transfer`] so the money-accounting lives in one
-/// place.
-pub(super) fn split_net_fee(
-    fee_balances: &mut BTreeMap<TokenId, Quantity>,
-    token: &TokenId,
-    gross: Quantity,
-    fee: Quantity,
-) -> Quantity {
-    assert!(
-        fee <= gross,
-        "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
-    );
-    let net = gross
-        .checked_sub(fee)
-        .expect("BUG: fee <= gross checked above");
-    if !fee.is_zero() {
-        let entry = fee_balances.entry(*token).or_default();
-        *entry = entry.checked_add(fee).expect("BUG: fee accrual overflow");
-    }
-    net
-}
-
 /// A row is worth persisting iff it existed before the operation or now holds a
 /// non-zero balance; empty never-existed rows are elided.
 pub(super) fn worth_persisting(existed: bool, balance: &Balance) -> bool {
     existed || !balance.is_zero()
-}
-
-/// CBOR-serializable entry of the fee pool, used by
-/// [`TokenBalance::fee_pool_snapshot`] and `StateSnapshot`.
-#[derive(Clone, Debug, PartialEq, Eq, minicbor::Encode, minicbor::Decode)]
-pub struct FeeEntry {
-    #[n(0)]
-    pub token: TokenId,
-    #[n(1)]
-    pub amount: Quantity,
 }
 
 // Tests that compare full `State` values clone the ledger and assert
@@ -239,7 +186,7 @@ impl Clone for TokenBalance<ic_stable_structures::VectorMemory> {
         for (key, balance) in self.iter() {
             fresh.balances.insert(key, balance);
         }
-        fresh.fee_balances = self.fee_balances.clone();
+        fresh.fee_pool = self.fee_pool.clone();
         fresh
     }
 }
@@ -247,7 +194,7 @@ impl Clone for TokenBalance<ic_stable_structures::VectorMemory> {
 #[cfg(test)]
 impl PartialEq for TokenBalance<ic_stable_structures::VectorMemory> {
     fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter()) && self.fee_balances == other.fee_balances
+        self.iter().eq(other.iter()) && self.fee_pool == other.fee_pool
     }
 }
 
