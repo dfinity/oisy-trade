@@ -1,5 +1,5 @@
 use super::fee_pool::FeePool;
-use super::token::worth_persisting;
+use super::row::BalanceRow;
 use super::{Balance, BalanceKey};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
@@ -16,15 +16,10 @@ use std::collections::BTreeMap;
 /// on the heap.
 ///
 /// [`TokenBalance::with_write_back`]: super::TokenBalance::with_write_back
-pub struct BalanceWriteBack<'a, M: Memory> {
+pub(crate) struct BalanceWriteBack<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
     fee_pool: &'a mut FeePool,
-    buffer: BTreeMap<BalanceKey, BufferedBalance>,
-}
-
-struct BufferedBalance {
-    balance: Balance,
-    existed: bool,
+    buffer: BTreeMap<BalanceKey, BalanceRow>,
 }
 
 impl<'a, M: Memory> BalanceWriteBack<'a, M> {
@@ -52,7 +47,7 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     ///   [`FeePool::withhold`].
     /// - The debtor has no balance entry for `token`, or `gross` exceeds the
     ///   debtor's reserved balance.
-    pub fn transfer(
+    pub(crate) fn transfer(
         &mut self,
         debtor: UserId,
         creditor: UserId,
@@ -78,7 +73,7 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     ///
     /// Panics if the user has no balance entry for `token`, or if `amount`
     /// exceeds their reserved balance.
-    pub fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
+    pub(crate) fn unreserve(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
         bench_scopes!("balances", "balances::unreserve");
         self.load_existing(
             BalanceKey::new(*token, user),
@@ -88,12 +83,12 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     }
 
     /// Write each buffered row back to the stable map exactly once, eliding
-    /// rows that are not [`worth_persisting`].
+    /// rows that are not [`worth_persisting`](BalanceRow::worth_persisting).
     pub(super) fn flush(self) {
         bench_scopes!("balances", "balances::flush");
-        for (key, buffered) in self.buffer {
-            if worth_persisting(buffered.existed, &buffered.balance) {
-                self.balances.insert(key, buffered.balance);
+        for (key, row) in self.buffer {
+            if row.worth_persisting() {
+                self.balances.insert(key, row.balance);
             }
         }
     }
@@ -104,23 +99,20 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     /// from the stable map on its first touch this event; a later touch reuses
     /// the buffered row without re-reading.
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
-        let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
-            existed: true,
-            balance: self.balances.get(&key).expect(msg),
-        });
-        &mut entry.balance
+        let row = self
+            .buffer
+            .entry(key)
+            .or_insert_with(|| BalanceRow::existing(self.balances.get(&key).expect(msg)));
+        &mut row.balance
     }
 
     /// Buffer a row that may not yet exist, as required by the creditor credit
     /// in [`transfer`](Self::transfer), which creates the entry on demand.
     fn load_or_create(&mut self, key: BalanceKey) -> &mut Balance {
-        let entry = self.buffer.entry(key).or_insert_with(|| {
-            let prev = self.balances.get(&key);
-            BufferedBalance {
-                existed: prev.is_some(),
-                balance: prev.unwrap_or_default(),
-            }
-        });
-        &mut entry.balance
+        let row = self
+            .buffer
+            .entry(key)
+            .or_insert_with(|| BalanceRow::load(self.balances, &key));
+        &mut row.balance
     }
 }

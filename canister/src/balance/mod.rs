@@ -1,4 +1,5 @@
 mod fee_pool;
+mod row;
 mod token;
 mod write_back;
 

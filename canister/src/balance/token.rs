@@ -1,4 +1,5 @@
 use super::fee_pool::{FeeEntry, FeePool};
+use super::row::BalanceRow;
 use super::write_back::BalanceWriteBack;
 use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
@@ -94,7 +95,7 @@ impl<M: Memory> TokenBalance<M> {
     ///
     /// The buffer is only ever lent out, so no caller can drop it unflushed
     /// and silently discard the operations it applied.
-    pub fn with_write_back<R>(
+    pub(crate) fn with_write_back<R>(
         &mut self,
         operations: impl FnOnce(&mut BalanceWriteBack<'_, M>) -> R,
     ) -> R {
@@ -130,17 +131,14 @@ impl<M: Memory> TokenBalance<M> {
     }
 
     /// Read-modify-write for an infallible mutation. Creates the entry if
-    /// absent. Skips the write when the mutation left the balance at the
-    /// default and no entry existed, so no-op closures (e.g. `deposit(ZERO)`)
-    /// don't materialise empty `(0, 0)` rows.
+    /// absent, unless the row is not
+    /// [`worth_persisting`](BalanceRow::worth_persisting) afterwards.
     fn update<F: FnOnce(&mut Balance)>(&mut self, user: UserId, token: TokenId, f: F) {
         let key = BalanceKey::new(token, user);
-        let prev = self.balances.get(&key);
-        let existed = prev.is_some();
-        let mut balance = prev.unwrap_or_default();
-        f(&mut balance);
-        if worth_persisting(existed, &balance) {
-            self.balances.insert(key, balance);
+        let mut row = BalanceRow::load(&self.balances, &key);
+        f(&mut row.balance);
+        if row.worth_persisting() {
+            self.balances.insert(key, row.balance);
         }
     }
 
@@ -167,12 +165,6 @@ impl<M: Memory> TokenBalance<M> {
             .iter()
             .map(|entry| (*entry.key(), entry.value()))
     }
-}
-
-/// A row is worth persisting iff it existed before the operation or now holds a
-/// non-zero balance; empty never-existed rows are elided.
-pub(super) fn worth_persisting(existed: bool, balance: &Balance) -> bool {
-    existed || !balance.is_zero()
 }
 
 // Tests that compare full `State` values clone the ledger and assert
