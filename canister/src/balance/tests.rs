@@ -105,10 +105,9 @@ mod balance {
 }
 
 mod token_balance {
+    use super::fixtures::{alice, bob, token_a, token_b, transfer, unreserve};
     use crate::balance::{Balance, InsufficientBalanceError, TokenBalance};
-    use crate::order::{Quantity, TokenId};
-    use crate::user::UserId;
-    use candid::Principal;
+    use crate::order::Quantity;
 
     #[test]
     fn should_deposit_and_read_balance() {
@@ -207,7 +206,6 @@ mod token_balance {
 
     #[test]
     fn should_transfer_between_users() {
-        let bob = UserId::new(2);
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(100u64));
         tb.reserve(alice(), &token_a(), Quantity::from(100u64))
@@ -216,7 +214,7 @@ mod token_balance {
         transfer(
             &mut tb,
             alice(),
-            bob,
+            bob(),
             &token_a(),
             Quantity::from(100u64),
             Quantity::ZERO,
@@ -227,7 +225,7 @@ mod token_balance {
             Some(Balance::new(0u64, 0u64))
         );
         assert_eq!(
-            tb.get_balance(bob, &token_a()),
+            tb.get_balance(bob(), &token_a()),
             Some(Balance::new(100u64, 0u64))
         );
     }
@@ -257,12 +255,11 @@ mod token_balance {
     #[test]
     #[should_panic(expected = "BUG: debtor balance missing")]
     fn should_panic_transfer_missing_debtor() {
-        let bob = UserId::new(2);
         let mut tb = TokenBalance::default();
         transfer(
             &mut tb,
             alice(),
-            bob,
+            bob(),
             &token_a(),
             Quantity::from(10u64),
             Quantity::ZERO,
@@ -290,45 +287,12 @@ mod token_balance {
         let mut tb = TokenBalance::default();
         unreserve(&mut tb, alice(), &token_a(), Quantity::from(10u64));
     }
-
-    fn transfer(
-        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
-        debtor: UserId,
-        creditor: UserId,
-        token: &TokenId,
-        gross: Quantity,
-        fee: Quantity,
-    ) {
-        tb.with_write_back(|balances| balances.transfer(debtor, creditor, token, gross, fee));
-    }
-
-    fn unreserve(
-        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
-        user: UserId,
-        token: &TokenId,
-        amount: Quantity,
-    ) {
-        tb.with_write_back(|balances| balances.unreserve(user, token, amount));
-    }
-
-    fn alice() -> UserId {
-        UserId::new(1)
-    }
-
-    fn token_a() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xA0]))
-    }
-
-    fn token_b() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xB0]))
-    }
 }
 
 mod fee_pool {
+    use super::fixtures::{alice, bob, token_a, token_b, transfer, unreserve};
     use crate::balance::{Balance, FeeEntry, TokenBalance};
     use crate::order::{Quantity, TokenId};
-    use crate::user::UserId;
-    use candid::Principal;
 
     #[test]
     fn fee_balance_is_none_for_unknown_token() {
@@ -516,26 +480,6 @@ mod fee_pool {
         ]);
     }
 
-    fn transfer(
-        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
-        debtor: UserId,
-        creditor: UserId,
-        token: &TokenId,
-        gross: Quantity,
-        fee: Quantity,
-    ) {
-        tb.with_write_back(|balances| balances.transfer(debtor, creditor, token, gross, fee));
-    }
-
-    fn unreserve(
-        tb: &mut TokenBalance<ic_stable_structures::VectorMemory>,
-        user: UserId,
-        token: &TokenId,
-        amount: Quantity,
-    ) {
-        tb.with_write_back(|balances| balances.unreserve(user, token, amount));
-    }
-
     fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
         let mut tb = TokenBalance::default();
         tb.deposit(alice(), token_a(), Quantity::from(amount));
@@ -560,305 +504,194 @@ mod fee_pool {
         }
         acc
     }
-
-    fn alice() -> UserId {
-        UserId::new(1)
-    }
-
-    fn bob() -> UserId {
-        UserId::new(2)
-    }
-
-    fn token_a() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xA0]))
-    }
-
-    fn token_b() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xB0]))
-    }
 }
 
 mod write_back {
+    use super::fixtures::{
+        alice as taker, bob as maker1, carol as maker2, token_a as base, token_b as quote,
+    };
     use crate::balance::{Balance, TokenBalance};
     use crate::order::{Quantity, TokenId};
     use crate::user::UserId;
-    use candid::Principal;
     use ic_stable_structures::VectorMemory;
 
-    enum Op {
-        Transfer {
-            debtor: UserId,
-            creditor: UserId,
-            token: TokenId,
-            gross: u64,
-            fee: u64,
-        },
-        Unreserve {
-            user: UserId,
-            token: TokenId,
-            amount: u64,
-        },
-    }
-
-    struct TestCase {
-        desc: &'static str,
-        setup: Vec<(UserId, TokenId, u64, u64)>,
-        ops: Vec<Op>,
-        expected_balances: Vec<(UserId, TokenId, u64, u64)>,
-        expected_fees: Vec<(TokenId, u64)>,
-    }
-
     #[test]
-    fn write_back_settles_to_expected_balances() {
-        let cases = vec![
-            TestCase {
-                desc: "taker party to several fills, no fees",
-                setup: vec![
-                    (taker(), base(), 300, 300),
-                    (maker1(), quote(), 0, 0),
-                    (maker2(), quote(), 0, 0),
-                ],
-                ops: vec![
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 100,
-                        fee: 0,
-                    },
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker2(),
-                        token: base(),
-                        gross: 150,
-                        fee: 0,
-                    },
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 50,
-                        fee: 0,
-                    },
-                ],
-                expected_balances: vec![
-                    (taker(), base(), 0, 0),
-                    (maker1(), base(), 150, 0),
-                    (maker2(), base(), 150, 0),
-                ],
-                expected_fees: vec![],
-            },
-            TestCase {
-                desc: "taker party to several fills, with fees",
-                setup: vec![
-                    (taker(), base(), 300, 300),
-                    (maker1(), quote(), 0, 0),
-                    (maker2(), quote(), 0, 0),
-                ],
-                ops: vec![
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 100,
-                        fee: 3,
-                    },
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker2(),
-                        token: base(),
-                        gross: 150,
-                        fee: 7,
-                    },
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 50,
-                        fee: 1,
-                    },
-                ],
-                expected_balances: vec![
-                    (taker(), base(), 0, 0),
-                    (maker1(), base(), 146, 0),
-                    (maker2(), base(), 143, 0),
-                ],
-                expected_fees: vec![(base(), 11)],
-            },
-            TestCase {
-                desc: "self-transfer credits the just-debited row",
-                setup: vec![(taker(), base(), 100, 60)],
-                ops: vec![Op::Transfer {
-                    debtor: taker(),
-                    creditor: taker(),
-                    token: base(),
-                    gross: 60,
-                    fee: 0,
-                }],
-                expected_balances: vec![(taker(), base(), 100, 0)],
-                expected_fees: vec![],
-            },
-            TestCase {
-                desc: "self-transfer with fee",
-                setup: vec![(taker(), base(), 100, 60)],
-                ops: vec![Op::Transfer {
-                    debtor: taker(),
-                    creditor: taker(),
-                    token: base(),
-                    gross: 60,
-                    fee: 4,
-                }],
-                expected_balances: vec![(taker(), base(), 96, 0)],
-                expected_fees: vec![(base(), 4)],
-            },
-            TestCase {
-                desc: "unreserve interleaved with transfers",
-                setup: vec![(taker(), base(), 200, 200), (maker1(), quote(), 0, 0)],
-                ops: vec![
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 80,
-                        fee: 2,
-                    },
-                    Op::Unreserve {
-                        user: taker(),
-                        token: base(),
-                        amount: 40,
-                    },
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 60,
-                        fee: 0,
-                    },
-                ],
-                expected_balances: vec![(taker(), base(), 40, 20), (maker1(), base(), 138, 0)],
-                expected_fees: vec![(base(), 2)],
-            },
-            TestCase {
-                desc: "creditor row created within the event",
-                setup: vec![(taker(), base(), 100, 100)],
-                ops: vec![Op::Transfer {
-                    debtor: taker(),
-                    creditor: maker1(),
-                    token: base(),
-                    gross: 100,
-                    fee: 5,
-                }],
-                expected_balances: vec![(taker(), base(), 0, 0), (maker1(), base(), 95, 0)],
-                expected_fees: vec![(base(), 5)],
-            },
-            TestCase {
-                desc: "two tokens touched in one event",
-                setup: vec![(taker(), base(), 100, 100), (maker1(), quote(), 90, 90)],
-                ops: vec![
-                    Op::Transfer {
-                        debtor: taker(),
-                        creditor: maker1(),
-                        token: base(),
-                        gross: 100,
-                        fee: 4,
-                    },
-                    Op::Transfer {
-                        debtor: maker1(),
-                        creditor: taker(),
-                        token: quote(),
-                        gross: 90,
-                        fee: 3,
-                    },
-                ],
-                expected_balances: vec![
-                    (taker(), base(), 0, 0),
-                    (maker1(), base(), 96, 0),
-                    (maker1(), quote(), 0, 0),
-                    (taker(), quote(), 87, 0),
-                ],
-                expected_fees: vec![(base(), 4), (quote(), 3)],
-            },
-        ];
+    fn should_debit_the_taker_row_once_across_several_fills() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 300)]);
 
-        for case in cases {
-            let mut actual = seeded(&case.setup);
-            actual.with_write_back(|balances| {
-                for op in &case.ops {
-                    match op {
-                        Op::Transfer {
-                            debtor,
-                            creditor,
-                            token,
-                            gross,
-                            fee,
-                        } => balances.transfer(
-                            *debtor,
-                            *creditor,
-                            token,
-                            Quantity::from(*gross),
-                            Quantity::from(*fee),
-                        ),
-                        Op::Unreserve {
-                            user,
-                            token,
-                            amount,
-                        } => balances.unreserve(*user, token, Quantity::from(*amount)),
-                    }
-                }
-            });
-
-            for (user, token, free, reserved) in &case.expected_balances {
-                assert_eq!(
-                    actual.get_balance(*user, token),
-                    Some(Balance::new(*free, *reserved)),
-                    "{}: balance for user {user:?} token {token:?}",
-                    case.desc,
-                );
-            }
-
-            let actual_fees: Vec<(TokenId, Quantity)> = actual.iter_fee_balances().collect();
-            let expected_fees: Vec<(TokenId, Quantity)> = case
-                .expected_fees
-                .iter()
-                .map(|(token, fee)| (*token, Quantity::from(*fee)))
-                .collect();
-            assert_eq!(actual_fees, expected_fees, "{}: fee pool", case.desc);
-        }
-    }
-
-    fn seeded(setup: &[(UserId, TokenId, u64, u64)]) -> TokenBalance<VectorMemory> {
-        let mut tb = TokenBalance::default();
-        for (user, token, deposit, reserve) in setup {
-            if *deposit > 0 {
-                tb.deposit(*user, *token, Quantity::from(*deposit));
-            }
-            if *reserve > 0 {
-                tb.reserve(*user, token, Quantity::from(*reserve)).unwrap();
-            }
-        }
-        tb
-    }
-
-    #[test]
-    fn flush_elides_untouched_empty_creditor_row() {
-        let mut tb = seeded(&[(taker(), base(), 100, 0)]);
-        tb.with_write_back(|balances| {
-            balances.transfer(
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
                 taker(),
                 maker1(),
                 &base(),
-                Quantity::from(0u64),
-                Quantity::from(0u64),
+                Quantity::from(100u64),
+                Quantity::ZERO,
+            );
+            write_back.transfer(
+                taker(),
+                maker2(),
+                &base(),
+                Quantity::from(150u64),
+                Quantity::ZERO,
+            );
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(50u64),
+                Quantity::ZERO,
             );
         });
-        assert_eq!(tb.get_balance(maker1(), &base()), None);
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker1(), &base()),
+            Some(Balance::new(150u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker2(), &base()),
+            Some(Balance::new(150u64, 0u64))
+        );
+        assert_eq!(accrued_fees(&balances), vec![]);
     }
 
     #[test]
-    fn flush_writes_hand_computed_balances() {
-        let mut tb = seeded(&[(taker(), base(), 100, 100)]);
-        tb.with_write_back(|balances| {
-            balances.transfer(
+    fn should_withhold_a_fee_from_every_fill() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 300)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(100u64),
+                Quantity::from(3u64),
+            );
+            write_back.transfer(
+                taker(),
+                maker2(),
+                &base(),
+                Quantity::from(150u64),
+                Quantity::from(7u64),
+            );
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(50u64),
+                Quantity::from(1u64),
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker1(), &base()),
+            Some(Balance::new(146u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker2(), &base()),
+            Some(Balance::new(143u64, 0u64))
+        );
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![(base(), Quantity::from(11u64))]
+        );
+    }
+
+    #[test]
+    fn should_credit_a_self_transfer_to_the_just_debited_row() {
+        let mut balances = seeded(&[row(taker(), base(), 40, 60)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                taker(),
+                &base(),
+                Quantity::from(60u64),
+                Quantity::ZERO,
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(100u64, 0u64))
+        );
+        assert_eq!(accrued_fees(&balances), vec![]);
+    }
+
+    #[test]
+    fn should_withhold_a_fee_on_a_self_transfer() {
+        let mut balances = seeded(&[row(taker(), base(), 40, 60)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                taker(),
+                &base(),
+                Quantity::from(60u64),
+                Quantity::from(4u64),
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(96u64, 0u64))
+        );
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![(base(), Quantity::from(4u64))]
+        );
+    }
+
+    #[test]
+    fn should_apply_an_unreserve_interleaved_with_transfers() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 200)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(80u64),
+                Quantity::from(2u64),
+            );
+            write_back.unreserve(taker(), &base(), Quantity::from(40u64));
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(60u64),
+                Quantity::ZERO,
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(40u64, 20u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker1(), &base()),
+            Some(Balance::new(138u64, 0u64))
+        );
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![(base(), Quantity::from(2u64))]
+        );
+    }
+
+    #[test]
+    fn should_create_the_creditor_row_within_the_event() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 100)]);
+        assert_eq!(balances.get_balance(maker1(), &base()), None);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
                 taker(),
                 maker1(),
                 &base(),
@@ -866,23 +699,123 @@ mod write_back {
                 Quantity::from(5u64),
             );
         });
+
         assert_eq!(
-            tb.get_balance(taker(), &base()),
+            balances.get_balance(taker(), &base()),
             Some(Balance::new(0u64, 0u64))
         );
         assert_eq!(
-            tb.get_balance(maker1(), &base()),
+            balances.get_balance(maker1(), &base()),
             Some(Balance::new(95u64, 0u64))
         );
-        assert_eq!(tb.fee_balance(&base()), Some(Quantity::from(5u64)));
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![(base(), Quantity::from(5u64))]
+        );
+    }
+
+    #[test]
+    fn should_apply_operations_on_two_tokens_in_one_event() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 100), row(maker1(), quote(), 0, 90)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(100u64),
+                Quantity::from(4u64),
+            );
+            write_back.transfer(
+                maker1(),
+                taker(),
+                &quote(),
+                Quantity::from(90u64),
+                Quantity::from(3u64),
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker1(), &base()),
+            Some(Balance::new(96u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(maker1(), &quote()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(
+            balances.get_balance(taker(), &quote()),
+            Some(Balance::new(87u64, 0u64))
+        );
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![
+                (base(), Quantity::from(4u64)),
+                (quote(), Quantity::from(3u64))
+            ]
+        );
+    }
+
+    #[test]
+    fn should_elide_a_creditor_row_that_stays_empty() {
+        let mut balances = seeded(&[row(taker(), base(), 100, 0)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(taker(), maker1(), &base(), Quantity::ZERO, Quantity::ZERO);
+        });
+
+        assert_eq!(balances.get_balance(maker1(), &base()), None);
+    }
+
+    #[test]
+    fn should_withhold_the_whole_gross_when_the_fee_equals_it() {
+        let mut balances = seeded(&[row(taker(), base(), 0, 50)]);
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
+                taker(),
+                maker1(),
+                &base(),
+                Quantity::from(50u64),
+                Quantity::from(50u64),
+            );
+        });
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(0u64, 0u64))
+        );
+        assert_eq!(balances.get_balance(maker1(), &base()), None);
+        assert_eq!(
+            accrued_fees(&balances),
+            vec![(base(), Quantity::from(50u64))]
+        );
+    }
+
+    #[test]
+    fn should_leave_balances_untouched_when_no_operation_is_applied() {
+        let mut balances = seeded(&[row(taker(), base(), 10, 20)]);
+
+        balances.with_write_back(|_write_back| {});
+
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(10u64, 20u64))
+        );
+        assert_eq!(accrued_fees(&balances), vec![]);
     }
 
     #[test]
     #[should_panic(expected = "BUG: debtor balance missing")]
-    fn should_panic_write_back_transfer_missing_debtor() {
-        let mut tb = TokenBalance::default();
-        tb.with_write_back(|balances| {
-            balances.transfer(
+    fn should_panic_on_transfer_with_missing_debtor() {
+        let mut balances = TokenBalance::default();
+
+        balances.with_write_back(|write_back| {
+            write_back.transfer(
                 taker(),
                 maker1(),
                 &base(),
@@ -894,29 +827,44 @@ mod write_back {
 
     #[test]
     #[should_panic(expected = "BUG: user balance missing for unreserve")]
-    fn should_panic_write_back_unreserve_missing_entry() {
-        let mut tb = TokenBalance::default();
-        tb.with_write_back(|balances| balances.unreserve(taker(), &base(), Quantity::from(10u64)));
+    fn should_panic_on_unreserve_with_missing_entry() {
+        let mut balances = TokenBalance::default();
+
+        balances
+            .with_write_back(|write_back| write_back.unreserve(taker(), &base(), Quantity::ZERO));
     }
 
-    fn taker() -> UserId {
-        UserId::new(1)
+    /// A `(token, user)` row to seed into the balance map, described by the
+    /// same `(free, reserved)` split the assertions read back.
+    struct Row {
+        user: UserId,
+        token: TokenId,
+        free: u64,
+        reserved: u64,
     }
 
-    fn maker1() -> UserId {
-        UserId::new(2)
+    fn row(user: UserId, token: TokenId, free: u64, reserved: u64) -> Row {
+        Row {
+            user,
+            token,
+            free,
+            reserved,
+        }
     }
 
-    fn maker2() -> UserId {
-        UserId::new(3)
+    fn seeded(rows: &[Row]) -> TokenBalance<VectorMemory> {
+        let mut balances = TokenBalance::default();
+        for row in rows {
+            balances.deposit(row.user, row.token, Quantity::from(row.free + row.reserved));
+            balances
+                .reserve(row.user, &row.token, Quantity::from(row.reserved))
+                .unwrap();
+        }
+        balances
     }
 
-    fn base() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xA0]))
-    }
-
-    fn quote() -> TokenId {
-        TokenId::new(Principal::from_slice(&[0xB0]))
+    fn accrued_fees(balances: &TokenBalance<VectorMemory>) -> Vec<(TokenId, Quantity)> {
+        balances.iter_fee_balances().collect()
     }
 }
 
@@ -933,5 +881,57 @@ mod key {
             let decoded = BalanceKey::from_bytes(bytes);
             prop_assert_eq!(decoded, key);
         }
+    }
+}
+
+mod fixtures {
+    use crate::balance::TokenBalance;
+    use crate::order::{Quantity, TokenId};
+    use crate::user::UserId;
+    use candid::Principal;
+    use ic_stable_structures::VectorMemory;
+
+    /// Apply a single `transfer` through the write-back buffer, the only path
+    /// that mutates balances during settling.
+    pub fn transfer(
+        balances: &mut TokenBalance<VectorMemory>,
+        debtor: UserId,
+        creditor: UserId,
+        token: &TokenId,
+        gross: Quantity,
+        fee: Quantity,
+    ) {
+        balances
+            .with_write_back(|write_back| write_back.transfer(debtor, creditor, token, gross, fee));
+    }
+
+    /// Apply a single `unreserve` through the write-back buffer.
+    pub fn unreserve(
+        balances: &mut TokenBalance<VectorMemory>,
+        user: UserId,
+        token: &TokenId,
+        amount: Quantity,
+    ) {
+        balances.with_write_back(|write_back| write_back.unreserve(user, token, amount));
+    }
+
+    pub fn alice() -> UserId {
+        UserId::new(1)
+    }
+
+    pub fn bob() -> UserId {
+        UserId::new(2)
+    }
+
+    pub fn carol() -> UserId {
+        UserId::new(3)
+    }
+
+    pub fn token_a() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xA0]))
+    }
+
+    pub fn token_b() -> TokenId {
+        TokenId::new(Principal::from_slice(&[0xB0]))
     }
 }
