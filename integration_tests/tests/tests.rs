@@ -6,9 +6,9 @@ use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LED
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    DepositRequestError, DepositTemporaryError, ErrorKind, LimitOrderRequest, OrderStatus, Side,
-    Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus, WithdrawRequest,
-    WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositResponse, DepositTemporaryError, ErrorKind, LimitOrderRequest,
+    OrderStatus, Side, Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus,
+    WithdrawError, WithdrawRequest, WithdrawRequestError, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -1597,6 +1597,76 @@ async fn should_fail_deposit_with_unsupported_token() {
             token_id: fake_token,
         }))
     );
+
+    setup.drop().await;
+}
+
+#[tokio::test]
+async fn oversized_amount_is_rejected_without_trapping() {
+    const OVERSIZED_LIMBS: usize = 200_000;
+
+    fn oversized_amount() -> Nat {
+        Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
+    }
+
+    type OversizedAmountCase = (&'static str, Vec<u8>, fn(&[u8]));
+
+    fn assert_deposit_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<DepositResponse, DepositError> =
+            candid::decode_one(bytes).expect("decode deposit response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    fn assert_withdraw_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<WithdrawResponse, WithdrawError> =
+            candid::decode_one(bytes).expect("decode withdraw response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x07]);
+    let token = setup.base_token_id();
+
+    let cases: [OversizedAmountCase; 2] = [
+        (
+            "deposit",
+            candid::encode_args((DepositRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode deposit args"),
+            assert_deposit_amount_exceeds_maximum,
+        ),
+        (
+            "withdraw",
+            candid::encode_args((WithdrawRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode withdraw args"),
+            assert_withdraw_amount_exceeds_maximum,
+        ),
+    ];
+
+    for (method, args, assert_rejected) in cases {
+        let bytes = setup
+            .env()
+            .update_call(setup.oisy_trade_id(), user, method, args)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{method} must reject an oversized amount as a request error, not trap on \
+                     super-linear work over the unvalidated amount: {e}"
+                )
+            });
+        assert_rejected(&bytes);
+    }
 
     setup.drop().await;
 }
@@ -4035,6 +4105,11 @@ mod trading_accounts {
             .await
             .unwrap();
 
+        // Upgrade between the grants: the grant-cooldown anchor lives in the
+        // event log and must survive, otherwise the second grant below would be
+        // treated as a first grant and escape the cooldown.
+        setup.upgrade(None).await;
+
         let err = client
             .add_trading_account(trading_account(2))
             .await
@@ -4262,6 +4337,16 @@ mod trading_accounts {
         // `quantity` base); grant whitelists T.
         setup.fund_base(funding, quantity * 4).await;
         funding_client.add_trading_account(trading).await.unwrap();
+
+        // Upgrade mid-lifecycle: the whitelist (stable memory) and the
+        // deposited balance must survive, and delegation must still resolve —
+        // the trading-account order placed below is the proof it does.
+        setup.upgrade(None).await;
+        assert_eq!(
+            funding_client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the whitelist survives the upgrade"
+        );
 
         let t_order = trading_client.add_limit_order(sell()).await.unwrap();
         setup.env().tick().await;

@@ -621,6 +621,10 @@ type AddTradingAccountError = record {
             // funding account itself, or an already-registered user. The
             // advisory `message` distinguishes the two.
             InvalidTradingAccount;
+            // The proposed trading account is a non-authenticating principal
+            // (the anonymous principal or the management canister) that no
+            // single keyholder can exclusively exercise.
+            NonAuthenticatingTradingAccount;
             // The principal is already a trading account (of anyone).
             AlreadyTradingAccount;
             // The granter already has the maximum number of trading accounts.

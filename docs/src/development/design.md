@@ -71,9 +71,11 @@ This separation means the matching engine never waits on async inter-canister ca
 | Role                       | Capabilities                                                                                  |
 |----------------------------|-----------------------------------------------------------------------------------------------|
 | **Admin** (controller)     | Add pairs (fees set at pair creation), halt/resume trading, upgrade canister |
-| **User** (any principal)   | Place orders, cancel own orders, deposit, withdraw own balance |
+| **Funding account** (any principal) | Deposit, withdraw, place and cancel own orders, whitelist/revoke trading accounts |
+| **Trading account** (whitelisted principal) | Place and cancel orders acting on its funding account's balance; cannot deposit or withdraw and never holds funds |
 
-- No allowlisting: any principal can trade on any active pair.
+- No allowlisting for trading: any principal can trade on any active pair.
+- A principal is either a funding account or a trading account, never both. A funding account may whitelist a trading account (a delegate principal that trades on the funding account's balance but can never move funds); see [DEFI-2911](specs/DEFI-2911-funding-and-trading-accounts.md).
 - Admin operations are guarded by `ic_cdk::api::is_controller()`.
 
 ## Trading
@@ -348,6 +350,8 @@ Every order submitted to OISY TRADE is recorded in a map keyed by `OrderId`; key
 - **time_in_force**: the order's time-in-force policy — `GoodTilCanceled` or `FillOrKill` (see Order Lifecycle / Time-in-Force).
 - **created_at**: the time the order was submitted, in nanoseconds since the Unix epoch.
 - **last_updated_at**: the time of the most recent modifying event (fill, status transition, or cancel), in nanoseconds since the Unix epoch; optional — `null` until the order is first modified.
+- **placed_by**: the acting principal that submitted the order, when it differs from `owner` — i.e. a trading account acting on the funding account's balance; optional — `null` when the funding account placed the order itself.
+- **canceled_by**: the acting principal that canceled the order, likewise; optional — `null` when the funding account canceled it itself, or the order was never canceled.
 
 A record is inserted once at submission and its `status` field is updated as the order transitions through its lifecycle. The trading pair is not stored — it is derivable from the `OrderBookId` embedded in the `OrderId` via the canister's trading-pair registry.
 
@@ -413,8 +417,9 @@ controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
 
 **Update calls** (state-changing):
 
-- **`deposit(token, amount)`**: transfers tokens into the canister via `icrc2_transfer_from`. Credits the user's available balance on success. Involves one async inter-canister call. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
-- **`withdraw(token, amount)`**: transfers tokens from the canister to the user's wallet via `icrc1_transfer`. Debits the user's available balance. Time: O(1) for balance bookkeeping, dominated by the async ledger call.
+- **`deposit(token, amount)`**: transfers tokens into the canister via `icrc2_transfer_from`. Credits the user's available balance on success. Involves one async inter-canister call. Time: O(1) for balance bookkeeping, dominated by the async ledger call. Rejected synchronously with `TradingAccountForbidden`, before any ledger call, when the caller is a trading account.
+- **`withdraw(token, amount)`**: transfers tokens from the canister to the user's wallet via `icrc1_transfer`. Debits the user's available balance. Time: O(1) for balance bookkeeping, dominated by the async ledger call. Rejected synchronously with `TradingAccountForbidden`, before any ledger call, when the caller is a trading account.
+- **`add_trading_account(principal)` / `remove_trading_account(principal)`**: the caller (a funding account) whitelists or revokes a trading principal that may then place and cancel orders on the caller's balance. Grants are gated (registered granter, 1:1 mapping, `MAX_TRADING_ACCOUNTS_PER_USER` cap) and rate-limited by a per-account cooldown; revocation is never rate-limited. Recorded as events. Fully synchronous. Time: O(1).
 - **`add_limit_order(pair, side, price, quantity)`**: validates the order (balance, tick/lot size), debits the required amount from the user's available balance to reserved, enqueues the order, and returns an order ID. Fully synchronous — no inter-canister calls. Time: O(1). Memory: O(1) for the queued order.
 - **`cancel_limit_order(order_id)`**: removes a resting order from the book and returns reserved tokens to the user's available balance. Time: O(log p + k) where p is the number of price levels and k is the queue depth at the order's price level (to find and remove the order from the `VecDeque`). Memory: frees the canceled order.
 
@@ -427,6 +432,9 @@ controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
 - **`get_my_orders(opt GetMyOrdersArgs)`**: returns the caller's orders, each with its current status. The argument is optional; when absent it defaults to the first page (newest first, `length = MAX_ORDERS_PER_RESPONSE`). When present, `GetMyOrdersArgs.filter` selects the mode: `ById` performs a point lookup of a single order; `ByPage` returns a page over the caller's orders, newest first. Time: O(1) for `ById` with an order-ID-indexed map; O(k) for `ByPage` over the page length.
 - **`get_balances(filter)`**: returns the caller's per-token balances. With no filter, iterates over all tokens registered with OISY TRADE, performs a balance lookup for each, and emits only non-zero entries; with a filter, returns one entry per requested `FilterToken` (in submission order, including zero entries and `TokenNotSupported` for unknown tokens). Time: with no filter, O(t) over the number of registered tokens; with a filter, O(f) over the number of requested filter entries.
 - **`list_supported_tokens()`**: returns the full list of tokens registered with OISY TRADE. Time: O(n) over the registered tokens.
+- **`get_my_trading_accounts()`**: returns the caller's whitelist of trading principals (empty for a principal with none). Acts on the raw caller — it never resolves delegation. Time: O(1).
+
+`get_balances`, `get_my_orders`, `get_my_trades`, `add_limit_order`, and `cancel_limit_order` resolve the caller to its funding account: called by a trading account, they act on the funding account's balances, orders, and trades exactly as if the funding account had called (the acting key is recorded as `placed_by` / `canceled_by`). The whitelist-management calls above are the exception — they always act on the raw caller.
 
 ### Expected Load
 

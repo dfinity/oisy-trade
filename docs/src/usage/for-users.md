@@ -18,7 +18,7 @@ The walkthrough uses two configurable identities — one for buy-side operations
 
 ## Identities
 
-Export a buyer and a seller identity. OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two.
+Export a buyer and a seller identity. OISY TRADE keys internal balances and order ownership off the caller principal, so every signing call targets one of these two. (A funding account may also whitelist a *trading account* — a separate principal that places and cancels orders on the funding account's balance but can never deposit or withdraw; its calls resolve to the funding account. This walkthrough uses plain funding accounts throughout.)
 
 ```bash
 export BUYER_IDENTITY=<buyer-name>

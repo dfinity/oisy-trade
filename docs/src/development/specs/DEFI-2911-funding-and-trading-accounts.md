@@ -122,11 +122,14 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   funder.
 - **Consent by the trading principal (two-step grant).** `add_trading_account` is unilateral,
   like Hyperliquid's `approveAgent`. Accepted residual: `F` can claim any *unregistered*
-  principal as its trading key. The consequence falls on `F` (the claimed key gains trading
-  power over `F`'s own funds); a principal claimed against its will simply cannot deposit while
-  whitelisted and its owner would use a different principal. R7's registered-user check ensures
-  no principal with existing funds or history can ever be claimed, and claiming is not free —
-  the claimer must itself be a deposited funding account, one grant per cooldown (R7, R14).
+  principal as its trading key, except the anonymous principal and the IC management canister,
+  which are refused — the anonymous principal is the sender of every unsigned ingress, so a
+  grant on it would resolve every unauthenticated caller to `F`. The consequence falls on `F`
+  (the claimed key gains trading power over `F`'s own funds); a principal claimed against its
+  will simply cannot deposit while whitelisted and its owner would use a different principal.
+  R7's registered-user check ensures no principal with existing funds or history can ever be
+  claimed, and claiming is not free — the claimer must itself be a deposited funding account,
+  one grant per cooldown (R7, R14).
 - **Automatic order cancellation on revocation (typed revocation).** Revoking a key could
   cancel the open orders it placed (`placed_by`, R13, would make them identifiable), and one
   could distinguish a "compromised key" revocation (cancel everything) from a "scheduled
@@ -162,7 +165,10 @@ out. Every major venue offers this separation — CEXes via permission-scoped AP
   agent's signature can never satisfy. The CEX permission-mask alternative exists (Binance /
   Kraken / Coinbase) but every venue compensates for its misconfiguration risk with extra gates
   (IP allowlists, address allowlists, consensus approvals); with exactly one scope to express,
-  the structural rule is smaller and safer.
+  the structural rule is smaller and safer. Grants also *refuse* the anonymous principal (the
+  sender of every unsigned ingress) and the IC management canister: naming the anonymous
+  principal a trading account would resolve every unauthenticated caller to the granter, an
+  open capability over its funds, so that one grant is rejected outright.
 - **A principal is either a funding account or a trading account, never both.** Funding accounts
   are exactly the registered users (a `UserId` is acquired on first deposit, the only
   registering path); trading accounts can never deposit (R3), can never grant (R7), and must be
@@ -292,11 +298,13 @@ remove_trading_account : (principal) -> (variant { Ok; Err : RemoveTradingAccoun
 get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradingAccountsError }) query;
 ```
 
-All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries one request-error
-variant per R7 precondition (granter not registered, self-grant, already a trading account,
-already a registered user, caller is a trading account, too many trading accounts) plus, in
-its `TemporaryError` class, the R14 cooldown and the in-flight-funding-operation rejection;
-`RemoveTradingAccountError` covers "not your trading account". `DepositError` and `WithdrawError` gain a variant denying funding operations
+All three are DEFI-2801 error envelopes. `AddTradingAccountError` carries request-error variants
+covering the R7 preconditions — `FundingAccountNotFound` (granter unregistered or itself a
+trading account), `InvalidTradingAccount` (self-grant or already-registered `T`),
+`AlreadyTradingAccount`, and `TooManyTradingAccounts`; the two collapsed cases are distinguished
+by the advisory `message` — plus, in its `TemporaryError` class, the R14 cooldown (`RateLimit`)
+and the in-flight-funding-operation rejection (`FundingOperationInProgress`);
+`RemoveTradingAccountError` covers "not your trading account" (`NotAllowed`). `DepositError` and `WithdrawError` gain a variant denying funding operations
 to trading accounts (R3), added *inside* the envelope's `opt variant` request-error class —
 the extension point DEFI-2801 built in exactly for this: a client compiled against the old
 interface decodes the unknown variant as `null` and falls back to the envelope's `message`,
@@ -341,7 +349,7 @@ The two value types:
 ```rust
 /// A trading account's standing authorization.
 pub struct TradingGrant {
-    /// The funding account this key acts for — the result of `resolve_account`.
+    /// The funding account this key acts for — the result of `effective_account`.
     #[cbor(n(0), with = "icrc_cbor::principal")]
     funding: Principal,
 }
@@ -370,16 +378,18 @@ spans both maps and `users`: `grant` checks "`F` is registered", "`T` is unregis
 the type that owns the data. Registration itself stays deposit-only — grant reads `users` but
 never writes it.
 
-API on `UserRegistry`: `grant(funding: Principal, trading: Principal, now: Timestamp) ->
-Result<(), GrantError>` (the identity, cap, and cooldown checks — R7 and R14),
-`revoke(funding: Principal, trading: Principal) -> Result<(), RevokeError>`,
-`resolve_account(caller: Principal) -> Principal` (delegate → funding principal, else the caller),
-`is_trading_account(&Principal) -> bool` (the R3 deny check),
-`trading_accounts_of(funding: Principal) -> Vec<Principal>` (R9).
+API on `UserRegistry`, split into a validation half and an event-application half per the
+event-sourcing pattern: `validate_add_trading_account` / `record_add_trading_account` (the
+identity, cap, and cooldown checks — R7 and R14 — then the whitelist mutation under the `Write`
+gate), `validate_remove_trading_account` / `record_remove_trading_account`, and
+`trading_accounts_of(funding: Principal) -> Vec<Principal>` (R9). Resolution and the R3 deny
+check are served by `lookup(caller) -> Option<UserAccount>`, which `State::effective_account`
+uses to resolve a delegate to its funding principal (else the caller) and `State::lookup_account`
+uses to classify a caller as a trading account.
 
 ### State wiring — `canister/src/state`
 
-- **Resolution.** `State` delegates to `user_registry.resolve_account(caller)`. Applied once,
+- **Resolution.** `State::effective_account(caller)` resolves the caller via the `UserRegistry`. Applied once,
   at the entry of:
   `validate_limit_order` / `record_limit_order` (order owner, balance reservation — R2),
   `validate_cancel_limit_order` (ownership check — R4), `get_balances`, `get_user_order(s)`,
