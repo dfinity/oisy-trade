@@ -1,4 +1,4 @@
-use super::cache::BalanceSettlingBatch;
+use super::write_back::BalanceWriteBack;
 use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 /// - Per-`(token, user)` `Balance` entries in a stable [`StableBTreeMap`]
 ///   (auto-survives upgrades via the memory ID).
 /// - A heap-resident fee pool indexed by `TokenId`, accrued by fills via
-///   [`BalanceSettlingBatch::transfer`] and persisted across upgrades
+///   [`BalanceWriteBack::transfer`] and persisted across upgrades
 ///   through the [`fee_pool_snapshot`](Self::fee_pool_snapshot) /
 ///   [`restore_fee_pool`](Self::restore_fee_pool) pair plumbed through
 ///   `StateSnapshot`.
@@ -92,11 +92,11 @@ impl<M: Memory> TokenBalance<M> {
     /// Open a write-back buffer over the balance map, scoped to a single
     /// settling event. Each `(token, user)` row touched while the batch is
     /// live is read from the stable map at most once and written back at most
-    /// once, on [`BalanceSettlingBatch::flush`]. Preserves the fee-pool accrual
-    /// and empty-row elision of [`BalanceSettlingBatch::transfer`] and
-    /// [`BalanceSettlingBatch::unreserve`] exactly.
-    pub fn settling_batch(&mut self) -> BalanceSettlingBatch<'_, M> {
-        BalanceSettlingBatch::new(&mut self.balances, &mut self.fee_balances)
+    /// once, on [`BalanceWriteBack::flush`]. Preserves the fee-pool accrual
+    /// and empty-row elision of [`BalanceWriteBack::transfer`] and
+    /// [`BalanceWriteBack::unreserve`] exactly.
+    pub fn write_back(&mut self) -> BalanceWriteBack<'_, M> {
+        BalanceWriteBack::new(&mut self.balances, &mut self.fee_balances)
     }
 
     /// Read the accumulated fee balance for `token`. `None` if no fees have
@@ -181,7 +181,7 @@ impl<M: Memory> TokenBalance<M> {
 
 /// Assert `fee <= gross`, accrue `fee` into the token's fee pool, and return
 /// the net `gross - fee` owed to the creditor. Used by
-/// [`BalanceSettlingBatch::transfer`] so the money-accounting lives in one
+/// [`BalanceWriteBack::transfer`] so the money-accounting lives in one
 /// place.
 pub(super) fn split_net_fee(
     fee_balances: &mut BTreeMap<TokenId, Quantity>,

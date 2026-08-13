@@ -492,7 +492,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             self.trade_history
                 .append(taker_leg, taker.user, maker_leg, maker.user);
         }
-        let mut batch = self.balances.settling_batch();
+        let mut write_back = self.balances.write_back();
         for op in &event.balance_operations {
             let token = pair.token(match op {
                 event::BalanceOperation::Transfer { token, .. }
@@ -506,7 +506,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     fee,
                     ..
                 } => {
-                    batch.transfer(
+                    write_back.transfer(
                         resolved[from_order].user,
                         resolved[to_order].user,
                         &token,
@@ -515,11 +515,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     );
                 }
                 event::BalanceOperation::Unreserve { order, amount, .. } => {
-                    batch.unreserve(resolved[order].user, &token, *amount);
+                    write_back.unreserve(resolved[order].user, &token, *amount);
                 }
             }
         }
-        batch.flush();
+        write_back.flush();
     }
 
     /// Returns up to `length` of `owner`'s orders, newest first, resuming

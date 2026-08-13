@@ -299,9 +299,9 @@ mod token_balance {
         gross: Quantity,
         fee: Quantity,
     ) {
-        let mut batch = tb.settling_batch();
-        batch.transfer(debtor, creditor, token, gross, fee);
-        batch.flush();
+        let mut write_back = tb.write_back();
+        write_back.transfer(debtor, creditor, token, gross, fee);
+        write_back.flush();
     }
 
     fn unreserve(
@@ -310,9 +310,9 @@ mod token_balance {
         token: &TokenId,
         amount: Quantity,
     ) {
-        let mut batch = tb.settling_batch();
-        batch.unreserve(user, token, amount);
-        batch.flush();
+        let mut write_back = tb.write_back();
+        write_back.unreserve(user, token, amount);
+        write_back.flush();
     }
 
     fn alice() -> UserId {
@@ -528,9 +528,9 @@ mod fee_pool {
         gross: Quantity,
         fee: Quantity,
     ) {
-        let mut batch = tb.settling_batch();
-        batch.transfer(debtor, creditor, token, gross, fee);
-        batch.flush();
+        let mut write_back = tb.write_back();
+        write_back.transfer(debtor, creditor, token, gross, fee);
+        write_back.flush();
     }
 
     fn unreserve(
@@ -539,9 +539,9 @@ mod fee_pool {
         token: &TokenId,
         amount: Quantity,
     ) {
-        let mut batch = tb.settling_batch();
-        batch.unreserve(user, token, amount);
-        batch.flush();
+        let mut write_back = tb.write_back();
+        write_back.unreserve(user, token, amount);
+        write_back.flush();
     }
 
     fn setup_alice_reserve(amount: u64) -> TokenBalance<ic_stable_structures::VectorMemory> {
@@ -586,7 +586,7 @@ mod fee_pool {
     }
 }
 
-mod settling_batch {
+mod write_back {
     use crate::balance::{Balance, TokenBalance};
     use crate::order::{Quantity, TokenId};
     use crate::user::UserId;
@@ -617,7 +617,7 @@ mod settling_batch {
     }
 
     #[test]
-    fn batch_settles_to_expected_balances() {
+    fn write_back_settles_to_expected_balances() {
         let cases = vec![
             TestCase {
                 desc: "taker party to several fills, no fees",
@@ -791,7 +791,7 @@ mod settling_batch {
         for case in cases {
             let mut actual = seeded(&case.setup);
             {
-                let mut batch = actual.settling_batch();
+                let mut write_back = actual.write_back();
                 for op in &case.ops {
                     match op {
                         Op::Transfer {
@@ -800,7 +800,7 @@ mod settling_batch {
                             token,
                             gross,
                             fee,
-                        } => batch.transfer(
+                        } => write_back.transfer(
                             *debtor,
                             *creditor,
                             token,
@@ -811,10 +811,10 @@ mod settling_batch {
                             user,
                             token,
                             amount,
-                        } => batch.unreserve(*user, token, Quantity::from(*amount)),
+                        } => write_back.unreserve(*user, token, Quantity::from(*amount)),
                     }
                 }
-                batch.flush();
+                write_back.flush();
             }
 
             for (user, token, free, reserved) in &case.expected_balances {
@@ -853,15 +853,15 @@ mod settling_batch {
     fn flush_elides_untouched_empty_creditor_row() {
         let mut tb = seeded(&[(taker(), base(), 100, 0)]);
         {
-            let mut batch = tb.settling_batch();
-            batch.transfer(
+            let mut write_back = tb.write_back();
+            write_back.transfer(
                 taker(),
                 maker1(),
                 &base(),
                 Quantity::from(0u64),
                 Quantity::from(0u64),
             );
-            batch.flush();
+            write_back.flush();
         }
         assert_eq!(tb.get_balance(maker1(), &base()), None);
     }
@@ -870,15 +870,15 @@ mod settling_batch {
     fn flush_writes_hand_computed_balances() {
         let mut tb = seeded(&[(taker(), base(), 100, 100)]);
         {
-            let mut batch = tb.settling_batch();
-            batch.transfer(
+            let mut write_back = tb.write_back();
+            write_back.transfer(
                 taker(),
                 maker1(),
                 &base(),
                 Quantity::from(100u64),
                 Quantity::from(5u64),
             );
-            batch.flush();
+            write_back.flush();
         }
         assert_eq!(
             tb.get_balance(taker(), &base()),
@@ -893,10 +893,10 @@ mod settling_batch {
 
     #[test]
     #[should_panic(expected = "BUG: debtor balance missing")]
-    fn should_panic_batch_transfer_missing_debtor() {
+    fn should_panic_write_back_transfer_missing_debtor() {
         let mut tb = TokenBalance::default();
-        let mut batch = tb.settling_batch();
-        batch.transfer(
+        let mut write_back = tb.write_back();
+        write_back.transfer(
             taker(),
             maker1(),
             &base(),
@@ -907,10 +907,10 @@ mod settling_batch {
 
     #[test]
     #[should_panic(expected = "BUG: user balance missing for unreserve")]
-    fn should_panic_batch_unreserve_missing_entry() {
+    fn should_panic_write_back_unreserve_missing_entry() {
         let mut tb = TokenBalance::default();
-        let mut batch = tb.settling_batch();
-        batch.unreserve(taker(), &base(), Quantity::from(10u64));
+        let mut write_back = tb.write_back();
+        write_back.unreserve(taker(), &base(), Quantity::from(10u64));
     }
 
     fn taker() -> UserId {

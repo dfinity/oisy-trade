@@ -6,7 +6,7 @@ use ic_stable_structures::{Memory, StableBTreeMap};
 use std::collections::BTreeMap;
 
 /// In-heap write-back buffer over the balance map for the balance operations
-/// of one settling event, opened by [`TokenBalance::settling_batch`].
+/// of one settling event, opened by [`TokenBalance::write_back`].
 ///
 /// The taker of a large sweep is party to every fill, so its two balance rows
 /// would otherwise be read-modify-written on each fill. The buffer collapses
@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 /// per dirty row on [`flush`](Self::flush), while the fee pool keeps accruing
 /// on the heap.
 ///
-/// [`TokenBalance::settling_batch`]: super::TokenBalance::settling_batch
-#[must_use = "BalanceSettlingBatch buffers balance mutations that are only applied by `flush()`; \
+/// [`TokenBalance::write_back`]: super::TokenBalance::write_back
+#[must_use = "BalanceWriteBack buffers balance mutations that are only applied by `flush()`; \
               dropping it without flushing silently discards them"]
-pub struct BalanceSettlingBatch<'a, M: Memory> {
+pub struct BalanceWriteBack<'a, M: Memory> {
     balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
     fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
     buffer: BTreeMap<BalanceKey, BufferedBalance>,
@@ -28,7 +28,7 @@ struct BufferedBalance {
     existed: bool,
 }
 
-impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
+impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     pub(super) fn new(
         balances: &'a mut StableBTreeMap<BalanceKey, Balance, M>,
         fee_balances: &'a mut BTreeMap<TokenId, Quantity>,
@@ -87,7 +87,7 @@ impl<'a, M: Memory> BalanceSettlingBatch<'a, M> {
     /// Buffer a row that must already exist in the balance map, or have been
     /// created earlier in this settling event, as required by the debtor read
     /// in [`transfer`](Self::transfer) and the target read in
-    /// [`unreserve`](Self::unreserve). On the row's first touch this batch, traps
+    /// [`unreserve`](Self::unreserve). On the row's first touch this buffer, traps
     /// with `msg` if it is absent from the stable map.
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let entry = self.buffer.entry(key).or_insert_with(|| BufferedBalance {
