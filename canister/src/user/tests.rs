@@ -128,6 +128,20 @@ mod trading_accounts {
                 expected: Err(GrantError::SelfGrant),
             },
             PreconditionCase {
+                desc: "trading principal is the anonymous principal",
+                setup: Box::new(|r| register(r, funding())),
+                funding: funding(),
+                trading: candid::Principal::anonymous(),
+                expected: Err(GrantError::NonAuthenticatingTradingAccount),
+            },
+            PreconditionCase {
+                desc: "trading principal is the management canister",
+                setup: Box::new(|r| register(r, funding())),
+                funding: funding(),
+                trading: candid::Principal::management_canister(),
+                expected: Err(GrantError::NonAuthenticatingTradingAccount),
+            },
+            PreconditionCase {
                 desc: "trading principal is already a trading account of someone else",
                 setup: Box::new(|r| {
                     register(r, funding());

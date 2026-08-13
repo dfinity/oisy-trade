@@ -299,10 +299,13 @@ pub fn get_trading_pairs() -> Vec<TradingPairInfo> {
 }
 
 pub async fn deposit(
-    request: DepositRequest,
+    request: &DepositRequest,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+        DepositError::request(oisy_trade_types::DepositRequestError::AmountExceedsMaximum)
+    })?;
     let token_id = request.token_id.clone();
     let internal_token = order::TokenId::from(token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
@@ -310,9 +313,6 @@ pub async fn deposit(
             oisy_trade_types::DepositRequestError::UnsupportedToken { token_id },
         ));
     }
-    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
-        DepositError::request(oisy_trade_types::DepositRequestError::AmountExceedsMaximum)
-    })?;
     let caller = runtime.msg_caller();
 
     // A trading account can never hold DEX balances, so deny its funding
@@ -368,10 +368,13 @@ pub async fn deposit(
 }
 
 pub async fn withdraw(
-    request: WithdrawRequest,
+    request: &WithdrawRequest,
     runtime: &impl Runtime,
 ) -> Result<WithdrawResponse, WithdrawError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
+    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
+        WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
+    })?;
     let token_id = request.token_id.clone();
     let internal_token = order::TokenId::from(token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
@@ -390,9 +393,6 @@ pub async fn withdraw(
     }
 
     let caller = runtime.msg_caller();
-    let amount = order::Quantity::try_from(request.amount.clone()).map_err(|_| {
-        WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
-    })?;
 
     // A trading account can never hold DEX balances, so deny its funding
     // operations up front — before the in-flight guard, the balance debit, or
@@ -426,7 +426,7 @@ pub async fn withdraw(
     })?;
 
     // Perform the ledger transfer (with automatic BadFee retry).
-    let outcome = ledger::withdraw(&token_id, caller, request.amount, cached_fee, runtime).await;
+    let outcome = ledger::withdraw(&token_id, caller, amount.to_nat(), cached_fee, runtime).await;
 
     // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
     if let Some(fee) = outcome.ledger_fee {

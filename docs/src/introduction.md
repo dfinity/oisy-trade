@@ -18,10 +18,12 @@ For the full design, see [Design](development/design.md).
 
 ## Deployment
 
-| Environment   | Canister ID                                                                                                  | Listings          |
-|---------------|--------------------------------------------------------------------------------------------------------------|-------------------|
-| Production    | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | *Coming soon!*    |
-| Staging       | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens |
+| Environment   | Canister ID                                                                                                  | Listings                                               |
+|---------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| Production    | [`sy2xe-miaaa-aaaar-qb7sq-cai`](https://dashboard.internetcomputer.org/canister/sy2xe-miaaa-aaaar-qb7sq-cai) | Trade tokens with real value: ICP, ckBTC, ckUSDT, etc. |
+| Staging       | [`proc5-daaaa-aaaar-qb5va-cai`](https://dashboard.internetcomputer.org/canister/proc5-daaaa-aaaar-qb5va-cai) | Trade test tokens                                      |
+
+The endpoint `get_trading_pairs` is the source of truth for what is listed.
 
 ## Where to next?
 
