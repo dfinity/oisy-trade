@@ -7,7 +7,7 @@ use ic_stable_structures::{Memory, StableBTreeMap};
 /// there and are still empty.
 pub(super) struct BalanceRow {
     pub(super) balance: Balance,
-    existed: bool,
+    pub(super) existed: bool,
 }
 
 impl BalanceRow {
@@ -20,14 +20,6 @@ impl BalanceRow {
         Self {
             existed: stored.is_some(),
             balance: stored.unwrap_or_default(),
-        }
-    }
-
-    /// A row the caller has already established is present in the map.
-    pub(super) fn existing(balance: Balance) -> Self {
-        Self {
-            balance,
-            existed: true,
         }
     }
 

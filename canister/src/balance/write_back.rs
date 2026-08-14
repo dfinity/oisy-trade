@@ -95,14 +95,14 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
 
     /// Buffer a row that a debit requires to exist: the debtor of
     /// [`transfer`](Self::transfer) and the target of
-    /// [`unreserve`](Self::unreserve). Traps with `msg` if the row is absent
-    /// from the stable map on its first touch this event; a later touch reuses
-    /// the buffered row without re-reading.
+    /// [`unreserve`](Self::unreserve). Traps with `msg` if the stable map held
+    /// no such row; a later touch reuses the buffered row without re-reading.
     fn load_existing(&mut self, key: BalanceKey, msg: &'static str) -> &mut Balance {
         let row = self
             .buffer
             .entry(key)
-            .or_insert_with(|| BalanceRow::existing(self.balances.get(&key).expect(msg)));
+            .or_insert_with(|| BalanceRow::load(self.balances, &key));
+        assert!(row.existed, "{msg}");
         &mut row.balance
     }
 
