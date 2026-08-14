@@ -5,24 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.4.0] - 2026-08-14
+
+### Added
+
+- Public types for funding and trading accounts: the `add_trading_account`, `remove_trading_account`, and `get_my_trading_accounts` error types, the `placed_by` / `canceled_by` attribution fields on `OrderRecord`, and a `TradingAccountForbidden` request-error variant on `DepositError` and `WithdrawError` ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226), [#238](https://github.com/dfinity/oisy-trade/pull/238))
+- `Display` for `Error`, `OrderRecord`, `LimitOrderRequest`, `TradingPair`, and `TokenId`, so principals render textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
 
 ### Changed
 
-- Resolve order cancellation to the funding account (DEFI-2911 PR 6/6) ([#226](https://github.com/dfinity/oisy-trade/pull/226))
-- Resolve order placement to the funding account (DEFI-2911 PR 5/6) ([#223](https://github.com/dfinity/oisy-trade/pull/223))
-- Deny funding operations to trading accounts (DEFI-2911 PR 3/6) ([#209](https://github.com/dfinity/oisy-trade/pull/209))
-- Trading-account revocation + grant cooldown (DEFI-2911 PR 2/6) ([#208](https://github.com/dfinity/oisy-trade/pull/208))
-- Trading-account registry (DEFI-2911 PR 1/6) ([#207](https://github.com/dfinity/oisy-trade/pull/207))
-- Render principals textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
-
-### Fixed
-
-- Reject non-authenticating trading-account delegation targets ([#238](https://github.com/dfinity/oisy-trade/pull/238))
-
-[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
-
-## [Unreleased]
+- **BREAKING (Rust API only):** `OrderRecord` gains two public fields, and `DepositRequestError` and `WithdrawRequestError` each gain a variant, so downstream Rust code that builds an `OrderRecord` from a struct literal or matches those enums exhaustively must be updated. The Candid interface is unchanged for existing clients: an older decoder ignores the added record fields, and an unknown leaf under `RequestError : opt variant` decodes as `null` by the disposition contract, leaving the arm and `message` readable ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
 
 ## [0.3.0] - 2026-07-02
 
@@ -64,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add an `OperationInProgress` error to guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.0.0..oisy_trade_types-v0.1.0
