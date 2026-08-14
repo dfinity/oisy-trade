@@ -313,8 +313,8 @@ mod add_trading_pair {
             // ckBTC/ckUSDT
             oisy_trade_types::AddTradingPairRequest {
                 base: SupportedTokens::CKBTC.token(),
-                tick_size: Nat::from(10_000_u32),
-                lot_size: Nat::from(10_000_u32),
+                tick_size: Nat::from(100_000_u32),
+                lot_size: Nat::from(1_000_u32),
                 ..ckusdt_quote.clone()
             },
             // VCHF/ckUSDT
@@ -758,6 +758,8 @@ mod cancel_limit_order {
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
                 filled_quote: candid::Nat::from(0u64),
                 filled_fee: candid::Nat::from(0u64),
+                placed_by: None,
+                canceled_by: None,
             })
         );
 
@@ -819,6 +821,8 @@ mod cancel_limit_order {
             time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
             filled_quote: candid::Nat::from(0u64),
             filled_fee: candid::Nat::from(0u64),
+            placed_by: None,
+            canceled_by: None,
         };
         assert_eq!(result, Ok(expected.clone()));
         let orders = crate::get_my_orders(
@@ -901,6 +905,383 @@ mod order_status_via_get_my_orders {
     }
 }
 
+mod resolution_on_reads {
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{
+        add_limit_order, add_trading_account, get_balances, get_my_orders, get_my_trades,
+        process_pending_orders,
+    };
+    use candid::Principal;
+    use oisy_trade_types::{GetMyOrdersArgs, GetMyTradesArgs, Side, TradesByAccount, TradesFilter};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const SELLER: Principal = Principal::from_slice(&[0x03]);
+
+    fn account_trades() -> GetMyTradesArgs {
+        GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        }
+    }
+
+    fn setup_funding_with_activity() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(SELLER);
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+        let mut sell = limit_order_request();
+        sell.side = Side::Sell;
+        add_limit_order(sell, &mock_runtime_for(SELLER)).unwrap();
+        process_pending_orders(&mock_runtime_for(Principal::anonymous()));
+
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+    }
+
+    #[test]
+    fn should_return_funding_data_when_read_by_a_trading_account() {
+        setup_funding_with_activity();
+
+        assert_eq!(
+            get_balances(None, TRADING),
+            get_balances(None, FUNDING),
+            "a trading account sees its funding account's balances"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "a trading account sees its funding account's orders"
+        );
+        let orders = get_my_orders(Some(GetMyOrdersArgs::default()), TRADING).unwrap();
+        assert!(
+            orders.iter().all(|o| o.order.owner == FUNDING),
+            "a trading account's orders are owned by the funding account (resolution returned FUNDING)"
+        );
+        assert_eq!(
+            get_my_trades(account_trades(), TRADING),
+            get_my_trades(account_trades(), FUNDING),
+            "a trading account sees its funding account's trades"
+        );
+
+        assert!(!get_balances(None, FUNDING).unwrap().is_empty());
+        assert!(
+            !get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!get_my_trades(account_trades(), FUNDING).unwrap().is_empty());
+    }
+
+    #[test]
+    fn should_resolve_by_id_reads_for_a_trading_account() {
+        use crate::GetMyOrdersError;
+        use oisy_trade_types::{OrderId, TradesByOrder};
+
+        setup_funding_with_activity();
+
+        let by_order = |order_id: OrderId| GetMyTradesArgs {
+            filter: TradesFilter::ByOrder(TradesByOrder {
+                order_id,
+                after: None,
+                length: 10,
+            }),
+        };
+        let first_order_id = |who: Principal| {
+            get_my_orders(Some(GetMyOrdersArgs::default()), who)
+                .unwrap()
+                .first()
+                .unwrap()
+                .id
+                .clone()
+        };
+        let funding_order = first_order_id(FUNDING);
+        let seller_order = first_order_id(SELLER);
+
+        let found =
+            get_my_orders(Some(GetMyOrdersArgs::by_id(funding_order.clone())), TRADING).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].order.owner, FUNDING,
+            "a trading account's ById read resolves to the funding account's order"
+        );
+
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::by_id(seller_order)), TRADING),
+            Err(GetMyOrdersError::OrderNotFound),
+            "a trading account resolves to F and cannot reach a non-F order"
+        );
+
+        let trades = get_my_trades(by_order(funding_order.clone()), TRADING).unwrap();
+        assert_eq!(
+            get_my_trades(by_order(funding_order.clone()), TRADING),
+            get_my_trades(by_order(funding_order.clone()), FUNDING),
+            "a trading account's ByOrder trades resolve to the funding account"
+        );
+        assert_eq!(trades.len(), 1);
+        assert_eq!(
+            trades[0].order_id, funding_order,
+            "the trade belongs to the funding account's order"
+        );
+        assert_eq!(
+            trades[0].side,
+            Side::Buy,
+            "the funding account placed a buy"
+        );
+    }
+}
+
+mod resolution_on_placement {
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::user::TRADING_ACCOUNT_GRANT_COOLDOWN;
+    use crate::{Timestamp, add_limit_order, add_trading_account, get_balances, get_my_orders};
+    use candid::{Nat, Principal};
+    use oisy_trade_types::{GetMyOrdersArgs, UserOrder};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x03]);
+
+    fn reserved_total(who: Principal) -> Nat {
+        get_balances(None, who)
+            .unwrap()
+            .into_iter()
+            .fold(Nat::from(0u64), |acc, b| acc + b.balance.reserved)
+    }
+
+    fn funding_orders() -> Vec<UserOrder> {
+        get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()
+    }
+
+    #[test]
+    fn should_place_a_trading_account_order_on_the_funding_account() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        let reserved_before = reserved_total(FUNDING);
+        add_limit_order(limit_order_request(), &mock_runtime_for(TRADING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the order is visible in the funding account's orders"
+        );
+        assert_eq!(
+            orders[0].order.owner, FUNDING,
+            "a trading account's order is owned by the funding account"
+        );
+        assert_eq!(
+            orders[0].order.placed_by,
+            Some(TRADING),
+            "the acting trading account is attributed as placed_by"
+        );
+        assert!(
+            reserved_total(FUNDING) > reserved_before,
+            "the order reserves from the funding account's balance"
+        );
+        assert_eq!(
+            get_my_orders(Some(GetMyOrdersArgs::default()), TRADING),
+            get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING),
+            "the trading account reads back the funding account's order"
+        );
+    }
+
+    #[test]
+    fn should_keep_full_placement_authority_for_a_funding_account_with_grants() {
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        add_trading_account(TRADING, &mock_runtime_at(FUNDING, Timestamp::new(0))).unwrap();
+        add_trading_account(
+            OTHER_TRADING,
+            &mock_runtime_at(FUNDING, Timestamp::new(cooldown)),
+        )
+        .unwrap();
+
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap();
+
+        let orders = funding_orders();
+        assert_eq!(
+            orders.len(),
+            1,
+            "the funding account places orders regardless of its grants"
+        );
+        assert_eq!(orders[0].order.owner, FUNDING);
+        assert_eq!(
+            orders[0].order.placed_by, None,
+            "the funding account's own order is unattributed even with whitelisted trading accounts"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is not allowed to call this endpoint in restricted mode")]
+    fn should_not_bypass_restricted_mode_via_delegation() {
+        use crate::state::with_state_mut;
+        use oisy_trade_types_internal::Mode;
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        // Restrict updates to the funding account only. The trading account is a
+        // delegate of an allowlisted funder but is not itself allowlisted.
+        with_state_mut(|s| s.set_mode(Mode::restricted_to(vec![FUNDING])));
+
+        // The raw-caller allowlist check runs before caller resolution, so the
+        // delegate is rejected even though its funding account would be allowed.
+        let mut runtime = mock_runtime_for(TRADING);
+        runtime.expect_is_controller().return_const(false);
+        let _panic = add_limit_order(limit_order_request(), &runtime);
+    }
+}
+
+mod resolution_on_cancel {
+    use crate::state::event::{CancelLimitOrderEvent, Event, EventType};
+    use crate::test_fixtures::mocks::mock_runtime_for;
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
+    use crate::{add_limit_order, add_trading_account, cancel_limit_order, get_my_orders, storage};
+    use candid::Principal;
+    use oisy_trade_types::{CancelLimitOrderRequestError, ErrorKind, GetMyOrdersArgs, OrderStatus};
+
+    const FUNDING: Principal = Principal::from_slice(&[0x01]);
+    const TRADING: Principal = Principal::from_slice(&[0x02]);
+    const OTHER_FUNDING: Principal = Principal::from_slice(&[0x03]);
+    const OTHER_TRADING: Principal = Principal::from_slice(&[0x06]);
+    const STRANGER: Principal = Principal::from_slice(&[0x05]);
+
+    fn place_funding_order() -> String {
+        add_limit_order(limit_order_request(), &mock_runtime_for(FUNDING)).unwrap()
+    }
+
+    fn last_cancel_event() -> CancelLimitOrderEvent {
+        storage::with_event_iter(|it| {
+            it.filter_map(|Event { payload, .. }| match payload {
+                EventType::CancelLimitOrder(e) => Some(e),
+                _ => None,
+            })
+            .last()
+        })
+        .expect("expected at least one CancelLimitOrderEvent")
+    }
+
+    fn cancel_event_count() -> usize {
+        storage::with_event_iter(|it| {
+            it.filter(|Event { payload, .. }| matches!(payload, EventType::CancelLimitOrder(_)))
+                .count()
+        })
+    }
+
+    #[test]
+    fn should_cancel_the_funding_account_order_and_attribute_the_acting_caller() {
+        struct TestCase {
+            desc: &'static str,
+            canceller: Principal,
+            expected_canceled_by: Option<Principal>,
+        }
+
+        let cases = vec![
+            TestCase {
+                desc: "a trading account cancels its funding account's order",
+                canceller: TRADING,
+                expected_canceled_by: Some(TRADING),
+            },
+            TestCase {
+                desc: "the funding account cancels its own order",
+                canceller: FUNDING,
+                expected_canceled_by: None,
+            },
+        ];
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        add_trading_account(TRADING, &mock_runtime_for(FUNDING)).unwrap();
+
+        for case in cases {
+            let order_id = place_funding_order();
+            let expected_order_id = order_id.parse::<crate::order::OrderId>().unwrap();
+
+            let record = cancel_limit_order(order_id, &mock_runtime_for(case.canceller)).unwrap();
+
+            assert_eq!(
+                record.owner, FUNDING,
+                "{}: the order resolves to the funding account",
+                case.desc
+            );
+            assert_eq!(
+                record.status,
+                OrderStatus::Canceled,
+                "{}: the order transitions to Canceled",
+                case.desc
+            );
+            assert_eq!(
+                record.canceled_by, case.expected_canceled_by,
+                "{}: the record attributes the acting caller as canceled_by",
+                case.desc
+            );
+            assert_eq!(
+                last_cancel_event(),
+                CancelLimitOrderEvent {
+                    order_id: expected_order_id,
+                    canceled_by: case.expected_canceled_by,
+                },
+                "{}: the cancel event records the order id and acting caller",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_cancel_by_a_foreign_caller() {
+        struct TestCase {
+            desc: &'static str,
+            caller: Principal,
+        }
+
+        init_state_with_order_book();
+        fund_user(FUNDING);
+        fund_user(OTHER_FUNDING);
+        add_trading_account(OTHER_TRADING, &mock_runtime_for(OTHER_FUNDING)).unwrap();
+        let order_id = place_funding_order();
+
+        let cases = vec![
+            TestCase {
+                desc: "a stranger cannot cancel the funding account's order",
+                caller: STRANGER,
+            },
+            TestCase {
+                desc: "a different funding account's trading account cannot cancel the order",
+                caller: OTHER_TRADING,
+            },
+        ];
+
+        for case in cases {
+            let result = cancel_limit_order(order_id.clone(), &mock_runtime_for(case.caller));
+
+            assert_eq!(
+                result.unwrap_err().kind,
+                ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
+                "{}",
+                case.desc
+            );
+            assert_eq!(
+                get_my_orders(Some(GetMyOrdersArgs::default()), FUNDING).unwrap()[0]
+                    .order
+                    .status,
+                OrderStatus::Pending,
+                "{}: the order stays pending",
+                case.desc
+            );
+            assert_eq!(cancel_event_count(), 0, "{}: no cancel event", case.desc);
+        }
+    }
+}
+
 mod deposit {
     use crate::deposit;
     use crate::guard::UserOpGuard;
@@ -923,7 +1304,7 @@ mod deposit {
         let _held = UserOpGuard::new(USER, icp_token_id()).expect("test setup: acquire guard");
         let runtime = CapturingRuntime::new(USER, vec![]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -939,7 +1320,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -952,7 +1333,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
     }
@@ -963,7 +1344,7 @@ mod deposit {
         let runtime =
             CapturingRuntime::new(USER, vec![Ok(transfer_from_response(Ok(Nat::from(7u64))))]);
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert!(result.is_ok(), "got {result:?}");
         assert_in_flight_empty();
@@ -983,7 +1364,7 @@ mod deposit {
             )))],
         );
 
-        let result = deposit(deposit_request(icp_token_id()), &runtime).await;
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -998,7 +1379,7 @@ mod deposit {
         let runtime = CapturingRuntime::new(USER, vec![]);
 
         let unsupported = TokenId::new(Principal::from_slice(&[0xAB]));
-        let result = deposit(deposit_request(unsupported), &runtime).await;
+        let result = deposit(&deposit_request(unsupported), &runtime).await;
 
         assert_eq!(
             result.unwrap_err().kind,
@@ -1007,6 +1388,62 @@ mod deposit {
             }))
         );
         assert!(runtime.captured_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum_before_any_ledger_call() {
+        use std::str::FromStr;
+
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = deposit(
+            &DepositRequest {
+                token_id: icp_token_id().into(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+        assert!(
+            runtime.captured_calls().is_empty(),
+            "an out-of-range amount is rejected before any ledger interaction"
+        );
+        assert_in_flight_empty();
+    }
+
+    #[tokio::test]
+    async fn should_deny_deposit_by_trading_account_before_any_ledger_call() {
+        use crate::test_fixtures::{fund_user, mocks::mock_runtime_for};
+
+        init_state_with_order_book();
+        fund_user(OTHER_USER);
+        crate::add_trading_account(USER, &mock_runtime_for(OTHER_USER)).unwrap();
+
+        let runtime = CapturingRuntime::new(USER, vec![]);
+        let events_before = crate::storage::total_event_count();
+        let result = deposit(&deposit_request(icp_token_id()), &runtime).await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
+        );
+        assert!(
+            runtime.captured_calls().is_empty(),
+            "a denied deposit performs no ledger interaction"
+        );
+        assert_eq!(
+            crate::storage::total_event_count(),
+            events_before,
+            "a denied deposit records no event"
+        );
+        assert_in_flight_empty();
     }
 
     fn deposit_request(token: TokenId) -> DepositRequest {
@@ -1168,7 +1605,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1210,7 +1647,7 @@ mod withdraw {
         ]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1240,7 +1677,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1287,7 +1724,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1332,7 +1769,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(1_000_000u64),
             },
@@ -1359,7 +1796,7 @@ mod withdraw {
         // No call_unbounded_wait expectations — the ledger should never be called.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(0u64),
             },
@@ -1374,6 +1811,34 @@ mod withdraw {
             }))
         );
         // Balance untouched — no debit happened.
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum() {
+        use std::str::FromStr;
+
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = withdraw(
+            &WithdrawRequest {
+                token_id: token_id(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
         assert_balance(deposit);
         assert_no_withdraw_event();
     }
@@ -1401,7 +1866,7 @@ mod withdraw {
         );
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(withdraw_amount),
             },
@@ -1437,7 +1902,7 @@ mod withdraw {
         // async call is made.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit + 1),
             },
@@ -1465,6 +1930,56 @@ mod withdraw {
     }
 
     #[tokio::test]
+    async fn should_deny_withdraw_by_trading_account_before_any_ledger_call() {
+        use crate::test_fixtures::mocks::mock_runtime_for;
+
+        let funding = Principal::from_slice(&[0x43]);
+        state::init_state(crate::test_fixtures::state_vmem());
+        state::with_state_mut(|s| {
+            s.record_token(
+                TokenId::from(token_id()),
+                crate::order::TokenMetadata {
+                    symbol: "TEST".to_string(),
+                    decimals: 8,
+                },
+            );
+            s.deposit(
+                funding,
+                TokenId::from(token_id()),
+                Quantity::from(1u64),
+                state::StableMemoryOptions::Write,
+            );
+        });
+        crate::add_trading_account(USER, &mock_runtime_for(funding)).unwrap();
+
+        // No ledger expectation: the deny must short-circuit before any transfer.
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
+
+        let events_before = crate::storage::total_event_count();
+        let result = withdraw(
+            &WithdrawRequest {
+                token_id: token_id(),
+                amount: Nat::from(1_000u64),
+            },
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountForbidden))
+        );
+        assert_eq!(
+            crate::storage::total_event_count(),
+            events_before,
+            "a denied withdrawal records no event"
+        );
+        assert_in_flight_empty();
+    }
+
+    #[tokio::test]
     async fn should_return_operation_in_progress_when_withdraw_already_in_flight() {
         let deposit = 1_000_000u64;
         init_state_with_balance(deposit);
@@ -1476,7 +1991,7 @@ mod withdraw {
         // No ledger expectation: the guard short-circuits before any ledger call.
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1504,7 +2019,7 @@ mod withdraw {
         runtime.expect_msg_caller().return_const(USER);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1527,7 +2042,7 @@ mod withdraw {
         let runtime = mock_runtime_returning(vec![transfer_response(Ok(Nat::from(42u64)))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -1549,7 +2064,7 @@ mod withdraw {
         ))]);
 
         let result = withdraw(
-            WithdrawRequest {
+            &WithdrawRequest {
                 token_id: token_id(),
                 amount: Nat::from(deposit),
             },
@@ -2521,5 +3036,548 @@ mod set_halt {
         let mut mock = mock_runtime_for(Principal::anonymous());
         mock.expect_is_controller().return_const(true);
         mock
+    }
+}
+
+mod add_trading_account {
+    use crate::Timestamp;
+    use crate::state::event::{AddTradingAccountEvent, EventType};
+    use crate::test_fixtures::event::last_event;
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, icp_token_id, init_state_with_order_book, principal};
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
+    use crate::{add_trading_account, get_my_trading_accounts, state, storage};
+    use oisy_trade_types::{
+        AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
+        ErrorKind,
+    };
+
+    fn funding() -> candid::Principal {
+        principal(0x21)
+    }
+
+    fn trading() -> candid::Principal {
+        principal(0x22)
+    }
+
+    #[test]
+    fn should_grant_and_list_trading_account() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        assert_eq!(
+            add_trading_account(trading(), &mock_runtime_for(funding())),
+            Ok(())
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![trading()]),
+            "the funding account lists its trading account"
+        );
+    }
+
+    #[test]
+    fn should_act_on_raw_caller_and_not_resolve_delegation() {
+        init_state_with_order_book();
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+
+        assert_eq!(
+            get_my_trading_accounts(trading()),
+            Ok(vec![]),
+            "the trading account's own whitelist is empty; reads act on the raw caller"
+        );
+        assert_eq!(
+            get_my_trading_accounts(principal(0x99)),
+            Ok(vec![]),
+            "a principal with no grants lists nothing"
+        );
+    }
+
+    #[test]
+    fn should_reject_grant_from_unregistered_granter() {
+        init_state_with_order_book();
+
+        let result = add_trading_account(trading(), &mock_runtime_for(funding()));
+        assert!(matches!(
+            result,
+            Err(AddTradingAccountError {
+                kind: ErrorKind::RequestError(Some(
+                    AddTradingAccountRequestError::FundingAccountNotFound
+                )),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn should_reject_grant_of_principal_with_in_flight_funding_operation() {
+        init_state_with_order_book();
+        fund_user(funding());
+        state::with_state_mut(|s| {
+            s.in_flight_user_ops_mut()
+                .insert((trading(), icp_token_id()));
+        });
+
+        let result = add_trading_account(trading(), &mock_runtime_for(funding()));
+        assert!(matches!(
+            result,
+            Err(AddTradingAccountError {
+                kind: ErrorKind::TemporaryError(Some(
+                    AddTradingAccountTemporaryError::FundingOperationInProgress
+                )),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn should_record_no_event_on_rejected_grant() {
+        init_state_with_order_book();
+
+        let before = storage::total_event_count();
+        assert!(add_trading_account(trading(), &mock_runtime_for(funding())).is_err());
+        assert_eq!(
+            storage::total_event_count(),
+            before,
+            "a rejected grant records no event"
+        );
+    }
+
+    #[test]
+    fn should_record_one_event_on_successful_grant() {
+        init_state_with_order_book();
+        fund_user(funding());
+
+        let before = storage::total_event_count();
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+        assert_eq!(
+            storage::total_event_count(),
+            before + 1,
+            "a successful grant records exactly one event"
+        );
+        assert_eq!(
+            last_event(),
+            EventType::AddTradingAccount(AddTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
+        );
+    }
+
+    #[test]
+    fn should_map_each_rejection_to_its_candid_variant() {
+        struct RejectionCase {
+            desc: &'static str,
+            setup: fn(),
+            granter: candid::Principal,
+            trading: candid::Principal,
+            expected: AddTradingAccountRequestError,
+            /// A reason-specific substring of the advisory message: distinct
+            /// from the sibling reason folded into the same public variant, so
+            /// the test proves the collapsed message still identifies which
+            /// reason fired.
+            message_contains: &'static str,
+        }
+
+        // Several internal reasons collapse into one public variant, so more
+        // than one setup maps to the same `expected` — the test stays a guard
+        // against a transposed `From` arm, and the `message_contains` phrases
+        // prove the folded reasons stay distinguishable in the message.
+        let cases = vec![
+            RejectionCase {
+                desc: "granter is not a registered user",
+                setup: || {},
+                granter: principal(0x59),
+                trading: principal(0x5a),
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "not a registered user",
+            },
+            RejectionCase {
+                // The delegate granter is intentionally left unregistered (no
+                // `fund_user`): the trading-account check precedes the
+                // registration check, so it is reported as a trading account
+                // rather than as merely unregistered.
+                desc: "granter is itself a trading account (and unregistered)",
+                setup: || {
+                    fund_user(principal(0x55));
+                    add_trading_account(principal(0x56), &mock_runtime_for(principal(0x55)))
+                        .unwrap();
+                },
+                granter: principal(0x56),
+                trading: principal(0x57),
+                expected: AddTradingAccountRequestError::FundingAccountNotFound,
+                message_contains: "itself a trading account",
+            },
+            RejectionCase {
+                desc: "granter whitelisting itself",
+                setup: || fund_user(principal(0x50)),
+                granter: principal(0x50),
+                trading: principal(0x50),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "whitelist itself",
+            },
+            RejectionCase {
+                desc: "trading principal is the anonymous principal",
+                setup: || fund_user(principal(0x5b)),
+                granter: principal(0x5b),
+                trading: candid::Principal::anonymous(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
+                desc: "trading principal is the management canister",
+                setup: || fund_user(principal(0x5c)),
+                granter: principal(0x5c),
+                trading: candid::Principal::management_canister(),
+                expected: AddTradingAccountRequestError::NonAuthenticatingTradingAccount,
+                message_contains: "non-authenticating",
+            },
+            RejectionCase {
+                desc: "principal already a registered user",
+                setup: || {
+                    fund_user(principal(0x53));
+                    fund_user(principal(0x54));
+                },
+                granter: principal(0x53),
+                trading: principal(0x54),
+                expected: AddTradingAccountRequestError::InvalidTradingAccount,
+                message_contains: "already a registered user",
+            },
+            RejectionCase {
+                desc: "principal already a trading account",
+                setup: || {
+                    fund_user(principal(0x51));
+                    add_trading_account(principal(0x52), &mock_runtime_for(principal(0x51)))
+                        .unwrap();
+                },
+                granter: principal(0x51),
+                trading: principal(0x52),
+                expected: AddTradingAccountRequestError::AlreadyTradingAccount,
+                message_contains: "already a trading account",
+            },
+            RejectionCase {
+                desc: "granter already at the trading-account cap",
+                setup: || {
+                    let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+                    fund_user(principal(0x58));
+                    for i in 0..MAX_TRADING_ACCOUNTS_PER_USER as u8 {
+                        add_trading_account(
+                            principal(0x60 + i),
+                            &mock_runtime_at(principal(0x58), Timestamp::new(i as u64 * cooldown)),
+                        )
+                        .unwrap();
+                    }
+                },
+                granter: principal(0x58),
+                trading: principal(0x60 + MAX_TRADING_ACCOUNTS_PER_USER as u8),
+                expected: AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                },
+                message_contains: "maximum number",
+            },
+        ];
+
+        for case in cases {
+            state::reset_state();
+            init_state_with_order_book();
+            (case.setup)();
+
+            // Capture after setup so setup grants (which do record events) don't
+            // count against the rejection's own no-event guarantee.
+            let before = storage::total_event_count();
+            let err = add_trading_account(case.trading, &mock_runtime_for(case.granter))
+                .expect_err(case.desc);
+
+            assert_eq!(
+                err.kind,
+                ErrorKind::RequestError(Some(case.expected.clone())),
+                "{}",
+                case.desc
+            );
+            assert!(
+                err.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains(case.message_contains)),
+                "{}: advisory message should identify the specific reason (contains {:?}), got {:?}",
+                case.desc,
+                case.message_contains,
+                err.message
+            );
+            assert_eq!(
+                storage::total_event_count(),
+                before,
+                "{}: a rejected grant records no event",
+                case.desc
+            );
+        }
+    }
+
+    #[test]
+    fn should_grant_up_to_the_cap_then_reject_the_next() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        // Successive grants must clear the cooldown, so space them an hour apart.
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x30 + i))
+            .collect();
+        for (i, account) in accounts.iter().enumerate() {
+            assert_eq!(
+                add_trading_account(
+                    *account,
+                    &mock_runtime_at(funding(), Timestamp::new(i as u64 * cooldown))
+                ),
+                Ok(()),
+                "a grant within the cap succeeds"
+            );
+        }
+
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(accounts.clone()),
+            "all {MAX_TRADING_ACCOUNTS_PER_USER} granted accounts are listed"
+        );
+
+        // Past the cap the request-level error takes precedence over the cooldown.
+        let overflow = principal(0x30 + MAX_TRADING_ACCOUNTS_PER_USER as u8);
+        let err = add_trading_account(
+            overflow,
+            &mock_runtime_at(
+                funding(),
+                Timestamp::new(MAX_TRADING_ACCOUNTS_PER_USER as u64 * cooldown),
+            ),
+        )
+        .expect_err("the grant past the cap is rejected");
+        assert_eq!(
+            err.kind,
+            ErrorKind::RequestError(Some(
+                AddTradingAccountRequestError::TooManyTradingAccounts {
+                    max: MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn should_reject_second_grant_within_cooldown_without_recording_event() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        add_trading_account(
+            principal(0x40),
+            &mock_runtime_at(funding(), Timestamp::new(1_000)),
+        )
+        .unwrap();
+
+        let before = storage::total_event_count();
+        let result = add_trading_account(
+            principal(0x41),
+            &mock_runtime_at(funding(), Timestamp::new(1_000 + cooldown - 1)),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(AddTradingAccountError {
+                    kind: ErrorKind::TemporaryError(Some(
+                        AddTradingAccountTemporaryError::RateLimit { retry_after_ns: 1 }
+                    )),
+                    ..
+                })
+            ),
+            "a grant within the cooldown is a retryable rate-limit error carrying the \
+             remaining time, got {result:?}"
+        );
+        assert_eq!(
+            storage::total_event_count(),
+            before,
+            "a cooldown rejection records no event"
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![principal(0x40)]),
+            "the rejected grant did not join the whitelist"
+        );
+    }
+
+    #[test]
+    fn should_allow_grant_after_cooldown_elapses() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        add_trading_account(
+            principal(0x40),
+            &mock_runtime_at(funding(), Timestamp::new(1_000)),
+        )
+        .unwrap();
+        assert_eq!(
+            add_trading_account(
+                principal(0x41),
+                &mock_runtime_at(funding(), Timestamp::new(1_000 + cooldown))
+            ),
+            Ok(()),
+            "a grant once the cooldown has elapsed succeeds"
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![principal(0x40), principal(0x41)])
+        );
+    }
+}
+
+mod remove_trading_account {
+    use crate::Timestamp;
+    use crate::state::event::{EventType, RemoveTradingAccountEvent};
+    use crate::test_fixtures::event::last_event;
+    use crate::test_fixtures::mocks::{mock_runtime_at, mock_runtime_for};
+    use crate::test_fixtures::{fund_user, init_state_with_order_book, principal};
+    use crate::user::{
+        FundingAccount, MAX_TRADING_ACCOUNTS_PER_USER, TRADING_ACCOUNT_GRANT_COOLDOWN,
+        TradingAccount,
+    };
+    use crate::{add_trading_account, get_my_trading_accounts, remove_trading_account, storage};
+    use oisy_trade_types::{
+        ErrorKind, RemoveTradingAccountError, RemoveTradingAccountRequestError,
+    };
+
+    fn funding() -> candid::Principal {
+        principal(0x70)
+    }
+
+    fn trading() -> candid::Principal {
+        principal(0x71)
+    }
+
+    #[test]
+    fn should_revoke_removing_authority_and_emit_one_event() {
+        init_state_with_order_book();
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+
+        let before = storage::total_event_count();
+        assert_eq!(
+            remove_trading_account(trading(), &mock_runtime_for(funding())),
+            Ok(())
+        );
+        assert_eq!(
+            get_my_trading_accounts(funding()),
+            Ok(vec![]),
+            "the revoked key is no longer whitelisted"
+        );
+        assert_eq!(
+            storage::total_event_count(),
+            before + 1,
+            "a successful revoke records exactly one event"
+        );
+        assert_eq!(
+            last_event(),
+            EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+                funding: FundingAccount(funding()),
+                trading: TradingAccount(trading()),
+            }),
+            "the recorded event names the funding and trading accounts"
+        );
+    }
+
+    #[test]
+    fn should_not_rate_limit_revocation() {
+        let cooldown = TRADING_ACCOUNT_GRANT_COOLDOWN.as_nanos() as u64;
+        init_state_with_order_book();
+        fund_user(funding());
+
+        // Grant the maximum number of trading accounts (grants are spaced by
+        // the cooldown), then revoke every one of them back-to-back at the same
+        // time — revocation carries no cooldown.
+        let accounts: Vec<candid::Principal> = (0..MAX_TRADING_ACCOUNTS_PER_USER as u8)
+            .map(|i| principal(0x72 + i))
+            .collect();
+        for (i, account) in accounts.iter().enumerate() {
+            add_trading_account(
+                *account,
+                &mock_runtime_at(funding(), Timestamp::new(i as u64 * cooldown)),
+            )
+            .unwrap();
+        }
+
+        for account in &accounts {
+            assert_eq!(
+                remove_trading_account(*account, &mock_runtime_for(funding())),
+                Ok(()),
+                "revocation is never rate-limited"
+            );
+        }
+        assert_eq!(get_my_trading_accounts(funding()), Ok(vec![]));
+    }
+
+    #[test]
+    fn should_reject_revoke_by_unauthorized_caller_recording_no_event() {
+        init_state_with_order_book();
+        // `funding()` grants `trading()`.
+        fund_user(funding());
+        add_trading_account(trading(), &mock_runtime_for(funding())).unwrap();
+        // A separate funding account with its own trading account.
+        let other_funding = principal(0x80);
+        let other_trading = principal(0x81);
+        fund_user(other_funding);
+        add_trading_account(other_trading, &mock_runtime_for(other_funding)).unwrap();
+
+        struct Case {
+            desc: &'static str,
+            caller: candid::Principal,
+            target: candid::Principal,
+        }
+        let cases = [
+            Case {
+                desc: "a stranger that granted nothing",
+                caller: principal(0x90),
+                target: trading(),
+            },
+            Case {
+                desc: "a different funding account",
+                caller: other_funding,
+                target: trading(),
+            },
+            Case {
+                desc: "a trading account of another funding account",
+                caller: other_trading,
+                target: trading(),
+            },
+            Case {
+                desc: "the owner targeting a principal that is not its trading account",
+                caller: funding(),
+                target: principal(0x99),
+            },
+        ];
+
+        for case in cases {
+            let before = storage::total_event_count();
+            let result = remove_trading_account(case.target, &mock_runtime_for(case.caller));
+            assert!(
+                matches!(
+                    result,
+                    Err(RemoveTradingAccountError {
+                        kind: ErrorKind::RequestError(Some(
+                            RemoveTradingAccountRequestError::NotAllowed
+                        )),
+                        ..
+                    })
+                ),
+                "{}: got {result:?}",
+                case.desc
+            );
+            assert_eq!(
+                storage::total_event_count(),
+                before,
+                "{}: a rejected revoke records no event",
+                case.desc
+            );
+        }
     }
 }

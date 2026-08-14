@@ -83,6 +83,9 @@ pub fn state() -> state::State<VectorMemory, VectorMemory> {
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         },
         order_history(),
         trade_history(),
@@ -100,6 +103,9 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             mode: oisy_trade_types_internal::Mode::GeneralAvailability,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         },
         crate::order::OrderHistory::new(
             crate::storage::order_history_memory(),
@@ -109,7 +115,11 @@ pub fn state_vmem() -> state::State<crate::storage::VMem, crate::storage::VMem> 
             crate::storage::trades_memory(),
             crate::storage::trades_by_user_memory(),
         ),
-        UserRegistry::new(crate::storage::user_registry_memory()),
+        UserRegistry::new(
+            crate::storage::user_registry_memory(),
+            crate::storage::trading_accounts_memory(),
+            crate::storage::trading_accounts_by_funding_memory(),
+        ),
         TokenBalance::new(crate::storage::balances_memory()),
     )
     .unwrap()
@@ -297,7 +307,11 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
         crate::storage::trades_memory(),
         crate::storage::trades_by_user_memory(),
     );
-    let user_registry = UserRegistry::new(crate::storage::user_registry_memory());
+    let user_registry = UserRegistry::new(
+        crate::storage::user_registry_memory(),
+        crate::storage::trading_accounts_memory(),
+        crate::storage::trading_accounts_by_funding_memory(),
+    );
     let balances = TokenBalance::new(crate::storage::balances_memory());
     state::init_state(
         state::State::new(
@@ -305,6 +319,9 @@ pub fn init_state_with_order_book_and_fees(fee_rates: FeeRates) {
                 mode: oisy_trade_types_internal::Mode::GeneralAvailability,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             },
             order_history,
             trade_history,
@@ -416,12 +433,22 @@ pub fn balances() -> TokenBalance<VectorMemory> {
 }
 
 pub fn user_registry() -> UserRegistry<VectorMemory> {
-    UserRegistry::new(VectorMemory::default())
+    UserRegistry::new(
+        VectorMemory::default(),
+        VectorMemory::default(),
+        VectorMemory::default(),
+    )
 }
 
 /// A deterministic test principal seeded by a single byte.
 pub fn principal(seed: u8) -> Principal {
     Principal::from_slice(&[seed])
+}
+
+/// A deterministic maker principal seeded by an index, kept clear of the
+/// single-byte [`principal`] seeds.
+pub fn maker(i: usize) -> Principal {
+    Principal::from_slice(&(0x1000u64 + i as u64).to_be_bytes())
 }
 
 /// Construct a [`ic_cdk::call::Response`] from Candid-encoded bytes.
@@ -470,15 +497,16 @@ pub mod arbitrary {
     use crate::balance::{Balance, BalanceKey};
     use crate::order::{
         self, BasisPoint, FeeRates, Fill, FillSeq, LotSize, MatchingOutput, Order, OrderBookId,
-        OrderId, OrderRecord, OrderSeq, OrderStatus, PairToken, PendingOrder, Price, Quantity,
-        RemovedOrder, Side, TickSize, TimeInForce, TokenId, TokenMetadata, TradeRecord,
+        OrderId, OrderSeq, PairToken, PendingOrder, Price, Quantity, RemovedOrder, Side, TickSize,
+        TimeInForce, TokenId, TokenMetadata, TradeRecord,
     };
     use crate::settlement::FillEvent;
     use crate::state::event::{
-        AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent,
-        DepositEvent, Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
+        AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
+        CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent,
+        RemoveTradingAccountEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
     };
-    use crate::user::UserId;
+    use crate::user::{FundingAccount, TradingAccount, UserId};
     use candid::Principal;
     use minicbor::{Decode, Encode};
     use oisy_trade_types::FilterToken;
@@ -643,16 +671,6 @@ pub mod arbitrary {
         prop_oneof![Just(Side::Buy), Just(Side::Sell)]
     }
 
-    pub fn arb_order_status() -> impl Strategy<Value = OrderStatus> {
-        prop_oneof![
-            Just(OrderStatus::Pending),
-            Just(OrderStatus::Open),
-            Just(OrderStatus::Filled),
-            Just(OrderStatus::Canceled),
-            Just(OrderStatus::Expired),
-        ]
-    }
-
     pub fn arb_time_in_force() -> impl Strategy<Value = TimeInForce> {
         prop_oneof![
             Just(TimeInForce::GoodTilCanceled),
@@ -682,65 +700,6 @@ pub mod arbitrary {
 
     pub fn arb_balance() -> impl Strategy<Value = Balance> {
         (arb_quantity(), arb_quantity()).prop_map(|(free, reserved)| Balance::new(free, reserved))
-    }
-
-    /// Strategy for a valid [`OrderRecord`] with a tick-aligned price and a
-    /// lot-aligned non-zero quantity. `filled_quantity` is a lot multiple
-    /// within `[0, quantity]`, upholding the `filled_quantity <= quantity`
-    /// invariant.
-    pub fn arb_order_record() -> impl Strategy<Value = OrderRecord> {
-        let tick = TICK_SIZE.get();
-        let lot = u64::from(LOT_SIZE);
-        (
-            arb_principal(),
-            arb_side(),
-            1..1_000u64, // price in ticks
-            1..1_000u64, // quantity in lots
-            arb_order_status(),
-            arb_timestamp(),             // created_at
-            option::of(arb_timestamp()), // last_updated_at
-            arb_time_in_force(),
-        )
-            .prop_flat_map(
-                move |(
-                    owner,
-                    side,
-                    price_ticks,
-                    qty_lots,
-                    status,
-                    created_at,
-                    last_updated_at,
-                    time_in_force,
-                )| {
-                    (0..=qty_lots).prop_map(move |filled_lots| {
-                        let price = Price::new(price_ticks as u128 * tick);
-                        let filled_quantity = Quantity::from(filled_lots * lot);
-                        // Realized quote notional, derived exactly as the engine
-                        // does: `maker_price × filled_quantity / base_scale`
-                        // (cf. `Fill::quote_amount`), with `base_scale = 10^8`
-                        // for this fixture.
-                        let filled_quote = price
-                            .checked_mul_quantity_scaled(
-                                &filled_quantity,
-                                NonZeroU64::new(100_000_000).unwrap(),
-                            )
-                            .expect("fixture notional fits in 256 bits");
-                        OrderRecord {
-                            owner,
-                            side,
-                            price,
-                            quantity: Quantity::from(qty_lots * lot),
-                            filled_quantity,
-                            status,
-                            created_at,
-                            last_updated_at,
-                            time_in_force,
-                            filled_quote,
-                            filled_fee: Quantity::from(u128::from(filled_lots)),
-                        }
-                    })
-                },
-            )
     }
 
     pub fn arb_price() -> impl Strategy<Value = Price> {
@@ -787,13 +746,27 @@ pub mod arbitrary {
 
     pub fn arb_init_arg() -> impl Strategy<Value = InitArg> {
         // Stay within ExecutionPolicy's validation bounds so `State::new` won't panic.
-        (arb_mode(), 1..=10_000u32, 1..=40_000_000_000u64).prop_map(
-            |(mode, max_orders_per_chunk, instruction_budget)| InitArg {
-                mode,
-                max_orders_per_chunk,
-                instruction_budget,
-            },
+        (
+            arb_mode(),
+            1..=10_000u32,
+            1..=40_000_000_000u64,
+            option::of(1..=10_000u32),
         )
+            .prop_map(
+                |(
+                    mode,
+                    max_orders_per_chunk,
+                    instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
+                    InitArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_settlement_units_per_event,
+                    }
+                },
+            )
     }
 
     pub fn arb_upgrade_arg() -> impl Strategy<Value = UpgradeArg> {
@@ -801,12 +774,21 @@ pub mod arbitrary {
             option::of(arb_mode()),
             option::of(1..=10_000u32),
             option::of(1..=40_000_000_000u64),
+            option::of(1..=10_000u32),
         )
             .prop_map(
-                |(mode, max_orders_per_chunk, instruction_budget)| UpgradeArg {
+                |(
                     mode,
                     max_orders_per_chunk,
                     instruction_budget,
+                    max_settlement_units_per_event,
+                )| {
+                    UpgradeArg {
+                        mode,
+                        max_orders_per_chunk,
+                        instruction_budget,
+                        max_settlement_units_per_event,
+                    }
                 },
             )
     }
@@ -896,21 +878,30 @@ pub mod arbitrary {
             arb_price(),
             arb_quantity(),
             arb_time_in_force(),
+            option::of(arb_principal()),
         )
-            .prop_map(|(user, order_id, side, price, quantity, time_in_force)| {
-                AddLimitOrderEvent {
-                    user,
-                    order_id,
-                    side,
-                    price,
-                    quantity,
-                    time_in_force,
-                }
-            })
+            .prop_map(
+                |(user, order_id, side, price, quantity, time_in_force, placed_by)| {
+                    AddLimitOrderEvent {
+                        user,
+                        order_id,
+                        side,
+                        price,
+                        quantity,
+                        time_in_force,
+                        placed_by,
+                    }
+                },
+            )
     }
 
     pub fn arb_cancel_limit_order_event() -> impl Strategy<Value = CancelLimitOrderEvent> {
-        arb_order_id().prop_map(|order_id| CancelLimitOrderEvent { order_id })
+        (arb_order_id(), option::of(arb_principal())).prop_map(|(order_id, canceled_by)| {
+            CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }
+        })
     }
 
     pub fn arb_removed_order() -> impl Strategy<Value = RemovedOrder> {
@@ -1096,6 +1087,22 @@ pub mod arbitrary {
         (book_ids, any::<bool>()).prop_map(|(book_ids, halted)| SetHaltEvent { book_ids, halted })
     }
 
+    pub fn arb_add_trading_account_event() -> impl Strategy<Value = AddTradingAccountEvent> {
+        (arb_principal(), arb_principal()).prop_map(|(funding, trading)| AddTradingAccountEvent {
+            funding: FundingAccount(funding),
+            trading: TradingAccount(trading),
+        })
+    }
+
+    pub fn arb_remove_trading_account_event() -> impl Strategy<Value = RemoveTradingAccountEvent> {
+        (arb_principal(), arb_principal()).prop_map(|(funding, trading)| {
+            RemoveTradingAccountEvent {
+                funding: FundingAccount(funding),
+                trading: TradingAccount(trading),
+            }
+        })
+    }
+
     pub fn arb_event_type() -> impl Strategy<Value = EventType> {
         prop_oneof![
             arb_init_arg().prop_map(EventType::Init),
@@ -1108,6 +1115,8 @@ pub mod arbitrary {
             arb_matching_event().prop_map(EventType::Matching),
             arb_settling_event().prop_map(EventType::Settling),
             arb_set_halt_event().prop_map(EventType::SetHalt),
+            arb_add_trading_account_event().prop_map(EventType::AddTradingAccount),
+            arb_remove_trading_account_event().prop_map(EventType::RemoveTradingAccount),
         ]
     }
 

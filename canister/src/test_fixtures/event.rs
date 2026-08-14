@@ -5,13 +5,23 @@ use crate::order::{
 };
 use crate::settlement::FillEvent;
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, BalanceOperation, CancelLimitOrderEvent, DepositEvent,
-    Event, EventType, MatchingEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, BalanceOperation,
+    CancelLimitOrderEvent, DepositEvent, Event, EventType, MatchingEvent,
+    RemoveTradingAccountEvent, SetHaltEvent, SettlingEvent, WithdrawEvent,
 };
+use crate::user::{FundingAccount, TradingAccount};
 use candid::Principal;
 use oisy_trade_types_internal::{InitArg, Mode, UpgradeArg};
 
 use super::{LOT_SIZE, MAX_NOTIONAL, MIN_NOTIONAL, TICK_SIZE, base_metadata, quote_metadata};
+
+/// The most recently recorded event in the storage log. Panics if the log is
+/// empty.
+pub fn last_event() -> EventType {
+    let count = crate::storage::total_event_count();
+    let Event { payload, .. } = crate::storage::get_event(count - 1).expect("event log not empty");
+    payload
+}
 
 pub fn init_event(mode: Mode) -> Event {
     Event {
@@ -20,6 +30,9 @@ pub fn init_event(mode: Mode) -> Event {
             mode,
             max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
             instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
         }),
     }
 }
@@ -28,6 +41,7 @@ pub fn upgrade_event(
     mode: Option<Mode>,
     max_orders_per_chunk: Option<u32>,
     instruction_budget: Option<u64>,
+    max_settlement_units_per_event: Option<u32>,
 ) -> Event {
     Event {
         timestamp: Timestamp::new(1),
@@ -35,6 +49,7 @@ pub fn upgrade_event(
             mode,
             max_orders_per_chunk,
             instruction_budget,
+            max_settlement_units_per_event,
         }),
     }
 }
@@ -71,6 +86,8 @@ pub enum WorstCaseEvent {
     Matching,
     Settling,
     SetHalt,
+    AddTradingAccount,
+    RemoveTradingAccount,
 }
 
 impl From<&EventType> for WorstCaseEvent {
@@ -86,6 +103,8 @@ impl From<&EventType> for WorstCaseEvent {
             EventType::Matching(_) => Self::Matching,
             EventType::Settling(_) => Self::Settling,
             EventType::SetHalt(_) => Self::SetHalt,
+            EventType::AddTradingAccount(_) => Self::AddTradingAccount,
+            EventType::RemoveTradingAccount(_) => Self::RemoveTradingAccount,
         }
     }
 }
@@ -120,6 +139,16 @@ impl WorstCaseEvent {
                 ),
                 halted: true,
             }),
+            Self::AddTradingAccount => EventType::AddTradingAccount(AddTradingAccountEvent {
+                funding: FundingAccount(max_principal(0)),
+                trading: TradingAccount(max_principal(1)),
+            }),
+            Self::RemoveTradingAccount => {
+                EventType::RemoveTradingAccount(RemoveTradingAccountEvent {
+                    funding: FundingAccount(max_principal(0)),
+                    trading: TradingAccount(max_principal(1)),
+                })
+            }
         })
     }
 
@@ -131,16 +160,18 @@ impl WorstCaseEvent {
 
     pub fn expected_memory_size(&self) -> usize {
         match self {
-            Self::Init => 343,
-            Self::Upgrade => 343,
+            Self::Init => 348,
+            Self::Upgrade => 348,
             Self::AddTradingPair => 224,
             Self::Deposit => 96,
             Self::Withdraw => 105,
-            Self::AddLimitOrder => 108,
-            Self::CancelLimitOrder => 34,
+            Self::AddLimitOrder => 139,
+            Self::CancelLimitOrder => 65,
             Self::Matching => 9_027,
             Self::Settling => 208_030,
             Self::SetHalt => 918,
+            Self::AddTradingAccount => 79,
+            Self::RemoveTradingAccount => 79,
         }
     }
 }
@@ -161,6 +192,7 @@ fn init_restricted() -> EventType {
         mode: Mode::RestrictedTo(restricted_principals()),
         max_orders_per_chunk: u32::MAX,
         instruction_budget: u64::MAX,
+        max_settlement_units_per_event: Some(u32::MAX),
     })
 }
 
@@ -169,6 +201,7 @@ fn upgrade_restricted() -> EventType {
         mode: Some(Mode::RestrictedTo(restricted_principals())),
         max_orders_per_chunk: Some(u32::MAX),
         instruction_budget: Some(u64::MAX),
+        max_settlement_units_per_event: Some(u32::MAX),
     })
 }
 
@@ -204,12 +237,14 @@ fn add_limit_order() -> EventType {
         price: Price::new(u128::MAX),
         quantity: max_quantity(),
         time_in_force: crate::order::TimeInForce::FillOrKill,
+        placed_by: Some(max_principal(1)),
     })
 }
 
 fn cancel_limit_order() -> EventType {
     EventType::CancelLimitOrder(CancelLimitOrderEvent {
         order_id: OrderId::new(OrderBookId::new(u64::MAX), OrderSeq::new(u64::MAX)),
+        canceled_by: Some(max_principal(1)),
     })
 }
 

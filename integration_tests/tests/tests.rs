@@ -6,9 +6,9 @@ use oisy_trade_int_tests::icrc_ledger::{BASE_LEDGER_FEE, LedgerConfig, QUOTE_LED
 use oisy_trade_int_tests::{LOT_SIZE, PRICE_SCALE, Setup, TICK_SIZE, fill_one_cross_with_fees};
 use oisy_trade_types::{
     AddTradingPairError, AddTradingPairRequest, Balance, DepositError, DepositRequest,
-    DepositRequestError, DepositTemporaryError, ErrorKind, LimitOrderRequest, OrderStatus, Side,
-    Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus, WithdrawRequest,
-    WithdrawRequestError, WithdrawTemporaryError,
+    DepositRequestError, DepositResponse, DepositTemporaryError, ErrorKind, LimitOrderRequest,
+    OrderStatus, Side, Token, TokenId, TokenMetadata, TradingPairInfo, TradingStatus,
+    WithdrawError, WithdrawRequest, WithdrawRequestError, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::log::Priority;
 
@@ -1274,6 +1274,8 @@ mod cancel_limit_order {
                 // Buyer rested first, so it is the maker: a base-token fee at the
                 // maker rate on the 1M filled = ceil(1_000_000 × 10 / 10_000).
                 filled_fee: Nat::from(1_000u64),
+                placed_by: None,
+                canceled_by: None,
             }
         );
 
@@ -1600,6 +1602,76 @@ async fn should_fail_deposit_with_unsupported_token() {
 }
 
 #[tokio::test]
+async fn oversized_amount_is_rejected_without_trapping() {
+    const OVERSIZED_LIMBS: usize = 200_000;
+
+    fn oversized_amount() -> Nat {
+        Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS]))
+    }
+
+    type OversizedAmountCase = (&'static str, Vec<u8>, fn(&[u8]));
+
+    fn assert_deposit_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<DepositResponse, DepositError> =
+            candid::decode_one(bytes).expect("decode deposit response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    fn assert_withdraw_amount_exceeds_maximum(bytes: &[u8]) {
+        let result: Result<WithdrawResponse, WithdrawError> =
+            candid::decode_one(bytes).expect("decode withdraw response");
+        assert_matches!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    let setup = Setup::new().await.with_trading_pair().await;
+    let user = Principal::from_slice(&[0x07]);
+    let token = setup.base_token_id();
+
+    let cases: [OversizedAmountCase; 2] = [
+        (
+            "deposit",
+            candid::encode_args((DepositRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode deposit args"),
+            assert_deposit_amount_exceeds_maximum,
+        ),
+        (
+            "withdraw",
+            candid::encode_args((WithdrawRequest {
+                token_id: token.clone(),
+                amount: oversized_amount(),
+            },))
+            .expect("encode withdraw args"),
+            assert_withdraw_amount_exceeds_maximum,
+        ),
+    ];
+
+    for (method, args, assert_rejected) in cases {
+        let bytes = setup
+            .env()
+            .update_call(setup.oisy_trade_id(), user, method, args)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{method} must reject an oversized amount as a request error, not trap on \
+                     super-linear work over the unvalidated amount: {e}"
+                )
+            });
+        assert_rejected(&bytes);
+    }
+
+    setup.drop().await;
+}
+
+#[tokio::test]
 async fn should_fail_deposit_when_ledger_is_stopped() {
     let setup = Setup::new().await.with_trading_pair().await;
 
@@ -1819,6 +1891,7 @@ async fn should_replay_events_on_upgrade() {
                 price: Nat::from(10_000 * PRICE_SCALE),
                 quantity: Nat::from(deposit_amount),
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+                placed_by: None,
             });
         });
         assert_matches!(&events[4], EventType::Matching(e) => {
@@ -1894,6 +1967,7 @@ async fn should_replay_events_on_upgrade() {
                 price: Nat::from(price),
                 quantity: Nat::from(deposit_amount),
                 time_in_force: oisy_trade_types::TimeInForce::GoodTilCanceled,
+                placed_by: None,
             });
         });
         assert_matches!(&events[7], EventType::Matching(e) => {
@@ -2696,6 +2770,9 @@ mod chunked_matching {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
                 instruction_budget: 1, // intentionally too small to make progress
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             })
             .build()
             .await
@@ -2714,6 +2791,7 @@ mod chunked_matching {
                 mode: None,
                 max_orders_per_chunk: None,
                 instruction_budget: Some(1_000_000_000),
+                max_settlement_units_per_event: None,
             }))
             .await;
 
@@ -2743,6 +2821,9 @@ mod chunked_matching {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: MAX_ORDERS_PER_CHUNK,
                 instruction_budget: 1_000_000_000,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             })
             .build()
             .await
@@ -3730,6 +3811,450 @@ mod halt {
             })
             .await
             .expect("orders accepted after the global resume clears the pair halt");
+
+        setup.drop().await;
+    }
+}
+
+mod trading_accounts {
+    use assert_matches::assert_matches;
+    use candid::{Nat, Principal};
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_types::{
+        AddTradingAccountRequestError, AddTradingAccountTemporaryError, DepositRequest,
+        DepositRequestError, ErrorKind, RemoveTradingAccountRequestError, WithdrawRequest,
+        WithdrawRequestError,
+    };
+    use std::time::Duration;
+
+    /// Mirrors the canister's `TRADING_ACCOUNT_GRANT_COOLDOWN` (1 hour). The
+    /// integration crate does not depend on the canister lib, so the value is
+    /// duplicated here.
+    const GRANT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
+    /// Mirrors the canister's `MAX_TRADING_ACCOUNTS_PER_USER`.
+    const MAX_TRADING_ACCOUNTS_PER_USER: u8 = 4;
+
+    fn trading_account(n: u8) -> Principal {
+        Principal::from_slice(&[0xF0, n])
+    }
+
+    /// Registers `who` as a funding account by depositing quote tokens.
+    async fn register_funding_account(setup: &Setup, who: Principal) {
+        setup.fund_quote(who, 1_000_000).await;
+    }
+
+    #[tokio::test]
+    async fn should_grant_list_and_revoke() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+
+        client.add_trading_account(trading).await.unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the granted trading account is listed"
+        );
+
+        client.remove_trading_account(trading).await.unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            Vec::<Principal>::new(),
+            "the whitelist is empty after revocation"
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_grant_past_the_cap() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+
+        // Fill the cap, advancing the clock past the cooldown between grants.
+        for i in 0..MAX_TRADING_ACCOUNTS_PER_USER {
+            client
+                .add_trading_account(trading_account(i))
+                .await
+                .unwrap();
+            setup.env().advance_time(GRANT_COOLDOWN).await;
+            setup.env().tick().await;
+        }
+
+        let err = client
+            .add_trading_account(trading_account(MAX_TRADING_ACCOUNTS_PER_USER))
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(
+                AddTradingAccountRequestError::TooManyTradingAccounts { max }
+            )) if max == MAX_TRADING_ACCOUNTS_PER_USER as u32
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_rate_limit_a_second_grant_within_the_cooldown() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let client = setup.oisy_trade_client_with_caller(funding);
+
+        client
+            .add_trading_account(trading_account(1))
+            .await
+            .unwrap();
+
+        // Upgrade between the grants: the grant-cooldown anchor lives in the
+        // event log and must survive, otherwise the second grant below would be
+        // treated as a first grant and escape the cooldown.
+        setup.upgrade(None).await;
+
+        let err = client
+            .add_trading_account(trading_account(2))
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::TemporaryError(Some(AddTradingAccountTemporaryError::RateLimit {
+                retry_after_ns,
+            })) if retry_after_ns > 0 && retry_after_ns <= GRANT_COOLDOWN.as_nanos() as u64
+        );
+
+        // Once the cooldown has elapsed, the second grant succeeds.
+        setup.env().advance_time(GRANT_COOLDOWN).await;
+        setup.env().tick().await;
+        client
+            .add_trading_account(trading_account(2))
+            .await
+            .unwrap();
+        assert_eq!(
+            client.get_my_trading_accounts().await.unwrap(),
+            vec![trading_account(1), trading_account(2)]
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_unauthorized_remove() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let owner = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        owner.add_trading_account(trading).await.unwrap();
+
+        // A stranger — a different, registered funding account — cannot remove it.
+        let stranger = Principal::from_slice(&[0xAB, 0xCD]);
+        register_funding_account(&setup, stranger).await;
+        let stranger_client = setup.oisy_trade_client_with_caller(stranger);
+        let err = stranger_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(RemoveTradingAccountRequestError::NotAllowed))
+        );
+
+        // A trading account cannot remove a trading account of its funding
+        // account (or any other).
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+        let err = trading_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err.kind,
+            ErrorKind::RequestError(Some(RemoveTradingAccountRequestError::NotAllowed))
+        );
+
+        // The owner's grant is untouched by the rejected removals.
+        assert_eq!(
+            owner.get_my_trading_accounts().await.unwrap(),
+            vec![trading]
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_deny_funding_operations_to_a_trading_account() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        register_funding_account(&setup, funding).await;
+        let owner = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        owner.add_trading_account(trading).await.unwrap();
+
+        // The trading account can neither deposit nor withdraw — the denial is
+        // synchronous, before any ledger interaction.
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+        let token = setup.quote_token_id();
+        let events_before = setup.get_all_events().await.len();
+
+        let deposit_err = trading_client
+            .deposit(DepositRequest {
+                token_id: token.clone(),
+                amount: Nat::from(1_000u64),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(
+            deposit_err.kind,
+            ErrorKind::RequestError(Some(DepositRequestError::TradingAccountForbidden))
+        );
+
+        let withdraw_err = trading_client
+            .withdraw(WithdrawRequest {
+                token_id: token,
+                amount: Nat::from(1_000u64),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(
+            withdraw_err.kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::TradingAccountForbidden))
+        );
+
+        assert_eq!(
+            setup.get_all_events().await.len(),
+            events_before,
+            "the denied funding operations record no events"
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_resolve_reads_to_the_funding_account() {
+        use oisy_trade_int_tests::PRICE_SCALE;
+        use oisy_trade_types::{
+            GetMyOrdersArgs, GetMyTradesArgs, LimitOrderRequest, Side, TradesByAccount,
+            TradesFilter,
+        };
+
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        let funding_client = setup.oisy_trade_client_with_caller(funding);
+
+        let quantity = 1_000_000u64;
+        let price = 9_000 * PRICE_SCALE;
+        setup.fund_base(funding, quantity).await;
+        funding_client
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Sell,
+                price: Nat::from(price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let buyer = Principal::from_slice(&[0x0B]);
+        let notional = price as u128 * quantity as u128 / 1_000_000_000u128;
+        setup.fund_quote(buyer, notional as u64).await;
+        setup
+            .oisy_trade_client_with_caller(buyer)
+            .add_limit_order(LimitOrderRequest {
+                pair: setup.trading_pair(),
+                side: Side::Buy,
+                price: Nat::from(price),
+                quantity: quantity.into(),
+                time_in_force: None,
+            })
+            .await
+            .unwrap();
+        setup.env().tick().await;
+
+        let trading = trading_account(1);
+        funding_client.add_trading_account(trading).await.unwrap();
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+
+        let account_trades = GetMyTradesArgs {
+            filter: TradesFilter::ByAccount(TradesByAccount {
+                after: None,
+                length: 10,
+            }),
+        };
+
+        assert_eq!(
+            trading_client.get_balances(None).await.unwrap(),
+            funding_client.get_balances(None).await.unwrap(),
+            "the trading account sees the funding account's balances"
+        );
+        assert_eq!(
+            trading_client
+                .get_my_orders(GetMyOrdersArgs::default())
+                .await
+                .unwrap(),
+            funding_client
+                .get_my_orders(GetMyOrdersArgs::default())
+                .await
+                .unwrap(),
+            "the trading account sees the funding account's orders"
+        );
+        assert_eq!(
+            trading_client
+                .get_my_trades(account_trades.clone())
+                .await
+                .unwrap(),
+            funding_client.get_my_trades(account_trades).await.unwrap(),
+            "the trading account sees the funding account's trades"
+        );
+        assert!(!funding_client.get_balances(None).await.unwrap().is_empty());
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_run_the_deposit_grant_trade_revoke_lifecycle() {
+        use oisy_trade_int_tests::PRICE_SCALE;
+        use oisy_trade_types::{
+            CancelLimitOrderRequestError, LimitOrderRequest, OrderStatus, Side,
+        };
+
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        let funding_client = setup.oisy_trade_client_with_caller(funding);
+        let trading = trading_account(1);
+        let trading_client = setup.oisy_trade_client_with_caller(trading);
+
+        let quantity = 1_000_000u64;
+        let price = 9_000 * PRICE_SCALE;
+        let sell = || LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Sell,
+            price: Nat::from(price),
+            quantity: quantity.into(),
+            time_in_force: None,
+        };
+
+        // Deposit registers F and funds every resting sell (each reserves
+        // `quantity` base); grant whitelists T.
+        setup.fund_base(funding, quantity * 4).await;
+        funding_client.add_trading_account(trading).await.unwrap();
+
+        // Upgrade mid-lifecycle: the whitelist (stable memory) and the
+        // deposited balance must survive, and delegation must still resolve —
+        // the trading-account order placed below is the proof it does.
+        setup.upgrade(None).await;
+        assert_eq!(
+            funding_client.get_my_trading_accounts().await.unwrap(),
+            vec![trading],
+            "the whitelist survives the upgrade"
+        );
+
+        let t_order = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let record = funding_client
+            .get_my_order(t_order.clone())
+            .await
+            .unwrap()
+            .order;
+        assert_eq!(
+            record.owner, funding,
+            "the order is owned by the funding account"
+        );
+        assert_eq!(
+            record.placed_by,
+            Some(trading),
+            "the acting trading account is attributed as placed_by"
+        );
+
+        assert_eq!(
+            funding_client
+                .cancel_limit_order(t_order)
+                .await
+                .unwrap()
+                .status,
+            OrderStatus::Canceled,
+            "the funding account cancels the order its trading account placed"
+        );
+
+        let f_order = funding_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let canceled = trading_client.cancel_limit_order(f_order).await.unwrap();
+        assert_eq!(canceled.owner, funding);
+        assert_eq!(
+            canceled.status,
+            OrderStatus::Canceled,
+            "the trading account cancels the funding account's own order"
+        );
+
+        setup.env().advance_time(GRANT_COOLDOWN).await;
+        setup.env().tick().await;
+        let trading2 = trading_account(2);
+        let trading2_client = setup.oisy_trade_client_with_caller(trading2);
+        funding_client.add_trading_account(trading2).await.unwrap();
+
+        let sibling_order = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+        let sibling_canceled = trading2_client
+            .cancel_limit_order(sibling_order)
+            .await
+            .unwrap();
+        assert_eq!(
+            sibling_canceled.owner, funding,
+            "a sibling key's cancel resolves to the funding account"
+        );
+        assert_eq!(
+            sibling_canceled.status,
+            OrderStatus::Canceled,
+            "a sibling trading account cancels an order another trading account placed"
+        );
+        assert_eq!(
+            sibling_canceled.canceled_by,
+            Some(trading2),
+            "the sibling key is attributed as canceled_by on the record"
+        );
+
+        let surviving = trading_client.add_limit_order(sell()).await.unwrap();
+        setup.env().tick().await;
+
+        funding_client
+            .remove_trading_account(trading)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            trading_client
+                .cancel_limit_order(surviving.clone())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::RequestError(Some(CancelLimitOrderRequestError::NotOrderOwner)),
+            "a revoked trading account is treated as a stranger"
+        );
+        // The order the revoked key placed stays open and cancellable by F.
+        assert_eq!(
+            funding_client
+                .get_my_order(surviving.clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open,
+            "an order the revoked key placed stays open"
+        );
+        assert_eq!(
+            funding_client
+                .cancel_limit_order(surviving)
+                .await
+                .unwrap()
+                .status,
+            OrderStatus::Canceled,
+            "the funding account still cancels the revoked key's order"
+        );
 
         setup.drop().await;
     }

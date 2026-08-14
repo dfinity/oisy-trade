@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
+### Added
+
+- Public types for funding and trading accounts: the `add_trading_account`, `remove_trading_account`, and `get_my_trading_accounts` error types, the `placed_by` / `canceled_by` attribution fields on `OrderRecord`, and a `TradingAccountForbidden` request-error variant on `DepositError` and `WithdrawError` ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226), [#238](https://github.com/dfinity/oisy-trade/pull/238))
+- `Display` for `Error`, `OrderRecord`, `LimitOrderRequest`, `TradingPair`, and `TokenId`, so principals render textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
+
+### Changed
+
+- **BREAKING (Rust API only):** `OrderRecord` gains two public fields, and `DepositRequestError` and `WithdrawRequestError` each gain a variant, so downstream Rust code that builds an `OrderRecord` from a struct literal or matches those enums exhaustively must be updated. The Candid interface is unchanged for existing clients: an older decoder ignores the added record fields, and an unknown leaf under `RequestError : opt variant` decodes as `null` by the disposition contract, leaving the arm and `message` readable ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
+
 ## [0.3.0] - 2026-07-02
 
 ### Added
@@ -47,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add an `OperationInProgress` error to guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.2.0..oisy_trade_types-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.1.0..oisy_trade_types-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.0.0..oisy_trade_types-v0.1.0

@@ -17,6 +17,14 @@ pub enum UnauthorizedError {
     NotController,
 }
 
+/// Why a funding operation (deposit / withdraw) was denied admission.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FundingDenied {
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot deposit or withdraw.
+    TradingAccountForbidden,
+}
+
 /// Proof that a synchronous admission check ran and passed.
 ///
 /// Permit tokens are capability tokens: the recorder *consumes* a permit to
@@ -121,12 +129,36 @@ impl Permissions {
         Ok(SyncPermit(()))
     }
 
-    pub fn permit_deposit(&self, _caller: Principal) -> PreAsyncPermit {
-        PreAsyncPermit(())
+    /// Admits a deposit unless the caller is a trading account, which can never
+    /// hold DEX balances. `caller_is_trading_account` is whether the calling
+    /// principal is a trading account, computed by the canister from the
+    /// registry (via `State::lookup_account`); it is derived internally and
+    /// must never be treated as caller-supplied input.
+    pub fn permit_deposit(
+        &self,
+        _caller: Principal,
+        caller_is_trading_account: bool,
+    ) -> Result<PreAsyncPermit, FundingDenied> {
+        if caller_is_trading_account {
+            return Err(FundingDenied::TradingAccountForbidden);
+        }
+        Ok(PreAsyncPermit(()))
     }
 
-    pub fn permit_withdraw(&self, _caller: Principal) -> PreAsyncPermit {
-        PreAsyncPermit(())
+    /// Admits a withdrawal unless the caller is a trading account, which can
+    /// never hold DEX balances. `caller_is_trading_account` is whether the
+    /// calling principal is a trading account, computed by the canister from the
+    /// registry (via `State::lookup_account`); it is derived internally and
+    /// must never be treated as caller-supplied input.
+    pub fn permit_withdraw(
+        &self,
+        _caller: Principal,
+        caller_is_trading_account: bool,
+    ) -> Result<PreAsyncPermit, FundingDenied> {
+        if caller_is_trading_account {
+            return Err(FundingDenied::TradingAccountForbidden);
+        }
+        Ok(PreAsyncPermit(()))
     }
 
     pub fn permit_cancel(&self) -> SyncPermit {
@@ -142,6 +174,14 @@ impl Permissions {
     }
 
     pub fn permit_admin(&self) -> SyncPermit {
+        SyncPermit(())
+    }
+
+    pub fn permit_add_trading_account(&self) -> SyncPermit {
+        SyncPermit(())
+    }
+
+    pub fn permit_remove_trading_account(&self) -> SyncPermit {
         SyncPermit(())
     }
 }

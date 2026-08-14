@@ -305,6 +305,14 @@ type OrderRecord = record {
     /// Cumulative realized fee charged across the order's fills, in the order's
     /// receive token — base for a buy, quote for a sell.
     filled_fee : nat;
+    /// The principal that placed the order when it differs from `owner` (a
+    /// trading account acting for the funding account); null when the owner
+    /// placed it itself.
+    placed_by : opt principal;
+    /// The principal that canceled the order when it differs from `owner` (a
+    /// trading account acting for the funding account); null if the order is
+    /// not canceled, or was canceled by the owner itself.
+    canceled_by : opt principal;
 };
 
 /// Request for `get_my_orders`.
@@ -454,6 +462,8 @@ type DepositError = record {
             InsufficientFunds : record { balance : nat };
             // The caller's ICRC-2 allowance to the canister is not large enough.
             InsufficientAllowance : record { allowance : nat };
+            // The caller is a trading account, which can never hold DEX balances.
+            TradingAccountForbidden;
         };
         TemporaryError : opt variant {
             // Another deposit or withdrawal is already in flight for this
@@ -525,6 +535,8 @@ type WithdrawError = record {
             UnsupportedToken : record { token_id : TokenId };
             // The caller does not have enough free balance.
             InsufficientBalance : record { available : nat };
+            // The caller is a trading account, which can never hold DEX balances.
+            TradingAccountForbidden;
         };
         TemporaryError : opt variant {
             // Another deposit or withdrawal is already in flight for this
@@ -594,6 +606,66 @@ type GetBalancesError = record {
 type GetBalancesResult = variant {
     Ok : vec UserTokenBalance;
     Err : GetBalancesError;
+};
+
+// Error reported by `add_trading_account`. See the disposition contract at the
+// top of this file.
+type AddTradingAccountError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The funding account cannot act as a granter: it is not a
+            // registered user, or it is itself a trading account. The advisory
+            // `message` distinguishes the two.
+            FundingAccountNotFound;
+            // The proposed trading account is not a valid, fresh key: it is the
+            // funding account itself, or an already-registered user. The
+            // advisory `message` distinguishes the two.
+            InvalidTradingAccount;
+            // The proposed trading account is a non-authenticating principal
+            // (the anonymous principal or the management canister) that no
+            // single keyholder can exclusively exercise.
+            NonAuthenticatingTradingAccount;
+            // The principal is already a trading account (of anyone).
+            AlreadyTradingAccount;
+            // The granter already has the maximum number of trading accounts.
+            TooManyTradingAccounts : record { max : nat32 };
+        };
+        TemporaryError : opt variant {
+            // The principal has an in-flight deposit or withdrawal; retry once it completes.
+            FundingOperationInProgress;
+            // Too little time has elapsed since the previous successful grant;
+            // retry after `retry_after_ns` nanoseconds.
+            RateLimit : record { retry_after_ns : nat64 };
+        };
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Error reported by `remove_trading_account`. Revocation is never rate-limited.
+// See the disposition contract at the top of this file.
+type RemoveTradingAccountError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The caller may not remove this trading account (it is not
+            // currently one of the caller's trading accounts).
+            NotAllowed;
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Error reported by `get_my_trading_accounts`. The query cannot currently fail;
+// all three disposition arms are reserved for forward compatibility.
+type GetMyTradingAccountsError = record {
+    kind : variant {
+        RequestError : opt variant {};
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
 };
 
 // Request to add a new trading pair to the canister.
@@ -677,6 +749,10 @@ type InitArg = record {
     max_orders_per_chunk : nat32;
     // Maximum instructions consumed before a chunk yields.
     instruction_budget : nat64;
+    // Maximum settlement units (a fill, or a removed-order refund) packed into
+    // a single settling event; absent falls back to the conservative production
+    // default.
+    max_settlement_units_per_event : opt nat32;
 };
 
 // Argument for canister upgrade.
@@ -687,6 +763,8 @@ type UpgradeArg = record {
     max_orders_per_chunk : opt nat32;
     // If set, overrides the current `instruction_budget`.
     instruction_budget : opt nat64;
+    // If set, overrides the current `max_settlement_units_per_event`.
+    max_settlement_units_per_event : opt nat32;
 };
 
 // Argument passed to the canister on init or upgrade.
@@ -721,6 +799,7 @@ type AddLimitOrderEvent = record {
     price : nat;
     quantity : nat;
     time_in_force : TimeInForce;
+    placed_by : opt principal;
 };
 
 // Event payload for a deposit.
@@ -741,6 +820,10 @@ type WithdrawEvent = record {
 /// Event payload for canceling a limit order.
 type CancelLimitOrderEvent = record {
     order_id : EventOrderId;
+    /// The principal that canceled the order when it differs from the owner (a
+    /// trading account acting for the funding account); null when the owner
+    /// canceled it itself.
+    canceled_by : opt principal;
 };
 
 // Event payload recording a halt status change. `book_ids` is null for a
@@ -749,6 +832,20 @@ type CancelLimitOrderEvent = record {
 type SetHaltEvent = record {
     book_ids : opt vec nat64;
     halted : bool;
+};
+
+// Event payload recording a trading-account grant: `funding` whitelisted
+// `trading` as one of its trading accounts.
+type AddTradingAccountEvent = record {
+    funding : principal;
+    trading : principal;
+};
+
+// Event payload recording a trading-account revocation: `funding` removed
+// `trading` from its trading accounts.
+type RemoveTradingAccountEvent = record {
+    funding : principal;
+    trading : principal;
 };
 
 // Engine drove a matching round on `book_id`, processing these orders in
@@ -812,6 +909,8 @@ type EventType = variant {
     Matching : MatchingEvent;
     Withdraw : WithdrawEvent;
     SetHalt : SetHaltEvent;
+    AddTradingAccount : AddTradingAccountEvent;
+    RemoveTradingAccount : RemoveTradingAccountEvent;
 };
 
 // A canister event with a timestamp.
@@ -931,6 +1030,27 @@ service : (OisyTradeArg) -> {
     // for clients that need to discover which tokens a user might hold
     // (e.g. wallet-state recovery after losing local state).
     list_supported_tokens : () -> (vec Token) query;
+
+    // Whitelist `trading` as a trading account of the caller's funding account.
+    // From then on `trading` may place and cancel orders acting on the caller's
+    // account (enforced in later releases). Acts on the raw caller as a funding
+    // account and never resolves delegation. Fails if the caller is not a
+    // registered user, is granting itself, is itself a trading account, has
+    // reached the maximum number of trading accounts, or if `trading` is already
+    // a trading account or an already-registered user; a transient failure is
+    // returned while `trading` has an in-flight deposit or withdrawal.
+    add_trading_account : (principal) -> (variant { Ok; Err : AddTradingAccountError });
+
+    // Revoke a trading account previously whitelisted by the caller. Acts on the
+    // raw caller as a funding account and never resolves delegation. Revocation
+    // is immediate and never rate-limited. Fails if `trading` is not currently
+    // one of the caller's trading accounts. The caller's open orders — including
+    // any the revoked key placed — are unaffected.
+    remove_trading_account : (principal) -> (variant { Ok; Err : RemoveTradingAccountError });
+
+    // Return the caller's current trading-account whitelist (empty if it has
+    // granted none). Acts on the raw caller and never resolves delegation.
+    get_my_trading_accounts : () -> (variant { Ok : vec principal; Err : GetMyTradingAccountsError }) query;
 
     // ===== END of Public / user endpoints =====
 

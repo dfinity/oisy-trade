@@ -1,6 +1,11 @@
-use crate::{DepositError, DepositRequestError, ErrorKind};
-use candid::CandidType;
+use crate::{
+    DepositError, DepositRequestError, DepositTemporaryError, ErrorKind, TokenId, WithdrawError,
+    WithdrawRequestError,
+};
+use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
+
+const KNOWN_PRINCIPAL_TEXT: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
 enum CurrentRequestError {
@@ -49,6 +54,44 @@ enum FutureErrorKind {
 struct FutureError {
     kind: FutureErrorKind,
     message: Option<String>,
+}
+
+#[test]
+fn should_display_principals_as_text() {
+    struct TestCase {
+        desc: &'static str,
+        rendered: String,
+        expected: &'static str,
+    }
+
+    let principal = Principal::from_text(KNOWN_PRINCIPAL_TEXT).unwrap();
+
+    let cases = vec![
+        TestCase {
+            desc: "DepositError CallFailed carries a ledger principal",
+            rendered: DepositError::temporary(DepositTemporaryError::CallFailed {
+                ledger: principal,
+                method: "icrc2_transfer_from".to_string(),
+                reason: "timed out".to_string(),
+            })
+            .to_string(),
+            expected: "temporary error: call to ryjl3-tyaaa-aaaaa-aaaba-cai.icrc2_transfer_from failed: timed out",
+        },
+        TestCase {
+            desc: "WithdrawError UnsupportedToken carries a TokenId",
+            rendered: WithdrawError::request(WithdrawRequestError::UnsupportedToken {
+                token_id: TokenId {
+                    ledger_id: principal,
+                },
+            })
+            .to_string(),
+            expected: "request error: token ryjl3-tyaaa-aaaaa-aaaba-cai is not supported",
+        },
+    ];
+
+    for case in cases {
+        assert_eq!(case.rendered, case.expected, "{}", case.desc);
+    }
 }
 
 #[test]

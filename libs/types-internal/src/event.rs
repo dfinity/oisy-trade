@@ -21,6 +21,8 @@ pub enum EventType {
     Matching(MatchingEvent),
     Withdraw(WithdrawEvent),
     SetHalt(SetHaltEvent),
+    AddTradingAccount(AddTradingAccountEvent),
+    RemoveTradingAccount(RemoveTradingAccountEvent),
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
@@ -61,17 +63,31 @@ pub struct AddLimitOrderEvent {
     pub price: Nat,
     pub quantity: Nat,
     pub time_in_force: TimeInForce,
+    pub placed_by: Option<Principal>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct CancelLimitOrderEvent {
     pub order_id: OrderId,
+    pub canceled_by: Option<Principal>,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
 pub struct SetHaltEvent {
     pub book_ids: Option<Vec<u64>>,
     pub halted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct AddTradingAccountEvent {
+    pub funding: Principal,
+    pub trading: Principal,
+}
+
+#[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]
+pub struct RemoveTradingAccountEvent {
+    pub funding: Principal,
+    pub trading: Principal,
 }
 
 #[derive(Clone, Debug, PartialEq, CandidType, Deserialize)]

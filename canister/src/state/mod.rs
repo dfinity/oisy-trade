@@ -24,10 +24,12 @@ use crate::order::{
 };
 use crate::settlement::{MatchSettlement, RemovedOrderSettlement};
 use crate::storage::VMem;
-use crate::user::{UserId, UserRegistry};
+use crate::user::{
+    FundingAccount, GrantError, RevokeError, TradingAccount, UserAccount, UserId, UserRegistry,
+};
 use candid::{Nat, Principal};
 use ic_stable_structures::Memory;
-use oisy_trade_types_internal::{InitArg, Mode};
+use oisy_trade_types_internal::{DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT, InitArg, Mode};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU64;
@@ -108,8 +110,13 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user_registry: UserRegistry<MB>,
         balances: TokenBalance<MB>,
     ) -> Result<Self, String> {
-        let execution_policy =
-            ExecutionPolicy::try_new(init_arg.max_orders_per_chunk, init_arg.instruction_budget)?;
+        let execution_policy = ExecutionPolicy::try_new(
+            init_arg.max_orders_per_chunk,
+            init_arg.instruction_budget,
+            init_arg
+                .max_settlement_units_per_event
+                .unwrap_or(DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT),
+        )?;
         Ok(Self {
             mode: init_arg.mode,
             execution_policy,
@@ -202,6 +209,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let free = self
             .user_registry
             .lookup(user)
+            .and_then(|account| account.funding_id())
             .and_then(|u| self.balances.get_balance(u, &token))
             .map(|b| *b.free())
             .unwrap_or(Quantity::ZERO);
@@ -223,6 +231,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         user: Principal,
         book_id: OrderBookId,
         order: Order,
+        placed_by: Option<Principal>,
         timestamp: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -254,6 +263,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             let user_id = self
                 .user_registry
                 .lookup(user)
+                .and_then(|account| account.funding_id())
                 .expect("BUG: order owner not registered — deposit registers every user");
             self.balances
                 .reserve(user_id, &token, required)
@@ -275,6 +285,8 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
                     time_in_force: order.time_in_force(),
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by,
+                    canceled_by: None,
                 },
             );
         }
@@ -283,26 +295,26 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     pub fn cancel_limit_order(
         &mut self,
-        user: &Principal,
+        owner: &Principal,
+        canceled_by: Option<Principal>,
         order_id: OrderId,
         runtime: &impl Runtime,
     ) -> Result<OrderRecord, CancelLimitOrderError> {
-        self.validate_cancel_limit_order(user, &order_id)?;
+        self.validate_cancel_limit_order(owner, &order_id)?;
 
+        let settling_backlog_len = self.pending_settling_events.len();
         let permit = self.permissions().permit_cancel();
         audit::process_event(
             self,
-            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent { order_id }),
+            event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
+                order_id,
+                canceled_by,
+            }),
             permit.into(),
             runtime,
         );
 
-        // TODO(DEFI-2882): once PR #89's chunked execution lets matching
-        // leave settling events queued across messages, draining the whole
-        // queue here lets an unrelated cancel apply balance ops from a
-        // previous matching round and inherit its instruction debt. Pop
-        // only the event this cancel just pushed.
-        while let Some(event) = self.take_next_pending_settling_event() {
+        for event in self.pending_settling_events.split_off(settling_backlog_len) {
             let permit = self.permissions().permit_settling();
             audit::process_event(
                 self,
@@ -325,14 +337,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
 
     fn validate_cancel_limit_order(
         &self,
-        caller: &Principal,
+        owner: &Principal,
         order_id: &OrderId,
     ) -> Result<(), CancelLimitOrderError> {
         let record = self
             .order_history
             .get(order_id)
             .ok_or(CancelLimitOrderError::OrderNotFound)?;
-        if &record.owner != caller {
+        if &record.owner != owner {
             return Err(CancelLimitOrderError::NotOrderOwner);
         }
         match record.status {
@@ -346,6 +358,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn record_cancel_limit_order(
         &mut self,
         order_id: OrderId,
+        canceled_by: Option<Principal>,
         now: Timestamp,
         persistence: StableMemoryOptions,
     ) {
@@ -359,29 +372,26 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
             "BUG: canceled order request was validated, but canceled order not found in book",
         );
         if matches!(persistence, StableMemoryOptions::Write) {
-            self.order_history.apply_update(
-                &order_id,
-                OrderUpdate::status(OrderStatus::Canceled),
-                now,
-            );
-            let mut balance_operations = Vec::with_capacity(1);
-            RemovedOrderSettlement::new(seq, &removed, base_scale)
-                .push_balance_operations(&mut balance_operations);
+            self.order_history
+                .apply_update(&order_id, OrderUpdate::cancel(canceled_by), now);
             self.pending_settling_events
                 .push_back(event::SettlingEvent {
                     book_id,
-                    balance_operations,
+                    balance_operations: RemovedOrderSettlement::new(seq, &removed, base_scale)
+                        .balance_operations(),
                     fills: Vec::new(),
                 });
         }
     }
 
     /// Drive engine matching for the given book; when `persistence` is
-    /// [`StableMemoryOptions::Write`], flip every touched order's status
-    /// in `order_history`. Push the paired balance-only
-    /// [`event::SettlingEvent`] (if any balance operations were produced)
-    /// onto [`State::pending_settling_events`] for the settling-event
-    /// dispatch to drain.
+    /// [`StableMemoryOptions::Write`], apply the resulting order-record
+    /// updates in one pass over `order_history`, then enqueue one
+    /// [`event::SettlingEvent`] per [`crate::settlement::SettlementBatch`] the packer cut from
+    /// the round — each carrying a bounded number of settlement units (fills
+    /// with their balance operations, plus removed-order refunds) — onto
+    /// [`State::pending_settling_events`] for the settling-event dispatch to
+    /// drain.
     pub fn record_matching_event(
         &mut self,
         event: &event::MatchingEvent,
@@ -399,21 +409,29 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         let output = book.process_pending_orders(&event.orders);
 
         if matches!(persistence, StableMemoryOptions::Write) {
-            let settlement = MatchSettlement::from_matching(output, fee_rates, base_scale);
+            let MatchSettlement {
+                order_updates,
+                settling_batches,
+            } = MatchSettlement::from_matching(
+                output,
+                fee_rates,
+                base_scale,
+                self.execution_policy.max_settlement_units_per_event(),
+            );
             {
                 #[cfg(feature = "canbench-rs")]
                 let _p = canbench_rs::bench_scope("apply_order_updates");
-                for (seq, update) in settlement.order_updates {
+                for (seq, update) in order_updates {
                     self.order_history
                         .apply_update(&OrderId::new(event.book_id, seq), update, now);
                 }
             }
-            if !settlement.balance_operations.is_empty() || !settlement.fills.is_empty() {
+            for batch in settling_batches {
                 self.pending_settling_events
                     .push_back(event::SettlingEvent {
                         book_id: event.book_id,
-                        balance_operations: settlement.balance_operations,
-                        fills: settlement.fills,
+                        balance_operations: batch.balance_operations,
+                        fills: batch.fills,
                     });
             }
         }
@@ -513,7 +531,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         after: Option<OrderId>,
         length: usize,
     ) -> Result<Vec<(OrderId, TradingPair, OrderRecord)>, CursorNotFound> {
-        let Some(user_id) = self.user_registry.lookup(*owner) else {
+        let Some(user_id) = self
+            .user_registry
+            .lookup(*owner)
+            .and_then(|account| account.funding_id())
+        else {
             return match after {
                 Some(_) => Err(CursorNotFound),
                 None => Ok(Vec::new()),
@@ -596,7 +618,11 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         after: Option<TradeId>,
         length: usize,
     ) -> Result<Vec<(TradeId, TradeRecord)>, CursorNotFound> {
-        let Some(user_id) = self.user_registry.lookup(*owner) else {
+        let Some(user_id) = self
+            .user_registry
+            .lookup(*owner)
+            .and_then(|account| account.funding_id())
+        else {
             return Ok(Vec::new());
         };
         self.trade_history.trades_after(user_id, after, length)
@@ -721,13 +747,14 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         amount: Quantity,
     ) -> Result<(), crate::balance::InsufficientBalanceError> {
         // A user with no interned id has never deposited, so has no balance.
-        let user_id =
-            self.user_registry
-                .lookup(user)
-                .ok_or(crate::balance::InsufficientBalanceError {
-                    available: Quantity::ZERO,
-                    required: amount,
-                })?;
+        let user_id = self
+            .user_registry
+            .lookup(user)
+            .and_then(|account| account.funding_id())
+            .ok_or(crate::balance::InsufficientBalanceError {
+                available: Quantity::ZERO,
+                required: amount,
+            })?;
         self.balances.withdraw(user_id, &token_id, amount)
     }
 
@@ -824,6 +851,75 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
         }
     }
 
+    pub fn validate_add_trading_account(
+        &self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        now: Timestamp,
+    ) -> Result<(), AddTradingAccountError> {
+        self.user_registry
+            .validate_add_trading_account(funding, trading, now)?;
+        if self.in_flight_user_ops.iter().any(|(p, _)| *p == trading.0) {
+            return Err(AddTradingAccountError::FundingOperationInProgress);
+        }
+        Ok(())
+    }
+
+    pub fn record_add_trading_account(
+        &mut self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        now: Timestamp,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.user_registry
+                .record_add_trading_account(funding, trading, now);
+        }
+    }
+
+    pub fn validate_remove_trading_account(
+        &self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+    ) -> Result<(), RemoveTradingAccountError> {
+        self.user_registry
+            .validate_remove_trading_account(funding, trading)
+            .map_err(RemoveTradingAccountError::from)
+    }
+
+    pub fn record_remove_trading_account(
+        &mut self,
+        funding: FundingAccount,
+        trading: TradingAccount,
+        persistence: StableMemoryOptions,
+    ) {
+        if matches!(persistence, StableMemoryOptions::Write) {
+            self.user_registry
+                .record_remove_trading_account(funding, trading);
+        }
+    }
+
+    pub fn trading_accounts_of(&self, funding: Principal) -> Vec<Principal> {
+        self.user_registry.trading_accounts_of(funding)
+    }
+
+    /// Classifies `principal` as a funding or trading account, or `None` if it
+    /// is neither. Used to deny funding operations to trading accounts.
+    pub fn lookup_account(&self, principal: Principal) -> Option<UserAccount> {
+        self.user_registry.lookup(principal)
+    }
+
+    /// Resolves `caller` to the account whose data it reads and acts on: a
+    /// trading account resolves to its funding account, any other principal to
+    /// itself.
+    pub fn effective_account(&self, caller: Principal) -> Principal {
+        self.user_registry
+            .lookup(caller)
+            .map(|account| account.effective_principal())
+            .unwrap_or(caller)
+    }
+
     pub fn get_cached_ledger_fee(&self, token_id: &TokenId) -> Nat {
         self.ledger_fee_cache
             .get(token_id)
@@ -838,6 +934,7 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     pub fn get_balance(&self, user: &Principal, token_id: &TokenId) -> Balance {
         self.user_registry
             .lookup(*user)
+            .and_then(|account| account.funding_id())
             .and_then(|u| self.balances.get_balance(u, token_id))
             .unwrap_or_default()
     }
@@ -849,7 +946,10 @@ impl<MH: Memory, MB: Memory> State<MH, MB> {
     ) -> Result<Vec<oisy_trade_types::UserTokenBalance>, oisy_trade_types::GetBalancesError> {
         // `lookup` (not `intern`) so mere queriers don't pollute the registry.
         // `None` ⇒ the user has never held a balance, so every balance is zero.
-        let user_id = self.user_registry.lookup(*user);
+        let user_id = self
+            .user_registry
+            .lookup(*user)
+            .and_then(|account| account.funding_id());
         match filter {
             Some(entries) => self.apply_filter(entries, |t| {
                 user_id
@@ -979,6 +1079,7 @@ fn resolve_op_orders<MH: Memory, MB: Memory>(
                 .expect("BUG: missing order_history entry for BalanceOperation");
             let user = registry
                 .lookup(record.owner)
+                .and_then(|account| account.funding_id())
                 .expect("BUG: order owner not registered");
             (
                 seq,
@@ -1123,6 +1224,117 @@ pub enum AddLimitOrderError {
 pub enum GetUserOrderTradesError {
     OrderNotFound,
     CursorNotFound,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AddTradingAccountError {
+    GranterNotRegistered,
+    SelfGrant,
+    NonAuthenticatingTradingAccount,
+    AlreadyTradingAccount,
+    AlreadyRegisteredUser,
+    GranterIsTradingAccount,
+    TooManyTradingAccounts,
+    FundingOperationInProgress,
+    CooldownActive { retry_after_ns: u64 },
+}
+
+impl From<GrantError> for AddTradingAccountError {
+    fn from(err: GrantError) -> Self {
+        match err {
+            GrantError::GranterNotRegistered => AddTradingAccountError::GranterNotRegistered,
+            GrantError::SelfGrant => AddTradingAccountError::SelfGrant,
+            GrantError::NonAuthenticatingTradingAccount => {
+                AddTradingAccountError::NonAuthenticatingTradingAccount
+            }
+            GrantError::AlreadyTradingAccount => AddTradingAccountError::AlreadyTradingAccount,
+            GrantError::AlreadyRegisteredUser => AddTradingAccountError::AlreadyRegisteredUser,
+            GrantError::GranterIsTradingAccount => AddTradingAccountError::GranterIsTradingAccount,
+            GrantError::TooManyTradingAccounts => AddTradingAccountError::TooManyTradingAccounts,
+            GrantError::CooldownActive { retry_after_ns } => {
+                AddTradingAccountError::CooldownActive { retry_after_ns }
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoveTradingAccountError {
+    NotAllowed,
+}
+
+impl From<RevokeError> for RemoveTradingAccountError {
+    fn from(err: RevokeError) -> Self {
+        match err {
+            RevokeError::NotAllowed => RemoveTradingAccountError::NotAllowed,
+        }
+    }
+}
+
+impl From<RemoveTradingAccountError> for oisy_trade_types::RemoveTradingAccountError {
+    fn from(err: RemoveTradingAccountError) -> Self {
+        use oisy_trade_types::RemoveTradingAccountRequestError as Req;
+        match err {
+            RemoveTradingAccountError::NotAllowed => {
+                oisy_trade_types::RemoveTradingAccountError::request(Req::NotAllowed)
+            }
+        }
+    }
+}
+
+impl From<AddTradingAccountError> for oisy_trade_types::AddTradingAccountError {
+    fn from(err: AddTradingAccountError) -> Self {
+        use oisy_trade_types::AddTradingAccountRequestError as Req;
+        use oisy_trade_types::AddTradingAccountTemporaryError as Tmp;
+        use oisy_trade_types::ErrorKind;
+        // Several internal reasons collapse into one public typed variant; the
+        // advisory `message` keeps the specific reason so diagnostics survive.
+        let (kind, message): (ErrorKind<Req, Tmp, oisy_trade_types::Never>, &'static str) =
+            match err {
+                AddTradingAccountError::GranterNotRegistered => (
+                    ErrorKind::RequestError(Some(Req::FundingAccountNotFound)),
+                    "the funding account is not a registered user",
+                ),
+                AddTradingAccountError::GranterIsTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::FundingAccountNotFound)),
+                    "the funding account is itself a trading account",
+                ),
+                AddTradingAccountError::SelfGrant => (
+                    ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
+                    "a funding account cannot whitelist itself",
+                ),
+                AddTradingAccountError::NonAuthenticatingTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::NonAuthenticatingTradingAccount)),
+                    "the proposed trading account is a non-authenticating principal",
+                ),
+                AddTradingAccountError::AlreadyRegisteredUser => (
+                    ErrorKind::RequestError(Some(Req::InvalidTradingAccount)),
+                    "the proposed trading account is already a registered user",
+                ),
+                AddTradingAccountError::AlreadyTradingAccount => (
+                    ErrorKind::RequestError(Some(Req::AlreadyTradingAccount)),
+                    "the principal is already a trading account",
+                ),
+                AddTradingAccountError::TooManyTradingAccounts => (
+                    ErrorKind::RequestError(Some(Req::TooManyTradingAccounts {
+                        max: crate::user::MAX_TRADING_ACCOUNTS_PER_USER as u32,
+                    })),
+                    "the granter already has the maximum number of trading accounts",
+                ),
+                AddTradingAccountError::FundingOperationInProgress => (
+                    ErrorKind::TemporaryError(Some(Tmp::FundingOperationInProgress)),
+                    "the trading account has an in-flight deposit or withdrawal",
+                ),
+                AddTradingAccountError::CooldownActive { retry_after_ns } => (
+                    ErrorKind::TemporaryError(Some(Tmp::RateLimit { retry_after_ns })),
+                    "the grant cooldown has not elapsed since the previous grant",
+                ),
+            };
+        oisy_trade_types::AddTradingAccountError {
+            kind,
+            message: Some(message.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -1,4 +1,7 @@
-use oisy_trade_types_internal::{DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK};
+use oisy_trade_types_internal::{
+    DEFAULT_INSTRUCTION_BUDGET, DEFAULT_MAX_ORDERS_PER_CHUNK,
+    DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+};
 use std::num::{NonZeroU32, NonZeroU64};
 
 #[cfg(test)]
@@ -15,6 +18,7 @@ pub const MAX_INSTRUCTION_BUDGET: u64 = 40_000_000_000;
 pub struct ExecutionPolicy {
     max_orders_per_chunk: NonZeroU32,
     instruction_budget: NonZeroU64,
+    max_settlement_units_per_event: NonZeroU32,
 }
 
 impl ExecutionPolicy {
@@ -24,16 +28,23 @@ impl ExecutionPolicy {
     pub const MAX: Self = Self {
         max_orders_per_chunk: NonZeroU32::MAX,
         instruction_budget: NonZeroU64::new(MAX_INSTRUCTION_BUDGET).unwrap(),
+        max_settlement_units_per_event: NonZeroU32::MAX,
     };
 
-    /// Build a validated `ExecutionPolicy`. Returns `Err` if either field
+    /// Build a validated `ExecutionPolicy`. Returns `Err` if any field
     /// is zero or if `instruction_budget` exceeds the IC system-subnet
     /// per-message cap.
-    pub fn try_new(max_orders_per_chunk: u32, instruction_budget: u64) -> Result<Self, String> {
+    pub fn try_new(
+        max_orders_per_chunk: u32,
+        instruction_budget: u64,
+        max_settlement_units_per_event: u32,
+    ) -> Result<Self, String> {
         let max_orders_per_chunk = NonZeroU32::new(max_orders_per_chunk)
             .ok_or_else(|| "max_orders_per_chunk must be non-zero".to_string())?;
         let instruction_budget = NonZeroU64::new(instruction_budget)
             .ok_or_else(|| "instruction_budget must be non-zero".to_string())?;
+        let max_settlement_units_per_event = NonZeroU32::new(max_settlement_units_per_event)
+            .ok_or_else(|| "max_settlement_units_per_event must be non-zero".to_string())?;
         if instruction_budget.get() > MAX_INSTRUCTION_BUDGET {
             return Err(format!(
                 "instruction_budget {} exceeds IC per-message cap ({})",
@@ -44,6 +55,7 @@ impl ExecutionPolicy {
         Ok(Self {
             max_orders_per_chunk,
             instruction_budget,
+            max_settlement_units_per_event,
         })
     }
 
@@ -54,13 +66,22 @@ impl ExecutionPolicy {
     pub fn instruction_budget(&self) -> u64 {
         self.instruction_budget.get()
     }
+
+    pub fn max_settlement_units_per_event(&self) -> NonZeroU32 {
+        self.max_settlement_units_per_event
+    }
 }
 
 impl Default for ExecutionPolicy {
-    /// Conservative production policy: see [`DEFAULT_MAX_ORDERS_PER_CHUNK`]
-    /// and [`DEFAULT_INSTRUCTION_BUDGET`].
+    /// Conservative production policy: see [`DEFAULT_MAX_ORDERS_PER_CHUNK`],
+    /// [`DEFAULT_INSTRUCTION_BUDGET`], and
+    /// [`DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT`].
     fn default() -> Self {
-        Self::try_new(DEFAULT_MAX_ORDERS_PER_CHUNK, DEFAULT_INSTRUCTION_BUDGET)
-            .expect("BUG: DEFAULT_* constants must produce a valid ExecutionPolicy")
+        Self::try_new(
+            DEFAULT_MAX_ORDERS_PER_CHUNK,
+            DEFAULT_INSTRUCTION_BUDGET,
+            DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+        )
+        .expect("BUG: DEFAULT_* constants must produce a valid ExecutionPolicy")
     }
 }

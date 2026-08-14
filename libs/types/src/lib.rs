@@ -10,16 +10,19 @@ mod error;
 
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
+    AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
     CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
     DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
     GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
-    GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequestError,
-    GetOrderBookTickerError, GetOrderBookTickerRequestError, Never, WithdrawError,
+    GetMyTradesRequestError, GetMyTradingAccountsError, GetOrderBookDepthError,
+    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
+    RemoveTradingAccountError, RemoveTradingAccountRequestError, WithdrawError,
     WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Unique identifier for an order, encoded as a lowercase hex string.
 pub type OrderId = String;
@@ -53,6 +56,13 @@ pub struct TradingPair {
     pub quote: Principal,
 }
 
+impl fmt::Display for TradingPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base, quote } = self;
+        write!(f, "{base}/{quote}")
+    }
+}
+
 /// Request to place a new limit order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 pub struct LimitOrderRequest {
@@ -67,6 +77,22 @@ pub struct LimitOrderRequest {
     /// Time-in-force policy. Absent defaults to
     /// [`TimeInForce::GoodTilCanceled`].
     pub time_in_force: Option<TimeInForce>,
+}
+
+impl fmt::Display for LimitOrderRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            pair,
+            side,
+            price,
+            quantity,
+            time_in_force,
+        } = self;
+        write!(
+            f,
+            "LimitOrderRequest(pair={pair}, side={side:?}, price={price}, quantity={quantity}, time_in_force={time_in_force:?})"
+        )
+    }
 }
 
 /// Error returned by controller-gated endpoints when the caller is not
@@ -207,6 +233,44 @@ pub struct OrderRecord {
     /// Cumulative realized fee charged across the order's fills, denominated in
     /// the order's receive token — base for a buy, quote for a sell.
     pub filled_fee: Nat,
+    /// The principal that placed the order when it differs from `owner` (a
+    /// trading account acting for the funding account); `None` when the owner
+    /// placed it itself.
+    pub placed_by: Option<Principal>,
+    /// The principal that canceled the order when it differs from `owner` (a
+    /// trading account acting for the funding account); `None` if the order is
+    /// not canceled, or was canceled by the owner itself.
+    pub canceled_by: Option<Principal>,
+}
+
+impl fmt::Display for OrderRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            owner,
+            side,
+            price,
+            quantity,
+            filled_quantity,
+            status,
+            created_at,
+            last_updated_at,
+            time_in_force,
+            filled_quote,
+            filled_fee,
+            placed_by,
+            canceled_by,
+        } = self;
+        let render_opt = |p: &Option<Principal>| match p {
+            Some(principal) => format!("Some({principal})"),
+            None => "None".to_string(),
+        };
+        let placed_by = render_opt(placed_by);
+        let canceled_by = render_opt(canceled_by);
+        write!(
+            f,
+            "OrderRecord(owner={owner}, side={side:?}, price={price}, quantity={quantity}, filled_quantity={filled_quantity}, status={status:?}, created_at={created_at}, last_updated_at={last_updated_at:?}, time_in_force={time_in_force:?}, filled_quote={filled_quote}, filled_fee={filled_fee}, placed_by={placed_by}, canceled_by={canceled_by})"
+        )
+    }
 }
 
 /// Maximum number of orders returned by a single `get_my_orders` call.
@@ -391,6 +455,13 @@ pub struct TokenId {
     pub ledger_id: Principal,
 }
 
+impl fmt::Display for TokenId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { ledger_id } = self;
+        write!(f, "{ledger_id}")
+    }
+}
+
 /// Metadata associated with a token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct TokenMetadata {
@@ -416,6 +487,13 @@ pub struct DepositRequest {
     pub token_id: TokenId,
     /// The amount to deposit.
     pub amount: Nat,
+}
+
+impl fmt::Display for DepositRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { token_id, amount } = self;
+        write!(f, "DepositRequest(token_id={token_id}, amount={amount})")
+    }
 }
 
 /// Response after a successful deposit.
@@ -485,6 +563,13 @@ pub struct WithdrawRequest {
     /// The ledger transfer fee is deducted from this amount,
     /// so the caller receives `amount - fee` on the ledger.
     pub amount: Nat,
+}
+
+impl fmt::Display for WithdrawRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { token_id, amount } = self;
+        write!(f, "WithdrawRequest(token_id={token_id}, amount={amount})")
+    }
 }
 
 /// Response after a successful withdrawal.

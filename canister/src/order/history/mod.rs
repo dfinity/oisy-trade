@@ -1,6 +1,6 @@
 use super::{OrderId, OrderStatus, Price, Quantity, Side, TimeInForce};
 use crate::Timestamp;
-use crate::history::{CursorNotFound, History};
+use crate::history::{CursorNotFound, History, InsertionSeq};
 use crate::user::UserId;
 use candid::Principal;
 use ic_stable_structures::Memory;
@@ -53,6 +53,14 @@ pub struct OrderRecord {
     /// the order's receive token — base for a buy, quote for a sell.
     #[n(10)]
     pub filled_fee: Quantity,
+    /// The acting caller when it differs from `owner`; `None` when the owner
+    /// placed the order itself.
+    #[cbor(n(11), with = "icrc_cbor::principal::option")]
+    pub placed_by: Option<Principal>,
+    /// The acting caller that canceled the order, when it differs from `owner`.
+    /// `None` if the order is not canceled, or was canceled by the owner itself.
+    #[cbor(n(12), with = "icrc_cbor::principal::option")]
+    pub canceled_by: Option<Principal>,
 }
 
 impl From<OrderRecord> for oisy_trade_types::OrderRecord {
@@ -69,6 +77,8 @@ impl From<OrderRecord> for oisy_trade_types::OrderRecord {
             time_in_force: record.time_in_force.into(),
             filled_quote: record.filled_quote.into(),
             filled_fee: record.filled_fee.into(),
+            placed_by: record.placed_by,
+            canceled_by: record.canceled_by,
         }
     }
 }
@@ -83,6 +93,7 @@ pub struct OrderUpdate {
     pub filled_delta: Quantity,
     pub quote_delta: Quantity,
     pub fee_delta: Quantity,
+    pub canceled_by: Option<Principal>,
 }
 
 impl OrderUpdate {
@@ -93,6 +104,19 @@ impl OrderUpdate {
             filled_delta: Quantity::ZERO,
             quote_delta: Quantity::ZERO,
             fee_delta: Quantity::ZERO,
+            canceled_by: None,
+        }
+    }
+
+    /// A cancel transition to [`OrderStatus::Canceled`] recording the acting
+    /// caller (`None` when the owner canceled the order itself).
+    pub fn cancel(canceled_by: Option<Principal>) -> Self {
+        Self {
+            status: Some(OrderStatus::Canceled),
+            filled_delta: Quantity::ZERO,
+            quote_delta: Quantity::ZERO,
+            fee_delta: Quantity::ZERO,
+            canceled_by,
         }
     }
 
@@ -103,6 +127,7 @@ impl OrderUpdate {
             filled_delta,
             quote_delta: Quantity::ZERO,
             fee_delta: Quantity::ZERO,
+            canceled_by: None,
         }
     }
 
@@ -121,6 +146,7 @@ impl OrderUpdate {
             filled_delta,
             quote_delta,
             fee_delta,
+            canceled_by,
         } = self;
 
         if let Some(new_status) = status
@@ -128,6 +154,9 @@ impl OrderUpdate {
         {
             changed = true;
             order.status = new_status;
+            if new_status == OrderStatus::Canceled {
+                order.canceled_by = canceled_by;
+            }
         }
 
         if filled_delta != Quantity::ZERO {
@@ -230,6 +259,17 @@ impl<M: Memory> OrderHistory<M> {
     ) -> Result<Vec<OrderId>, CursorNotFound> {
         bench_scopes!("order_history", "order_history::orders_after");
         self.0.page_by_user(user, after, length)
+    }
+
+    /// Iterates every order record as `(order id, record)` in key order.
+    pub fn iter(&self) -> impl Iterator<Item = (OrderId, OrderRecord)> + '_ {
+        self.0.iter_primary()
+    }
+
+    /// Iterates the per-user order index as `(user, insertion sequence, order
+    /// id)` in index order.
+    pub fn iter_by_user(&self) -> impl Iterator<Item = (UserId, InsertionSeq, OrderId)> + '_ {
+        self.0.iter_by_user()
     }
 }
 

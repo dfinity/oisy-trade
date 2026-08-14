@@ -1,6 +1,36 @@
 #[cfg(test)]
 mod tests;
 
+/// CBOR codec for a `Vec<Principal>`, encoding each principal via
+/// [`icrc_cbor::principal`]. Mirrors `oisy_trade_types_internal`'s
+/// `btreeset_principal` codec.
+pub mod vec_principal {
+    use candid::Principal;
+    use minicbor::decode::{Decoder, Error};
+    use minicbor::encode::{Encoder, Write};
+    use minicbor::{Decode, Encode};
+
+    #[derive(Decode, Encode)]
+    #[cbor(transparent)]
+    struct CborPrincipal(#[cbor(n(0), with = "icrc_cbor::principal")] pub Principal);
+
+    pub fn decode<Ctx>(d: &mut Decoder<'_>, ctx: &mut Ctx) -> Result<Vec<Principal>, Error> {
+        Ok(Vec::<CborPrincipal>::decode(d, ctx)?
+            .into_iter()
+            .map(|p| p.0)
+            .collect())
+    }
+
+    pub fn encode<Ctx, W: Write>(
+        v: &[Principal],
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let vec: Vec<CborPrincipal> = v.iter().copied().map(CborPrincipal).collect();
+        vec.encode(e, ctx)
+    }
+}
+
 pub mod non_zero_u64 {
     use minicbor::decode::{Decoder, Error};
     use minicbor::encode::{Encoder, Write};

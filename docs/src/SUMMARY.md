@@ -21,6 +21,7 @@
   - [DEFI-2850 — Min/Max Notional](development/specs/DEFI-2850-min-max-notional.md)
   - [DEFI-2852 — Order Status / Partial Fill](development/specs/DEFI-2852-order-status-partial-fill.md)
   - [DEFI-2853 — Fill-or-Kill Orders](development/specs/DEFI-2853-add-fill-or-kill-orders-fok.md)
+  - [DEFI-2911 — Funding and Trading Accounts](development/specs/DEFI-2911-funding-and-trading-accounts.md)
 
 # Reference
 

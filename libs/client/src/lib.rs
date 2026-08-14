@@ -8,11 +8,12 @@ use candid::utils::ArgumentEncoder;
 use candid::{CandidType, Principal};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use oisy_trade_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, Balance, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, FilterToken, GetBalancesError, GetMyOrdersArgs,
-    GetMyOrdersError, GetMyTradesArgs, GetMyTradesError, GetOrderBookDepthError,
-    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
-    OrderBookTicker, OrderId, OrderRecord, Token, TokenId, Trade, TradingPair, TradingPairInfo,
+    AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
+    Balance, CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, FilterToken,
+    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyTradesArgs, GetMyTradesError,
+    GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
+    OrderRecord, RemoveTradingAccountError, Token, TokenId, Trade, TradingPair, TradingPairInfo,
     UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
     WithdrawResponse,
 };
@@ -114,6 +115,48 @@ impl<R: Runtime> OisyTradeClient<R> {
     ) -> Result<Vec<Trade>, GetMyTradesError> {
         self.runtime
             .call(self.oisy_trade_canister, "get_my_trades", (args,), 0)
+            .await
+            .unwrap()
+    }
+
+    /// Whitelist `trading` as a trading account of the caller's funding account.
+    pub async fn add_trading_account(
+        &self,
+        trading: Principal,
+    ) -> Result<(), AddTradingAccountError> {
+        self.runtime
+            .call(
+                self.oisy_trade_canister,
+                "add_trading_account",
+                (trading,),
+                0,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Revoke a trading account previously whitelisted by the caller.
+    pub async fn remove_trading_account(
+        &self,
+        trading: Principal,
+    ) -> Result<(), RemoveTradingAccountError> {
+        self.runtime
+            .call(
+                self.oisy_trade_canister,
+                "remove_trading_account",
+                (trading,),
+                0,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Query the caller's current trading-account whitelist.
+    pub async fn get_my_trading_accounts(
+        &self,
+    ) -> Result<Vec<Principal>, GetMyTradingAccountsError> {
+        self.runtime
+            .call(self.oisy_trade_canister, "get_my_trading_accounts", (), 0)
             .await
             .unwrap()
     }

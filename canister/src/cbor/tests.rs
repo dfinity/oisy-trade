@@ -59,6 +59,29 @@ fn should_fail_to_decode_zero_u128() {
     assert!(result.is_err());
 }
 
+proptest! {
+    /// The `vec_principal` codec round-trips any list of principals, including
+    /// the empty list.
+    #[test]
+    fn vec_principal_roundtrips(
+        principals in proptest::collection::vec(
+            crate::test_fixtures::arbitrary::arb_principal(),
+            0..=8,
+        )
+    ) {
+        let mut buf = vec![];
+        crate::cbor::vec_principal::encode(
+            &principals,
+            &mut minicbor::Encoder::new(&mut buf),
+            &mut (),
+        )
+        .unwrap();
+        let decoded =
+            crate::cbor::vec_principal::decode(&mut minicbor::Decoder::new(&buf), &mut ()).unwrap();
+        prop_assert_eq!(decoded, principals);
+    }
+}
+
 #[derive(minicbor::Encode, minicbor::Decode)]
 #[cbor(transparent)]
 struct CborNonZeroU128(#[cbor(n(0), with = "crate::cbor::non_zero_u128_via_quantity")] NonZeroU128);

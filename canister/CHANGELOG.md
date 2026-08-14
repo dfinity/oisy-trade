@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
+First release since the canister went live on mainnet: the Candid interface and
+the persisted state are backward compatible, so an upgrade from 0.3.0 needs no
+migration and no client change (see *Changed*).
+
+### Added
+
+- Separate funding and trading accounts: a funding account can whitelist trading-account principals via `add_trading_account` / `remove_trading_account` / `get_my_trading_accounts`. A trading account places and cancels orders on the funding account's balance but can never deposit or withdraw (`deposit` / `withdraw` are denied with a `TradingAccountForbidden` request-error variant). Orders and reads by a trading account resolve to the funding account, and each order records the acting key via the new `placed_by` / `canceled_by` fields on `OrderRecord`. Grants require a registered granter, target a fresh principal that can actually be exercised by a single keyholder — the anonymous principal and the management canister are rejected — and are rate-limited by a per-account cooldown; revocation is never rate-limited. All additions are backward-compatible Candid ([#207](https://github.com/dfinity/oisy-trade/pull/207), [#208](https://github.com/dfinity/oisy-trade/pull/208), [#209](https://github.com/dfinity/oisy-trade/pull/209), [#219](https://github.com/dfinity/oisy-trade/pull/219), [#222](https://github.com/dfinity/oisy-trade/pull/222), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226), [#230](https://github.com/dfinity/oisy-trade/pull/230), [#238](https://github.com/dfinity/oisy-trade/pull/238))
+- `max_settlement_units_per_event`, an optional init/upgrade argument capping how much settlement work a single settling event carries; absent, it falls back to the conservative production default ([#216](https://github.com/dfinity/oisy-trade/pull/216))
+
+### Changed
+
+- **No break for clients or for persisted state.** Every Candid addition is backward compatible: new record fields are ignored by older decoders, and the new `TradingAccountForbidden` leaves sit under `RequestError : opt variant`, which the disposition contract has older clients decode as `null`. Every persisted-state addition is a new optional CBOR field at a fresh index or a new event variant, and the trading-account maps live in fresh stable-memory regions, so a canister upgraded from state persisted by 0.3.0 decodes and replays it unchanged. This is now checked against production: a test replays the live mainnet event log and asserts the reconstructed balances, order history, trades, user registry, and order-book depth match the mainnet snapshot ([#229](https://github.com/dfinity/oisy-trade/pull/229))
+- A matching round now emits several bounded settling events instead of one per chunk, so `get_events` readers see more, smaller settling events for the same settlement; the debug event stream also gains the trading-account grant/revoke events and the `placed_by` / `canceled_by` attribution ([#216](https://github.com/dfinity/oisy-trade/pull/216), [#207](https://github.com/dfinity/oisy-trade/pull/207), [#223](https://github.com/dfinity/oisy-trade/pull/223), [#226](https://github.com/dfinity/oisy-trade/pull/226))
+- Render principals textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
+- Finalize the ckBTC/ckUSDT tick and lot sizing, and document the live production listings ([#246](https://github.com/dfinity/oisy-trade/pull/246))
+
+### Fixed
+
+- Cancel applies only its own settlement: a cancellation used to drain the whole global settlement backlog, inheriting the instruction debt of unrelated matching rounds. On a large backlog it could exceed the per-message instruction limit and trap, leaving the order uncanceled and its reservation locked, so the user could not exit ([#240](https://github.com/dfinity/oisy-trade/pull/240))
+- Bound the settlement work applied per message: a single fill-or-kill order sweeping many resting makers produced one oversized settling event whose apply cost, past roughly 23,000 fills, exceeded the per-message instruction limit and froze matching. Settlement is now partitioned into bounded events at construction ([#216](https://github.com/dfinity/oisy-trade/pull/216), [#210](https://github.com/dfinity/oisy-trade/pull/210))
+- Validate the deposit/withdraw amount before rendering it: the handlers formatted the caller-controlled unbounded `nat` into a diagnostic string ahead of authorization and validation, and that super-linear conversion alone could exhaust a message's instruction budget and trap the call ([#237](https://github.com/dfinity/oisy-trade/pull/237))
+
 ## [0.3.0] - 2026-07-02
 
 ### Added
@@ -58,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guard concurrent deposits and withdrawals per (caller, token) ([#78](https://github.com/dfinity/oisy-trade/pull/78))
 - Surface trading-pair fee rates in `get_events` ([#134](https://github.com/dfinity/oisy-trade/pull/134))
 
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.3.0..oisy_trade_canister-v0.4.0
 [0.3.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.2.0..oisy_trade_canister-v0.3.0
 [0.2.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.1.0..oisy_trade_canister-v0.2.0
 [0.1.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.0.0..oisy_trade_canister-v0.1.0

@@ -2,8 +2,8 @@ use super::{StableMemoryOptions, State};
 use crate::balance::TokenBalance;
 use crate::order::{OrderHistory, TradeHistory};
 use crate::state::event::{
-    AddLimitOrderEvent, AddTradingPairEvent, CancelLimitOrderEvent, DepositEvent, Event, EventType,
-    SetHaltEvent, WithdrawEvent,
+    AddLimitOrderEvent, AddTradingAccountEvent, AddTradingPairEvent, CancelLimitOrderEvent,
+    DepositEvent, Event, EventType, RemoveTradingAccountEvent, SetHaltEvent, WithdrawEvent,
 };
 use crate::state::permissions::Permit;
 use crate::storage;
@@ -57,15 +57,21 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             mode: new_mode,
             max_orders_per_chunk,
             instruction_budget,
+            max_settlement_units_per_event,
         }) => {
             if let Some(new_mode) = new_mode {
                 state.set_mode(new_mode.clone());
             }
-            if max_orders_per_chunk.is_some() || instruction_budget.is_some() {
+            if max_orders_per_chunk.is_some()
+                || instruction_budget.is_some()
+                || max_settlement_units_per_event.is_some()
+            {
                 let current = state.execution_policy();
                 let policy = crate::state::ExecutionPolicy::try_new(
                     max_orders_per_chunk.unwrap_or_else(|| current.max_orders_per_chunk()),
                     instruction_budget.unwrap_or_else(|| current.instruction_budget()),
+                    max_settlement_units_per_event
+                        .unwrap_or_else(|| current.max_settlement_units_per_event().get()),
                 )
                 .unwrap_or_else(|e| panic!("BUG: invalid ExecutionPolicy: {e}"));
                 state.set_execution_policy(policy);
@@ -125,6 +131,7 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             price,
             quantity,
             time_in_force,
+            placed_by,
         }) => {
             let pending = order::PendingOrder {
                 side: *side,
@@ -134,16 +141,25 @@ fn apply_state_transition<MH: Memory, MB: Memory>(
             };
             let (book_id, order_seq) = order_id.into_parts();
             let order = pending.into_order(order_seq);
-            state.record_limit_order(*user, book_id, order, timestamp, persistence);
+            state.record_limit_order(*user, book_id, order, *placed_by, timestamp, persistence);
         }
-        EventType::CancelLimitOrder(CancelLimitOrderEvent { order_id }) => {
-            state.record_cancel_limit_order(*order_id, timestamp, persistence);
+        EventType::CancelLimitOrder(CancelLimitOrderEvent {
+            order_id,
+            canceled_by,
+        }) => {
+            state.record_cancel_limit_order(*order_id, *canceled_by, timestamp, persistence);
         }
         EventType::Matching(event) => {
             state.record_matching_event(event, timestamp, persistence);
         }
         EventType::Settling(event) => {
             state.record_settling_event(event, timestamp, persistence);
+        }
+        EventType::AddTradingAccount(AddTradingAccountEvent { funding, trading }) => {
+            state.record_add_trading_account(*funding, *trading, timestamp, persistence);
+        }
+        EventType::RemoveTradingAccount(RemoveTradingAccountEvent { funding, trading }) => {
+            state.record_remove_trading_account(*funding, *trading, persistence);
         }
         EventType::SetHalt(SetHaltEvent { book_ids, halted }) => {
             let permissions = state.permissions_mut();

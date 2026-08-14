@@ -25,6 +25,22 @@ pub struct Error<Request, Temporary, Internal> {
     pub message: Option<String>,
 }
 
+impl<Request, Temporary, Internal> fmt::Display for Error<Request, Temporary, Internal> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { kind, message } = self;
+        let disposition = match kind {
+            ErrorKind::RequestError(_) => "request",
+            ErrorKind::TemporaryError(_) => "temporary",
+            ErrorKind::InternalError(_) => "internal",
+        };
+        write!(
+            f,
+            "{disposition} error: {}",
+            message.as_deref().unwrap_or("<no detail>")
+        )
+    }
+}
+
 /// The disposition of an [`Error`], parameterized by its per-endpoint leaves.
 ///
 /// Each arm carries an `Option` of its leaf so that a client built against an
@@ -233,6 +249,10 @@ pub enum DepositRequestError {
         /// The current allowance.
         allowance: Nat,
     },
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot deposit.
+    #[error("a trading account cannot deposit")]
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a deposit can fail.
@@ -305,6 +325,10 @@ pub enum WithdrawRequestError {
         /// The caller's available free balance.
         available: Nat,
     },
+    /// The caller is a trading account, which can never hold DEX balances and
+    /// so cannot withdraw.
+    #[error("a trading account cannot withdraw")]
+    TradingAccountForbidden,
 }
 
 /// Transient reasons a withdrawal can fail.
@@ -392,6 +416,77 @@ pub enum GetOrderBookDepthRequestError {
         max: u32,
     },
 }
+
+/// Error returned by the `add_trading_account` endpoint.
+pub type AddTradingAccountError =
+    Error<AddTradingAccountRequestError, AddTradingAccountTemporaryError, Never>;
+
+/// Caller-side reasons `add_trading_account` can fail.
+///
+/// Several distinct internal reasons collapse into one variant here; the
+/// envelope's advisory `message` carries the specific reason for diagnostics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum AddTradingAccountRequestError {
+    /// The funding account cannot act as a granter: it is not a registered
+    /// user, or it is itself a trading account (no delegation chains).
+    #[error("the funding account is not a valid granter")]
+    FundingAccountNotFound,
+    /// The proposed trading account is not a valid, fresh key: it is the
+    /// funding account itself, or an already-registered user.
+    #[error("the proposed trading account is not a valid, unregistered principal")]
+    InvalidTradingAccount,
+    /// The proposed trading account is a non-authenticating principal (the
+    /// anonymous principal or the management canister) that no single keyholder
+    /// can exclusively exercise.
+    #[error("the proposed trading account is a non-authenticating principal")]
+    NonAuthenticatingTradingAccount,
+    /// The principal is already a trading account, of the granter or of
+    /// someone else — a trading account maps to exactly one funding account.
+    #[error("the principal is already a trading account")]
+    AlreadyTradingAccount,
+    /// The granter already has the maximum number of trading accounts.
+    #[error("the granter already has the maximum of {max} trading accounts")]
+    TooManyTradingAccounts {
+        /// The per-funding-account cap on trading accounts.
+        max: u32,
+    },
+}
+
+/// Transient reasons `add_trading_account` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum AddTradingAccountTemporaryError {
+    /// The principal has an in-flight deposit or withdrawal. Retry once it
+    /// completes; whitelisting it now could strand a balance it is about to
+    /// acquire.
+    #[error("the principal has an in-flight deposit or withdrawal")]
+    FundingOperationInProgress,
+    /// The grant rate limit is active: too little time has elapsed since the
+    /// funding account's previous successful grant. Retry after
+    /// `retry_after_ns` nanoseconds.
+    #[error("grant rate limit active; retry after {retry_after_ns} ns")]
+    RateLimit {
+        /// Nanoseconds remaining until the caller may grant again.
+        retry_after_ns: u64,
+    },
+}
+
+/// Error returned by the `remove_trading_account` endpoint.
+pub type RemoveTradingAccountError = Error<RemoveTradingAccountRequestError, Never, Never>;
+
+/// Caller-side reasons `remove_trading_account` can fail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum RemoveTradingAccountRequestError {
+    /// The caller may not remove this trading account: it is not currently a
+    /// trading account of the caller.
+    #[error("not allowed to remove this trading account")]
+    NotAllowed,
+}
+
+/// Error returned by the `get_my_trading_accounts` query.
+///
+/// The query cannot currently fail, so all three disposition arms are reserved
+/// (always-`null`) — the forward-compatible slot for future leaves.
+pub type GetMyTradingAccountsError = Error<Never, Never, Never>;
 
 /// Error returned by the `get_my_trades` query.
 pub type GetMyTradesError = Error<GetMyTradesRequestError, Never, Never>;

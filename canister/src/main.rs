@@ -1,12 +1,14 @@
 use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
-    AddLimitOrderError, AddTradingPairError, AddTradingPairRequest, CancelLimitOrderError,
-    DepositError, DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesArgs,
-    GetMyTradesError, GetMyTradesRequestError, GetOrderBookDepthError, GetOrderBookDepthRequest,
+    AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
+    CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, DepositTemporaryError,
+    ErrorKind, FilterToken, GetBalancesError, GetMyOrdersArgs, GetMyOrdersError,
+    GetMyOrdersRequestError, GetMyTradesArgs, GetMyTradesError, GetMyTradesRequestError,
+    GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
     GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, Token, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
-    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
+    OrderRecord, RemoveTradingAccountError, Token, Trade, TradingPair, TradingPairInfo,
+    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
+    WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -17,7 +19,7 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         oisy_trade_canister::add_limit_order(request.clone(), &oisy_trade_canister::IC_RUNTIME)?;
     canlog::log!(
         Priority::Info,
-        "[add_limit_order]: created order_id={} for request {:?}",
+        "[add_limit_order]: created order_id={} for request {}",
         order_id,
         request
     );
@@ -34,13 +36,51 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
     match &result {
         Ok(record) => canlog::log!(
             Priority::Info,
-            "[cancel_limit_order]: canceled order_id={order_id}: {record:?}"
+            "[cancel_limit_order]: canceled order_id={order_id}: {record}"
         ),
         Err(_err) => {
             // do not log errors due to user actions
         }
     }
     result
+}
+
+#[ic_cdk::update]
+fn add_trading_account(trading: candid::Principal) -> Result<(), AddTradingAccountError> {
+    let result =
+        oisy_trade_canister::add_trading_account(trading, &oisy_trade_canister::IC_RUNTIME);
+    match &result {
+        Ok(()) => canlog::log!(
+            Priority::Info,
+            "[add_trading_account]: whitelisted trading account {trading}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
+}
+
+#[ic_cdk::update]
+fn remove_trading_account(trading: candid::Principal) -> Result<(), RemoveTradingAccountError> {
+    let result =
+        oisy_trade_canister::remove_trading_account(trading, &oisy_trade_canister::IC_RUNTIME);
+    match &result {
+        Ok(()) => canlog::log!(
+            Priority::Info,
+            "[remove_trading_account]: revoked trading account {trading}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
+}
+
+#[ic_cdk::query]
+fn get_my_trading_accounts() -> Result<Vec<candid::Principal>, GetMyTradingAccountsError> {
+    use oisy_trade_canister::Runtime;
+    oisy_trade_canister::get_my_trading_accounts(oisy_trade_canister::IC_RUNTIME.msg_caller())
 }
 
 #[ic_cdk::query]
@@ -62,19 +102,18 @@ fn get_order_book_depth(
 
 #[ic_cdk::update]
 async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositError> {
-    let deposit_dbg = format!("{request:?}");
-    let result = oisy_trade_canister::deposit(request, &oisy_trade_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::deposit(&request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
-            "[deposit]: successful deposit for request {deposit_dbg}, block_index={}",
+            "[deposit]: successful deposit for request {request}, block_index={}",
             response.block_index
         ),
         Err(err) => {
             if should_log_deposit_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[deposit]: deposit for request {deposit_dbg} failed, error={:?}",
+                    "[deposit]: deposit for request {request} failed, error={}",
                     err
                 )
             }
@@ -85,19 +124,18 @@ async fn deposit(request: DepositRequest) -> Result<DepositResponse, DepositErro
 
 #[ic_cdk::update]
 async fn withdraw(request: WithdrawRequest) -> Result<WithdrawResponse, WithdrawError> {
-    let withdraw_dbg = format!("{request:?}");
-    let result = oisy_trade_canister::withdraw(request, &oisy_trade_canister::IC_RUNTIME).await;
+    let result = oisy_trade_canister::withdraw(&request, &oisy_trade_canister::IC_RUNTIME).await;
     match &result {
         Ok(response) => canlog::log!(
             Priority::Info,
-            "[withdraw]: successful withdrawal for request {withdraw_dbg}, block_index={}",
+            "[withdraw]: successful withdrawal for request {request}, block_index={}",
             response.block_index
         ),
         Err(err) => {
             if should_log_withdraw_error(err) {
                 canlog::log!(
                     Priority::Debug,
-                    "[withdraw]: withdrawal for request {withdraw_dbg} failed, error={:?}",
+                    "[withdraw]: withdrawal for request {request} failed, error={}",
                     err
                 )
             }
@@ -323,6 +361,7 @@ fn get_events(
                         price,
                         quantity,
                         time_in_force,
+                        placed_by,
                     },
                 ) => event::EventType::AddLimitOrder(event::AddLimitOrderEvent {
                     user,
@@ -334,14 +373,19 @@ fn get_events(
                     price: candid::Nat::from(price),
                     quantity: quantity.into(),
                     time_in_force: time_in_force.into(),
+                    placed_by,
                 }),
                 EventType::CancelLimitOrder(
-                    oisy_trade_canister::state::event::CancelLimitOrderEvent { order_id },
+                    oisy_trade_canister::state::event::CancelLimitOrderEvent {
+                        order_id,
+                        canceled_by,
+                    },
                 ) => event::EventType::CancelLimitOrder(event::CancelLimitOrderEvent {
                     order_id: event::OrderId {
                         book_id: order_id.book_id().get(),
                         seq: order_id.seq().get(),
                     },
+                    canceled_by,
                 }),
                 EventType::Matching(oisy_trade_canister::state::event::MatchingEvent {
                     book_id,
@@ -367,6 +411,21 @@ fn get_events(
                         .book_ids
                         .map(|ids| ids.into_iter().map(|id| id.get()).collect()),
                     halted: e.halted,
+                }),
+                EventType::AddTradingAccount(
+                    oisy_trade_canister::state::event::AddTradingAccountEvent { funding, trading },
+                ) => event::EventType::AddTradingAccount(event::AddTradingAccountEvent {
+                    funding: funding.0,
+                    trading: trading.0,
+                }),
+                EventType::RemoveTradingAccount(
+                    oisy_trade_canister::state::event::RemoveTradingAccountEvent {
+                        funding,
+                        trading,
+                    },
+                ) => event::EventType::RemoveTradingAccount(event::RemoveTradingAccountEvent {
+                    funding: funding.0,
+                    trading: trading.0,
                 }),
             },
         }

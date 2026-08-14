@@ -56,6 +56,9 @@ mod assert_caller_is_allowed {
                 mode,
                 max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
                 instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event: Some(
+                    oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+                ),
             },
             crate::state::OrderHistory::new(
                 ic_stable_structures::VectorMemory::default(),
@@ -65,7 +68,11 @@ mod assert_caller_is_allowed {
                 ic_stable_structures::VectorMemory::default(),
                 ic_stable_structures::VectorMemory::default(),
             ),
-            crate::user::UserRegistry::new(ic_stable_structures::VectorMemory::default()),
+            crate::user::UserRegistry::new(
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+                ic_stable_structures::VectorMemory::default(),
+            ),
             crate::balance::TokenBalance::new(ic_stable_structures::VectorMemory::default()),
         )
         .unwrap()
@@ -275,6 +282,7 @@ mod cancel_limit_order {
 
     const OWNER: Principal = Principal::from_slice(&[0x01]);
     const STRANGER: Principal = Principal::from_slice(&[0x02]);
+    const STRANGER2: Principal = Principal::from_slice(&[0x03]);
 
     /// Status of `order_id` as `OWNER` would see it via `get_user_order`, or
     /// `None` if absent / not owned by `OWNER`.
@@ -295,6 +303,25 @@ mod cancel_limit_order {
         let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
 
         assert_cancel_refunds(&mut state, OWNER, buy_id, PairToken::Quote, 100 * lot, lot);
+    }
+
+    #[test]
+    fn stores_the_canceling_caller_on_the_record() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+
+        state.record_cancel_limit_order(
+            buy_id,
+            Some(STRANGER),
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+
+        let record = state.order_history.get(&buy_id).unwrap();
+        assert_eq!(record.status, OrderStatus::Canceled);
+        assert_eq!(record.canceled_by, Some(STRANGER));
     }
 
     #[test]
@@ -385,28 +412,76 @@ mod cancel_limit_order {
         let buy_id = order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
         let _sell_id = order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
 
-        // Record only the matching half: the book pops both orders into
-        // `filled_orders` and the paired `SettlingEvent` lands on the queue
-        // without being drained — exactly the state left behind by a chunk
-        // whose inline drain was budget-interrupted.
-        let orders: Vec<_> = state
-            .order_book(&OrderBookId::ZERO)
-            .unwrap()
-            .pending_order_seqs()
-            .collect();
-        state.record_matching_event(
-            &crate::state::event::MatchingEvent {
-                book_id: OrderBookId::ZERO,
-                orders,
-            },
-            crate::Timestamp::EPOCH,
-            crate::state::StableMemoryOptions::Write,
-        );
-        assert!(state.has_pending_settling_events());
+        queue_matching_backlog(&mut state);
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
+    }
+
+    #[test]
+    fn should_leave_unrelated_settling_backlog_for_the_executor() {
+        let mut state = setup();
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        order(STRANGER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
+        order(STRANGER2, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy = order(OWNER, &pair, Side::Buy, 50 * PRICE_SCALE, lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+
+        let backlog_len = state.pending_settling_events.len();
+        let stranger_before = balances_pair(&state, &STRANGER, &pair);
+        let stranger2_before = balances_pair(&state, &STRANGER2, &pair);
+
+        assert_cancel_refunds(
+            &mut state,
+            OWNER,
+            owner_buy,
+            PairToken::Quote,
+            50 * lot,
+            lot,
+        );
+
+        assert_eq!(state.pending_settling_events.len(), backlog_len);
+        assert!(state.has_pending_settling_events());
+        assert_eq!(balances_pair(&state, &STRANGER, &pair), stranger_before);
+        assert_eq!(balances_pair(&state, &STRANGER2, &pair), stranger2_before);
+    }
+
+    #[test]
+    fn should_settle_the_same_regardless_of_cancel_and_drain_order() {
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+
+        let baseline = {
+            let mut state = setup();
+            order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+            let owner_buy =
+                order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+            EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+            state
+                .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+                .unwrap();
+            balances_pair(&state, &OWNER, &pair)
+        };
+
+        let mut state = setup();
+        order(STRANGER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        let owner_buy =
+            order(OWNER, &pair, Side::Buy, 100 * PRICE_SCALE, 3 * lot).place(&mut state);
+
+        queue_matching_backlog(&mut state);
+        state
+            .cancel_limit_order(&OWNER, None, owner_buy, &mock_runtime_for(OWNER))
+            .unwrap();
+        EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
+
+        let (base_after, quote_after) = balances_pair(&state, &OWNER, &pair);
+        assert_eq!(*base_after.reserved(), Quantity::ZERO);
+        assert_eq!(*quote_after.reserved(), Quantity::ZERO);
+        assert_eq!((base_after, quote_after), baseline);
     }
 
     #[test]
@@ -436,7 +511,7 @@ mod cancel_limit_order {
         EXECUTOR.run_once(&mut state, &mock_runtime_for(Principal::anonymous()));
         assert_eq!(owner_status(&state, buy_id), Some(OrderStatus::Expired));
 
-        let result = state.cancel_limit_order(&OWNER, buy_id, &mock_runtime_for(OWNER));
+        let result = state.cancel_limit_order(&OWNER, None, buy_id, &mock_runtime_for(OWNER));
 
         assert_eq!(result, Err(CancelLimitOrderError::OrderAlreadyTerminal));
     }
@@ -461,7 +536,9 @@ mod cancel_limit_order {
         let pair = icp_ckbtc_trading_pair();
         let (base_before, quote_before) = balances_pair(state, &user, &pair);
 
-        let order = state.cancel_limit_order(&user, order_id, &runtime).unwrap();
+        let order = state
+            .cancel_limit_order(&user, None, order_id, &runtime)
+            .unwrap();
         assert_eq!(order.status, OrderStatus::Canceled);
         assert_eq!(
             order.quantity.checked_sub(order.filled_quantity),
@@ -494,6 +571,25 @@ mod cancel_limit_order {
             untouched_before, untouched_after,
             "the non-refund token balance should not change",
         );
+    }
+
+    /// Matches every pending order in book `ZERO` and leaves the resulting
+    /// settling events queued but undrained.
+    fn queue_matching_backlog(state: &mut State<VectorMemory, VectorMemory>) {
+        let orders: Vec<_> = state
+            .order_book(&OrderBookId::ZERO)
+            .unwrap()
+            .pending_order_seqs()
+            .collect();
+        state.record_matching_event(
+            &crate::state::event::MatchingEvent {
+                book_id: OrderBookId::ZERO,
+                orders,
+            },
+            crate::Timestamp::EPOCH,
+            crate::state::StableMemoryOptions::Write,
+        );
+        assert!(state.has_pending_settling_events());
     }
 
     fn setup() -> State<VectorMemory, VectorMemory> {
@@ -542,7 +638,8 @@ mod record_limit_order {
     }
 
     #[test]
-    fn stores_the_submission_timestamp_on_the_record() {
+    fn stores_submission_metadata_on_the_record() {
+        const TRADING: Principal = Principal::from_slice(&[0x02]);
         let mut state = setup();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
@@ -565,14 +662,14 @@ mod record_limit_order {
             OWNER,
             order_id.book_id(),
             order,
+            Some(TRADING),
             timestamp,
             StableMemoryOptions::Write,
         );
 
-        assert_eq!(
-            state.order_history.get(&order_id).unwrap().created_at,
-            timestamp
-        );
+        let record = state.order_history.get(&order_id).unwrap();
+        assert_eq!(record.created_at, timestamp);
+        assert_eq!(record.placed_by, Some(TRADING));
     }
 
     #[test]
@@ -584,7 +681,11 @@ mod record_limit_order {
         let first = order(OWNER, &pair, Side::Sell, 100, lot).place(&mut state);
         let second = order(OWNER, &pair, Side::Buy, 100, lot).place(&mut state);
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
         assert_eq!(
             state.order_history.orders_after(owner_id, None, 10),
             Ok(vec![second, first])
@@ -705,8 +806,16 @@ mod get_user_order_trades {
         let stranger_order = order(STRANGER, &pair, Side::Buy, 100, lot).place(&mut state);
         let unknown_order = OrderId::new(OrderBookId::ZERO, OrderSeq::new(99));
 
-        let owner_id = state.user_registry.lookup(OWNER).unwrap();
-        let stranger_id = state.user_registry.lookup(STRANGER).unwrap();
+        let owner_id = state
+            .user_registry
+            .lookup(OWNER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
+        let stranger_id = state
+            .user_registry
+            .lookup(STRANGER)
+            .and_then(|account| account.funding_id())
+            .unwrap();
 
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(0));
         seed_trade(&mut state, (owner_order, owner_id), FillSeq::new(1));
@@ -1204,6 +1313,7 @@ mod settle_fills {
                 user,
                 order_id.book_id(),
                 order,
+                None,
                 Timestamp::EPOCH,
                 StableMemoryOptions::Write,
             );
@@ -1737,6 +1847,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(status_of(&state, BUYER, buy_id), Some(OrderStatus::Filled));
@@ -1770,6 +1882,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             // The taker rests `Open` with one of three lots filled.
@@ -1788,6 +1902,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1858,6 +1974,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(100 * lot + 101 * lot),
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -1953,6 +2071,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::ZERO,
                     filled_fee: Quantity::ZERO,
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             assert_eq!(buy.last_updated_at, None);
@@ -2066,6 +2186,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(base_fee),
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
             let sell = test_fixtures::record_of(&state, SELLER, seller_id);
@@ -2083,6 +2205,8 @@ mod settle_fills {
                     time_in_force: TimeInForce::GoodTilCanceled,
                     filled_quote: Quantity::from(notional),
                     filled_fee: Quantity::from(quote_fee),
+                    placed_by: None,
+                    canceled_by: None,
                 },
             );
         }
@@ -2842,6 +2966,7 @@ mod settle_fills {
             let user = state
                 .user_registry
                 .lookup(owner)
+                .and_then(|account| account.funding_id())
                 .expect("owner should be registered after settlement");
             state
                 .trade_history
@@ -3322,17 +3447,22 @@ mod execution_policy {
                 mode: Mode::GeneralAvailability,
                 max_orders_per_chunk: 17,
                 instruction_budget: 12_345,
+                max_settlement_units_per_event: Some(42),
             },
             OrderHistory::new(VectorMemory::default(), VectorMemory::default()),
             TradeHistory::new(VectorMemory::default(), VectorMemory::default()),
-            crate::user::UserRegistry::new(VectorMemory::default()),
+            crate::user::UserRegistry::new(
+                VectorMemory::default(),
+                VectorMemory::default(),
+                VectorMemory::default(),
+            ),
             TokenBalance::new(VectorMemory::default()),
         )
         .unwrap();
 
         assert_eq!(
             state.execution_policy(),
-            &ExecutionPolicy::try_new(17, 12_345).unwrap()
+            &ExecutionPolicy::try_new(17, 12_345, 42).unwrap()
         );
     }
 }
@@ -3671,6 +3801,8 @@ mod pending_state_predicates {
         icp_ckbtc_trading_pair, icp_metadata,
     };
     use candid::Principal;
+    use proptest::prelude::{Strategy, any};
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     const BUYER: Principal = Principal::from_slice(&[0x01]);
     const SELLER: Principal = Principal::from_slice(&[0x02]);
@@ -3701,14 +3833,186 @@ mod pending_state_predicates {
     #[test]
     fn should_report_settling_events_present_between_match_and_drain() {
         let mut state = setup_one_book();
+
+        place_sweep(&mut state, 1, 100 * PRICE_SCALE);
+        record_matching_round(&mut state);
+
+        assert!(state.has_pending_settling_events());
+    }
+
+    /// A round that both fills and kills a fill-or-kill order packs the killed
+    /// order's refund unit through the same packer as the fill units: it flows
+    /// into the trailing event rather than being crammed onto an already-full
+    /// event, so every event still holds at most the unit cap.
+    #[test]
+    fn expired_refunds_pack_through_the_settling_events() {
+        let mut state = setup_one_book();
         let pair = icp_ckbtc_trading_pair();
         let lot = u128::from(LOT_SIZE.get());
+        let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+        let num_makers = cap;
+        let refund_units = 1;
+        let total_units = num_makers + refund_units;
 
-        test_fixtures::order(BUYER, &pair, Side::Buy, 100 * PRICE_SCALE, lot).place(&mut state);
-        test_fixtures::order(SELLER, &pair, Side::Sell, 100 * PRICE_SCALE, lot).place(&mut state);
+        place_sweep(&mut state, num_makers, 100 * PRICE_SCALE);
+        let killed = test_fixtures::order(SELLER, &pair, Side::Buy, 50 * PRICE_SCALE, lot)
+            .fill_or_kill()
+            .place(&mut state);
+        record_matching_round(&mut state);
 
-        // Apply only the matching event; do not drain settling. The matching
-        // produces a SettlingEvent on the queue that must be observable.
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        assert_eq!(events.len(), total_units.div_ceil(cap));
+        for event in &events {
+            assert!(
+                unit_count(event) <= cap,
+                "the refund never pushes an event past the unit cap",
+            );
+        }
+
+        let refund_events = events
+            .iter()
+            .filter(|event| {
+                event.balance_operations.iter().any(|op| {
+                    matches!(
+                        op,
+                        crate::state::event::BalanceOperation::Unreserve { order, .. }
+                            if *order == killed.seq()
+                    )
+                })
+            })
+            .count();
+        assert_eq!(
+            refund_events, 1,
+            "the kill refund appears in exactly one event"
+        );
+    }
+
+    /// A buy taker crossing below its limit emits a surplus `Unreserve` as part
+    /// of each fill unit, not as a separate settlement unit. The packer counts
+    /// each such fill once, so a surplus-bearing sweep partitions into the same
+    /// number of events as a surplus-free one and no event exceeds the unit cap.
+    #[test]
+    fn surplus_fills_count_as_one_unit_each() {
+        let cap = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+        let num_makers = cap + 3;
+
+        let mut state = setup_one_book();
+        place_sweep(&mut state, num_makers, 50 * PRICE_SCALE);
+        record_matching_round(&mut state);
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+
+        let surplus_unreserves: usize = events
+            .iter()
+            .flat_map(|event| &event.balance_operations)
+            .filter(|op| matches!(op, crate::state::event::BalanceOperation::Unreserve { .. }))
+            .count();
+        assert_eq!(
+            surplus_unreserves, num_makers,
+            "every crossing-below-limit fill must emit a surplus refund",
+        );
+
+        let total_units: usize = events.iter().map(unit_count).sum();
+        assert_eq!(
+            total_units, num_makers,
+            "each surplus fill is one unit; its refund is not counted separately",
+        );
+
+        assert_eq!(events.len(), num_makers.div_ceil(cap));
+        for event in &events {
+            assert!(
+                unit_count(event) <= cap,
+                "each settling event holds at most the unit cap",
+            );
+        }
+    }
+
+    proptest! {
+        /// The final settled state is invariant to `max_settlement_units_per_event`:
+        /// matching an arbitrary set of orders under an arbitrary small cap and
+        /// draining every bounded settling event leaves exactly the state produced
+        /// by draining a single unbounded event. The bounded run must still honor
+        /// the cap — every event holds at most `cap` units and the round splits
+        /// into `total_units.div_ceil(cap)` events — so an implementation that
+        /// ignored the cap could not satisfy the invariance vacuously.
+        #[test]
+        fn draining_is_invariant_to_the_settlement_unit_cap(
+            specs in arb_order_specs(),
+            cap in 1u32..=8,
+        ) {
+            let (mut bounded_state, bounded_events) = run_round(&specs, cap);
+            let (mut single_state, _) = run_round(&specs, u32::MAX);
+
+            let total_units: usize = bounded_events.iter().map(unit_count).sum();
+            prop_assert_eq!(bounded_events.len(), total_units.div_ceil(cap as usize));
+            for event in &bounded_events {
+                prop_assert!(unit_count(event) <= cap as usize);
+            }
+
+            let canonical =
+                crate::state::ExecutionPolicy::try_new(u32::MAX, oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET, 1)
+                    .unwrap();
+            bounded_state.set_execution_policy(canonical.clone());
+            single_state.set_execution_policy(canonical);
+            prop_assert_eq!(bounded_state, single_state);
+        }
+    }
+
+    fn unit_count(event: &crate::state::event::SettlingEvent) -> usize {
+        let taker_seqs: std::collections::BTreeSet<_> = event
+            .fills
+            .iter()
+            .map(|fill| fill.taker_order_seq)
+            .collect();
+        let removed_order_units = event
+            .balance_operations
+            .iter()
+            .filter(|op| match op {
+                crate::state::event::BalanceOperation::Unreserve { order, .. } => {
+                    !taker_seqs.contains(order)
+                }
+                _ => false,
+            })
+            .count();
+        event.fills.len() + removed_order_units
+    }
+
+    fn place_sweep(
+        state: &mut crate::state::State<
+            ic_stable_structures::VectorMemory,
+            ic_stable_structures::VectorMemory,
+        >,
+        num_makers: usize,
+        maker_price: u128,
+    ) {
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for i in 0..num_makers {
+            test_fixtures::order(test_fixtures::maker(i), &pair, Side::Sell, maker_price, lot)
+                .place(state);
+        }
+        test_fixtures::order(
+            BUYER,
+            &pair,
+            Side::Buy,
+            100 * PRICE_SCALE,
+            num_makers as u128 * lot,
+        )
+        .place(state);
+    }
+
+    fn record_matching_round(
+        state: &mut crate::state::State<
+            ic_stable_structures::VectorMemory,
+            ic_stable_structures::VectorMemory,
+        >,
+    ) {
         let book = state.order_book(&OrderBookId::ZERO).unwrap();
         let matching_event = crate::state::event::MatchingEvent {
             book_id: OrderBookId::ZERO,
@@ -3719,8 +4023,6 @@ mod pending_state_predicates {
             crate::Timestamp::EPOCH,
             crate::state::StableMemoryOptions::Write,
         );
-
-        assert!(state.has_pending_settling_events());
     }
 
     fn setup_one_book()
@@ -3739,5 +4041,75 @@ mod pending_state_predicates {
             FeeRates::default(),
         );
         state
+    }
+
+    #[derive(Clone, Debug)]
+    struct OrderSpec {
+        side: Side,
+        price_ticks: u128,
+        qty_lots: u64,
+        fill_or_kill: bool,
+    }
+
+    fn arb_order_specs() -> impl Strategy<Value = Vec<OrderSpec>> {
+        let spec = (any::<bool>(), 1u128..=10, 1u64..=4, any::<bool>()).prop_map(
+            |(is_buy, price_ticks, qty_lots, fill_or_kill)| OrderSpec {
+                side: if is_buy { Side::Buy } else { Side::Sell },
+                price_ticks,
+                qty_lots,
+                fill_or_kill,
+            },
+        );
+        proptest::collection::vec(spec, 0..=24)
+    }
+
+    fn run_round(
+        specs: &[OrderSpec],
+        max_settlement_units_per_event: u32,
+    ) -> (
+        crate::state::State<ic_stable_structures::VectorMemory, ic_stable_structures::VectorMemory>,
+        Vec<crate::state::event::SettlingEvent>,
+    ) {
+        let mut state = setup_one_book();
+        state.set_execution_policy(
+            crate::state::ExecutionPolicy::try_new(
+                u32::MAX,
+                oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+                max_settlement_units_per_event,
+            )
+            .unwrap(),
+        );
+
+        let pair = icp_ckbtc_trading_pair();
+        let lot = u128::from(LOT_SIZE.get());
+        for (i, spec) in specs.iter().enumerate() {
+            let placement = test_fixtures::order(
+                test_fixtures::maker(i),
+                &pair,
+                spec.side,
+                spec.price_ticks * PRICE_SCALE,
+                spec.qty_lots as u128 * lot,
+            );
+            let placement = if spec.fill_or_kill {
+                placement.fill_or_kill()
+            } else {
+                placement
+            };
+            placement.place(&mut state);
+        }
+        record_matching_round(&mut state);
+
+        let mut events = Vec::new();
+        while let Some(event) = state.take_next_pending_settling_event() {
+            events.push(event);
+        }
+        for event in &events {
+            state.record_settling_event(
+                event,
+                crate::Timestamp::EPOCH,
+                crate::state::StableMemoryOptions::Write,
+            );
+        }
+        (state, events)
     }
 }

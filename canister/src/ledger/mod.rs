@@ -22,14 +22,14 @@ enum Icrc1TransferError {
 }
 
 pub async fn deposit(
-    request: DepositRequest,
+    request: &DepositRequest,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
-    let token = request.token_id;
-    let amount = request.amount;
+    let token = &request.token_id;
+    let amount = &request.amount;
     let caller = runtime.msg_caller();
 
     let transfer_args = TransferFromArgs {

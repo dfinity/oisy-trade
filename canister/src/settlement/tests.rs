@@ -26,8 +26,7 @@ mod settled_fill {
             let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
             let settlement = FillSettlement::new(fill.clone(), fee_rates, base_scale);
 
-            let mut ops = Vec::new();
-            settlement.push_balance_operations(&mut ops);
+            let ops = settlement.balance_operations();
             let (mut quote_amount, mut quote_fee, mut base_fee) = (None, None, None);
             for op in &ops {
                 if let BalanceOperation::Transfer { token, amount, fee, .. } = op {
@@ -116,6 +115,227 @@ mod settled_fill {
     }
 }
 
+mod settling_batches {
+    use crate::order::{
+        FeeRates, Fill, FillSeq, MatchingOutput, OrderSeq, Price, Quantity, RemovedOrder, Side,
+    };
+    use crate::settlement::{
+        FillSettlement, MatchSettlement, RemovedOrderSettlement, SettlementBatch,
+    };
+    use crate::state::event::BalanceOperation;
+    use crate::test_fixtures::{LOT_SIZE, TICK_SIZE};
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::{NonZeroU32, NonZeroU64};
+
+    const BASE_SCALE: u64 = 100_000_000;
+    const CAP: usize = oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT as usize;
+
+    struct TestCase {
+        desc: &'static str,
+        num_fills: usize,
+        num_expired: usize,
+        expected_batches: usize,
+    }
+
+    /// `from_matching` packs a round's settlement into events holding at most
+    /// `cap` whole settlement UNITS each: a unit is one fill (with its balance
+    /// operations) or one killed/expired order (with its `Unreserve`), counted
+    /// as one and never split. Fill units come first, then removed-order units,
+    /// and the packer opens a new event once the current one already holds `cap`
+    /// units. Flattening every event's operations and fills reproduces the exact
+    /// single-event order (all fill ops in fill order, then the refund ops). The
+    /// refund cases also prove killed-order units are chunked across events
+    /// instead of piled onto one event.
+    #[test]
+    fn packs_settlement_into_unit_bounded_events() {
+        let cap = CAP;
+        let cases = vec![
+            TestCase {
+                desc: "empty round",
+                num_fills: 0,
+                num_expired: 0,
+                expected_batches: 0,
+            },
+            TestCase {
+                desc: "single fill unit",
+                num_fills: 1,
+                num_expired: 0,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "fill units exactly fill one event",
+                num_fills: cap,
+                num_expired: 0,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "one unit over the cap spills into a second event",
+                num_fills: cap + 1,
+                num_expired: 0,
+                expected_batches: 2,
+            },
+            TestCase {
+                desc: "several full events of fill units plus a remainder",
+                num_fills: cap * 3 + 7,
+                num_expired: 0,
+                expected_batches: 4,
+            },
+            TestCase {
+                desc: "refund units exactly fill one event",
+                num_fills: 0,
+                num_expired: cap,
+                expected_batches: 1,
+            },
+            TestCase {
+                desc: "refund units are chunked across events past the cap",
+                num_fills: 0,
+                num_expired: cap * 2 + 5,
+                expected_batches: 3,
+            },
+            TestCase {
+                desc: "refunds after a full fill event start a new event",
+                num_fills: cap,
+                num_expired: 3,
+                expected_batches: 2,
+            },
+            TestCase {
+                desc: "refunds top up a partial trailing fill event",
+                num_fills: 1,
+                num_expired: 3,
+                expected_batches: 1,
+            },
+        ];
+
+        let base_scale = NonZeroU64::new(BASE_SCALE).unwrap();
+        for case in cases {
+            let settlement = build(case.num_fills, case.num_expired, base_scale);
+
+            assert_eq!(
+                settlement.settling_batches.len(),
+                case.expected_batches,
+                "{}: event count",
+                case.desc,
+            );
+            for batch in &settlement.settling_batches {
+                assert!(
+                    batch.fills.len() + removed_order_units(batch) <= cap,
+                    "{}: event holds at most the unit cap",
+                    case.desc,
+                );
+                assert!(!batch.is_empty(), "{}: no empty event", case.desc);
+            }
+
+            let (mut expected_ops, expected_fills) =
+                flat_reference(&fills(case.num_fills), base_scale);
+            expected_ops.extend(expired_ops(case.num_expired, base_scale));
+            let flat_ops: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.balance_operations.iter().cloned())
+                .collect();
+            let flat_fills: Vec<_> = settlement
+                .settling_batches
+                .iter()
+                .flat_map(|b| b.fills.iter().cloned())
+                .collect();
+            assert_eq!(
+                flat_ops, expected_ops,
+                "{}: flattened balance operations",
+                case.desc,
+            );
+            assert_eq!(flat_fills, expected_fills, "{}: flattened fills", case.desc,);
+        }
+    }
+
+    #[test]
+    fn should_be_empty_when_default_batch_instantiated() {
+        assert!(SettlementBatch::default().is_empty());
+    }
+
+    fn removed_order_units(batch: &crate::settlement::SettlementBatch) -> usize {
+        batch
+            .balance_operations
+            .iter()
+            .filter(|op| matches!(op, BalanceOperation::Unreserve { .. }))
+            .count()
+    }
+
+    fn build(num_fills: usize, num_expired: usize, base_scale: NonZeroU64) -> MatchSettlement {
+        let mut expired_orders = BTreeMap::new();
+        for i in 0..num_expired as u64 {
+            expired_orders.insert(OrderSeq::new(1_000_000 + i), removed_order());
+        }
+        let out = MatchingOutput {
+            fills: fills(num_fills),
+            resting_orders: BTreeSet::new(),
+            filled_orders: BTreeSet::new(),
+            expired_orders,
+        };
+        MatchSettlement::from_matching(
+            out,
+            FeeRates::default(),
+            base_scale,
+            NonZeroU32::new(CAP as u32).unwrap(),
+        )
+    }
+
+    fn expired_ops(num_expired: usize, base_scale: NonZeroU64) -> Vec<BalanceOperation> {
+        let mut ops = Vec::new();
+        for i in 0..num_expired as u64 {
+            let removed = removed_order();
+            ops.extend(
+                RemovedOrderSettlement::new(OrderSeq::new(1_000_000 + i), &removed, base_scale)
+                    .balance_operations(),
+            );
+        }
+        ops
+    }
+
+    fn removed_order() -> RemovedOrder {
+        RemovedOrder {
+            side: Side::Sell,
+            price: price(),
+            remaining_quantity: quantity(),
+        }
+    }
+
+    fn flat_reference(
+        fills: &[Fill],
+        base_scale: NonZeroU64,
+    ) -> (Vec<BalanceOperation>, Vec<crate::settlement::FillEvent>) {
+        let mut ops = Vec::new();
+        let mut settled = Vec::new();
+        for fill in fills {
+            let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
+            ops.extend(settlement.balance_operations());
+            settled.push(settlement.fill_event());
+        }
+        (ops, settled)
+    }
+
+    fn fills(n: usize) -> Vec<Fill> {
+        (0..n as u64)
+            .map(|i| Fill {
+                fill_seq: FillSeq::new(i),
+                taker_order_seq: OrderSeq::new(0),
+                taker_side: Side::Sell,
+                taker_price: price(),
+                maker_order_seq: OrderSeq::new(i + 1),
+                maker_price: price(),
+                quantity: quantity(),
+            })
+            .collect()
+    }
+
+    fn price() -> Price {
+        Price::new(5 * TICK_SIZE.get())
+    }
+
+    fn quantity() -> Quantity {
+        Quantity::from(u128::from(LOT_SIZE.get()))
+    }
+}
+
 mod settlement_shape {
     use crate::order::{self, FeeRates, PairToken};
     use crate::settlement::{FillSettlement, RemovedOrderSettlement};
@@ -124,7 +344,7 @@ mod settlement_shape {
     use proptest::prelude::*;
 
     proptest! {
-        /// `FillSettlement::new` + `push_balance_operations` preserve structural invariants
+        /// `FillSettlement::new` + `balance_operations` preserve structural invariants
         /// over any `MatchingOutput` the arbitrary strategy can produce:
         /// - never panics
         /// - emits exactly one Quote Transfer and one Base Transfer per fill
@@ -143,11 +363,12 @@ mod settlement_shape {
             let mut ops = Vec::new();
             for fill in &output.fills {
                 let settlement = FillSettlement::new(fill.clone(), FeeRates::default(), base_scale);
-                settlement.push_balance_operations(&mut ops);
+                ops.extend(settlement.balance_operations());
             }
             for (seq, killed) in &output.expired_orders {
-                RemovedOrderSettlement::new(*seq, killed, base_scale)
-                    .push_balance_operations(&mut ops);
+                ops.extend(
+                    RemovedOrderSettlement::new(*seq, killed, base_scale).balance_operations(),
+                );
             }
 
             prop_assert!(
