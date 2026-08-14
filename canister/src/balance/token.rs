@@ -66,8 +66,7 @@ impl<M: Memory> TokenBalance<M> {
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
-        bench_scopes!("balances", "balances::withdraw");
-        self.try_update(user, *token, |b| b.withdraw(amount))
+        self.with_write_back(|balances| balances.withdraw(user, token, amount))
     }
 
     /// Reserve `amount` from a user's free balance for the given token.
@@ -80,8 +79,7 @@ impl<M: Memory> TokenBalance<M> {
         token: &TokenId,
         amount: Quantity,
     ) -> Result<(), InsufficientBalanceError> {
-        bench_scopes!("balances", "balances::reserve");
-        self.try_update(user, *token, |b| b.reserve(amount))
+        self.with_write_back(|balances| balances.reserve(user, token, amount))
     }
 
     /// Apply `operations` to a write-back buffer over the balance map — one
@@ -124,23 +122,6 @@ impl<M: Memory> TokenBalance<M> {
     /// post-upgrade. Duplicate `TokenId` entries in `snapshot` trap.
     pub fn restore_fee_pool(&mut self, snapshot: Vec<FeeEntry>) {
         self.fee_pool.restore(snapshot);
-    }
-
-    /// Read-modify-write for a fallible mutation. On `Err(_)` the stored
-    /// entry is left untouched; on `Ok(_)` the updated value is persisted.
-    fn try_update<F, T, E>(&mut self, user: UserId, token: TokenId, f: F) -> Result<T, E>
-    where
-        F: FnOnce(&mut Balance) -> Result<T, E>,
-    {
-        let key = BalanceKey::new(token, user);
-        let mut balance = self.balances.get(&key).unwrap_or_default();
-        match f(&mut balance) {
-            Ok(v) => {
-                self.balances.insert(key, balance);
-                Ok(v)
-            }
-            Err(e) => Err(e),
-        }
     }
 
     #[cfg(test)]

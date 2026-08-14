@@ -1,10 +1,11 @@
 use super::fee_pool::FeePool;
 use super::row::BalanceRow;
-use super::{Balance, BalanceKey};
+use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
 use ic_stable_structures::{Memory, StableBTreeMap};
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 /// In-heap write-back buffer over the balance map for one batch of balance
 /// operations, lent out by [`TokenBalance::with_write_back`].
@@ -90,6 +91,36 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
             .deposit(amount);
     }
 
+    /// Withdraws `amount` from the user's free balance for `token`. Returns
+    /// `Err` with the available balance when the free balance is insufficient,
+    /// leaving the stored balance untouched.
+    pub(crate) fn withdraw(
+        &mut self,
+        user: UserId,
+        token: &TokenId,
+        amount: Quantity,
+    ) -> Result<(), InsufficientBalanceError> {
+        bench_scopes!("balances", "balances::withdraw");
+        self.try_mutate(BalanceKey::new(*token, user), |balance| {
+            balance.withdraw(amount)
+        })
+    }
+
+    /// Moves `amount` from the user's free to their reserved balance. Returns
+    /// `Err` with the available balance when the free balance is insufficient,
+    /// leaving the stored balance untouched.
+    pub(crate) fn reserve(
+        &mut self,
+        user: UserId,
+        token: &TokenId,
+        amount: Quantity,
+    ) -> Result<(), InsufficientBalanceError> {
+        bench_scopes!("balances", "balances::reserve");
+        self.try_mutate(BalanceKey::new(*token, user), |balance| {
+            balance.reserve(amount)
+        })
+    }
+
     /// Write each buffered row back to the stable map exactly once, eliding
     /// rows that are not [`worth_persisting`](BalanceRow::worth_persisting).
     pub(super) fn flush(self) {
@@ -123,5 +154,25 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
             .entry(key)
             .or_insert_with(|| BalanceRow::load(self.balances, &key));
         &mut row.balance
+    }
+
+    /// Buffer a row only once `mutate` has succeeded, so that a failed
+    /// operation leaves the buffer — and hence the stable map — untouched. A
+    /// row an earlier operation already buffered stays buffered either way,
+    /// since that operation's own write-back is still owed.
+    fn try_mutate<T, E>(
+        &mut self,
+        key: BalanceKey,
+        mutate: impl FnOnce(&mut Balance) -> Result<T, E>,
+    ) -> Result<T, E> {
+        match self.buffer.entry(key) {
+            Entry::Occupied(mut buffered) => mutate(&mut buffered.get_mut().balance),
+            Entry::Vacant(slot) => {
+                let mut row = BalanceRow::load(self.balances, &key);
+                let outcome = mutate(&mut row.balance)?;
+                slot.insert(row);
+                Ok(outcome)
+            }
+        }
     }
 }
