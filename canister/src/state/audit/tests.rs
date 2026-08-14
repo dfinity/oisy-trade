@@ -198,10 +198,10 @@ impl Scenario {
         time_in_force: TimeInForce,
         placed_by: Option<Principal>,
     ) -> (Self, OrderId) {
-        let (order_id, order) = self
+        let (order_id, order, _) = self
             .state
             .validate_limit_order(
-                self.state.lookup_account(user).as_ref(),
+                user,
                 trading_pair(),
                 PendingOrder {
                     side,
@@ -247,7 +247,7 @@ impl Scenario {
         canceled_by: Option<Principal>,
     ) -> Self {
         self.state
-            .validate_cancel_limit_order(self.state.lookup_account(owner).as_ref(), &order_id)
+            .validate_cancel_limit_order(owner, &order_id)
             .expect("test setup: order must be cancelable");
         let cancel_ts = self.timestamp();
         self.state.record_cancel_limit_order(

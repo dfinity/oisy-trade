@@ -233,9 +233,9 @@ fn should_roundtrip_state_through_snapshot() {
     // non-crossing prices, so after `process_pending_orders` both `bids` and
     // `asks` hold an entry — which exercises the encode paths and the
     // on-load reconstruction of the `resting_orders` index.
-    let (buy_id, buy_order) = state
+    let (buy_id, buy_order, _) = state
         .validate_limit_order(
-            state.lookup_account(buyer).as_ref(),
+            buyer,
             pair.clone(),
             PendingOrder {
                 side: Side::Buy,
@@ -253,9 +253,9 @@ fn should_roundtrip_state_through_snapshot() {
         crate::Timestamp::EPOCH,
         StableMemoryOptions::Write,
     );
-    let (sell_id, sell_order) = state
+    let (sell_id, sell_order, _) = state
         .validate_limit_order(
-            state.lookup_account(seller).as_ref(),
+            seller,
             pair.clone(),
             PendingOrder {
                 side: Side::Sell,
