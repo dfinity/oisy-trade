@@ -156,17 +156,25 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
         &mut row.balance
     }
 
-    /// Buffer a row only once `mutate` has succeeded, so that a failed
-    /// operation leaves the buffer — and hence the stable map — untouched. A
-    /// row an earlier operation already buffered stays buffered either way,
-    /// since that operation's own write-back is still owed.
+    /// Run `mutate` against a detached copy of the row for `key` and commit it
+    /// only once it succeeds, so a failed operation leaves the buffer — and
+    /// hence the stable map — exactly as it found it, even if `mutate`
+    /// modified the balance before returning `Err`. Whatever an earlier
+    /// operation buffered for `key` survives either way, since its own
+    /// write-back is still owed.
     fn try_mutate<T, E>(
         &mut self,
         key: BalanceKey,
         mutate: impl FnOnce(&mut Balance) -> Result<T, E>,
     ) -> Result<T, E> {
         match self.buffer.entry(key) {
-            Entry::Occupied(mut buffered) => mutate(&mut buffered.get_mut().balance),
+            Entry::Occupied(mut buffered) => {
+                let row = buffered.get_mut();
+                let mut candidate = row.balance;
+                let outcome = mutate(&mut candidate)?;
+                row.balance = candidate;
+                Ok(outcome)
+            }
             Entry::Vacant(slot) => {
                 let mut row = BalanceRow::load(self.balances, &key);
                 let outcome = mutate(&mut row.balance)?;
