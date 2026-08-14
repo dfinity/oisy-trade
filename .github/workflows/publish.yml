@@ -32,7 +32,9 @@ jobs:
         uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1
       - name: 'Run release-plz'
         id: release-plz
-        uses: release-plz/action@bbd1afc9813d25602e002b29e96e0aacebab1160 # v0.5.105
+        # Kept in step with release.yml, which explains why the action version
+        # matters beyond the release-plz binary it installs.
+        uses: release-plz/action@1a0c5beec2fe4e91727549b5d2d0715ed28684bb # v0.5.131
         with:
           command: release
           # Pin the release-plz binary to match release.yml: >= 0.3.142 creates

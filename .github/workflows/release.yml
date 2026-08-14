@@ -20,7 +20,14 @@ jobs:
         with:
           fetch-depth: 0
       - name: 'Run release-plz'
-        uses: release-plz/action@bbd1afc9813d25602e002b29e96e0aacebab1160 # v0.5.105
+        # The action version also selects the cargo-semver-checks it installs,
+        # which is not overridable: v0.5.105 pinned 0.40, too old to read the
+        # rustdoc JSON emitted by the toolchain in rust-toolchain.toml, so the
+        # API compatibility check errored out and release-plz reported every
+        # release as API compatible. v0.5.131 pins 0.48, which reads it. Keep in
+        # step with publish.yml, and re-check this when bumping the toolchain:
+        # the check fails silently, it does not fail the workflow.
+        uses: release-plz/action@1a0c5beec2fe4e91727549b5d2d0715ed28684bb # v0.5.131
         with:
           command: release-pr
           # Pin the release-plz binary. >= 0.3.142 creates the PR branch via the
