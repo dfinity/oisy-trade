@@ -6,8 +6,8 @@ use crate::user::UserId;
 use ic_stable_structures::{Memory, StableBTreeMap};
 use std::collections::BTreeMap;
 
-/// In-heap write-back buffer over the balance map for the balance operations
-/// of one settling event, lent out by [`TokenBalance::with_write_back`].
+/// In-heap write-back buffer over the balance map for one batch of balance
+/// operations, lent out by [`TokenBalance::with_write_back`].
 ///
 /// The taker of a large sweep is party to every fill, so its two balance rows
 /// would otherwise be read-modify-written on each fill. The buffer collapses
@@ -82,6 +82,14 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
         .unreserve(amount);
     }
 
+    /// Credits `amount` to the user's free balance for `token`, creating the
+    /// row on demand.
+    pub(crate) fn deposit(&mut self, user: UserId, token: &TokenId, amount: Quantity) {
+        bench_scopes!("balances", "balances::deposit");
+        self.load_or_create(BalanceKey::new(*token, user))
+            .deposit(amount);
+    }
+
     /// Write each buffered row back to the stable map exactly once, eliding
     /// rows that are not [`worth_persisting`](BalanceRow::worth_persisting).
     pub(super) fn flush(self) {
@@ -106,8 +114,9 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
         &mut row.balance
     }
 
-    /// Buffer a row that may not yet exist, as required by the creditor credit
-    /// in [`transfer`](Self::transfer), which creates the entry on demand.
+    /// Buffer a row that may not yet exist, as required by
+    /// [`deposit`](Self::deposit) and by the creditor credit in
+    /// [`transfer`](Self::transfer), which create the entry on demand.
     fn load_or_create(&mut self, key: BalanceKey) -> &mut Balance {
         let row = self
             .buffer

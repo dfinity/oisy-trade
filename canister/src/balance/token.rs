@@ -1,5 +1,4 @@
 use super::fee_pool::{FeeEntry, FeePool};
-use super::row::BalanceRow;
 use super::write_back::BalanceWriteBack;
 use super::{Balance, BalanceKey, InsufficientBalanceError};
 use crate::order::{Quantity, TokenId};
@@ -55,8 +54,7 @@ impl<M: Memory> TokenBalance<M> {
     /// Deposit `amount` into a user's free balance for the given token.
     /// Creates the entry if absent.
     pub fn deposit(&mut self, user: UserId, token: TokenId, amount: Quantity) {
-        bench_scopes!("balances", "balances::deposit");
-        self.update(user, token, |b| b.deposit(amount));
+        self.with_write_back(|balances| balances.deposit(user, &token, amount));
     }
 
     /// Withdraw `amount` from a user's free balance for the given token.
@@ -86,12 +84,10 @@ impl<M: Memory> TokenBalance<M> {
         self.try_update(user, *token, |b| b.reserve(amount))
     }
 
-    /// Apply `operations` to a write-back buffer over the balance map, scoped
-    /// to a single settling event, and flush it before returning. Each
-    /// `(token, user)` row the operations touch is read from the stable map at
-    /// most once and written back at most once. Preserves the fee-pool accrual
-    /// and empty-row elision of [`BalanceWriteBack::transfer`] and
-    /// [`BalanceWriteBack::unreserve`] exactly.
+    /// Apply `operations` to a write-back buffer over the balance map — one
+    /// settling event's worth of fills, or a single deposit — and flush it
+    /// before returning. Each `(token, user)` row the operations touch is read
+    /// from the stable map at most once and written back at most once.
     ///
     /// The buffer is only ever lent out, so no caller can drop it unflushed
     /// and silently discard the operations it applied.
@@ -128,18 +124,6 @@ impl<M: Memory> TokenBalance<M> {
     /// post-upgrade. Duplicate `TokenId` entries in `snapshot` trap.
     pub fn restore_fee_pool(&mut self, snapshot: Vec<FeeEntry>) {
         self.fee_pool.restore(snapshot);
-    }
-
-    /// Read-modify-write for an infallible mutation. Creates the entry if
-    /// absent, unless the row is not
-    /// [`worth_persisting`](BalanceRow::worth_persisting) afterwards.
-    fn update<F: FnOnce(&mut Balance)>(&mut self, user: UserId, token: TokenId, f: F) {
-        let key = BalanceKey::new(token, user);
-        let mut row = BalanceRow::load(&self.balances, &key);
-        f(&mut row.balance);
-        if row.worth_persisting() {
-            self.balances.insert(key, row.balance);
-        }
     }
 
     /// Read-modify-write for a fallible mutation. On `Err(_)` the stored
