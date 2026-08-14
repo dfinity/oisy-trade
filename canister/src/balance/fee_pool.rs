@@ -48,12 +48,8 @@ impl FeePool {
 
     /// Snapshot the pool for pre-upgrade serialization.
     pub fn snapshot(&self) -> Vec<FeeEntry> {
-        self.per_token
-            .iter()
-            .map(|(token, amount)| FeeEntry {
-                token: *token,
-                amount: *amount,
-            })
+        self.iter()
+            .map(|(token, amount)| FeeEntry { token, amount })
             .collect()
     }
 
