@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-14
+
+### Changed
+
+- Resolve order cancellation to the funding account (DEFI-2911 PR 6/6) ([#226](https://github.com/dfinity/oisy-trade/pull/226))
+- Resolve order placement to the funding account (DEFI-2911 PR 5/6) ([#223](https://github.com/dfinity/oisy-trade/pull/223))
+- Deny funding operations to trading accounts (DEFI-2911 PR 3/6) ([#209](https://github.com/dfinity/oisy-trade/pull/209))
+- Trading-account revocation + grant cooldown (DEFI-2911 PR 2/6) ([#208](https://github.com/dfinity/oisy-trade/pull/208))
+- Trading-account registry (DEFI-2911 PR 1/6) ([#207](https://github.com/dfinity/oisy-trade/pull/207))
+- Render principals textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
+
+### Fixed
+
+- Reject non-authenticating trading-account delegation targets ([#238](https://github.com/dfinity/oisy-trade/pull/238))
+
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_types-v0.3.0..oisy_trade_types-v0.4.0
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-07-02

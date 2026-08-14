@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-14
+
+### Changed
+
+- Finalize ckBTC/ckUSDT sizing and record live production listings ([#246](https://github.com/dfinity/oisy-trade/pull/246))
+- Refresh Cargo.lock and re-persist canbench results ([#245](https://github.com/dfinity/oisy-trade/pull/245))
+- Docs and test follow-ups for funding/trading accounts ([#230](https://github.com/dfinity/oisy-trade/pull/230))
+- Resolve order cancellation to the funding account (DEFI-2911 PR 6/6) ([#226](https://github.com/dfinity/oisy-trade/pull/226))
+- Drop orphaned arb_order_record test fixtures ([#224](https://github.com/dfinity/oisy-trade/pull/224))
+- Resolve order placement to the funding account (DEFI-2911 PR 5/6) ([#223](https://github.com/dfinity/oisy-trade/pull/223))
+- Classify principals via UserAccount lookup ([#222](https://github.com/dfinity/oisy-trade/pull/222))
+- Resolve trading-account reads to the funding account (DEFI-2911 PR 4/6) ([#219](https://github.com/dfinity/oisy-trade/pull/219))
+- Deny funding operations to trading accounts (DEFI-2911 PR 3/6) ([#209](https://github.com/dfinity/oisy-trade/pull/209))
+- Trading-account revocation + grant cooldown (DEFI-2911 PR 2/6) ([#208](https://github.com/dfinity/oisy-trade/pull/208))
+- Trading-account registry (DEFI-2911 PR 1/6) ([#207](https://github.com/dfinity/oisy-trade/pull/207))
+- Render principals textually in canister logs ([#203](https://github.com/dfinity/oisy-trade/pull/203))
+
+### Fixed
+
+- Replay mainnet events and reconstruct state ([#229](https://github.com/dfinity/oisy-trade/pull/229))
+- Validate deposit/withdraw amount before rendering it ([#237](https://github.com/dfinity/oisy-trade/pull/237))
+- Reject non-authenticating trading-account delegation targets ([#238](https://github.com/dfinity/oisy-trade/pull/238))
+- Cancel applies only its own settlement ([#240](https://github.com/dfinity/oisy-trade/pull/240))
+- Bound settling-event application cost during matching ([#216](https://github.com/dfinity/oisy-trade/pull/216))
+- Benchmark unbounded settling-event sweep during matching ([#210](https://github.com/dfinity/oisy-trade/pull/210))
+
+[0.4.0]: https://github.com/dfinity/oisy-trade/compare/oisy_trade_canister-v0.3.0..oisy_trade_canister-v0.4.0
+
 ## [Unreleased]
 
 ### Added
