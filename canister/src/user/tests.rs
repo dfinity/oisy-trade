@@ -421,6 +421,57 @@ mod trading_accounts {
     }
 
     #[test]
+    fn should_attribute_only_a_trading_account_as_the_acting_key() {
+        let mut registry = user_registry();
+        registry.get_or_register(funding());
+        record(&mut registry, funding(), trading(), Timestamp::new(1));
+
+        assert_eq!(
+            registry.lookup(trading()).unwrap().acting_key(),
+            Some(trading()),
+            "a trading account is attributed as the acting key"
+        );
+        assert_eq!(
+            registry.lookup(funding()).unwrap().acting_key(),
+            None,
+            "a funding account acting as itself has no separate attribution"
+        );
+    }
+
+    #[test]
+    fn should_resolve_the_funding_id_an_account_acts_on() {
+        let mut registry = user_registry();
+        let funding_id = registry.get_or_register(funding());
+        record(&mut registry, funding(), trading(), Timestamp::new(1));
+
+        let funding_account = registry.lookup(funding()).unwrap();
+        let trading_account = registry.lookup(trading()).unwrap();
+
+        assert_eq!(
+            registry.funding_id_of(&funding_account),
+            Some(funding_id),
+            "a funding account acts on its own id"
+        );
+        assert_eq!(
+            registry.funding_id_of(&trading_account),
+            Some(funding_id),
+            "a trading account acts on its funding account's id"
+        );
+
+        let orphaned = UserAccount::Trading {
+            principal: trading(),
+            grant: TradingGrant {
+                funding: principal(9),
+            },
+        };
+        assert_eq!(
+            registry.funding_id_of(&orphaned),
+            None,
+            "a grant naming an unregistered funding account resolves to no id"
+        );
+    }
+
+    #[test]
     fn should_return_empty_list_for_unregistered_or_ungranted_principal() {
         let mut registry = user_registry();
         assert_eq!(registry.trading_accounts_of(principal(9)), vec![]);

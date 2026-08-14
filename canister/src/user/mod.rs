@@ -197,14 +197,14 @@ impl UserAccount {
         }
     }
 
-    /// The order owner and the acting key to attribute a placement or cancel
-    /// to: a funding account acts as itself with no separate attribution; a
-    /// trading account acts on its funding account's behalf, attributed to the
-    /// trading principal.
-    pub fn order_actor(&self) -> (Principal, Option<Principal>) {
+    /// The key to attribute a placement or cancel to, on top of the order's
+    /// owner ([`Self::effective_principal`]): `None` for a funding account,
+    /// which acts as itself, and the trading principal for a trading account,
+    /// which acts on its funding account's behalf.
+    pub fn acting_key(&self) -> Option<Principal> {
         match self {
-            UserAccount::Funding { principal, .. } => (*principal, None),
-            UserAccount::Trading { principal, grant } => (grant.funding, Some(*principal)),
+            UserAccount::Funding { .. } => None,
+            UserAccount::Trading { principal, .. } => Some(*principal),
         }
     }
 
@@ -293,6 +293,18 @@ impl<M: Memory> UserRegistry<M> {
         self.users
             .get(&key)
             .map(|id| UserAccount::Funding { id, principal })
+    }
+
+    /// The [`UserId`] whose balances, orders, and trades `account` acts on: a
+    /// funding account's own id; a trading account's funding account's id.
+    /// `None` when a trading account's funding account is not registered.
+    pub fn funding_id_of(&self, account: &UserAccount) -> Option<UserId> {
+        match account {
+            UserAccount::Funding { id, .. } => Some(*id),
+            UserAccount::Trading { grant, .. } => self
+                .lookup(grant.funding)
+                .and_then(|funding| funding.funding_id()),
+        }
     }
 
     /// Checks the grant preconditions for whitelisting `trading` under funding
