@@ -1,4 +1,11 @@
 //! Disposition-tagged, forward-compatible user-facing errors.
+//!
+//! Every leaf enum in this module is `#[non_exhaustive]`, mirroring in Rust what
+//! the Candid interface already promises: each disposition arm is an
+//! `opt variant`, so a client decodes a leaf it does not know as `null` rather
+//! than failing. A Rust client must therefore carry a wildcard arm, and adding a
+//! leaf stays a compatible change on both sides. [`ErrorKind`] itself is
+//! deliberately exhaustive — the three dispositions are the closed contract.
 
 #[cfg(test)]
 mod tests;
@@ -121,6 +128,7 @@ pub type AddLimitOrderError = Error<AddLimitOrderRequestError, AddLimitOrderTemp
 
 /// Caller-side reasons `add_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum AddLimitOrderRequestError {
     /// The amount exceeds the maximum supported value.
     #[error("the amount exceeds the maximum supported value")]
@@ -179,6 +187,7 @@ fn invalid_notional_message(notional: &Nat, min: &Nat, max: Option<&Nat>) -> Str
 
 /// Transient reasons `add_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum AddLimitOrderTemporaryError {
     /// Trading is halted (globally or on this pair); no new orders are accepted.
     #[error("trading is halted; no new orders are accepted")]
@@ -190,6 +199,7 @@ pub type CancelLimitOrderError = Error<CancelLimitOrderRequestError, Never, Neve
 
 /// Caller-side reasons `cancel_limit_order` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum CancelLimitOrderRequestError {
     /// The supplied order id was not a well-formed order id.
     #[error("the supplied order id is not a well-formed order id")]
@@ -211,6 +221,7 @@ pub type GetMyOrdersError = Error<GetMyOrdersRequestError, Never, Never>;
 
 /// Caller-side reasons `get_my_orders` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum GetMyOrdersRequestError {
     /// An order id in the filter (`ById` target or `ByPage.after` cursor) was
     /// not a well-formed order id.
@@ -227,6 +238,7 @@ pub type DepositError = Error<DepositRequestError, DepositTemporaryError, Deposi
 
 /// Caller-side reasons a deposit can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum DepositRequestError {
     /// The amount exceeds the maximum supported value.
     #[error("the amount exceeds the maximum supported value")]
@@ -257,6 +269,7 @@ pub enum DepositRequestError {
 
 /// Transient reasons a deposit can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum DepositTemporaryError {
     /// Another deposit or withdrawal is already in flight for this
     /// `(caller, token)`. Retry once the previous operation completes.
@@ -279,6 +292,7 @@ pub enum DepositTemporaryError {
 
 /// Canister-side reasons a deposit can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum DepositInternalError {
     /// The `icrc2_transfer_from` call returned an unexpected ledger error.
     #[error("ledger error: {reason}")]
@@ -303,6 +317,7 @@ pub type WithdrawError = Error<WithdrawRequestError, WithdrawTemporaryError, Wit
 
 /// Caller-side reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum WithdrawRequestError {
     /// The amount exceeds the maximum supported value.
     #[error("the amount exceeds the maximum supported value")]
@@ -333,6 +348,7 @@ pub enum WithdrawRequestError {
 
 /// Transient reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum WithdrawTemporaryError {
     /// Another deposit or withdrawal is already in flight for this
     /// `(caller, token)`. Retry once the previous operation completes.
@@ -359,6 +375,7 @@ pub enum WithdrawTemporaryError {
 
 /// Canister-side reasons a withdrawal can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum WithdrawInternalError {
     /// The `icrc1_transfer` call returned an unexpected ledger error.
     #[error("ledger error: {reason}")]
@@ -392,6 +409,7 @@ pub type GetOrderBookTickerError = Error<GetOrderBookTickerRequestError, Never, 
 
 /// Caller-side reasons `get_order_book_ticker` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum GetOrderBookTickerRequestError {
     /// The requested trading pair is not registered on the OISY TRADE.
     #[error("the requested trading pair is not registered")]
@@ -403,6 +421,7 @@ pub type GetOrderBookDepthError = Error<GetOrderBookDepthRequestError, Never, Ne
 
 /// Caller-side reasons `get_order_book_depth` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum GetOrderBookDepthRequestError {
     /// The requested trading pair is not registered on the OISY TRADE.
     #[error("the requested trading pair is not registered")]
@@ -426,6 +445,7 @@ pub type AddTradingAccountError =
 /// Several distinct internal reasons collapse into one variant here; the
 /// envelope's advisory `message` carries the specific reason for diagnostics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum AddTradingAccountRequestError {
     /// The funding account cannot act as a granter: it is not a registered
     /// user, or it is itself a trading account (no delegation chains).
@@ -454,6 +474,7 @@ pub enum AddTradingAccountRequestError {
 
 /// Transient reasons `add_trading_account` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum AddTradingAccountTemporaryError {
     /// The principal has an in-flight deposit or withdrawal. Retry once it
     /// completes; whitelisting it now could strand a balance it is about to
@@ -475,6 +496,7 @@ pub type RemoveTradingAccountError = Error<RemoveTradingAccountRequestError, Nev
 
 /// Caller-side reasons `remove_trading_account` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum RemoveTradingAccountRequestError {
     /// The caller may not remove this trading account: it is not currently a
     /// trading account of the caller.
@@ -493,6 +515,7 @@ pub type GetMyTradesError = Error<GetMyTradesRequestError, Never, Never>;
 
 /// Caller-side reasons `get_my_trades` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum GetMyTradesRequestError {
     /// The `order_id` in a `ByOrder` filter was not a well-formed order id.
     #[error("the supplied order id is not a well-formed order id")]
@@ -516,6 +539,7 @@ pub type GetBalancesError = Error<GetBalancesRequestError, Never, Never>;
 
 /// Caller-side reasons `get_balances` / `get_fee_balances` can fail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+#[non_exhaustive]
 pub enum GetBalancesRequestError {
     /// The filter referenced a token that the OISY TRADE does not support.
     #[error("the filter referenced an unsupported token {0:?}")]

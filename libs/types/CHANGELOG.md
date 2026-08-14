@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** every user-facing error leaf enum is now `#[non_exhaustive]`, so a Rust client must match them with a wildcard arm. This mirrors in Rust what the Candid interface already promises — each disposition arm is an `opt variant`, so a client decodes an unknown leaf as `null` — and makes adding a leaf a compatible change on both sides instead of only on the wire. `ErrorKind` stays exhaustive: the three dispositions are the closed part of the contract
+
 ## [0.3.0] - 2026-07-02
 
 ### Added

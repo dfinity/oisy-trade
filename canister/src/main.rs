@@ -155,6 +155,9 @@ fn should_log_deposit_error(err: &DepositError) -> bool {
             | DepositTemporaryError::CallFailed { .. } => true,
             // Do not log errors due to user actions.
             DepositTemporaryError::OperationInProgress => false,
+            // The leaf enum is non-exhaustive; log an unclassified one rather
+            // than silently dropping it.
+            _ => true,
         },
         // Do not log errors due to user actions.
         ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
@@ -170,6 +173,9 @@ fn should_log_withdraw_error(err: &WithdrawError) -> bool {
             | WithdrawTemporaryError::LedgerFeeChanged => true,
             // Do not log errors due to user actions.
             WithdrawTemporaryError::OperationInProgress => false,
+            // The leaf enum is non-exhaustive; log an unclassified one rather
+            // than silently dropping it.
+            _ => true,
         },
         // Do not log errors due to user actions.
         ErrorKind::TemporaryError(None) | ErrorKind::RequestError(_) => false,
