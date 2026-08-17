@@ -71,9 +71,12 @@ This ticket adds three endpoints:
   event, mirroring how `get_balances` treats an empty filter.
 - **R12 — The error envelope is preserved at every level.** Every error these endpoints
   produce — per-item, whole-batch, and the `reason` nested inside a replace leaf — is the
-  three-arm `{ kind : variant { RequestError; TemporaryError; InternalError : opt variant };
-  message : opt text }` shape. Per-item errors reuse the **existing** `AddLimitOrderError` /
-  `CancelLimitOrderError` verbatim: no new item leaves, no second definition to keep in sync.
+  three-arm `{ kind : variant { RequestError : opt variant {…}; TemporaryError : opt variant
+  {…}; InternalError : opt variant {…} }; message : opt text }` shape — **every** arm carries
+  its own `opt variant` payload, which is precisely what lets a future leaf decode as `null`
+  on an old client instead of breaking it. Per-item errors reuse the **existing**
+  `AddLimitOrderError` / `CancelLimitOrderError` verbatim: no new item leaves, no second
+  definition to keep in sync.
 - **R13 — The per-item variant is frozen at two arms.** `variant { Ok; Err }` gains no third
   arm, ever. Any future per-item outcome is added as a **leaf** under one of the three existing
   disposition arms. (See D3: a new arm is a latent, production-only break.)
@@ -101,7 +104,7 @@ This ticket adds three endpoints:
   rather than implied queue semantics (the new order goes to the back, as any new order does).
 - **A `ByPair` / `All` cancel selector.** The standard CEX "cancel all open orders" panic
   button. Deliberately excluded: its cost is not bounded by the caller's input, so it needs its
-  own chunking story, and a maker cancelling its own book already tracks its ids. Worth a
+  own chunking story, and a maker canceling its own book already tracks its ids. Worth a
   follow-up on its own terms.
 - **Atomicity for `add_limit_orders` / `cancel_limit_orders`.** These are throughput
   conveniences; per-item partial success is the more useful behavior and the one DEFI-2801 D8
