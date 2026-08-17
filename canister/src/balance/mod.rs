@@ -1,6 +1,10 @@
+mod fee_pool;
+mod row;
 mod token;
+mod write_back;
 
-pub use token::{FeeEntry, TokenBalance};
+pub use fee_pool::FeeEntry;
+pub use token::TokenBalance;
 
 use crate::order::{Quantity, TokenId};
 use crate::user::UserId;
