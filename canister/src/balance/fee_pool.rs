@@ -22,13 +22,9 @@ impl FeePool {
     ///   per-pair `BasisPoint` invariant guarantees this at the fill path.
     /// - The token's accrued fees would overflow.
     pub fn withhold(&mut self, token: &TokenId, gross: Quantity, fee: Quantity) -> Quantity {
-        assert!(
-            fee <= gross,
-            "BUG: fee {fee:?} exceeds gross {gross:?} in transfer"
-        );
         let net = gross
             .checked_sub(fee)
-            .expect("BUG: fee <= gross checked above");
+            .unwrap_or_else(|| panic!("BUG: fee {fee:?} exceeds gross {gross:?} in transfer"));
         if !fee.is_zero() {
             let accrued = self.per_token.entry(*token).or_default();
             *accrued = accrued.checked_add(fee).expect("BUG: fee accrual overflow");
