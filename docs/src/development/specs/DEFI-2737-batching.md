@@ -129,8 +129,10 @@ told precisely which went through.
 
 `replace_limit_orders` is the deliberate exception. Partial success there would defeat the
 primitive: a maker whose cancels land but whose creates fail is left with no quote in the book —
-the exact state it called `replace` to avoid. So replace is all-or-nothing, and its result needs
-no per-item vector, because on success every item succeeded.
+the exact state it called `replace` to avoid. So replace is all-or-nothing, and its result carries
+no per-item **outcomes**: it still returns a `vec OrderId` naming the orders it created, but every
+entry in it is a success, because any failure would have rejected the whole call before anything
+was applied. The single `Err` reports which item was at fault by index (see D5).
 
 The asymmetry is intentional and is the spec's main product decision.
 
