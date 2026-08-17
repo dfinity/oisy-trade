@@ -82,10 +82,11 @@ impl<M: Memory> TokenBalance<M> {
         self.with_write_back(|balances| balances.reserve(user, token, amount))
     }
 
-    /// Apply `operations` to a write-back buffer over the balance map — one
-    /// settling event's worth of fills, or a single deposit — and flush it
-    /// before returning. Each `(token, user)` row the operations touch is read
-    /// from the stable map at most once and written back at most once.
+    /// Apply `operations` — an arbitrary balance operation or a set of them (a
+    /// settling event's fills, or a deposit / withdraw / reserve) — to a
+    /// write-back buffer over the balance map and flush it before returning.
+    /// Each `(token, user)` row the operations touch is read from the stable
+    /// map at most once and written back at most once.
     ///
     /// The buffer is only ever lent out, so no caller can drop it unflushed
     /// and silently discard the operations it applied.
