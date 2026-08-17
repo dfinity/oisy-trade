@@ -161,7 +161,10 @@ impl<'a, M: Memory> BalanceWriteBack<'a, M> {
     /// hence the stable map — exactly as it found it, even if `mutate`
     /// modified the balance before returning `Err`. Whatever an earlier
     /// operation buffered for `key` survives either way, since its own
-    /// write-back is still owed.
+    /// write-back is still owed. Only a multi-op batch reaches that already-
+    /// buffered case, which no caller drives today, but it keeps a future one
+    /// correct: a later fallible op that fails on an already-buffered row
+    /// leaves whatever an earlier op committed to that row in place.
     fn try_mutate<T, E>(
         &mut self,
         key: BalanceKey,

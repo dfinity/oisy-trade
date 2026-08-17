@@ -510,7 +510,7 @@ mod write_back {
     use super::fixtures::{
         alice as taker, bob as maker1, carol as maker2, token_a as base, token_b as quote,
     };
-    use crate::balance::{Balance, TokenBalance};
+    use crate::balance::{Balance, InsufficientBalanceError, TokenBalance};
     use crate::order::{Quantity, TokenId};
     use crate::user::UserId;
     use ic_stable_structures::VectorMemory;
@@ -832,6 +832,31 @@ mod write_back {
 
         balances
             .with_write_back(|write_back| write_back.unreserve(taker(), &base(), Quantity::ZERO));
+    }
+
+    #[test]
+    fn should_keep_an_earlier_op_when_a_later_op_on_the_same_row_fails() {
+        let mut balances = seeded(&[row(taker(), base(), 100, 0)]);
+
+        let second = balances.with_write_back(|write_back| {
+            write_back
+                .withdraw(taker(), &base(), Quantity::from(30u64))
+                .expect("first withdraw fits the free balance");
+            write_back.withdraw(taker(), &base(), Quantity::from(100u64))
+        });
+
+        assert_eq!(
+            second.unwrap_err(),
+            InsufficientBalanceError {
+                available: Quantity::from(70u64),
+                required: Quantity::from(100u64),
+            }
+        );
+        assert_eq!(
+            balances.get_balance(taker(), &base()),
+            Some(Balance::new(70u64, 0u64))
+        );
+        assert_eq!(accrued_fees(&balances), vec![]);
     }
 
     /// A `(token, user)` row to seed into the balance map, described by the
