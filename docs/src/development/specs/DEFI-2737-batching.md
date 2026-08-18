@@ -112,18 +112,33 @@ This ticket adds three endpoints:
   call; cancels remain permitted under halt, preserving the "users can always exit" guarantee. In
   replace, this check must run in **phase 1**, before any mutation — see Implementation — and it
   surfaces under the outer `TemporaryError` arm, not `RequestError` (R19).
-- **R17 — A full batch fits one message, and the cap is justified by measurement, not assumption.**
-  The cap bounds the *number* of operations by caller input but **not** their unit cost: one cancel
-  is `O(log p + k)` where `k` is the depth of the order's price level (`OrderQueue::remove` scans
-  the level with `iter().position(..)`), or `O(pending)` for a still-pending order — and neither
-  `k` nor `pending` is bounded by anything the caller sends. Cancellation is thus the binding case,
-  and a 100-cancel benchmark over a shallow fixture proves nothing about a deep live book. The
-  `canbench` benchmark must cover **both** unbounded paths — a deep, fragmented book with the
-  targets buried in their price-level queues, *and* a large pending backlog with the targets at its
-  far end — and `MAX_BATCH_LEN` must be a value that measurement supports at the **worse** of the
-  two. If neither fits, the remedy is a lower cap or an `O(1)` removal path (a position index for
-  resting orders, and one for pending) — decided in the delivering PR, not an assumed larger
-  bound.
+- **R17 — Batching adds no super-linear cost, and the absolute fit is scoped to a documented state
+  envelope.** No benchmark can establish an unconditional "a full batch always fits one message".
+  `OrderBook::remove_order` costs `O(log p + k)` in the depth `k` of the order's price level
+  (`OrderQueue::remove` scans it with `iter().position(..)`), or `O(pending)` when it falls through
+  to the linear `pending_orders` scan — and neither `k` nor `pending` is bounded by caller input
+  **or by the canister's own state**. At a large enough live depth even a *single* cancel can
+  exceed the instruction budget; that is a pre-existing property of `cancel_limit_order`, not
+  something batching introduces. What batching introduces is a multiplier of up to
+  `MAX_BATCH_LEN`. The requirement therefore splits into three parts:
+  - **Enforceable, and required.** A batch of `N` items costs no more than `N` × the equivalent
+    single-order call: batching contributes no super-linear factor of its own. This is what the
+    `canbench` benchmarks verify, across both worst-case shapes — deep fragmented resting queues,
+    and a large pending backlog with the targets at its far end.
+  - **Conditional, and documented.** The absolute "fits one message" claim holds only inside a
+    stated **state envelope** — the level depth and pending-backlog size the benchmark ran at.
+    `MAX_BATCH_LEN` is chosen so the worse of the two shapes fits with margin at that envelope, and
+    the envelope is recorded next to the number. A fixture is evidence for the envelope, never a
+    proof for all depths.
+  - **Failure behavior beyond the envelope.** Exceeding the instruction limit traps, and the
+    replica discards the message's state changes — so an over-budget batch applies **nothing** and
+    the caller retries with fewer items. The residual risk is a rejected call, never partial or
+    corrupted state.
+
+  Making the absolute claim unconditional requires **caller-bounded removal** — an `O(1)` position
+  index for resting orders and for the pending queue — which would also retire the pre-existing
+  single-cancel exposure. That is the principled fix; PR 2 chooses between delivering it and
+  lowering the cap, on the measurement.
 - **R18 — No new event types and no state migration.** A batch records N existing
   `AddLimitOrderEvent` / `CancelLimitOrderEvent` events. Event-log replay, the state snapshot,
   and persisted state are untouched.
@@ -457,8 +472,12 @@ settlements in one message. `OrderBook::remove_order` has **two** unbounded path
 its own fixture: a resting order costs `O(log p + k)` in its price level's depth, while a
 still-pending order falls through to a linear `pending_orders.iter().position(..)` scan and costs
 `O(pending)`. So benchmark a deep, fragmented resting book *and* a large pending backlog with the
-targets at its far end, and set `MAX_BATCH_LEN` from the **worse** of the two (R17). If neither
-fits the per-message limit, lower the cap or add `O(1)` removal paths rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
+targets at its far end, and set `MAX_BATCH_LEN` from the **worse** of the two (R17). **Record the
+state envelope** each measurement was taken at — level depth and backlog size — alongside the
+chosen cap; R17's absolute claim is scoped to it and is not a proof for all depths. Beyond the
+envelope the message traps and the replica discards its state changes, so an over-budget batch
+applies nothing and the caller retries smaller. If the margin at a realistic envelope is
+uncomfortable, add the `O(1)` removal paths rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
 the committed `canbench_results.yml`, so new benchmarks must be persisted with `just bench-check`.
 
 ### Docs — `docs/src/development/design.md`
@@ -530,8 +549,9 @@ Each PR is independently compilable, testable, and useful on its own.
   matching kickoff. Placement only.
   - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R18.
 - **PR 2 (2/3) — `cancel_limit_orders`.** The same shape applied to cancellation, reusing PR 1's
-  scaffolding, plus the deep-book inline-settlement benchmark that makes R17 checkable and settles
-  the cap.
+  scaffolding, plus the two worst-case inline-settlement benchmarks that make R17 checkable, and
+  the decision they force: record the state envelope and set the cap, or deliver the `O(1)`
+  removal index if the margin is inadequate.
   - *Acceptance:* R4, R5, R17 — **plus the cross-cutting requirements as they apply to this
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
