@@ -91,6 +91,28 @@ fn should_saturate_timestamp_max_on_addition() {
 }
 
 #[test]
+fn should_rearm_global_timer_with_future_deadline_when_nothing_ready() {
+    let future = Timestamp::new(now().as_nanos() + 5_000_000_000);
+    super::SCHEDULER.with(|s| {
+        s.borrow_mut()
+            .schedule_at(TaskType::ProcessPendingOrders, future)
+    });
+
+    let mut runtime = MockRuntime::new();
+    runtime.expect_time().return_const(now());
+    runtime
+        .expect_global_timer_set()
+        .times(1)
+        .withf(move |&ts| ts == future)
+        .return_const(());
+
+    run_task_if_ready(&runtime);
+
+    let remaining = super::SCHEDULER.with(|s| s.borrow().next_deadline());
+    assert_eq!(remaining, Some(future));
+}
+
+#[test]
 fn should_arm_global_timer_with_same_deadline_for_burst_of_schedule_now() {
     let mut runtime = MockRuntime::new();
     runtime.expect_time().return_const(now());
