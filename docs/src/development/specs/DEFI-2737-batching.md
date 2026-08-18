@@ -357,21 +357,28 @@ by construction rather than by test:
 
 Two phases, with no mutation in the first (D2).
 
-**Phase 1 — validate, read-only, against projected balance *and* sequence state.** Two pieces of
-state advance as the batch is planned, so neither may be read live:
+**Phase 1 — validate, read-only, against a projected free balance.** Two pieces of state advance
+as the batch is planned, so neither may simply be read live. They are handled differently:
 
-- **Free balance** — couples the cancels to the creates, and accumulates across the creates.
+- **Free balance** — couples the cancels to the creates and accumulates across the creates. This
+  one is **projected**, in a per-token overlay.
 - **Each book's `next_seq`** — advances once per create. `State::validate_limit_order` assigns
   `OrderId::new(book_id, book.next_seq())`, and `OrderBook::add_pending_order` asserts
   `order.id() == self.next_seq` before incrementing. Validating two same-book creates against an
-  unmutated book therefore plans the **same** id twice and trips that assertion on the second
-  apply. Either project a per-book sequence counter through phase 1, or **defer id assignment to
-  phase 2** and have phase 1 validate everything else. Deferring is preferred: it keeps one source
-  of truth for id assignment.
+  unmutated book would therefore plan the **same** id twice and trip that assertion on the second
+  apply.
+
+  **Decision: id assignment is deferred to phase 2.** Phase 1 validates everything a create must
+  satisfy (pair, halt, tick/lot, notional, amount bound, projected balance) but assigns no id;
+  phase 2 draws each id from the live `book.next_seq()` as it records the create, exactly as the
+  single-order path does. This keeps one source of truth for id assignment and removes the need to
+  mirror `next_seq` in the overlay at all — so the projection stays purely a **free-balance**
+  overlay. It does require splitting `validate_limit_order`'s validation from its id assignment;
+  the single-order path keeps its current behavior by calling both.
 
 Everything else create-validation touches (pair registered, tick/lot via
 `OrderBook::validate_order`, notional via `check_notional`, the u256 amount bound) is independent
-of both, so the projection stays a small overlay rather than a state fork.
+of both, so the overlay stays small rather than becoming a state fork.
 
 **Phase 1 must also run the halt check itself.** `State::validate_limit_order` does **not** inspect
 halt state — `add_limit_order` checks it separately, via
@@ -466,9 +473,9 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 - Equivalence (R2, R5): a property test asserting `add_limit_orders(reqs)` leaves state and the
   event log identical to the same requests placed one at a time, **normalizing timestamps** (a
   batch shares one `Runtime::time` sample; separate calls need not); likewise for cancel.
-- Same-book sequence assignment (R2, and the phase-1 projection): a batch — and a replace — with
-  several creates on the **same** book assigns distinct consecutive `OrderId`s and applies without
-  tripping `add_pending_order`'s seq assertion.
+- Same-book sequence assignment (R2, and the deferred id assignment): a batch — and a replace —
+  with several creates on the **same** book assigns distinct, consecutive `OrderId`s and applies
+  without tripping `add_pending_order`'s seq assertion.
 - Cumulative reservations (R3): a batch whose later items overdraw — earlier items stand and the
   overdrawing item reports `InsufficientBalance`, **while a smaller following item still
   succeeds**, since a failed item reserves nothing and must not poison its successors.
@@ -529,9 +536,10 @@ Each PR is independently compilable, testable, and useful on its own.
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
     satisfies those only for `add_limit_orders`; they are re-verified here.
-- **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 projection (free balance **and** per-book
-  `next_seq`), the validate-then-apply split, the phase-1 halt check, the factoring of the balance
-  lookup out of `validate_limit_order`, and the atomic endpoint.
+- **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 free-balance projection with **id
+  assignment deferred to phase 2**, the validate-then-apply split, the phase-1 halt check, the
+  split of `validate_limit_order` into validation (balance read through the projection) and id
+  assignment, and the atomic endpoint.
   - *Acceptance:* R6, R7, R8, R9, R16 (replace half), R19 — **plus the cross-cutting requirements for
     this endpoint**: R10, R11 (combined cap, empty no-op), R12 (including the nested `reason`
     envelope), R13, R14 (single conditional kickoff), R15, R18 — and the design-doc update. PR 1
