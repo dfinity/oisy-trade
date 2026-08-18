@@ -110,20 +110,30 @@ This ticket adds three endpoints:
   that item with `TradingHalted` while items on other pairs proceed. In
   `replace_limit_orders`, because the call is atomic, a create on a halted pair fails the whole
   call; cancels remain permitted under halt, preserving the "users can always exit" guarantee. In
-  replace, this check must run in **phase 1**, before any mutation — see Implementation.
+  replace, this check must run in **phase 1**, before any mutation — see Implementation — and it
+  surfaces under the outer `TemporaryError` arm, not `RequestError` (R19).
 - **R17 — A full batch fits one message, and the cap is justified by measurement, not assumption.**
   The cap bounds the *number* of operations by caller input but **not** their unit cost: one cancel
   is `O(log p + k)` where `k` is the depth of the order's price level (`OrderQueue::remove` scans
   the level with `iter().position(..)`), or `O(pending)` for a still-pending order — and neither
   `k` nor `pending` is bounded by anything the caller sends. Cancellation is thus the binding case,
   and a 100-cancel benchmark over a shallow fixture proves nothing about a deep live book. The
-  `canbench` benchmark must use a deliberately deep, fragmented book with the targets buried in
-  their queues, and `MAX_BATCH_LEN` must be a value that measurement supports at that depth. If the
-  worst case does not fit, the remedy is a lower cap or an `O(1)` removal path (indexing each
-  resting order's position) — decided in the delivering PR, not an assumed larger bound.
+  `canbench` benchmark must cover **both** unbounded paths — a deep, fragmented book with the
+  targets buried in their price-level queues, *and* a large pending backlog with the targets at its
+  far end — and `MAX_BATCH_LEN` must be a value that measurement supports at the **worse** of the
+  two. If neither fits, the remedy is a lower cap or an `O(1)` removal path (a position index for
+  resting orders, and one for pending) — decided in the delivering PR, not an assumed larger
+  bound.
 - **R18 — No new event types and no state migration.** A batch records N existing
   `AddLimitOrderEvent` / `CancelLimitOrderEvent` events. Event-log replay, the state snapshot,
   and persisted state are untouched.
+- **R19 — A replace's outer disposition mirrors its nested reason's.** When a replace is rejected
+  over one item, the outer `kind` arm is the **same arm** the nested `reason` carries: an item that
+  failed with a `TemporaryError` — today `TradingHalted`, which R16 explicitly routes through this
+  path — surfaces as an outer `TemporaryError`, and one that failed with a `RequestError` as an
+  outer `RequestError`. The outer arm *is* the client's retry contract (DEFI-2801 R2:
+  `RequestError` means "do not auto-retry unchanged"), so flattening every rejection into
+  `RequestError` would tell a client never to retry a halt that clears on its own.
 
 ## Non-goals
 
@@ -223,8 +233,10 @@ a constant the design may assume.
 ### D5 — Replace reports the offending item by index, reusing the existing error types
 
 Being single-level, the replace result has nowhere to hang a per-item error — but the caller still
-needs to know what failed and where. Its `RequestError` leaves therefore carry the index plus the
-**existing** typed error as a nested `reason`. That keeps R12 at both levels (the nested `reason`
+needs to know what failed and where. Its rejection leaves therefore carry the index plus the
+**existing** typed error as a nested `reason`, and are declared under **each outer arm the nested
+error can itself carry** — so a `TradingHalted` create surfaces as an outer `TemporaryError`, not a
+`RequestError` (R19). That keeps R12 at both levels (the nested `reason`
 is itself the three-arm envelope and softens independently) and avoids defining a parallel set of
 replace-specific reasons that would drift from the single-order ones.
 
@@ -301,7 +313,15 @@ type ReplaceLimitOrdersError = record {
             // cancels release.
             CreateRejected : record { index : nat32; reason : AddLimitOrderError };
         };
-        TemporaryError : opt variant {};
+        TemporaryError : opt variant {
+            // `create[index]` was rejected for a transient reason — today only
+            // TradingHalted. Same payload as the RequestError leaf; it sits
+            // under this arm so the caller's retry contract stays correct
+            // (R19). A CancelRejected leaf joins it here if
+            // CancelLimitOrderError ever gains a temporary leaf — an additive,
+            // non-breaking change.
+            CreateRejected : record { index : nat32; reason : AddLimitOrderError };
+        };
         InternalError : opt variant {};
     };
     message : opt text;
@@ -426,10 +446,12 @@ cancels would never have triggered — a visible divergence from R5.
 
 A `canbench` benchmark per endpoint at the 100-item cap. The binding case is
 `cancel_limit_orders`: cancellation settles inline, so 100 cancels are 100 book removals plus 100
-settlements in one message — and each removal is `O(log p + k)` in its price level's depth, so the
-fixture must be a **deep, fragmented** book with the targets buried in their queues, not a shallow
-one (R17). If the measured worst case exceeds the per-message limit, lower `MAX_BATCH_LEN` or add
-an `O(1)` removal path rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
+settlements in one message. `OrderBook::remove_order` has **two** unbounded paths and each needs
+its own fixture: a resting order costs `O(log p + k)` in its price level's depth, while a
+still-pending order falls through to a linear `pending_orders.iter().position(..)` scan and costs
+`O(pending)`. So benchmark a deep, fragmented resting book *and* a large pending backlog with the
+targets at its far end, and set `MAX_BATCH_LEN` from the **worse** of the two (R17). If neither
+fits the per-message limit, lower the cap or add `O(1)` removal paths rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
 the committed `canbench_results.yml`, so new benchmarks must be persisted with `just bench-check`.
 
 ### Docs — `docs/src/development/design.md`
@@ -471,7 +493,10 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 Integration (`integration_tests/tests/tests.rs`, PocketIC):
 
 - Round trip of all three endpoints against a live canister, including per-item error reporting.
-- Halt behavior (R16): halted pair fails only its own items in a batch, but fails a whole replace.
+- Halt behavior (R16, R19): a halted pair fails only its own items in a batch, but fails a whole
+  replace — and that replace rejection arrives under the outer **`TemporaryError`** arm carrying
+  `CreateRejected`, not `RequestError`, so a client following the disposition contract retries once
+  the halt clears.
 - Trading accounts (R15): a trading account batches on its funding account's behalf;
   `placed_by` / `canceled_by` are recorded per order.
 - A replace that moves a two-sided quote: cancels and creates apply atomically, and the
@@ -507,7 +532,7 @@ Each PR is independently compilable, testable, and useful on its own.
 - **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 projection (free balance **and** per-book
   `next_seq`), the validate-then-apply split, the phase-1 halt check, the factoring of the balance
   lookup out of `validate_limit_order`, and the atomic endpoint.
-  - *Acceptance:* R6, R7, R8, R9, R16 (replace half) — **plus the cross-cutting requirements for
+  - *Acceptance:* R6, R7, R8, R9, R16 (replace half), R19 — **plus the cross-cutting requirements for
     this endpoint**: R10, R11 (combined cap, empty no-op), R12 (including the nested `reason`
     envelope), R13, R14 (single conditional kickoff), R15, R18 — and the design-doc update. PR 1
     cannot satisfy these for an endpoint that does not exist until here.
