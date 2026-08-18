@@ -83,7 +83,10 @@ This ticket adds three endpoints:
   reporting the effective cap. For `replace_limit_orders` the cap applies to `cancel` and `create`
   **combined**. This requirement fixes the *behavior*, not the number: `MAX_BATCH_LEN` is
   **proposed at 100** (D4) and its final value is settled by R17's measurement, so R10 and R17
-  cannot pull against each other.
+  cannot pull against each other. That measurement must land **before the first batch endpoint
+  ships**: once `add_limit_orders` is public the cap is part of its contract, and on a live
+  canister it may thereafter be **raised, never lowered** — lowering would reject requests that
+  previously succeeded.
 - **R11 — An empty batch is a successful no-op.** It returns an empty `Ok` and records no
   event, mirroring how `get_balances` treats an empty filter.
 - **R12 — The error envelope is preserved at every level.** Every error these endpoints
@@ -590,15 +593,23 @@ Each PR is independently compilable, testable, and useful on its own.
 
 - **PR 1 (1/3) — `add_limit_orders`.** The shared batch scaffolding: `MAX_BATCH_LEN`, the
   batch-level error type, the per-item outcome shape, the hoisted preamble, and the single
-  matching kickoff. Placement only.
-  - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R18 — **plus its
+  matching kickoff. Placement only — **but the cap is settled here, not deferred to PR 2.** The
+  moment this PR ships, `MAX_BATCH_LEN` is part of a public contract, and lowering it afterwards
+  would fail requests that previously succeeded (R10). PR 1 therefore measures the binding
+  per-item cost up front — `MAX_BATCH_LEN` × a single `cancel_limit_order` at the worst-case
+  envelope, which exists today and, by R17's `N ×` + `O(N)` claim, bounds the batch path — and
+  fixes the cap from that. Later revisions may only **raise** it.
+  - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R17 (the cap-setting
+    measurement plus the placement-path scaling curve), R18 — **plus its
     `design.md` entry**: document `add_limit_orders` and its partial-success contract, and drop the
     stale "Batch operations" bullet from *Potential Additional Features*, which wrongly calls batch
     place/cancel atomic.
 - **PR 2 (2/3) — `cancel_limit_orders`.** The same shape applied to cancellation, reusing PR 1's
-  scaffolding, plus the two worst-case inline-settlement benchmarks that make R17 checkable, and
-  the decision they force: record the state envelope and set the cap, or deliver the `O(1)`
-  removal index if the margin is inadequate.
+  scaffolding, plus the two worst-case inline-settlement benchmarks over several batch sizes that
+  make R17 checkable on the cancellation path. These **confirm** the cap PR 1 fixed and record the
+  state envelope; they may raise it but never lower it. If the margin proves inadequate, the remedy
+  is the `O(1)` removal index — not a smaller cap, which is no longer available once
+  `add_limit_orders` is public.
   - *Acceptance:* R4, R5, R17 — **plus the cross-cutting requirements as they apply to this
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
@@ -610,7 +621,9 @@ Each PR is independently compilable, testable, and useful on its own.
   assignment, and the atomic endpoint.
   - *Acceptance:* R6, R7, R8, R9, R16 (replace half), R19 — **plus the cross-cutting requirements for
     this endpoint**: R10, R11 (combined cap, empty no-op), R12 (including the nested `reason`
-    envelope), R13, R14 (single conditional kickoff), R15, R18 — and its `design.md` entry for
+    envelope), R13, R14 (single conditional kickoff), R15, R17 (its own multi-size
+    `replace_limit_orders` benchmark, whose combined `cancel + create` batch is the heaviest single
+    call in the stack), R18 — and its `design.md` entry for
     `replace_limit_orders`, including the combined batch overview now that all three exist. PR 1
     cannot satisfy these for an endpoint that does not exist until here.
 
