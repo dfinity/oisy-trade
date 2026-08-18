@@ -103,8 +103,9 @@ This ticket adds three endpoints:
 - **R14 — One matching kickoff per batch, and only when something was enqueued.** A batch that
   successfully enqueues at least one new order arms the zero-delay matching timer exactly once,
   not once per order. `cancel_limit_orders` never arms it — the existing `cancel_limit_order`
-  wrapper does not either — and neither does an empty batch nor an `add_limit_orders` call whose
-  every item failed. Arming it otherwise would pull unrelated pending orders into a matching round
+  wrapper does not either — and neither does an empty batch, an `add_limit_orders` call whose every
+  item failed, nor a **cancel-only replace** (non-empty `cancel`, empty `create`), which succeeds
+  while enqueuing nothing. Arming it otherwise would pull unrelated pending orders into a matching round
   that N sequential calls would not have triggered, breaking the equivalence of R2 and R5.
 - **R15 — Trading accounts behave as they do on the single-order endpoints.** All three
   endpoints resolve the caller to its funding account via `effective_account`, and record
@@ -524,9 +525,11 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
   batch shares one `Runtime::time` sample; separate calls need not); likewise for cancel.
 - Matching kickoff (R14): assert the **number of kickoffs**, which no state or event-log
   assertion can see. A mixed-success `add_limit_orders` and a successful `replace_limit_orders`
-  each schedule exactly **one**; an empty batch, an `add_limit_orders` whose every item failed, an
-  empty replace, and **every** `cancel_limit_orders` call schedule **none**. Without this the
-  wrappers can regress R14 with every other test still green.
+  **that carries at least one create** each schedule exactly **one**. Scheduling **none**: an empty
+  batch, an `add_limit_orders` whose every item failed, an empty replace, a successful
+  **cancel-only replace** (non-empty `cancel`, empty `create` — valid, and it enqueues nothing),
+  and **every** `cancel_limit_orders` call. Without this the wrappers can regress R14 with every
+  other test still green.
 - Same-book sequence assignment (R2, and the deferred id assignment): a batch — and a replace —
   with several creates on the **same** book assigns distinct, consecutive `OrderId`s and applies
   without tripping `add_pending_order`'s seq assertion.
