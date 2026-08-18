@@ -235,7 +235,7 @@ fn should_roundtrip_state_through_snapshot() {
     // on-load reconstruction of the `resting_orders` index.
     let (buy_id, buy_order) = state
         .validate_limit_order(
-            buyer,
+            state.lookup_account(buyer).as_ref(),
             pair.clone(),
             PendingOrder {
                 side: Side::Buy,
@@ -255,7 +255,7 @@ fn should_roundtrip_state_through_snapshot() {
     );
     let (sell_id, sell_order) = state
         .validate_limit_order(
-            seller,
+            state.lookup_account(seller).as_ref(),
             pair.clone(),
             PendingOrder {
                 side: Side::Sell,

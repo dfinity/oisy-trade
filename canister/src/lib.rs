@@ -64,38 +64,13 @@ pub fn add_limit_order(
 ) -> Result<OrderId, AddLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let placed_by = (caller != owner).then_some(caller);
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::try_from(request).map_err(|_| {
         AddLimitOrderError::request(
             oisy_trade_types::AddLimitOrderRequestError::AmountExceedsMaximum,
         )
     })?;
-    let (order_id, order) = state::with_state(|s| s.validate_limit_order(owner, pair, pending))?;
-
-    state::with_state_mut(|s| {
-        let permit = s
-            .permissions()
-            .permit_trading(owner, order_id.book_id())
-            .map_err(|e| AddLimitOrderError::from(state::AddLimitOrderError::from(e)))?;
-        let event = state::event::AddLimitOrderEvent {
-            user: owner,
-            order_id,
-            side: order.side(),
-            price: order.price(),
-            quantity: *order.remaining_quantity(),
-            time_in_force: order.time_in_force(),
-            placed_by,
-        };
-        state::audit::process_event(
-            s,
-            state::event::EventType::AddLimitOrder(event),
-            permit.into(),
-            runtime,
-        );
-        Ok::<(), AddLimitOrderError>(())
-    })?;
+    let order_id = state::with_state_mut(|s| s.add_limit_order(caller, pair, pending, runtime))?;
     Ok(order_id.to_string())
 }
 
@@ -105,14 +80,12 @@ pub fn cancel_limit_order(
 ) -> Result<OrderRecord, CancelLimitOrderError> {
     state::with_state(|s| s.assert_caller_is_allowed(runtime));
     let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let canceled_by = (caller != owner).then_some(caller);
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
             oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
         )
     })?;
-    let record = state::with_state_mut(|s| s.cancel_limit_order(&owner, canceled_by, id, runtime))?;
+    let record = state::with_state_mut(|s| s.cancel_limit_order(caller, id, runtime))?;
     Ok(record.into())
 }
 
