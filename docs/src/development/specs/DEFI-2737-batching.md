@@ -119,7 +119,7 @@ This ticket adds three endpoints:
   call; cancels remain permitted under halt, preserving the "users can always exit" guarantee. In
   replace, this check must run in **phase 1**, before any mutation — see Implementation — and it
   surfaces under the outer `TemporaryError` arm, not `RequestError` (R19).
-- **R17 — Batching adds no super-linear cost, and the absolute fit is scoped to a documented state
+- **R17 — Batching adds no *quadratic* cost, and the absolute fit is scoped to a documented state
   envelope.** No benchmark can establish an unconditional "a full batch always fits one message".
   `OrderBook::remove_order` costs `O(log p + k)` in the depth `k` of the order's price level
   (`OrderQueue::remove` scans it with `iter().position(..)`), or `O(pending)` when it falls through
@@ -129,15 +129,17 @@ This ticket adds three endpoints:
   something batching introduces. What batching introduces is a multiplier of up to
   `MAX_BATCH_LEN`. The requirement therefore splits into three parts:
   - **Enforceable, and required.** A batch of `N` items costs `N ×` the equivalent single-item
-    work plus `O(N log T)` batch overhead — cap check, outcome vector, result encoding, and for
-    `replace_limit_orders` the projected-balance overlay, where `T` is the number of **distinct
-    tokens** the batch touches (at most two per pair, and bounded above by the registered token
-    count). Batching contributes nothing worse than that, and in particular nothing quadratic in
-    `N`. This is a *scaling* claim, not an exact
+    work plus batch overhead that is **at worst `O(N log N)`**, and never quadratic. The overhead
+    covers the cap check, the outcome vector, result encoding and — for `replace_limit_orders` —
+    the projected-balance overlay and the duplicate-id pre-scan. Those last two are keyed lookups
+    over at most `T` distinct tokens and `N` ids, so a `BTreeMap` / `BTreeSet` implementation
+    contributes `O(N log N)` in the worst case: `T` itself reaches `2N` when every item names a
+    different pair. Hash-based structures would make it `O(N)`; the spec permits either and
+    forbids only what is **quadratic or worse** in `N`. This is a *scaling* claim, not an exact
     inequality — a one-item batch legitimately costs slightly more than one single-order call. The
-    `canbench` benchmarks therefore measure **several values of `N`** and check that growth stays
-    linear, across both worst-case shapes: deep fragmented resting queues, and a large pending
-    backlog with the targets at its far end.
+    `canbench` benchmarks therefore measure **several values of `N`** and check the curve is
+    consistent with `N log N` and clearly not `N²`, across both worst-case shapes: deep fragmented
+    resting queues, and a large pending backlog with the targets at its far end.
   - **Conditional, and documented.** The absolute "fits one message" claim holds only inside a
     stated **state envelope** — the level depth and pending-backlog size the benchmark ran at.
     `MAX_BATCH_LEN` is chosen so the worse of the two shapes fits with margin at that envelope, and
@@ -507,7 +509,8 @@ a cancel-only batch.
 ### Performance — `canister/src/benchmarks.rs`
 
 A `canbench` benchmark per endpoint across **several batch sizes** — say 1, 10, 50, and the cap —
-not a single cap-sized run: R17's linear-scaling claim needs more than one data point to test, and
+not a single cap-sized run: R17's scaling claim (`N log N` at worst, never quadratic) needs more
+than one data point to test, and
 one cap-sized measurement cannot tell you *which* lower cap is safe if 100 turns out to exceed the
 budget. The binding case is `cancel_limit_orders`: cancellation settles inline, so a 100-item batch
 is 100 book removals plus 100 settlements in one message. `OrderBook::remove_order` has **two** unbounded paths and each needs
@@ -617,10 +620,13 @@ Each PR is independently compilable, testable, and useful on its own.
   batch-level error type, the per-item outcome shape, the hoisted preamble, and the single
   matching kickoff. Placement only — **but the cap is settled here, not deferred to PR 2.** The
   moment this PR ships, `MAX_BATCH_LEN` is part of a public contract, and lowering it afterwards
-  would fail requests that previously succeeded (R10). PR 1 therefore measures the binding
-  per-item cost up front — `MAX_BATCH_LEN` × a single `cancel_limit_order` at the worst-case
-  envelope, which exists today and, by R17's `N ×` + `O(N)` claim, bounds the batch path — and
-  fixes the cap from that. Later revisions may only **raise** it.
+  would fail requests that previously succeeded (R10). Note that multiplying one measured
+  `cancel_limit_order` by `MAX_BATCH_LEN` is **not** a sound bound: R17's model is `N ×` single-item
+  work *plus* a positive overhead term, so the scalar product omits real cost. PR 1 therefore
+  benchmarks `MAX_BATCH_LEN` cancellations **within a single message**, driving the state-level
+  cancel path that already exists, with representative batch overhead (outcome vector, result
+  encoding) included, at the worst-case envelope — and fixes the cap from that measurement with an
+  explicitly recorded margin. Later revisions may only **raise** it.
   - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R17 (the cap-setting
     measurement plus the placement-path scaling curve), R18 — **plus its
     `design.md` entry**: document `add_limit_orders` and its partial-success contract, and drop the
