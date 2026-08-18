@@ -109,12 +109,18 @@ impl StateSnapshot {
             tokens,
             trading_pairs,
             order_books,
+            // ignored: lives in stable memory, survives upgrades on its own
             user_registry: _,
+            // only the heap fee pool is snapshotted below; user balances
+            // live in stable memory and survive upgrades on their own.
             balances,
+            // ignored: live in stable memory,
             order_history: _,
+            // ignored: lives in stable memory, survives upgrades on its own
             trade_history: _,
             ledger_fee_cache,
             pending_settling_events,
+            // ignored: per-request guard set, reset upon upgrades
             in_flight_user_ops: _,
             permissions,
         } = state;

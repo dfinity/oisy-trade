@@ -251,12 +251,10 @@ fn should_skip_halted_book_while_matching_others() {
     assert_eq!(status_of(&state, sell_a), Some(OrderStatus::Filled));
 }
 
-/// Drives the actual `drive_matching` reschedule decision (loop while
-/// `run_once` reports `MoreWork`) rather than a single direct call. While a
-/// pair is halted and only its book holds pending orders, the loop must
-/// terminate at `Complete` with no forward progress — otherwise the
+/// While a pair is halted and only its book holds pending orders, `run_once`
+/// must terminate at `Complete` with no forward progress — otherwise the
 /// zero-delay self-reschedule chain busy-spins for the whole halt. After
-/// unhalting, a fresh drive must fill the previously-halted book's resting
+/// unhalting, a fresh run must fill the previously-halted book's resting
 /// cross.
 #[test]
 fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
@@ -272,9 +270,8 @@ fn should_not_busy_spin_while_pair_halted_and_resume_on_unhalt() {
     // Halt the only book before any matching runs.
     state.permissions_mut().halt_trading(OrderBookId::ZERO);
 
-    // Mirror `drive_matching`: a halted book reports no matchable work, so the
-    // run reaches `Complete` instead of self-rescheduling — a busy-spin would
-    // never reach `Complete`.
+    // A halted book reports no matchable work, so the run reaches `Complete`
+    // instead of self-rescheduling — a busy-spin would never reach `Complete`.
     let status = EXECUTOR.run_once(&mut state, &runtime);
     assert_eq!(status, ExecutionStatus::Complete);
     assert_eq!(status_of(&state, buy), Some(OrderStatus::Pending));
