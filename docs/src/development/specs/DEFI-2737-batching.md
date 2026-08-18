@@ -470,11 +470,19 @@ the kickoff. `cancel_limit_orders` does **not** arm it: the existing `cancel_lim
 does not, so arming it would drag unrelated pending orders into a matching round that N sequential
 cancels would never have triggered — a visible divergence from R5.
 
+For R14 to be **testable**, the kickoff must be observable: today the wrappers call
+`ic_cdk_timers::set_timer` directly, which no unit test can count. Route it through the `Runtime`
+abstraction (or a small injectable scheduler) so a test can assert the number of kickoffs; failing
+that, assert it end-to-end in PocketIC by showing an unrelated pending order is *not* matched after
+a cancel-only batch.
+
 ### Performance — `canister/src/benchmarks.rs`
 
-A `canbench` benchmark per endpoint at the 100-item cap. The binding case is
-`cancel_limit_orders`: cancellation settles inline, so 100 cancels are 100 book removals plus 100
-settlements in one message. `OrderBook::remove_order` has **two** unbounded paths and each needs
+A `canbench` benchmark per endpoint across **several batch sizes** — say 1, 10, 50, and the cap —
+not a single cap-sized run: R17's linear-scaling claim needs more than one data point to test, and
+one cap-sized measurement cannot tell you *which* lower cap is safe if 100 turns out to exceed the
+budget. The binding case is `cancel_limit_orders`: cancellation settles inline, so a 100-item batch
+is 100 book removals plus 100 settlements in one message. `OrderBook::remove_order` has **two** unbounded paths and each needs
 its own fixture: a resting order costs `O(log p + k)` in its price level's depth, while a
 still-pending order falls through to a linear `pending_orders.iter().position(..)` scan and costs
 `O(pending)`. So benchmark a deep, fragmented resting book *and* a large pending backlog with the
@@ -505,6 +513,11 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 - Equivalence (R2, R5): a property test asserting `add_limit_orders(reqs)` leaves state and the
   event log identical to the same requests placed one at a time, **normalizing timestamps** (a
   batch shares one `Runtime::time` sample; separate calls need not); likewise for cancel.
+- Matching kickoff (R14): assert the **number of kickoffs**, which no state or event-log
+  assertion can see. A mixed-success `add_limit_orders` and a successful `replace_limit_orders`
+  each schedule exactly **one**; an empty batch, an `add_limit_orders` whose every item failed, an
+  empty replace, and **every** `cancel_limit_orders` call schedule **none**. Without this the
+  wrappers can regress R14 with every other test still green.
 - Same-book sequence assignment (R2, and the deferred id assignment): a batch — and a replace —
   with several creates on the **same** book assigns distinct, consecutive `OrderId`s and applies
   without tripping `add_pending_order`'s seq assertion.
@@ -513,9 +526,13 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
   succeeds**, since a failed item reserves nothing and must not poison its successors.
 - Cap and empty (R10, R11): `MAX_BATCH_LEN + 1` items ⇒ `BatchTooLarge` with `max` equal to the
   effective cap, no state change; 0 items ⇒ `Ok([])` and no event recorded.
-- Replace atomicity (R6, R8): a replace whose last create is invalid leaves the book, balances,
-  and event log **byte-identical** to their pre-call state (compared via the snapshot round-trip),
-  and returns `CreateRejected` with the right index — no trap.
+- Replace atomicity (R6, R8): a replace whose last create is invalid returns `CreateRejected` with
+  the right index — no trap — and leaves the book, balances, **and** event log untouched. Assert
+  each with an instrument that actually covers it: `StateSnapshot::from_state` snapshots the
+  **book only** — it deliberately skips user balances and `order_history` (both stable-memory,
+  surviving upgrades on their own) and carries no event log — so a snapshot round-trip alone would
+  silently verify one third of this claim. Compare the affected free/reserved balances directly and
+  assert `storage::total_event_count()` is unchanged, **alongside** the snapshot comparison.
 - Replace self-funding (R7): a maker whose stored free balance cannot cover the creates, but whose
   cancels release enough, succeeds. Run it with **zero** spare free balance so the creates are
   funded *entirely* by the cancels' released reservations — that is the case that fails if phase 2
