@@ -490,6 +490,14 @@ Because phase 1 approved every item against a projection that mirrors exactly th
 phase 2 cannot fail; an `expect("BUG: …")` on any per-item failure here is correct (matching the
 codebase's always-on invariant convention, not `debug_assert!`).
 
+### Rust client — `libs/client/src/lib.rs`
+
+`OisyTradeClient` mirrors the public surface — it already wraps `add_limit_order`,
+`cancel_limit_order`, and the rest — and it is what the PocketIC harness drives
+(`integration_tests/src/lib.rs` builds one per test). Each new endpoint therefore needs a
+corresponding client method **in the PR that introduces it**: otherwise the supported client
+surface lags the canister, and the integration round trips in the test plan have nothing to call.
+
 ### Entry points — `canister/src/main.rs`
 
 Three new `#[ic_cdk::update]` wrappers mirroring the existing ones' logging convention (log
@@ -521,7 +529,10 @@ targets at its far end, and set `MAX_BATCH_LEN` from the **worse** of the two (R
 state envelope** each measurement was taken at — level depth and backlog size — alongside the
 chosen cap; R17's absolute claim is scoped to it and is not a proof for all depths. Beyond the
 envelope the message traps and the replica discards its state changes, so an over-budget batch
-applies nothing and the caller retries smaller. If the margin at a realistic envelope is
+applies nothing. Recovery is endpoint-specific (R17): the two partial-success endpoints are simply
+retried with fewer items, whereas an oversized `replace_limit_orders` **cannot** be split without
+forfeiting its atomicity — at that state depth it cannot be completed atomically at all. If the
+margin at a realistic envelope is
 uncomfortable, add the constant-time-deletion structures described in R17 — note an index alone is
 insufficient, since `VecDeque::remove(pos)` still shifts — rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
 the committed `canbench_results.yml`, so new benchmarks must be persisted with `just bench-check`.
@@ -543,8 +554,13 @@ additionally writes the combined overview once all three exist.
 Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 
 - Equivalence (R2, R5): a property test asserting `add_limit_orders(reqs)` leaves state and the
-  event log identical to the same requests placed one at a time, **normalizing timestamps** (a
-  batch shares one `Runtime::time` sample; separate calls need not); likewise for cancel.
+  event log identical to the same requests placed one at a time — **and** that the returned outcome
+  vector matches the sequential results **positionally**, id for id and error for error. State
+  equality alone would pass a batch that returned the right orders in the wrong order, or paired an
+  item with the wrong error, which is exactly what R1 and R4 promise and what a caller relies on to
+  zip its request list against the response. Normalize timestamps throughout: a batch shares one
+  `Runtime::time` sample where separate calls need not, and the `OrderRecord`s the cancel path
+  returns carry `created_at` / `last_updated_at` of their own. Likewise for cancel.
 - Matching kickoff (R14): assert the **number of kickoffs**, which no state or event-log
   assertion can see. A mixed-success `add_limit_orders` and a successful `replace_limit_orders`
   **that carries at least one create** each schedule exactly **one**. Scheduling **none**: an empty
@@ -559,7 +575,10 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
   overdrawing item reports `InsufficientBalance`, **while a smaller following item still
   succeeds**, since a failed item reserves nothing and must not poison its successors.
 - Cap and empty (R10, R11): `MAX_BATCH_LEN + 1` items ⇒ `BatchTooLarge` with `max` equal to the
-  effective cap, no state change; 0 items ⇒ `Ok([])` and no event recorded.
+  effective cap, no state change; 0 items ⇒ `Ok([])` and no event recorded. For
+  `replace_limit_orders`, add the case that actually tests the **combined** limit — each leg
+  individually within the cap but `cancel.len() + create.len()` over it, e.g. 60 + 41 against a cap
+  of 100. A single oversized vector passes an implementation that caps the two legs independently.
 - Replace atomicity (R6, R8): a replace whose last create is invalid returns `CreateRejected` with
   the right index — no trap — and leaves the book, balances, **and** event log untouched. Assert
   each with an instrument that actually covers it: `StateSnapshot::from_state` snapshots the
@@ -631,7 +650,8 @@ Each PR is independently compilable, testable, and useful on its own.
     measurement plus the placement-path scaling curve), R18 — **plus its
     `design.md` entry**: document `add_limit_orders` and its partial-success contract, and drop the
     stale "Batch operations" bullet from *Potential Additional Features*, which wrongly calls batch
-    place/cancel atomic.
+    place/cancel atomic — **and its `OisyTradeClient::add_limit_orders` method**, without which the
+    integration round trips cannot run.
 - **PR 2 (2/3) — `cancel_limit_orders`.** The same shape applied to cancellation, reusing PR 1's
   scaffolding, plus the two worst-case inline-settlement benchmarks over several batch sizes that
   make R17 checkable on the cancellation path. These **confirm** the cap PR 1 fixed and record the
@@ -642,7 +662,7 @@ Each PR is independently compilable, testable, and useful on its own.
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
     satisfies those only for `add_limit_orders`; they are re-verified here. Plus its `design.md`
-    entry for `cancel_limit_orders`.
+    entry and its `OisyTradeClient::cancel_limit_orders` method.
 - **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 free-balance projection with **id
   assignment deferred to phase 2**, the validate-then-apply split, the phase-1 halt check, the
   split of `validate_limit_order` into validation (balance read through the projection) and id
@@ -652,8 +672,9 @@ Each PR is independently compilable, testable, and useful on its own.
     envelope), R13, R14 (single conditional kickoff), R15, R17 (its own multi-size
     `replace_limit_orders` benchmark, whose combined `cancel + create` batch is the heaviest single
     call in the stack), R18 — and its `design.md` entry for
-    `replace_limit_orders`, including the combined batch overview now that all three exist. PR 1
-    cannot satisfy these for an endpoint that does not exist until here.
+    `replace_limit_orders`, including the combined batch overview now that all three exist, and its
+    `OisyTradeClient::replace_limit_orders` method. PR 1 cannot satisfy these for an endpoint that
+    does not exist until here.
 
 ## Discussed Alternatives
 
@@ -674,8 +695,12 @@ Each PR is independently compilable, testable, and useful on its own.
   window that is the entire reason to have the endpoint — a maker would still have to reconcile a
   half-applied re-quote itself, which is what it was trying to avoid by not issuing two calls.
 - **A per-item `Skipped` outcome for budget exhaustion.** Tempting for R17, but adding an arm to
-  the per-item variant is a latent breaking change (D3), and the fixed cap plus the benchmark make
-  the case unreachable. If it is ever needed, it arrives as a `TemporaryError` leaf.
+  the per-item variant is a latent breaking change (D3) — and, more decisively, the outcome could
+  never be *delivered*: instruction exhaustion **traps** and the replica rolls the call back, so
+  there is no response in which to report that an item was skipped. The cap does not make
+  exhaustion unreachable — R17 is explicit that a call outside the documented envelope can still
+  trap — it only bounds when it happens. If a per-item transient outcome is ever genuinely needed,
+  it arrives as a `TemporaryError` leaf, never a new arm.
 - **A `ByPair` / `All` cancel selector instead of an id list.** Genuinely useful as a panic button,
   but its cost is unbounded by the caller's input, so it needs chunking or its own cap and a story
   for what happens when it cannot finish in one message. Out of scope here; see Non-goals.
