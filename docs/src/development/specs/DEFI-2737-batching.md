@@ -9,9 +9,10 @@ tags: [orders, candid, errors, market-making]
 ## Motivation
 
 Every order today costs one update call. A market maker quoting both sides of several pairs
-re-quotes continuously, so it pays a round trip per order — and, worse, has no way to move a
-quote without a window in which it has no quote at all: `cancel_limit_order` and
-`add_limit_order` are separate calls, and between them the maker is exposed.
+re-quotes continuously, so it pays a round trip per order — and, worse, has no safe way to move a
+quote: `cancel_limit_order` and `add_limit_order` are separate calls, so between them the maker is
+exposed, and if the create is rejected or the client dies in between, it stays exposed
+indefinitely.
 
 The ask came from the field. G20 (Sandeep) asked for "batch place order and batch cancel
 orders"; the same primitives are standard on Binance, Kraken, and Coinbase precisely because
@@ -22,10 +23,12 @@ This ticket adds three endpoints:
 - **`add_limit_orders`** — place up to 100 orders in one call, each succeeding or failing on
   its own.
 - **`cancel_limit_orders`** — cancel up to 100 orders in one call, same per-item behavior.
-- **`replace_limit_orders`** — cancel a set and create a set **atomically**, so a re-quote
-  either lands whole or leaves the maker's existing quotes untouched. This is the one that
-  closes the naked-quote window, and the reason it is worth more than calling the first two
-  back to back.
+- **`replace_limit_orders`** — cancel a set and create a set **atomically**, so a re-quote either
+  lands whole or leaves the maker's existing quotes untouched. It does not make the replacement
+  liquidity appear instantly: new orders are enqueued as `Pending` and rest only once the matching
+  engine processes them (see Non-goals). What it removes is the *failure-prone* part of the
+  window — the replacements are durably accepted before the cancels apply, so the gap is bounded
+  by one matching tick instead of by a second round trip that may never succeed.
 
 ## Requirements
 
@@ -61,9 +64,13 @@ This ticket adds three endpoints:
 - **R8 — Replace rejects by returning, never by trapping.** A rejected replace returns a typed
   `ReplaceLimitOrdersError` naming the offending leg and index. Reverting state by trapping is
   not an acceptable implementation (it discards the typed error the caller needs).
-- **R9 — Duplicate cancel ids are rejected in a replace.** A `cancel` list containing the same
-  order id twice fails the whole call with a dedicated leaf carrying the index. (Unlike R5,
-  the atomic path cannot let the second occurrence fail on its own.)
+- **R9 — Duplicate cancel ids are rejected in a replace, ahead of every other cancel check.** The
+  `cancel` list is **pre-scanned** for repeated ids; a repeat fails the whole call with
+  `DuplicateOrderId` carrying the index of the **second** occurrence, regardless of whether an
+  earlier id would also have failed validation. The pre-scan is what makes this outcome
+  unconditional — validating in order would surface a `CancelRejected` for an earlier bad id and
+  never reach the duplicate. (Unlike R5, the atomic path cannot let the second occurrence fail on
+  its own: it would double-count the released reservation in the projection.)
 - **R10 — Batch size is capped.** A batch of more than `MAX_BATCH_LEN = 100` items fails the
   whole call with `BatchTooLarge { len; max }` under `RequestError`, before any item is
   processed. For `replace_limit_orders` the cap applies to `cancel` and `create` **combined**.
@@ -80,8 +87,12 @@ This ticket adds three endpoints:
 - **R13 — The per-item variant is frozen at two arms.** `variant { Ok; Err }` gains no third
   arm, ever. Any future per-item outcome is added as a **leaf** under one of the three existing
   disposition arms. (See D3: a new arm is a latent, production-only break.)
-- **R14 — One matching kickoff per batch.** A batch arms the zero-delay matching timer once,
-  not once per order.
+- **R14 — One matching kickoff per batch, and only when something was enqueued.** A batch that
+  successfully enqueues at least one new order arms the zero-delay matching timer exactly once,
+  not once per order. `cancel_limit_orders` never arms it — the existing `cancel_limit_order`
+  wrapper does not either — and neither does an empty batch nor an `add_limit_orders` call whose
+  every item failed. Arming it otherwise would pull unrelated pending orders into a matching round
+  that N sequential calls would not have triggered, breaking the equivalence of R2 and R5.
 - **R15 — Trading accounts behave as they do on the single-order endpoints.** All three
   endpoints resolve the caller to its funding account via `effective_account`, and record
   `placed_by` / `canceled_by` per order exactly as the single-order paths do.
@@ -110,6 +121,15 @@ This ticket adds three endpoints:
   conveniences; per-item partial success is the more useful behavior and the one DEFI-2801 D8
   prescribes. Only `replace_limit_orders` is atomic, and only because eliminating the
   naked-quote window is its entire purpose (see D1).
+- **Closing the residual pending window.** `replace_limit_orders` is atomic in *acceptance*, not
+  in *resting liquidity*. `State::record_limit_order` enqueues a new order via
+  `OrderBook::add_pending_order` with `status = Pending`; it enters the book only when the
+  timer-driven matching engine processes it. So between the call committing and the next matching
+  tick, the maker's old quotes are gone and its replacements are queued but not yet resting.
+  Eliminating that gap would require matching the replacements synchronously inside the update
+  call, which the architecture deliberately rejects (see Discussed Alternatives). **Accepted:** the
+  window is bounded by one matching tick and the replacements are already durably accepted —
+  versus a two-call re-quote, where the window is unbounded and can outlive a crashed client.
 - **Batching across users, or batching deposits / withdrawals.** Deposits and withdrawals make
   inter-canister calls and carry a per-(user, token) in-flight guard; batching them is a
   different problem.
@@ -128,8 +148,8 @@ half-applied batch risks double-placing the items that already succeeded, so the
 told precisely which went through.
 
 `replace_limit_orders` is the deliberate exception. Partial success there would defeat the
-primitive: a maker whose cancels land but whose creates fail is left with no quote in the book —
-the exact state it called `replace` to avoid. So replace is all-or-nothing, and its result carries
+primitive: a maker whose cancels land but whose creates are rejected is left with nothing even
+queued to replace them — the failure mode it called `replace` to avoid. So replace is all-or-nothing, and its result carries
 no per-item **outcomes**: it still returns a `vec OrderId` naming the orders it created, but every
 entry in it is a success, because any failure would have rejected the whole call before anything
 was applied. The single `Err` reports which item was at fault by index (see D5).
@@ -313,10 +333,11 @@ small per-token overlay rather than a state fork.
 struct ProjectedFreeBalance { /* BTreeMap<TokenId, Quantity> */ }
 ```
 
-- Walk `cancel` in order: reuse `validate_cancel_limit_order` (well-formed, exists, owned,
-  non-terminal), reject a repeated id (R9), and credit the projection by the reservation the
-  cancel would release — computed with `RemovedOrderSettlement::new` from the order record, no
-  book mutation.
+- **Pre-scan** `cancel` for repeated ids and reject the whole call before any per-id validation,
+  reporting the second occurrence's index (R9).
+- Then walk `cancel` in order: reuse `validate_cancel_limit_order` (well-formed, exists, owned,
+  non-terminal) and credit the projection by the reservation the cancel would release — computed
+  with `RemovedOrderSettlement::new` from the order record, no book mutation.
 - Then walk `create` in order (R7): reuse the existing validation, but read free balance through
   the projection, and debit it per accepted create so creates accumulate against each other as
   well as against the freed funds.
@@ -352,9 +373,12 @@ codebase's always-on invariant convention, not `debug_assert!`).
 ### Entry points — `canister/src/main.rs`
 
 Three new `#[ic_cdk::update]` wrappers mirroring the existing ones' logging convention (log
-successes, do not log user-caused errors). Each arms the zero-delay `drive_matching` timer **once
-after the batch**, not per order (R14) — `TODO DEFI-2823` (timer coalescing) applies here too and
-will subsume the kickoff.
+successes, do not log user-caused errors). `add_limit_orders` and `replace_limit_orders` arm the
+zero-delay `drive_matching` timer **once after the batch**, and **only if at least one order was
+actually enqueued** (R14) — `TODO DEFI-2823` (timer coalescing) applies here too and will subsume
+the kickoff. `cancel_limit_orders` does **not** arm it: the existing `cancel_limit_order` wrapper
+does not, so arming it would drag unrelated pending orders into a matching round that N sequential
+cancels would never have triggered — a visible divergence from R5.
 
 ### Performance — `canister/src/benchmarks.rs`
 
@@ -400,7 +424,10 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 - Halt behavior (R16): halted pair fails only its own items in a batch, but fails a whole replace.
 - Trading accounts (R15): a trading account batches on its funding account's behalf;
   `placed_by` / `canceled_by` are recorded per order.
-- A replace that moves a two-sided quote: the maker is never without a resting order.
+- A replace that moves a two-sided quote: cancels and creates apply atomically, and the
+  replacements are resting once the matching engine has run. Assert the **intermediate** state
+  too — immediately after the call the replacements are `Pending`, not `Open`. That is the
+  documented residual window (see Non-goals); the test must pin it, not paper over it.
 
 Verification:
 
@@ -451,6 +478,12 @@ Each PR is independently compilable, testable, and useful on its own.
 - **A `ByPair` / `All` cancel selector instead of an id list.** Genuinely useful as a panic button,
   but its cost is unbounded by the caller's input, so it needs chunking or its own cap and a story
   for what happens when it cannot finish in one message. Out of scope here; see Non-goals.
+- **Matching the replacement orders synchronously inside `replace_limit_orders`,** to make a
+  re-quote atomic in resting liquidity rather than only in acceptance. Rejected on the same grounds
+  DEFI-2853 rejected synchronous inline FOK matching: it introduces a second matching entry point,
+  jumps the batch ahead of orders already queued (breaking FIFO), and turns the per-message
+  instruction bound into a hard gate for a call that may carry up to 100 orders. The residual
+  window is documented as an accepted limitation in Non-goals instead.
 - **One combined `batch(vec Operation)` endpoint** with an operation variant covering create,
   cancel, and replace. More extensible, but it collapses three different result shapes (per-item,
   per-item, atomic) into one type that would have to express all of them, and it makes the
