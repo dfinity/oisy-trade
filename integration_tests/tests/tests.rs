@@ -3231,16 +3231,27 @@ mod halt {
     const MODES: [HaltMode; 2] = [HaltMode::Global, HaltMode::Pair];
 
     /// End-to-end halt lifecycle: a resting buy is placed before the halt, run
-    /// once per [`HaltMode`]:
+    /// once per [`HaltMode`].
     ///
-    /// 1. buyer funds and places a resting buy before the halt;
-    /// 2. trading halts; the scheduler fires matching during `halt_trading` but
-    ///    finds no cross (no sell yet), so the buy stays unmatched;
-    /// 3. the buy keeps the exact status it had before the halt (no transition
-    ///    is driven while halted);
-    /// 4. `filled_quantity` stays zero — no partial fill slips through;
-    /// 5. after `resume_trading`, a crossing sell placement and a tick drive
+    /// 1. buyer and seller are funded;
+    /// 2. buyer places a resting buy — the scheduler arms the global timer;
+    /// 3. trading halts; the timer fires during or between rounds but finds no
+    ///    crossing sell, so the buy stays unmatched;
+    /// 4. the buy keeps the exact status it had before the halt across several
+    ///    timed matching rounds (no transition driven while halted);
+    /// 5. `filled_quantity` stays zero — no partial fill slips through;
+    /// 6. after `resume_trading`, a crossing sell placement and a tick drive
     ///    the fill.
+    ///
+    /// The crossable-both-sides-frozen invariant (a genuinely crossable resting
+    /// book stays completely frozen while halted) is verified at the unit layer:
+    /// `execute::tests::should_be_a_no_op_when_globally_halted`,
+    /// `should_skip_halted_book_while_matching_others`, and
+    /// `should_not_busy_spin_while_pair_halted_and_resume_on_unhalt`. Placing
+    /// both orders before the halt is not reproducible E2E: PocketIC fires the
+    /// timer between awaited update calls (not only on explicit `tick()`), so
+    /// the cross fills before the halt call lands; and placement while halted is
+    /// rejected with `TradingHalted`.
     #[tokio::test]
     async fn should_freeze_orders_under_halt_then_fill_them_on_resume() {
         for mode in MODES {
@@ -3260,9 +3271,7 @@ mod halt {
             let required_quote = 1_000_000_000u64;
             let required_base = quantity;
 
-            // Buyer funds and places a resting buy while trading is active.
-            // The scheduler arms the global timer at placement; the timer fires
-            // during later rounds but finds no cross (no sell in the book yet).
+            // Fund the buyer and place a resting buy while trading is active.
             setup
                 .deposit_flow(buyer, setup.quote_token_id())
                 .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
@@ -3298,9 +3307,8 @@ mod halt {
                 "{mode:?}: pair must report Trading before the halt"
             );
 
-            // Halt. The global timer fires at the start of the halt round, runs
-            // matching, finds no crossing sell, and exits without filling. Then
-            // the halt takes effect.
+            // Halt. The global timer fires during subsequent rounds, runs
+            // matching, finds no crossing sell, and exits without filling.
             assert_eq!(controller_client.halt_trading(mode.arg(pair)).await, Ok(()));
 
             // The halt is reflected on the pair's trading status.
@@ -3321,7 +3329,8 @@ mod halt {
                 .status;
             assert_matches!(
                 buy_status_under_halt,
-                OrderStatus::Open | OrderStatus::Pending
+                OrderStatus::Open | OrderStatus::Pending,
+                "{mode:?}: buy must be open or pending under halt"
             );
 
             // Advance past the matching interval and tick: matching must make no
