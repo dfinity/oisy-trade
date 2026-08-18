@@ -68,9 +68,12 @@ This ticket adds three endpoints:
   of its own canceled orders must succeed even when its stored free balance alone would not
   cover the new orders. Recording a create against a not-yet-settled cancel would reserve
   against funds that are still locked and fail with a spurious `InsufficientBalance`.
-- **R8 — Replace rejects by returning, never by trapping.** A rejected replace returns a typed
-  `ReplaceLimitOrdersError` naming the offending leg and index. Reverting state by trapping is
-  not an acceptable implementation (it discards the typed error the caller needs).
+- **R8 — Replace signals a *validation* rejection by returning, never by trapping.** A replace
+  rejected in phase 1 — bad id, duplicate, halted pair, insufficient funds — returns a typed
+  `ReplaceLimitOrdersError` naming the offending leg and index. Deliberately trapping to revert
+  state is not an acceptable implementation: it discards the typed error the caller needs. The
+  guarantee is scoped to *rejection*; a replace that exhausts the instruction budget still traps,
+  which is the platform's behavior rather than a design choice (R17).
 - **R9 — Duplicate cancel ids are rejected in a replace, ahead of every other cancel check.** The
   `cancel` list is **pre-scanned** for repeated ids; a repeat fails the whole call with
   `DuplicateOrderId` carrying the index of the **second** occurrence, regardless of whether an
@@ -126,8 +129,11 @@ This ticket adds three endpoints:
   something batching introduces. What batching introduces is a multiplier of up to
   `MAX_BATCH_LEN`. The requirement therefore splits into three parts:
   - **Enforceable, and required.** A batch of `N` items costs `N ×` the equivalent single-item
-    work plus `O(N)` batch overhead (cap check, outcome vector, result encoding): batching
-    contributes no **super-linear** factor of its own. This is a *scaling* claim, not an exact
+    work plus `O(N log T)` batch overhead — cap check, outcome vector, result encoding, and for
+    `replace_limit_orders` the projected-balance overlay, where `T` is the number of **distinct
+    tokens** the batch touches (at most two per pair, and bounded above by the registered token
+    count). Batching contributes nothing worse than that, and in particular nothing quadratic in
+    `N`. This is a *scaling* claim, not an exact
     inequality — a one-item batch legitimately costs slightly more than one single-order call. The
     `canbench` benchmarks therefore measure **several values of `N`** and check that growth stays
     linear, across both worst-case shapes: deep fragmented resting queues, and a large pending
@@ -137,15 +143,24 @@ This ticket adds three endpoints:
     `MAX_BATCH_LEN` is chosen so the worse of the two shapes fits with margin at that envelope, and
     the envelope is recorded next to the number. A fixture is evidence for the envelope, never a
     proof for all depths.
-  - **Failure behavior beyond the envelope.** Exceeding the instruction limit traps, and the
-    replica discards the message's state changes — so an over-budget batch applies **nothing** and
-    the caller retries with fewer items. The residual risk is a rejected call, never partial or
-    corrupted state.
+  - **Failure behavior beyond the envelope.** Exceeding the instruction limit traps and the replica
+    discards the message's state changes, so an over-budget call applies **nothing** — the residual
+    risk is a rejected call, never partial or corrupted state. This is the platform's behavior, not
+    a designed path, and it is the single case R8's no-trap guarantee does not cover. Recovery
+    differs by endpoint: `add_limit_orders` and `cancel_limit_orders` are partial-success, so the
+    caller simply retries with fewer items. A **replace cannot be split that way** — dividing one
+    atomic replace across several calls forfeits precisely the R6 all-or-nothing property it exists
+    for. A replace too large to execute atomically at the requested size therefore cannot be
+    completed atomically at all, which is a further argument for bounded removal below.
 
-  Making the absolute claim unconditional requires **caller-bounded removal** — an `O(1)` position
-  index for resting orders and for the pending queue — which would also retire the pre-existing
-  single-cancel exposure. That is the principled fix; PR 2 chooses between delivering it and
-  lowering the cap, on the measurement.
+  Making the absolute claim unconditional requires **caller-bounded removal**, and an index alone
+  will not deliver it: price levels and `pending_orders` are both `VecDeque`s, and
+  `VecDeque::remove(pos)` shifts elements, so removal stays `O(k)` even when the position is
+  already known. The real fix is a FIFO structure supporting **constant-time arbitrary deletion**
+  — an intrusive doubly-linked list over a slab, or tombstoning with lazy compaction — applied to
+  both `OrderQueue`'s levels and `pending_orders`. That would also retire the pre-existing
+  single-cancel exposure. It is the principled fix; PR 2 chooses between delivering it and
+  accepting the measured cap, on the evidence.
 - **R18 — No new event types and no state migration.** A batch records **one existing *operation*
   event — `AddLimitOrderEvent` or `CancelLimitOrderEvent` — per *successful* item**: a rejected
   item in a partial-success batch records nothing, so a three-item add batch with one rejection
@@ -431,6 +446,9 @@ halt, which is exactly what preserves the exit guarantee.
 /// (reserved → free), so that phase 1's verdict and phase 2's outcome cannot
 /// disagree.
 struct ProjectedFreeBalance { /* BTreeMap<TokenId, Quantity> */ }
+// Keyed by token, so N credits/debits cost O(N log T) in the number of
+// distinct tokens touched — the log factor R17's overhead term accounts
+// for. Swap in a hash map if the R17 scaling curve shows it matters.
 ```
 
 - **Pre-scan** `cancel` for repeated ids and reject the whole call before any per-id validation,
@@ -501,7 +519,8 @@ state envelope** each measurement was taken at — level depth and backlog size 
 chosen cap; R17's absolute claim is scoped to it and is not a proof for all depths. Beyond the
 envelope the message traps and the replica discards its state changes, so an over-budget batch
 applies nothing and the caller retries smaller. If the margin at a realistic envelope is
-uncomfortable, add the `O(1)` removal paths rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
+uncomfortable, add the constant-time-deletion structures described in R17 — note an index alone is
+insufficient, since `VecDeque::remove(pos)` still shifts — rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
 the committed `canbench_results.yml`, so new benchmarks must be persisted with `just bench-check`.
 
 ### Docs — `docs/src/development/design.md`
@@ -611,8 +630,8 @@ Each PR is independently compilable, testable, and useful on its own.
   scaffolding, plus the two worst-case inline-settlement benchmarks over several batch sizes that
   make R17 checkable on the cancellation path. These **confirm** the cap PR 1 fixed and record the
   state envelope; they may raise it but never lower it. If the margin proves inadequate, the remedy
-  is the `O(1)` removal index — not a smaller cap, which is no longer available once
-  `add_limit_orders` is public.
+  is the constant-time-deletion refactor of `OrderQueue` and `pending_orders` (R17) — not a smaller
+  cap, which is no longer available once `add_limit_orders` is public.
   - *Acceptance:* R4, R5, R17 — **plus the cross-cutting requirements as they apply to this
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
