@@ -23,7 +23,6 @@ canbench-rs = { workspace = true, optional = true }
 candid = { workspace = true }
 canlog = { workspace = true }
 ic-cdk = { workspace = true }
-ic-cdk-timers = { workspace = true }
 ic-http-types = { workspace = true }
 ic-metrics-encoder = { workspace = true }
 ic-stable-structures = { workspace = true }

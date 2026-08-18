@@ -1156,6 +1156,7 @@ pub mod mocks {
         let mut mock = MockRuntime::new();
         mock.expect_instruction_counter().return_const(0u64);
         mock.expect_time().return_const(Timestamp::EPOCH);
+        mock.expect_global_timer_set().return_const(());
         mock
     }
 
@@ -1189,6 +1190,7 @@ pub mod mocks {
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
             fn time(&self) -> Timestamp;
+            fn global_timer_set(&self, deadline: Timestamp);
         }
     }
 
@@ -1269,5 +1271,7 @@ pub mod mocks {
         fn time(&self) -> Timestamp {
             Timestamp::EPOCH
         }
+
+        fn global_timer_set(&self, _deadline: Timestamp) {}
     }
 }

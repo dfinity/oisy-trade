@@ -388,15 +388,14 @@ fn should_roundtrip_notional_bounds_through_snapshot() {
     assert_eq!(book.max_notional(), max_notional);
 }
 
-/// Transient runtime state (`matching_timer_scheduled`, `in_flight_user_ops`)
-/// is intentionally excluded from the snapshot and reset on restore.
+/// Transient runtime state (`in_flight_user_ops`) is intentionally excluded
+/// from the snapshot and reset on restore.
 #[test]
 fn should_drop_transient_guard_sets_on_roundtrip() {
     let mut state = fresh_state();
     let user = Principal::from_slice(&[0x01]);
     let token = crate::order::TokenId::new(Principal::from_slice(&[0xAA]));
 
-    assert!(state.try_mark_matching_timer_scheduled());
     state.in_flight_user_ops_mut().insert((user, token));
 
     let snapshot = StateSnapshot::from_state(&state);
@@ -411,10 +410,6 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     );
 
     assert!(
-        !restored.matching_timer_scheduled,
-        "matching_timer_scheduled must be reset after restore"
-    );
-    assert!(
         restored.in_flight_user_ops().is_empty(),
         "in_flight_user_ops must be empty after restore"
     );
@@ -422,7 +417,6 @@ fn should_drop_transient_guard_sets_on_roundtrip() {
     assert_eq!(
         state,
         State {
-            matching_timer_scheduled: state.matching_timer_scheduled,
             in_flight_user_ops: state.in_flight_user_ops().clone(),
             ..restored
         },

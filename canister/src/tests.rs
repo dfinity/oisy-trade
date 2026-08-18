@@ -2980,34 +2980,6 @@ mod get_fee_balances {
     }
 }
 
-mod matching_timer_coalescing {
-    use crate::state;
-    use crate::test_fixtures::state_vmem;
-
-    #[test]
-    fn should_schedule_a_single_timer_until_it_fires() {
-        state::init_state(state_vmem());
-        state::with_state_mut(|s| {
-            assert!(
-                s.try_mark_matching_timer_scheduled(),
-                "first kickoff schedules a timer"
-            );
-            assert!(
-                !s.try_mark_matching_timer_scheduled(),
-                "a burst of further kickoffs must not schedule more timers"
-            );
-
-            // The timer fires and clears the flag, allowing the next kickoff
-            // (or the `MoreWork` self-reschedule) to arm a fresh timer.
-            s.clear_matching_timer_scheduled();
-            assert!(
-                s.try_mark_matching_timer_scheduled(),
-                "a kickoff after the timer fired schedules again"
-            );
-        });
-    }
-}
-
 mod set_halt {
     use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{ckbtc_token_id, icp_token_id, init_state_with_order_book};
