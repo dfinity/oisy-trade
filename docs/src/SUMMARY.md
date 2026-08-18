@@ -16,6 +16,7 @@
 - [Trading Data Analysis](development/trading-data.md)
 - [Specs](development/specs/index.md)
   - [Template](development/specs/template.md)
+  - [DEFI-2737 — Batch Placement, Cancellation, and Replacement](development/specs/DEFI-2737-batching.md)
   - [DEFI-2801 — User-Facing Error Taxonomy](development/specs/DEFI-2801-error-envelope.md)
   - [DEFI-2849 — Circuit Breaker](development/specs/DEFI-2849-circuit-breaker.md)
   - [DEFI-2850 — Min/Max Notional](development/specs/DEFI-2850-min-max-notional.md)
