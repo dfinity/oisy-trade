@@ -121,10 +121,13 @@ This ticket adds three endpoints:
   exceed the instruction budget; that is a pre-existing property of `cancel_limit_order`, not
   something batching introduces. What batching introduces is a multiplier of up to
   `MAX_BATCH_LEN`. The requirement therefore splits into three parts:
-  - **Enforceable, and required.** A batch of `N` items costs no more than `N` × the equivalent
-    single-order call: batching contributes no super-linear factor of its own. This is what the
-    `canbench` benchmarks verify, across both worst-case shapes — deep fragmented resting queues,
-    and a large pending backlog with the targets at its far end.
+  - **Enforceable, and required.** A batch of `N` items costs `N ×` the equivalent single-item
+    work plus `O(N)` batch overhead (cap check, outcome vector, result encoding): batching
+    contributes no **super-linear** factor of its own. This is a *scaling* claim, not an exact
+    inequality — a one-item batch legitimately costs slightly more than one single-order call. The
+    `canbench` benchmarks therefore measure **several values of `N`** and check that growth stays
+    linear, across both worst-case shapes: deep fragmented resting queues, and a large pending
+    backlog with the targets at its far end.
   - **Conditional, and documented.** The absolute "fits one message" claim holds only inside a
     stated **state envelope** — the level depth and pending-backlog size the benchmark ran at.
     `MAX_BATCH_LEN` is chosen so the worse of the two shapes fits with margin at that envelope, and
@@ -139,9 +142,12 @@ This ticket adds three endpoints:
   index for resting orders and for the pending queue — which would also retire the pre-existing
   single-cancel exposure. That is the principled fix; PR 2 chooses between delivering it and
   lowering the cap, on the measurement.
-- **R18 — No new event types and no state migration.** A batch records N existing
-  `AddLimitOrderEvent` / `CancelLimitOrderEvent` events. Event-log replay, the state snapshot,
-  and persisted state are untouched.
+- **R18 — No new event types and no state migration.** A batch records **one existing
+  `AddLimitOrderEvent` / `CancelLimitOrderEvent` per *successful* item**: a rejected item in a
+  partial-success batch records nothing, so a three-item batch with one rejection writes two
+  events, and a successful `replace_limit_orders` writes exactly `cancel.len() + create.len()` of
+  them (a rejected replace writes none, per R6). Event-log replay, the state snapshot, and
+  persisted state are untouched.
 - **R19 — A replace's outer disposition mirrors its nested reason's.** When a replace is rejected
   over one item, the outer `kind` arm is the **same arm** the nested `reason` carries: an item that
   failed with a `TemporaryError` — today `TradingHalted`, which R16 explicitly routes through this
@@ -482,8 +488,15 @@ the committed `canbench_results.yml`, so new benchmarks must be persisted with `
 
 ### Docs — `docs/src/development/design.md`
 
-Add the three endpoints to *Main Endpoints* with their cost, document the partial-success vs
-atomic split (D1), and move "Batch operations" out of *Potential Additional Features*.
+Add each endpoint to *Main Endpoints* with its cost, and document the partial-success vs atomic
+split (D1). Note that `design.md` currently lists "Batch operations" under *Potential Additional
+Features* and describes them as placing or cancelling "multiple orders **atomically** in a single
+call" — wrong for `add_limit_orders` / `cancel_limit_orders` under D1 — so that bullet must go as
+soon as the **first** endpoint ships, not at the end of the stack.
+
+**Each PR updates the doc for the endpoint it introduces** (see Delivery). A PR that ships a public
+endpoint must not leave `design.md` calling it hypothetical or mis-stating its atomicity; PR 3
+additionally writes the combined overview once all three exist.
 
 ### Test plan
 
@@ -508,8 +521,12 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
   funded *entirely* by the cancels' released reservations — that is the case that fails if phase 2
   records a create before the cancel's `Unreserve` has been settled, and it should be asserted on
   the resulting `free` / `reserved` split, not just on the `Ok`.
-- Duplicate cancel id (R9) and per-item duplicate (R5): the atomic path rejects; the batch path
-  returns `OrderAlreadyTerminal` on the second occurrence.
+- Duplicate cancel id (R9) and per-item duplicate (R5): the batch path returns
+  `OrderAlreadyTerminal` on the second occurrence. For the atomic path, the case that actually pins
+  R9's precedence is an earlier cancel id that is **independently invalid** (unknown, not owned, or
+  terminal) *together with* a later duplicate — assert `DuplicateOrderId` at the second
+  occurrence's index. A duplicate-only fixture would pass a sequential implementation that wrongly
+  returns the earlier `CancelRejected`.
 - Envelope forward-compat (R12, R13): encode a batch reply carrying an unknown future leaf and
   decode it against the current types — the unknown leaf softens to `None` in its own item while a
   known leaf in a sibling item still decodes typed, and `message` survives at both levels. This
@@ -547,7 +564,10 @@ Each PR is independently compilable, testable, and useful on its own.
 - **PR 1 (1/3) — `add_limit_orders`.** The shared batch scaffolding: `MAX_BATCH_LEN`, the
   batch-level error type, the per-item outcome shape, the hoisted preamble, and the single
   matching kickoff. Placement only.
-  - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R18.
+  - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R18 — **plus its
+    `design.md` entry**: document `add_limit_orders` and its partial-success contract, and drop the
+    stale "Batch operations" bullet from *Potential Additional Features*, which wrongly calls batch
+    place/cancel atomic.
 - **PR 2 (2/3) — `cancel_limit_orders`.** The same shape applied to cancellation, reusing PR 1's
   scaffolding, plus the two worst-case inline-settlement benchmarks that make R17 checkable, and
   the decision they force: record the state envelope and set the cap, or deliver the `O(1)`
@@ -555,14 +575,16 @@ Each PR is independently compilable, testable, and useful on its own.
   - *Acceptance:* R4, R5, R17 — **plus the cross-cutting requirements as they apply to this
     endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
     (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
-    satisfies those only for `add_limit_orders`; they are re-verified here.
+    satisfies those only for `add_limit_orders`; they are re-verified here. Plus its `design.md`
+    entry for `cancel_limit_orders`.
 - **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 free-balance projection with **id
   assignment deferred to phase 2**, the validate-then-apply split, the phase-1 halt check, the
   split of `validate_limit_order` into validation (balance read through the projection) and id
   assignment, and the atomic endpoint.
   - *Acceptance:* R6, R7, R8, R9, R16 (replace half), R19 — **plus the cross-cutting requirements for
     this endpoint**: R10, R11 (combined cap, empty no-op), R12 (including the nested `reason`
-    envelope), R13, R14 (single conditional kickoff), R15, R18 — and the design-doc update. PR 1
+    envelope), R13, R14 (single conditional kickoff), R15, R18 — and its `design.md` entry for
+    `replace_limit_orders`, including the combined batch overview now that all three exist. PR 1
     cannot satisfy these for an endpoint that does not exist until here.
 
 ## Discussed Alternatives
