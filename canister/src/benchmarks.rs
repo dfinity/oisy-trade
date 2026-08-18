@@ -817,6 +817,10 @@ mod settling_event_sweep {
         fn time(&self) -> Timestamp {
             IC_RUNTIME.time()
         }
+
+        fn global_timer_set(&self, deadline: Timestamp) {
+            IC_RUNTIME.global_timer_set(deadline);
+        }
     }
 
     // Mainnet ICP/ckUSDT listing parameters (ICP: 8 decimals, ckUSDT: 6).
