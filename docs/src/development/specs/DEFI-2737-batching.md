@@ -78,9 +78,12 @@ This ticket adds three endpoints:
   unconditional — validating in order would surface a `CancelRejected` for an earlier bad id and
   never reach the duplicate. (Unlike R5, the atomic path cannot let the second occurrence fail on
   its own: it would double-count the released reservation in the projection.)
-- **R10 — Batch size is capped.** A batch of more than `MAX_BATCH_LEN = 100` items fails the
-  whole call with `BatchTooLarge { len; max }` under `RequestError`, before any item is
-  processed. For `replace_limit_orders` the cap applies to `cancel` and `create` **combined**.
+- **R10 — Batch size is capped.** A batch of more than `MAX_BATCH_LEN` items fails the whole call
+  with `BatchTooLarge { len; max }` under `RequestError`, before any item is processed, with `max`
+  reporting the effective cap. For `replace_limit_orders` the cap applies to `cancel` and `create`
+  **combined**. This requirement fixes the *behavior*, not the number: `MAX_BATCH_LEN` is
+  **proposed at 100** (D4) and its final value is settled by R17's measurement, so R10 and R17
+  cannot pull against each other.
 - **R11 — An empty batch is a successful no-op.** It returns an empty `Ok` and records no
   event, mirroring how `get_balances` treats an empty filter.
 - **R12 — The error envelope is preserved at every level.** Every error these endpoints
@@ -106,7 +109,8 @@ This ticket adds three endpoints:
 - **R16 — Halt is enforced per book.** In `add_limit_orders`, a create on a halted pair fails
   that item with `TradingHalted` while items on other pairs proceed. In
   `replace_limit_orders`, because the call is atomic, a create on a halted pair fails the whole
-  call; cancels remain permitted under halt, preserving the "users can always exit" guarantee.
+  call; cancels remain permitted under halt, preserving the "users can always exit" guarantee. In
+  replace, this check must run in **phase 1**, before any mutation — see Implementation.
 - **R17 — A full batch fits one message, and the cap is justified by measurement, not assumption.**
   The cap bounds the *number* of operations by caller input but **not** their unit cost: one cancel
   is `O(log p + k)` where `k` is the depth of the order's price level (`OrderQueue::remove` scans
@@ -207,7 +211,7 @@ Hence R13. Any future per-item outcome is a **leaf**, not an arm — and for the
 leaf is also the semantically better answer, since it belongs under `TemporaryError`: the caller
 should retry it.
 
-### D4 — `MAX_BATCH_LEN = 100`, matching the existing cap convention
+### D4 — `MAX_BATCH_LEN` proposed at 100, matching the existing cap convention
 
 `MAX_FILTER_LEN`, `MAX_ORDERS_PER_RESPONSE`, `MAX_TRADES_PER_RESPONSE`, and `MAX_HALT_BOOKS` are
 all 100. A batch cap bounds the *number* of operations by the caller's input — though not their
@@ -252,7 +256,8 @@ canister is live and back-compat is required.
 ### Public types & Candid — `libs/types/src/lib.rs`, `libs/types/src/error/mod.rs`, `canister/oisy_trade.did`
 
 ```candid
-// Maximum items accepted by a batch endpoint (100). For replace_limit_orders
+// Maximum items accepted by a batch endpoint (MAX_BATCH_LEN, proposed 100;
+// the final value is settled by R17's measurement). For replace_limit_orders
 // the cap applies to `cancel` and `create` combined.
 
 type AddLimitOrdersError = record {
@@ -344,9 +349,19 @@ state advance as the batch is planned, so neither may be read live:
   phase 2** and have phase 1 validate everything else. Deferring is preferred: it keeps one source
   of truth for id assignment.
 
-Everything else create-validation touches (pair registered, halt status, tick/lot via
+Everything else create-validation touches (pair registered, tick/lot via
 `OrderBook::validate_order`, notional via `check_notional`, the u256 amount bound) is independent
 of both, so the projection stays a small overlay rather than a state fork.
+
+**Phase 1 must also run the halt check itself.** `State::validate_limit_order` does **not** inspect
+halt state — `add_limit_order` checks it separately, via
+`permissions().permit_trading(owner, book_id)` *inside* the mutating block, immediately before
+recording the event (`canister/src/lib.rs`). A replace whose phase 1 called only
+`validate_limit_order` would therefore discover `TradingHalted` in phase 2, **after** the cancels
+had already mutated and settled — violating R6 and R16. Phase 1 therefore runs `permit_trading`
+for every create's book, in the same precedence as the single-order path, and phase 2 re-acquires
+the permit it needs to emit each event. Cancels are unaffected: `permit_cancel` is allowed under
+halt, which is exactly what preserves the exit guarantee.
 
 ```rust
 /// Free-balance overlay for validating orders that have not been applied yet:
@@ -435,8 +450,8 @@ Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 - Cumulative reservations (R3): a batch whose later items overdraw — earlier items stand and the
   overdrawing item reports `InsufficientBalance`, **while a smaller following item still
   succeeds**, since a failed item reserves nothing and must not poison its successors.
-- Cap and empty (R10, R11): 101 items ⇒ `BatchTooLarge`, no state change; 0 items ⇒ `Ok([])` and
-  no event recorded.
+- Cap and empty (R10, R11): `MAX_BATCH_LEN + 1` items ⇒ `BatchTooLarge` with `max` equal to the
+  effective cap, no state change; 0 items ⇒ `Ok([])` and no event recorded.
 - Replace atomicity (R6, R8): a replace whose last create is invalid leaves the book, balances,
   and event log **byte-identical** to their pre-call state (compared via the snapshot round-trip),
   and returns `CreateRejected` with the right index — no trap.
@@ -483,11 +498,19 @@ Each PR is independently compilable, testable, and useful on its own.
   matching kickoff. Placement only.
   - *Acceptance:* R1, R2, R3, R10, R11, R12, R13, R14, R15, R16 (batch half), R18.
 - **PR 2 (2/3) — `cancel_limit_orders`.** The same shape applied to cancellation, reusing PR 1's
-  scaffolding, plus the inline-settlement benchmark that makes R17 checkable.
-  - *Acceptance:* R4, R5, R17.
-- **PR 3 (3/3) — `replace_limit_orders`.** `ProjectedFreeBalance`, the validate-then-apply split,
-  the factoring of the balance lookup out of `validate_limit_order`, and the atomic endpoint.
-  - *Acceptance:* R6, R7, R8, R9, R16 (replace half), plus the design-doc update.
+  scaffolding, plus the deep-book inline-settlement benchmark that makes R17 checkable and settles
+  the cap.
+  - *Acceptance:* R4, R5, R17 — **plus the cross-cutting requirements as they apply to this
+    endpoint**: R10, R11 (cap, empty no-op), R12, R13 (envelope, frozen two-arm outcome), R14
+    (this endpoint must *not* arm matching), R15 (trading accounts), R18 (no new events). PR 1
+    satisfies those only for `add_limit_orders`; they are re-verified here.
+- **PR 3 (3/3) — `replace_limit_orders`.** The phase-1 projection (free balance **and** per-book
+  `next_seq`), the validate-then-apply split, the phase-1 halt check, the factoring of the balance
+  lookup out of `validate_limit_order`, and the atomic endpoint.
+  - *Acceptance:* R6, R7, R8, R9, R16 (replace half) — **plus the cross-cutting requirements for
+    this endpoint**: R10, R11 (combined cap, empty no-op), R12 (including the nested `reason`
+    envelope), R13, R14 (single conditional kickoff), R15, R18 — and the design-doc update. PR 1
+    cannot satisfy these for an endpoint that does not exist until here.
 
 ## Discussed Alternatives
 
