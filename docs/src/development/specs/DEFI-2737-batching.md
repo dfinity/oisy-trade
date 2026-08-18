@@ -142,12 +142,16 @@ This ticket adds three endpoints:
   index for resting orders and for the pending queue — which would also retire the pre-existing
   single-cancel exposure. That is the principled fix; PR 2 chooses between delivering it and
   lowering the cap, on the measurement.
-- **R18 — No new event types and no state migration.** A batch records **one existing
-  `AddLimitOrderEvent` / `CancelLimitOrderEvent` per *successful* item**: a rejected item in a
-  partial-success batch records nothing, so a three-item batch with one rejection writes two
-  events, and a successful `replace_limit_orders` writes exactly `cancel.len() + create.len()` of
-  them (a rejected replace writes none, per R6). Event-log replay, the state snapshot, and
-  persisted state are untouched.
+- **R18 — No new event types and no state migration.** A batch records **one existing *operation*
+  event — `AddLimitOrderEvent` or `CancelLimitOrderEvent` — per *successful* item**: a rejected
+  item in a partial-success batch records nothing, so a three-item add batch with one rejection
+  writes two operation events, and a successful `replace_limit_orders` writes exactly
+  `cancel.len() + create.len()` of them (a rejected replace writes none, per R6). **Each successful
+  cancel additionally records its inline settling event**, since `State::cancel_limit_order` drains
+  the settling it produced within the same message — so `N` cancels leave `2N` entries in the log,
+  not `N`. Acceptance tests must therefore count **per event type** rather than assert a raw
+  `total_event_count()` delta. What the requirement fixes is that no new event **type** appears:
+  event-log replay, the state snapshot, and persisted state are untouched.
 - **R19 — A replace's outer disposition mirrors its nested reason's.** When a replace is rejected
   over one item, the outer `kind` arm is the **same arm** the nested `reason` carries: an item that
   failed with a `TemporaryError` — today `TradingHalted`, which R16 explicitly routes through this
@@ -263,8 +267,10 @@ replace-specific reasons that would drift from the single-order ones.
 
 ### D6 — No new events
 
-A batch is N existing events. Nothing about the event log, replay, or the snapshot changes, so
-this ticket carries no persistence risk and no migration — worth stating explicitly given the
+A batch is just the existing events repeated: one operation event per successful item, plus the
+inline settling event each successful cancel already produces (R18). No new event **type** appears,
+so nothing about the event log's shape, replay, or the snapshot changes, and this ticket carries no
+persistence risk and no migration — worth stating explicitly given the
 canister is live and back-compat is required.
 
 ## Implementation
@@ -556,7 +562,11 @@ Integration (`integration_tests/tests/tests.rs`, PocketIC):
 - Halt behavior (R16, R19): a halted pair fails only its own items in a batch, but fails a whole
   replace — and that replace rejection arrives under the outer **`TemporaryError`** arm carrying
   `CreateRejected`, not `RequestError`, so a client following the disposition contract retries once
-  the halt clears.
+  the halt clears. The replace case **must include at least one valid cancel** and assert that
+  order is still open, its reservation still held, and the event count unchanged — otherwise the
+  test passes against an implementation that checks halt only in phase 2, having already applied
+  and settled the cancels. That is precisely the atomicity violation the phase-1 halt check
+  exists to prevent, and asserting only the error arm would not see it.
 - Trading accounts (R15): a trading account batches on its funding account's behalf;
   `placed_by` / `canceled_by` are recorded per order.
 - A replace that moves a two-sided quote: cancels and creates apply atomically, and the
