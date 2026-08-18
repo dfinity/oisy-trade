@@ -27,8 +27,9 @@ This ticket adds three endpoints:
   lands whole or leaves the maker's existing quotes untouched. It does not make the replacement
   liquidity appear instantly: new orders are enqueued as `Pending` and rest only once the matching
   engine processes them (see Non-goals). What it removes is the *failure-prone* part of the
-  window — the replacements are durably accepted before the cancels apply, so the gap is bounded
-  by one matching tick instead of by a second round trip that may never succeed.
+  window — every leg is validated before anything mutates and the call commits as a unit, so there
+  is no outcome where the cancels land and the replacements do not. The gap that remains is
+  bounded by one matching tick, rather than by a second round trip that may never succeed.
 
 ## Requirements
 
@@ -41,10 +42,16 @@ This ticket adds three endpoints:
   `add_limit_order(c)` issued in that order by the same caller: the same events recorded, the
   same order ids assigned in the same sequence, the same reservations, the same per-item
   errors. The batch differs only in costing one message and arming matching once (R14).
-- **R3 — Reservations accumulate within a batch.** Item `k` is validated against the balance
-  remaining after items `0..k` have taken their reservations. A batch that overdraws
-  therefore fails from the point the funds run out; the items before it stand. (A consequence
-  of R2, called out because it is the behavior a client will test.)
+  Equivalence is **modulo timestamps and inter-message interleaving**: a batch is one message, so
+  every order it records shares a single `Runtime::time` sample, while separate calls need not.
+  Nothing else may differ, and the R2 property test must normalize timestamps rather than expect
+  them to match.
+- **R3 — Reservations accumulate within a batch, and a failed item consumes nothing.** Item `k` is
+  validated against the balance left after the **successful** reservations among items `0..k`. An
+  item that fails takes no funds and therefore does not doom its successors: with 10 free units, an
+  item needing 11 fails while a following item needing 1 still succeeds. (A consequence of R2,
+  called out because it is the behavior a client will test — and the one most likely to be
+  mis-implemented as "stop at the first insufficient balance".)
 - **R4 — Batch cancellation returns one outcome per id.** `cancel_limit_orders` accepts a `vec
   OrderId` and returns a positionally-aligned `vec` of per-item outcomes: the canceled
   `OrderRecord`, or exactly the `CancelLimitOrderError` the single-order endpoint would have
@@ -100,8 +107,16 @@ This ticket adds three endpoints:
   that item with `TradingHalted` while items on other pairs proceed. In
   `replace_limit_orders`, because the call is atomic, a create on a halted pair fails the whole
   call; cancels remain permitted under halt, preserving the "users can always exit" guarantee.
-- **R17 — A full batch fits one message.** The worst case — 100 cancels, each settling inline —
-  stays within the per-message instruction limit, verified by a `canbench` benchmark.
+- **R17 — A full batch fits one message, and the cap is justified by measurement, not assumption.**
+  The cap bounds the *number* of operations by caller input but **not** their unit cost: one cancel
+  is `O(log p + k)` where `k` is the depth of the order's price level (`OrderQueue::remove` scans
+  the level with `iter().position(..)`), or `O(pending)` for a still-pending order — and neither
+  `k` nor `pending` is bounded by anything the caller sends. Cancellation is thus the binding case,
+  and a 100-cancel benchmark over a shallow fixture proves nothing about a deep live book. The
+  `canbench` benchmark must use a deliberately deep, fragmented book with the targets buried in
+  their queues, and `MAX_BATCH_LEN` must be a value that measurement supports at that depth. If the
+  worst case does not fit, the remedy is a lower cap or an `O(1)` removal path (indexing each
+  resting order's position) — decided in the delivering PR, not an assumed larger bound.
 - **R18 — No new event types and no state migration.** A batch records N existing
   `AddLimitOrderEvent` / `CancelLimitOrderEvent` events. Event-log replay, the state snapshot,
   and persisted state are untouched.
@@ -195,9 +210,11 @@ should retry it.
 ### D4 — `MAX_BATCH_LEN = 100`, matching the existing cap convention
 
 `MAX_FILTER_LEN`, `MAX_ORDERS_PER_RESPONSE`, `MAX_TRADES_PER_RESPONSE`, and `MAX_HALT_BOOKS` are
-all 100. A batch cap bounds the per-message instruction cost by the caller's input, which is what
-keeps R17 checkable; 100 is well above a realistic re-quote (a maker quoting both sides of a
-handful of pairs moves tens of orders) and consistent with the rest of the surface.
+all 100. A batch cap bounds the *number* of operations by the caller's input — though not their
+unit cost, which for a cancel depends on book depth (see R17); 100 is well above a realistic
+re-quote (a maker quoting both sides of a handful of pairs moves tens of orders) and consistent
+with the rest of the surface. Treat it as the starting point the R17 benchmark must validate, not
+a constant the design may assume.
 
 ### D5 — Replace reports the offending item by index, reusing the existing error types
 
@@ -315,11 +332,21 @@ by construction rather than by test:
 
 Two phases, with no mutation in the first (D2).
 
-**Phase 1 — validate, read-only, against a projected free balance.** Balance is the *only* state
-the cancels and the creates are coupled through: everything else create-validation touches (pair
-registered, halt status, tick/lot via `OrderBook::validate_order`, notional via
-`check_notional`, the u256 amount bound) is independent of the cancels. So the projection is a
-small per-token overlay rather than a state fork.
+**Phase 1 — validate, read-only, against projected balance *and* sequence state.** Two pieces of
+state advance as the batch is planned, so neither may be read live:
+
+- **Free balance** — couples the cancels to the creates, and accumulates across the creates.
+- **Each book's `next_seq`** — advances once per create. `State::validate_limit_order` assigns
+  `OrderId::new(book_id, book.next_seq())`, and `OrderBook::add_pending_order` asserts
+  `order.id() == self.next_seq` before incrementing. Validating two same-book creates against an
+  unmutated book therefore plans the **same** id twice and trips that assertion on the second
+  apply. Either project a per-book sequence counter through phase 1, or **defer id assignment to
+  phase 2** and have phase 1 validate everything else. Deferring is preferred: it keeps one source
+  of truth for id assignment.
+
+Everything else create-validation touches (pair registered, halt status, tick/lot via
+`OrderBook::validate_order`, notional via `check_notional`, the u256 amount bound) is independent
+of both, so the projection stays a small overlay rather than a state fork.
 
 ```rust
 /// Free-balance overlay for validating orders that have not been applied yet:
@@ -384,7 +411,10 @@ cancels would never have triggered — a visible divergence from R5.
 
 A `canbench` benchmark per endpoint at the 100-item cap. The binding case is
 `cancel_limit_orders`: cancellation settles inline, so 100 cancels are 100 book removals plus 100
-settlements in one message (R17). Note the repo's benchmark CI gate fails on **any** delta against
+settlements in one message — and each removal is `O(log p + k)` in its price level's depth, so the
+fixture must be a **deep, fragmented** book with the targets buried in their queues, not a shallow
+one (R17). If the measured worst case exceeds the per-message limit, lower `MAX_BATCH_LEN` or add
+an `O(1)` removal path rather than relaxing R17. Note the repo's benchmark CI gate fails on **any** delta against
 the committed `canbench_results.yml`, so new benchmarks must be persisted with `just bench-check`.
 
 ### Docs — `docs/src/development/design.md`
@@ -397,9 +427,14 @@ atomic split (D1), and move "Batch operations" out of *Potential Additional Feat
 Unit (`*/tests.rs`, fixtures in `canister/src/test_fixtures`):
 
 - Equivalence (R2, R5): a property test asserting `add_limit_orders(reqs)` leaves state and the
-  event log identical to the same requests placed one at a time; likewise for cancel.
-- Cumulative reservations (R3): a batch whose later items overdraw — earlier items stand, the
-  overdrawing item and its successors report `InsufficientBalance`.
+  event log identical to the same requests placed one at a time, **normalizing timestamps** (a
+  batch shares one `Runtime::time` sample; separate calls need not); likewise for cancel.
+- Same-book sequence assignment (R2, and the phase-1 projection): a batch — and a replace — with
+  several creates on the **same** book assigns distinct consecutive `OrderId`s and applies without
+  tripping `add_pending_order`'s seq assertion.
+- Cumulative reservations (R3): a batch whose later items overdraw — earlier items stand and the
+  overdrawing item reports `InsufficientBalance`, **while a smaller following item still
+  succeeds**, since a failed item reserves nothing and must not poison its successors.
 - Cap and empty (R10, R11): 101 items ⇒ `BatchTooLarge`, no state change; 0 items ⇒ `Ok([])` and
   no event recorded.
 - Replace atomicity (R6, R8): a replace whose last create is invalid leaves the book, balances,
