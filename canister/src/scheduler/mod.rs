@@ -15,6 +15,16 @@ pub enum TaskType {
     ProcessPendingOrders,
 }
 
+impl TaskType {
+    /// The task's heartbeat: the dispatcher re-arms the task at this interval
+    /// on every run. `None` for one-shot tasks.
+    fn interval(self) -> Option<Duration> {
+        match self {
+            TaskType::ProcessPendingOrders => Some(MATCHING_INTERVAL),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Scheduler {
     deadlines: BTreeMap<TaskType, Timestamp>,
@@ -63,7 +73,12 @@ pub fn run_task_if_ready(runtime: &impl Runtime) {
     let now = runtime.time();
     let task = SCHEDULER.with(|s| s.borrow_mut().pop_if_ready(now));
     match task {
-        Some(task) => run_task(task, runtime),
+        Some(task) => {
+            if let Some(interval) = task.interval() {
+                schedule_after(interval, task, runtime);
+            }
+            run_task(task, runtime);
+        }
         None => {
             if let Some(next) = SCHEDULER.with(|s| s.borrow().next_deadline()) {
                 runtime.global_timer_set(next);
@@ -75,7 +90,6 @@ pub fn run_task_if_ready(runtime: &impl Runtime) {
 fn run_task(task: TaskType, runtime: &impl Runtime) {
     match task {
         TaskType::ProcessPendingOrders => {
-            schedule_after(MATCHING_INTERVAL, TaskType::ProcessPendingOrders, runtime);
             if let ExecutionStatus::MoreWork = crate::process_pending_orders(runtime) {
                 schedule_now(TaskType::ProcessPendingOrders, runtime);
             }
