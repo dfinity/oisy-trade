@@ -1167,6 +1167,7 @@ pub mod mocks {
         mock.expect_msg_caller().return_const(caller);
         mock.expect_time().return_const(now);
         mock.expect_instruction_counter().return_const(0u64);
+        mock.expect_global_timer_set().return_const(());
         mock
     }
 

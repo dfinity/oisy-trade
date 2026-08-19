@@ -23,10 +23,6 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         order_id,
         request
     );
-    oisy_trade_canister::scheduler::schedule_now(
-        oisy_trade_canister::scheduler::TaskType::ProcessPendingOrders,
-        &oisy_trade_canister::IC_RUNTIME,
-    );
     Ok(order_id)
 }
 
@@ -245,12 +241,7 @@ fn halt_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError
 
 #[ic_cdk::update]
 fn resume_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError> {
-    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)?;
-    oisy_trade_canister::scheduler::schedule_now(
-        oisy_trade_canister::scheduler::TaskType::ProcessPendingOrders,
-        &oisy_trade_canister::IC_RUNTIME,
-    );
-    Ok(())
+    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.

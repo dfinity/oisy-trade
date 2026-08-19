@@ -87,6 +87,7 @@ pub fn add_limit_order(
         );
         Ok::<(), AddLimitOrderError>(())
     })?;
+    scheduler::schedule_now(scheduler::TaskType::ProcessPendingOrders, runtime);
     Ok(order_id.to_string())
 }
 
@@ -712,7 +713,9 @@ pub fn resume_trading(
     pairs: Option<Vec<TradingPair>>,
     runtime: &impl Runtime,
 ) -> Result<(), UnauthorizedError> {
-    set_halt(pairs, false, runtime)
+    set_halt(pairs, false, runtime)?;
+    scheduler::schedule_now(scheduler::TaskType::ProcessPendingOrders, runtime);
+    Ok(())
 }
 
 fn set_halt(

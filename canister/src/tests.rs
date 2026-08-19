@@ -661,6 +661,34 @@ mod add_limit_order {
             Balance::default()
         );
     }
+
+    #[test]
+    fn should_schedule_matching_on_successful_placement() {
+        init_state_with_order_book();
+        fund_user(DEFAULT_USER);
+        let mut runtime = crate::test_fixtures::mocks::MockRuntime::new();
+        runtime.expect_msg_caller().return_const(DEFAULT_USER);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
+        runtime.expect_instruction_counter().return_const(0u64);
+        runtime.expect_global_timer_set().times(1).return_const(());
+
+        add_limit_order(limit_order_request(), &runtime).unwrap();
+    }
+
+    #[test]
+    fn should_not_schedule_matching_on_rejected_placement() {
+        init_state_with_order_book();
+        let user = Principal::from_slice(&[0x01]);
+        let mut runtime = crate::test_fixtures::mocks::MockRuntime::new();
+        runtime.expect_msg_caller().return_const(user);
+        runtime.expect_time().return_const(crate::Timestamp::EPOCH);
+        runtime.expect_instruction_counter().return_const(0u64);
+        runtime.expect_global_timer_set().times(0).return_const(());
+
+        let result = add_limit_order(limit_order_request(), &runtime);
+
+        assert!(result.is_err());
+    }
 }
 
 mod cancel_limit_order {
