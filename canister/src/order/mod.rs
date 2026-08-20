@@ -520,10 +520,6 @@ impl std::fmt::Display for QuantityOverflowError {
 impl TryFrom<&Nat> for Quantity {
     type Error = QuantityOverflowError;
 
-    /// Rejects an out-of-range value in constant time: `bits()` is O(1) and the
-    /// (linear) `to_bytes_be()` runs only once the magnitude is known to fit.
-    /// Borrowing lets callers range-check an untrusted `Nat` without first
-    /// copying its unbounded magnitude.
     fn try_from(value: &Nat) -> Result<Self, Self::Error> {
         if value.0.bits() > 256 {
             return Err(QuantityOverflowError);

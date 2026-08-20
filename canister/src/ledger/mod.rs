@@ -22,8 +22,6 @@ enum Icrc1TransferError {
     Other(WithdrawError),
 }
 
-/// Transfer `amount` tokens from the caller to this canister via
-/// `icrc2_transfer_from`.
 pub async fn deposit(
     token: &TokenId,
     amount: Quantity,
