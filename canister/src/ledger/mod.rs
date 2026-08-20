@@ -24,10 +24,6 @@ enum Icrc1TransferError {
 
 /// Transfer `amount` tokens from the caller to this canister via
 /// `icrc2_transfer_from`.
-///
-/// Taking the validated `Quantity` rather than the request's raw `Nat` keeps the
-/// Candid types on the canister's outer layer: the amount is converted back for
-/// the ledger call only once its magnitude is known to be in range.
 pub async fn deposit(
     token: &TokenId,
     amount: Quantity,
@@ -86,10 +82,6 @@ pub async fn deposit(
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
 /// `BadFee`, the correct fee is used for a single retry. The amount shall
 /// be larger than zero (checked by caller).
-///
-/// Like `deposit`, this takes the validated `Quantity` and converts it for the
-/// ledger call itself. `cached_fee` stays a `Nat` because that is how the fee
-/// cache holds it.
 pub(crate) async fn withdraw(
     token: &TokenId,
     to: candid::Principal,
