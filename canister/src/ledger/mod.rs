@@ -1,4 +1,5 @@
 use crate::Runtime;
+use crate::order::{Quantity, TokenId};
 use oisy_trade_types::{
     DepositError, DepositInternalError, DepositRequestError, DepositResponse,
     DepositTemporaryError, WithdrawError, WithdrawInternalError, WithdrawRequestError,
@@ -22,17 +23,20 @@ enum Icrc1TransferError {
 }
 
 /// Transfer `amount` tokens from the caller to this canister via
-/// `icrc2_transfer_from`. The amount is taken as an already range-checked value
-/// rather than read back off the request, so no unvalidated magnitude reaches
-/// the ledger call.
+/// `icrc2_transfer_from`.
+///
+/// Taking the validated `Quantity` rather than the request's raw `Nat` keeps the
+/// Candid types on the canister's outer layer: the amount is converted back for
+/// the ledger call only once its magnitude is known to be in range.
 pub async fn deposit(
-    token: &oisy_trade_types::TokenId,
-    amount: candid::Nat,
+    token: &TokenId,
+    amount: Quantity,
     runtime: &impl Runtime,
 ) -> Result<DepositResponse, DepositError> {
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 
+    let ledger_id = *token.as_principal();
     let caller = runtime.msg_caller();
 
     let transfer_args = TransferFromArgs {
@@ -45,7 +49,7 @@ pub async fn deposit(
             owner: runtime.canister_self(),
             subaccount: None,
         },
-        amount,
+        amount: amount.to_nat(),
         fee: None,
         memo: None,
         created_at_time: None,
@@ -53,11 +57,11 @@ pub async fn deposit(
 
     // TODO(DEFI-2745): Consider switching to bounded_wait calls.
     let response = runtime
-        .call_unbounded_wait(token.ledger_id, "icrc2_transfer_from", (transfer_args,))
+        .call_unbounded_wait(ledger_id, "icrc2_transfer_from", (transfer_args,))
         .await
         .map_err(|e| {
             DepositError::temporary(DepositTemporaryError::CallFailed {
-                ledger: token.ledger_id,
+                ledger: ledger_id,
                 method: "icrc2_transfer_from".to_string(),
                 reason: format!("{e}"),
             })
@@ -66,7 +70,7 @@ pub async fn deposit(
     let (result,): (Result<candid::Nat, TransferFromError>,) =
         response.candid_tuple().map_err(|e| {
             DepositError::internal(DepositInternalError::CandidDecodeFailed {
-                ledger: token.ledger_id,
+                ledger: ledger_id,
                 method: "icrc2_transfer_from".to_string(),
                 reason: e.to_string(),
             })
@@ -82,14 +86,22 @@ pub async fn deposit(
 /// Uses `cached_fee` for the first attempt. If the ledger rejects it with
 /// `BadFee`, the correct fee is used for a single retry. The amount shall
 /// be larger than zero (checked by caller).
+///
+/// Like `deposit`, this takes the validated `Quantity` and converts it for the
+/// ledger call itself. `cached_fee` stays a `Nat` because that is how the fee
+/// cache holds it.
 pub(crate) async fn withdraw(
-    token: &oisy_trade_types::TokenId,
+    token: &TokenId,
     to: candid::Principal,
-    amount: candid::Nat,
+    amount: Quantity,
     cached_fee: candid::Nat,
     runtime: &impl Runtime,
 ) -> WithdrawOutcome {
-    debug_assert_ne!(amount, 0u64, "withdrawal amount must be greater than zero");
+    debug_assert!(
+        !amount.is_zero(),
+        "withdrawal amount must be greater than zero"
+    );
+    let amount = amount.to_nat();
     // When the cached fee exceeds the amount (e.g. the ledger fee was lowered
     // since the last withdrawal), cap it to amount - 1 so the subtraction
     // doesn't underflow. The ledger will reply with BadFee and the retry will
@@ -148,7 +160,7 @@ pub(crate) async fn withdraw(
 }
 
 async fn icrc1_transfer(
-    token: &oisy_trade_types::TokenId,
+    token: &TokenId,
     to: candid::Principal,
     transfer_amount: candid::Nat,
     fee: candid::Nat,
@@ -157,6 +169,7 @@ async fn icrc1_transfer(
     use icrc_ledger_types::icrc1::account::Account;
     use icrc_ledger_types::icrc1::transfer::TransferArg;
 
+    let ledger_id = *token.as_principal();
     let transfer_args = TransferArg {
         from_subaccount: None,
         to: Account {
@@ -170,12 +183,12 @@ async fn icrc1_transfer(
     };
 
     let response = runtime
-        .call_unbounded_wait(token.ledger_id, "icrc1_transfer", (transfer_args,))
+        .call_unbounded_wait(ledger_id, "icrc1_transfer", (transfer_args,))
         .await
         .map_err(|e| {
             Icrc1TransferError::Other(WithdrawError::temporary(
                 WithdrawTemporaryError::CallFailed {
-                    ledger: token.ledger_id,
+                    ledger: ledger_id,
                     method: "icrc1_transfer".to_string(),
                     reason: format!("{e}"),
                 },
@@ -186,7 +199,7 @@ async fn icrc1_transfer(
         response.candid_tuple().map_err(|e| {
             Icrc1TransferError::Other(WithdrawError::internal(
                 WithdrawInternalError::CandidDecodeFailed {
-                    ledger: token.ledger_id,
+                    ledger: ledger_id,
                     method: "icrc1_transfer".to_string(),
                     reason: e.to_string(),
                 },

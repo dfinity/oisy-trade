@@ -306,11 +306,12 @@ pub async fn deposit(
     let amount = order::Quantity::try_from(&request.amount).map_err(|_| {
         DepositError::request(oisy_trade_types::DepositRequestError::AmountExceedsMaximum)
     })?;
-    let token_id = request.token_id.clone();
-    let internal_token = order::TokenId::from(token_id.clone());
+    let internal_token = order::TokenId::from(request.token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
         return Err(DepositError::request(
-            oisy_trade_types::DepositRequestError::UnsupportedToken { token_id },
+            oisy_trade_types::DepositRequestError::UnsupportedToken {
+                token_id: request.token_id.clone(),
+            },
         ));
     }
     let caller = runtime.msg_caller();
@@ -348,10 +349,10 @@ pub async fn deposit(
         ));
     }
 
-    let deposit_response = ledger::deposit(&token_id, amount.to_nat(), runtime).await?;
+    let deposit_response = ledger::deposit(&internal_token, amount, runtime).await?;
     let event = state::event::DepositEvent {
         user: caller,
-        token: order::TokenId::from(token_id),
+        token: internal_token,
         amount,
     };
     let post = pre.reconcile();
@@ -375,11 +376,12 @@ pub async fn withdraw(
     let amount = order::Quantity::try_from(&request.amount).map_err(|_| {
         WithdrawError::request(oisy_trade_types::WithdrawRequestError::AmountExceedsMaximum)
     })?;
-    let token_id = request.token_id.clone();
-    let internal_token = order::TokenId::from(token_id.clone());
+    let internal_token = order::TokenId::from(request.token_id.clone());
     if !state::with_state(|s| s.is_known_token(&internal_token)) {
         return Err(WithdrawError::request(
-            oisy_trade_types::WithdrawRequestError::UnsupportedToken { token_id },
+            oisy_trade_types::WithdrawRequestError::UnsupportedToken {
+                token_id: request.token_id.clone(),
+            },
         ));
     }
     let cached_fee = state::with_state(|s| s.get_cached_ledger_fee(&internal_token));
@@ -426,12 +428,12 @@ pub async fn withdraw(
     })?;
 
     // Perform the ledger transfer (with automatic BadFee retry).
-    let outcome = ledger::withdraw(&token_id, caller, amount.to_nat(), cached_fee, runtime).await;
+    let outcome = ledger::withdraw(&internal_token, caller, amount, cached_fee, runtime).await;
 
     // Update the fee cache when a BadFee revealed a new fee, regardless of success/failure.
     if let Some(fee) = outcome.ledger_fee {
         state::with_state_mut(|s| {
-            s.set_cached_ledger_fee(order::TokenId::from(token_id.clone()), fee);
+            s.set_cached_ledger_fee(internal_token, fee);
         });
     }
 
@@ -446,7 +448,7 @@ pub async fn withdraw(
             let event = state::event::WithdrawEvent {
                 block_index,
                 user: caller,
-                token: order::TokenId::from(token_id),
+                token: internal_token,
                 amount,
             };
             let post = pre.reconcile();
@@ -464,7 +466,7 @@ pub async fn withdraw(
             state::with_state_mut(|s| {
                 s.deposit(
                     caller,
-                    order::TokenId::from(token_id),
+                    internal_token,
                     amount,
                     state::StableMemoryOptions::Write,
                 );
