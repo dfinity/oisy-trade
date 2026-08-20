@@ -313,8 +313,8 @@ mod add_trading_pair {
             // ckBTC/ckUSDT
             oisy_trade_types::AddTradingPairRequest {
                 base: SupportedTokens::CKBTC.token(),
-                tick_size: Nat::from(10_000_u32),
-                lot_size: Nat::from(10_000_u32),
+                tick_size: Nat::from(100_000_u32),
+                lot_size: Nat::from(1_000_u32),
                 ..ckusdt_quote.clone()
             },
             // VCHF/ckUSDT
