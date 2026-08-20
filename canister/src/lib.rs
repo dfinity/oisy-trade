@@ -8,10 +8,7 @@ use oisy_trade_types::{
     Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
     WithdrawError, WithdrawRequest, WithdrawResponse,
 };
-use std::{
-    num::{NonZeroU64, NonZeroU128},
-    time::Duration,
-};
+use std::num::{NonZeroU64, NonZeroU128};
 
 pub use execute::EXECUTOR;
 pub use runtime::{IC_RUNTIME, Runtime, Timestamp};
@@ -37,6 +34,7 @@ pub mod lifecycle;
 pub mod metrics;
 pub mod order;
 pub mod runtime;
+pub mod scheduler;
 pub mod settlement;
 pub mod state;
 pub mod storage;
@@ -50,13 +48,6 @@ mod ledger;
 pub mod test_fixtures;
 #[cfg(test)]
 mod tests;
-
-pub const MATCHING_INTERVAL: Duration = Duration::from_mins(1);
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
-pub enum Task {
-    ProcessPendingOrders,
-}
 
 pub fn add_limit_order(
     request: LimitOrderRequest,
@@ -96,6 +87,7 @@ pub fn add_limit_order(
         );
         Ok::<(), AddLimitOrderError>(())
     })?;
+    scheduler::schedule_now(scheduler::TaskType::ProcessPendingOrders, runtime);
     Ok(order_id.to_string())
 }
 
@@ -174,33 +166,7 @@ pub fn get_my_trading_accounts(
 }
 
 pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatus {
-    let _guard = match guard::TimerGuard::new(Task::ProcessPendingOrders) {
-        Some(guard) => guard,
-        None => return execute::ExecutionStatus::AlreadyRunning,
-    };
-
     state::with_state_mut(|s| EXECUTOR.run_once(s, runtime))
-}
-
-/// Run one chunk of matching/settling and, if more work remains, schedule a
-/// zero-delay timer to continue. Intended for IC entry points (the periodic
-/// matching timer and the post-`add_limit_order` kickoff) — tests should call
-/// [`process_pending_orders`] directly, which is synchronous and timer-free.
-pub fn drive_matching() {
-    match process_pending_orders(&IC_RUNTIME) {
-        execute::ExecutionStatus::MoreWork => {
-            // TODO DEFI-2823: coalesce zero-delay matching timers so a
-            // burst of `add_limit_order` kickoffs plus this self-reschedule
-            // chain doesn't queue O(N) redundant timers per burst.
-            ic_cdk_timers::set_timer(Duration::ZERO, async {
-                drive_matching();
-            });
-        }
-        // Complete: nothing left to do. AlreadyRunning: the holder will
-        // reschedule itself if its run left work unfinished, so we don't
-        // pile on another timer.
-        execute::ExecutionStatus::Complete | execute::ExecutionStatus::AlreadyRunning => {}
-    }
 }
 
 pub fn get_order_book_ticker(
@@ -749,7 +715,9 @@ pub fn resume_trading(
     pairs: Option<Vec<TradingPair>>,
     runtime: &impl Runtime,
 ) -> Result<(), UnauthorizedError> {
-    set_halt(pairs, false, runtime)
+    set_halt(pairs, false, runtime)?;
+    scheduler::schedule_now(scheduler::TaskType::ProcessPendingOrders, runtime);
+    Ok(())
 }
 
 fn set_halt(

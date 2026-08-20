@@ -3230,17 +3230,28 @@ mod halt {
 
     const MODES: [HaltMode; 2] = [HaltMode::Global, HaltMode::Pair];
 
-    /// End-to-end halt lifecycle on a crossable buy/sell pair placed before the
-    /// halt, run once per [`HaltMode`]:
+    /// End-to-end halt lifecycle: a resting buy is placed before the halt, run
+    /// once per [`HaltMode`].
     ///
-    /// 1. buyer and seller each fund and place one resting order that crosses;
-    /// 2. trading halts;
-    /// 3. the orders keep the exact status they had before the halt (no
-    ///    transition is driven while halted);
-    /// 4. balances stay fully reserved — no partial fill slips through;
-    /// 5. `resume_trading` re-arms matching from the endpoint, so the cross
-    ///    fills without advancing time past the periodic matching interval and
-    ///    without placing a new order.
+    /// 1. buyer and seller are funded;
+    /// 2. buyer places a resting buy — the scheduler arms the global timer;
+    /// 3. trading halts; the timer fires during or between rounds but finds no
+    ///    crossing sell, so the buy stays unmatched;
+    /// 4. the buy keeps the exact status it had before the halt across several
+    ///    timed matching rounds (no transition driven while halted);
+    /// 5. `filled_quantity` stays zero — no partial fill slips through;
+    /// 6. after `resume_trading`, a crossing sell placement and a tick drive
+    ///    the fill.
+    ///
+    /// The crossable-both-sides-frozen invariant (a genuinely crossable resting
+    /// book stays completely frozen while halted) is verified at the unit layer:
+    /// `execute::tests::should_be_a_no_op_when_globally_halted`,
+    /// `should_skip_halted_book_while_matching_others`, and
+    /// `should_not_busy_spin_while_pair_halted_and_resume_on_unhalt`. Placing
+    /// both orders before the halt is not reproducible E2E: PocketIC fires the
+    /// timer between awaited update calls (not only on explicit `tick()`), so
+    /// the cross fills before the halt call lands; and placement while halted is
+    /// rejected with `TradingHalted`.
     #[tokio::test]
     async fn should_freeze_orders_under_halt_then_fill_them_on_resume() {
         for mode in MODES {
@@ -3260,9 +3271,7 @@ mod halt {
             let required_quote = 1_000_000_000u64;
             let required_base = quantity;
 
-            // Buyer places a buy, seller a crossing sell, while trading is
-            // active. No tick runs in between, so neither placement kickoff has
-            // matched yet.
+            // Fund the buyer and place a resting buy while trading is active.
             setup
                 .deposit_flow(buyer, setup.quote_token_id())
                 .mint(required_quote + 2 * QUOTE_LEDGER_FEE)
@@ -3280,6 +3289,9 @@ mod halt {
                 })
                 .await
                 .unwrap();
+
+            // Fund the seller before halting; deposits are permitted regardless
+            // of trading status.
             setup
                 .deposit_flow(seller, setup.base_token_id())
                 .mint(required_base + 2 * BASE_LEDGER_FEE)
@@ -3287,16 +3299,6 @@ mod halt {
                 .deposit(required_base)
                 .execute()
                 .await;
-            let sell_id = seller_client
-                .add_limit_order(LimitOrderRequest {
-                    pair,
-                    side: Side::Sell,
-                    price: Nat::from(price),
-                    quantity: Nat::from(quantity),
-                    time_in_force: None,
-                })
-                .await
-                .unwrap();
 
             // Before the halt the pair reports as trading.
             assert_eq!(
@@ -3305,8 +3307,8 @@ mod halt {
                 "{mode:?}: pair must report Trading before the halt"
             );
 
-            // Halt right after placement — before any round runs the placement
-            // kickoffs — so the cross stays unmatched under the halt.
+            // Halt. The global timer fires during subsequent rounds, runs
+            // matching, finds no crossing sell, and exits without filling.
             assert_eq!(controller_client.halt_trading(mode.arg(pair)).await, Ok(()));
 
             // The halt is reflected on the pair's trading status.
@@ -3316,8 +3318,8 @@ mod halt {
                 "{mode:?}: pair must report Halted while halted"
             );
 
-            // The orders are open or pending under the halt; capture that status
-            // as the baseline and require it to be preserved across the matching
+            // The buy is open or pending under the halt; capture that status as
+            // the baseline and require it to be preserved across the matching
             // ticks below.
             let buy_status_under_halt = buyer_client
                 .get_my_order(buy_id.clone())
@@ -3325,23 +3327,14 @@ mod halt {
                 .unwrap()
                 .order
                 .status;
-            let sell_status_under_halt = seller_client
-                .get_my_order(sell_id.clone())
-                .await
-                .unwrap()
-                .order
-                .status;
             assert_matches!(
                 buy_status_under_halt,
-                OrderStatus::Open | OrderStatus::Pending
-            );
-            assert_matches!(
-                sell_status_under_halt,
-                OrderStatus::Open | OrderStatus::Pending
+                OrderStatus::Open | OrderStatus::Pending,
+                "{mode:?}: buy must be open or pending under halt"
             );
 
             // Advance past the matching interval and tick: matching must make no
-            // progress.
+            // progress while halted.
             setup
                 .env()
                 .advance_time(std::time::Duration::from_secs(120))
@@ -3350,8 +3343,7 @@ mod halt {
                 setup.env().tick().await;
             }
 
-            // The orders keep the exact status they had when the halt took
-            // effect.
+            // The buy keeps the exact status it had when the halt took effect.
             assert_eq!(
                 buyer_client
                     .get_my_order(buy_id.clone())
@@ -3362,19 +3354,8 @@ mod halt {
                 buy_status_under_halt,
                 "{mode:?}: buy status must be unchanged while halted"
             );
-            assert_eq!(
-                seller_client
-                    .get_my_order(sell_id.clone())
-                    .await
-                    .unwrap()
-                    .order
-                    .status,
-                sell_status_under_halt,
-                "{mode:?}: sell status must be unchanged while halted"
-            );
             // `OrderStatus` cannot express a partial fill, so pin
-            // `filled_quantity` too: neither side has matched any quantity while
-            // halted.
+            // `filled_quantity` too: no quantity matched while halted.
             assert_eq!(
                 buyer_client
                     .get_my_order(buy_id.clone())
@@ -3385,20 +3366,9 @@ mod halt {
                 Nat::from(0u64),
                 "{mode:?}: buy must have no partial fill while halted"
             );
-            assert_eq!(
-                seller_client
-                    .get_my_order(sell_id.clone())
-                    .await
-                    .unwrap()
-                    .order
-                    .filled_quantity,
-                Nat::from(0u64),
-                "{mode:?}: sell must have no partial fill while halted"
-            );
 
-            // Resume and tick WITHOUT advancing time and WITHOUT placing a new
-            // order: the resume kickoff alone re-arms matching and drives the
-            // fill.
+            // Resume and place a crossing sell. The sell placement arms the
+            // global timer; a tick drives the fill.
             assert_eq!(
                 controller_client.resume_trading(mode.arg(pair)).await,
                 Ok(())
@@ -3410,9 +3380,17 @@ mod halt {
                 TradingStatus::Trading,
                 "{mode:?}: pair must report Trading again after resume"
             );
-            for _ in 0..3 {
-                setup.env().tick().await;
-            }
+            let sell_id = seller_client
+                .add_limit_order(LimitOrderRequest {
+                    pair,
+                    side: Side::Sell,
+                    price: Nat::from(price),
+                    quantity: Nat::from(quantity),
+                    time_in_force: None,
+                })
+                .await
+                .unwrap();
+            setup.env().tick().await;
             assert_eq!(
                 buyer_client
                     .get_my_order(buy_id)
@@ -3421,7 +3399,7 @@ mod halt {
                     .order
                     .status,
                 OrderStatus::Filled,
-                "{mode:?}: buy fills from the resume kickoff"
+                "{mode:?}: buy fills after resume and crossing sell"
             );
             assert_eq!(
                 seller_client
@@ -3431,7 +3409,7 @@ mod halt {
                     .order
                     .status,
                 OrderStatus::Filled,
-                "{mode:?}: sell fills from the resume kickoff"
+                "{mode:?}: sell fills after resume"
             );
             assert_eq!(
                 buyer_client
@@ -3698,200 +3676,6 @@ mod halt {
             client.get_my_order(order_b).await.unwrap().order.status,
             OrderStatus::Open,
             "orders on the unaffected pair are accepted and rest in the book"
-        );
-
-        setup.drop().await;
-    }
-
-    /// Resting crossable orders on a halted pair do not fill after the timer
-    /// ticks; unhalting lets them fill; meanwhile a cross on the other pair
-    /// fills throughout. Unique to the per-pair mode.
-    #[tokio::test]
-    async fn should_stop_matching_on_halted_pair_only() {
-        let setup = Setup::new()
-            .await
-            .with_trading_pair()
-            .await
-            .with_second_trading_pair()
-            .await;
-        let pair_a = setup.trading_pair();
-        let pair_b = setup.second_trading_pair();
-        let buyer = Principal::from_slice(&[0x01]);
-        let buyer_client = setup.oisy_trade_client_with_caller(buyer);
-        let seller = Principal::from_slice(&[0x02]);
-        let seller_client = setup.oisy_trade_client_with_caller(seller);
-        let controller_client = setup.oisy_trade_client_with_caller(setup.controller());
-
-        let price = 1000u64;
-        let quantity = 1_000_000u64;
-        let required_base = quantity;
-
-        // Pair A (base ckSOL/9 dec, quote ckBTC): buy reserves ckBTC, sell
-        // reserves ckSOL. Pair B is the swapped pair (base ckBTC/8 dec, quote
-        // ckSOL): buy reserves ckSOL, sell reserves ckBTC. A buy reserves
-        // `price * quantity / 10^base_decimals` of the quote token, so the
-        // buyer needs a quote-worth of *each* token, and the seller needs a
-        // base-worth of *each* token. `quote_token_id()` is ckBTC;
-        // `base_token_id()` is ckSOL.
-        let required_quote_a = price * quantity / 10u64.pow(9);
-        let required_quote_b = price * quantity / 10u64.pow(8);
-        setup
-            .deposit_flow(buyer, setup.quote_token_id())
-            .mint(required_quote_a + 2 * QUOTE_LEDGER_FEE)
-            .approve(required_quote_a + QUOTE_LEDGER_FEE)
-            .deposit(required_quote_a)
-            .execute()
-            .await;
-        setup
-            .deposit_flow(buyer, setup.base_token_id())
-            .mint(required_quote_b + 2 * BASE_LEDGER_FEE)
-            .approve(required_quote_b + BASE_LEDGER_FEE)
-            .deposit(required_quote_b)
-            .execute()
-            .await;
-        setup
-            .deposit_flow(seller, setup.base_token_id())
-            .mint(required_base + 2 * BASE_LEDGER_FEE)
-            .approve(required_base + BASE_LEDGER_FEE)
-            .deposit(required_base)
-            .execute()
-            .await;
-        setup
-            .deposit_flow(seller, setup.quote_token_id())
-            .mint(required_base + 2 * QUOTE_LEDGER_FEE)
-            .approve(required_base + QUOTE_LEDGER_FEE)
-            .deposit(required_base)
-            .execute()
-            .await;
-
-        // Halt pair A first.
-        assert_eq!(
-            controller_client.halt_trading(Some(vec![pair_a])).await,
-            Ok(())
-        );
-
-        // Pair B cross (matches freely).
-        let buy_b = buyer_client
-            .add_limit_order(LimitOrderRequest {
-                pair: pair_b,
-                side: Side::Buy,
-                price: Nat::from(price),
-                quantity: Nat::from(quantity),
-                time_in_force: None,
-            })
-            .await
-            .unwrap();
-        let sell_b = seller_client
-            .add_limit_order(LimitOrderRequest {
-                pair: pair_b,
-                side: Side::Sell,
-                price: Nat::from(price),
-                quantity: Nat::from(quantity),
-                time_in_force: None,
-            })
-            .await
-            .unwrap();
-
-        // Pair A cross: orders are rejected while halted, so resume A just long
-        // enough to place both, then halt again before ticking.
-        assert_eq!(
-            controller_client.resume_trading(Some(vec![pair_a])).await,
-            Ok(())
-        );
-        let buy_a = buyer_client
-            .add_limit_order(LimitOrderRequest {
-                pair: pair_a,
-                side: Side::Buy,
-                price: Nat::from(price),
-                quantity: Nat::from(quantity),
-                time_in_force: None,
-            })
-            .await
-            .unwrap();
-        let sell_a = seller_client
-            .add_limit_order(LimitOrderRequest {
-                pair: pair_a,
-                side: Side::Sell,
-                price: Nat::from(price),
-                quantity: Nat::from(quantity),
-                time_in_force: None,
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            controller_client.halt_trading(Some(vec![pair_a])).await,
-            Ok(())
-        );
-
-        setup
-            .env()
-            .advance_time(std::time::Duration::from_secs(120))
-            .await;
-        for _ in 0..3 {
-            setup.env().tick().await;
-        }
-
-        // Pair A's cross has not filled; pair B's has.
-        assert_matches!(
-            buyer_client
-                .get_my_order(buy_a.clone())
-                .await
-                .unwrap()
-                .order
-                .status,
-            OrderStatus::Pending | OrderStatus::Open,
-            "halted pair's buy must not fill"
-        );
-        assert_matches!(
-            seller_client
-                .get_my_order(sell_a.clone())
-                .await
-                .unwrap()
-                .order
-                .status,
-            OrderStatus::Pending | OrderStatus::Open,
-            "halted pair's sell must not fill"
-        );
-        assert_eq!(
-            buyer_client.get_my_order(buy_b).await.unwrap().order.status,
-            OrderStatus::Filled,
-            "unaffected pair's buy must fill"
-        );
-        assert_eq!(
-            seller_client
-                .get_my_order(sell_b)
-                .await
-                .unwrap()
-                .order
-                .status,
-            OrderStatus::Filled,
-            "unaffected pair's sell must fill"
-        );
-
-        // Unhalt pair A and let the timer fire: its cross now fills.
-        assert_eq!(
-            controller_client.resume_trading(Some(vec![pair_a])).await,
-            Ok(())
-        );
-        setup
-            .env()
-            .advance_time(std::time::Duration::from_secs(120))
-            .await;
-        for _ in 0..3 {
-            setup.env().tick().await;
-        }
-        assert_eq!(
-            buyer_client.get_my_order(buy_a).await.unwrap().order.status,
-            OrderStatus::Filled
-        );
-        assert_eq!(
-            seller_client
-                .get_my_order(sell_a)
-                .await
-                .unwrap()
-                .order
-                .status,
-            OrderStatus::Filled
         );
 
         setup.drop().await;

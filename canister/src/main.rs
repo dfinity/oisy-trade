@@ -23,12 +23,6 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         order_id,
         request
     );
-    // Trigger matching immediately, no need to wait for the periodic timer.
-    // TODO DEFI-2823: coalesce — a burst of order placements currently
-    // queues one zero-delay timer per call.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
     Ok(order_id)
 }
 
@@ -247,13 +241,7 @@ fn halt_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError
 
 #[ic_cdk::update]
 fn resume_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError> {
-    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)?;
-    // Re-arm matching immediately so orders that piled up while halted match now,
-    // without waiting for the periodic timer. Mirrors the add_limit_order kickoff.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
-    Ok(())
+    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
@@ -556,6 +544,11 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         }
         _ => HttpResponseBuilder::not_found().build(),
     }
+}
+
+#[unsafe(export_name = "canister_global_timer")]
+fn global_timer() {
+    oisy_trade_canister::scheduler::run_task_if_ready(&oisy_trade_canister::IC_RUNTIME);
 }
 
 fn main() {}

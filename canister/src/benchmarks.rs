@@ -3,16 +3,60 @@ use crate::order::{
     TickSize, TimeInForce, TokenId, TokenMetadata, TradingPair,
 };
 
-use crate::EXECUTOR;
 use crate::order::{OrderHistory, OrderId, TradeHistory};
 use crate::state::execution_policy::ExecutionPolicy;
 use crate::state::{StableMemoryOptions, State};
 use crate::storage;
+use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
+use async_trait::async_trait;
 use canbench_rs::bench;
 use candid::Principal;
+use candid::utils::ArgumentEncoder;
+use ic_cdk::call::{CallFailed, Response};
 use oisy_trade_types_internal::{InitArg, Mode};
 use serde::Deserialize;
 use std::num::{NonZeroU64, NonZeroU128};
+
+struct BenchUpgradeRuntime;
+
+#[async_trait]
+impl Runtime for BenchUpgradeRuntime {
+    async fn call_unbounded_wait<A>(
+        &self,
+        canister_id: Principal,
+        method: &str,
+        args: A,
+    ) -> Result<Response, CallFailed>
+    where
+        A: ArgumentEncoder + Send,
+    {
+        IC_RUNTIME
+            .call_unbounded_wait(canister_id, method, args)
+            .await
+    }
+
+    fn msg_caller(&self) -> Principal {
+        IC_RUNTIME.msg_caller()
+    }
+
+    fn canister_self(&self) -> Principal {
+        IC_RUNTIME.canister_self()
+    }
+
+    fn is_controller(&self, principal: &Principal) -> bool {
+        IC_RUNTIME.is_controller(principal)
+    }
+
+    fn instruction_counter(&self) -> u64 {
+        IC_RUNTIME.instruction_counter()
+    }
+
+    fn time(&self) -> Timestamp {
+        IC_RUNTIME.time()
+    }
+
+    fn global_timer_set(&self, _deadline: Timestamp) {}
+}
 
 /// Minimum price increment for ICP/USDT on Binance: 0.001 USDT with 8 decimal places.
 const TICK_SIZE: TickSize = TickSize::new(NonZeroU128::new(100_000).unwrap());
@@ -186,14 +230,12 @@ fn bench_upgrade_1000_no_fills() -> canbench_rs::BenchResult {
 }
 
 fn bench_upgrade_roundtrip(state: State<storage::VMem, storage::VMem>) -> canbench_rs::BenchResult {
-    // canbench installs the canister via `init`, which already populated
-    // the thread-local state. Swap in the benchmark's populated state.
     crate::state::reset_state();
     crate::state::init_state(state);
     canbench_rs::bench_fn(|| {
-        crate::lifecycle::pre_upgrade(&crate::IC_RUNTIME);
+        crate::lifecycle::pre_upgrade(&BenchUpgradeRuntime);
         crate::state::reset_state();
-        crate::lifecycle::post_upgrade(None, &crate::IC_RUNTIME);
+        crate::lifecycle::post_upgrade(None, &BenchUpgradeRuntime);
     })
 }
 
@@ -816,6 +858,10 @@ mod settling_event_sweep {
 
         fn time(&self) -> Timestamp {
             IC_RUNTIME.time()
+        }
+
+        fn global_timer_set(&self, deadline: Timestamp) {
+            IC_RUNTIME.global_timer_set(deadline);
         }
     }
 

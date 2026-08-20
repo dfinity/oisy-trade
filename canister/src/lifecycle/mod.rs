@@ -1,10 +1,11 @@
 use crate::balance::TokenBalance;
 use crate::order::{OrderHistory, TradeHistory};
+use crate::scheduler::{MATCHING_INTERVAL, TaskType};
 use crate::state::audit;
 use crate::state::event::EventType;
 use crate::state::{State, StateSnapshot};
 use crate::user::UserRegistry;
-use crate::{MATCHING_INTERVAL, Runtime, state, storage};
+use crate::{Runtime, scheduler, state, storage};
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
 
@@ -41,7 +42,7 @@ pub fn init(arg: OisyTradeArg, runtime: &impl Runtime) {
         .expect("ERROR: invalid init args"),
     );
     storage::record_event(runtime.time(), EventType::Init(init_arg));
-    setup_timers();
+    scheduler::schedule_after(MATCHING_INTERVAL, TaskType::ProcessPendingOrders, runtime);
     canlog::log!(Priority::Info, "[init]: OISY TRADE canister initialized");
 }
 
@@ -126,11 +127,5 @@ pub fn post_upgrade(arg: Option<OisyTradeArg>, runtime: &impl Runtime) {
         Priority::Info,
         "[post_upgrade]: state restored from snapshot, total instructions used: {instructions_used}",
     );
-    setup_timers();
-}
-
-fn setup_timers() {
-    ic_cdk_timers::set_timer_interval(MATCHING_INTERVAL, || async {
-        crate::drive_matching();
-    });
+    scheduler::schedule_after(MATCHING_INTERVAL, TaskType::ProcessPendingOrders, runtime);
 }

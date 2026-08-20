@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use candid::Principal;
 use candid::utils::ArgumentEncoder;
 use ic_cdk::call::{Call, CallFailed, Response};
+use std::time::Duration;
 
 pub const IC_RUNTIME: IcRuntime = IcRuntime;
 
@@ -25,6 +26,11 @@ impl Timestamp {
 
     pub const fn as_nanos(self) -> u64 {
         self.0
+    }
+
+    pub fn saturating_add(self, delay: Duration) -> Self {
+        let delay_nanos = u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX);
+        Self(self.0.saturating_add(delay_nanos))
     }
 }
 
@@ -54,6 +60,9 @@ pub trait Runtime {
 
     /// Returns the current time in nanoseconds since the Unix epoch.
     fn time(&self) -> Timestamp;
+
+    /// Sets the canister's global timer to `deadline`, replacing any prior value.
+    fn global_timer_set(&self, deadline: Timestamp);
 }
 
 #[derive(Copy, Clone)]
@@ -93,5 +102,9 @@ impl Runtime for IcRuntime {
 
     fn time(&self) -> Timestamp {
         Timestamp::new(ic_cdk::api::time())
+    }
+
+    fn global_timer_set(&self, deadline: Timestamp) {
+        ic_cdk::api::global_timer_set(deadline.as_nanos());
     }
 }
