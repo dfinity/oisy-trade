@@ -1419,6 +1419,31 @@ mod deposit {
     }
 
     #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum_ahead_of_unsupported_token() {
+        use std::str::FromStr;
+
+        init_state_with_order_book();
+        let runtime = CapturingRuntime::new(USER, vec![]);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = deposit(
+            &DepositRequest {
+                token_id: TokenId::new(Principal::from_slice(&[0xAB])).into(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        // The range check must win over every other request-error branch: an
+        // out-of-range amount may never reach code that could render it.
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(DepositRequestError::AmountExceedsMaximum))
+        );
+    }
+
+    #[tokio::test]
     async fn should_deny_deposit_by_trading_account_before_any_ledger_call() {
         use crate::test_fixtures::{fund_user, mocks::mock_runtime_for};
 
@@ -1835,6 +1860,36 @@ mod withdraw {
         )
         .await;
 
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
+        );
+        assert_balance(deposit);
+        assert_no_withdraw_event();
+    }
+
+    #[tokio::test]
+    async fn should_reject_amount_exceeding_maximum_ahead_of_unsupported_token() {
+        use std::str::FromStr;
+
+        let deposit = 1_000_000u64;
+        init_state_with_balance(deposit);
+
+        let mut runtime = MockRuntime::new();
+        runtime.expect_msg_caller().return_const(USER);
+
+        let oversized = Nat::from_str(&format!("1{}", "0".repeat(100))).unwrap();
+        let result = withdraw(
+            &WithdrawRequest {
+                token_id: TokenId::new(Principal::from_slice(&[0xAB])).into(),
+                amount: oversized,
+            },
+            &runtime,
+        )
+        .await;
+
+        // The range check must win over every other request-error branch: an
+        // out-of-range amount may never reach code that could render it.
         assert_eq!(
             result.unwrap_err().kind,
             ErrorKind::RequestError(Some(WithdrawRequestError::AmountExceedsMaximum))
