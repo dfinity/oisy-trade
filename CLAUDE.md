@@ -14,17 +14,45 @@
 
 ## Spec-driven build loop (GitHub PR)
 
-Specs live in `docs/src/development/specs/` as `DEFI-XXXX-short-slug.md` and follow
-the template at `docs/src/development/specs/template.md`. When I ask you to write a
-spec, start from that template; the build loop below consumes the spec's
-**Requirements** and its **Delivery / PR sequence**.
+Specs live in `docs/src/development/specs/` as a **directory per ticket**,
+`DEFI-XXXX-short-slug/`, holding exactly two documents:
+
+- `requirements.md` — the verifiable behavioural contract, and nothing else:
+  **Introduction**, **Glossary**, **Non-goals**, then `### Requirement N` sections, each
+  with a **User Story** and numbered EARS acceptance criteria (`WHEN <trigger>, THE
+  <system> SHALL <observable response>`; `IF … THEN …` for conditional behaviour; a bare
+  `THE … SHALL …` for an invariant). Every criterion must be independently testable
+  through the public interface — which the **published** interface is part of, so naming an
+  endpoint, a Candid type, or an error leaf is correct. It carries **no implementation
+  detail**: no module paths, no internal type or function names, no algorithm, no data
+  structure, no phase or pass of a procedure, and no test or benchmark harness. Where a
+  criterion depends on a constant whose value is still open, it fixes the *behaviour* and
+  leaves the *number* to `design.md`. Requirement titles are declarative statements of the
+  property in Title Case; multi-word concepts get a `Capitalized_Snake` name in the
+  Glossary and are used by that name in the criteria.
+- `design.md` — how to build it, written to be handed to an implementer: **Overview**,
+  **Constraints**, **Design Decisions** (`D1…`), **Implementation** per area, **Test
+  plan**, **Delivery / PR sequence**, **Discussed Alternatives**.
+
+Criteria are cited as `Req N` for a whole requirement and `Req N.M` for one criterion — by
+`design.md`, by the PR sequence, by commits, and by review comments. `design.md` **cites,
+never restates**: a behaviour written down in both documents will drift. Requirement
+numbering is append-only once a spec is on a PR — add `N.7`, never renumber `N.3`.
+
+When I ask you to write a spec, start from `docs/src/development/specs/template/`, and
+write `requirements.md` **first** — settle it with me before you write `design.md`, so the
+contract is not back-fitted to an implementation. Specs written before this split remain
+single `DEFI-XXXX-short-slug.md` files and are consumed as-is.
+
+The build loop below consumes `requirements.md`'s **Requirements** and `design.md`'s
+**Delivery / PR sequence**.
 
 When I give you a specification to build:
 
-1. Delegate to the `implementer` subagent with the full spec: build on a feature
-   branch, open a DRAFT PR, report the PR number.
-2. Delegate to the `reviewer` subagent. Pass it ONLY the spec and the PR number —
-   do NOT paste the diff, so it can read the title/description before the code and
+1. Delegate to the `implementer` subagent with the full spec — **both** documents: build
+   on a feature branch, open a DRAFT PR, report the PR number.
+2. Delegate to the `reviewer` subagent. Pass it ONLY the spec (both documents) and the PR
+   number — do NOT paste the diff, so it can read the title/description before the code and
    review without anchoring. It posts its verdict to the PR via `gh`.
 3. If the reviewer returns VERDICT: CHANGES_REQUESTED, OR the PR carries any unresolved
    comment — a review thread not marked resolved, or a comment (from the reviewer, me,
@@ -71,8 +99,8 @@ When I give you a specification to build:
    to do manually.
 
 For stacked PRs: whenever a PR is added to, removed from, or reordered within a stack,
-refresh the "📚 PR stack" section of every *other* PR in the stack (and the spec's
-**Delivery / PR sequence**) so they all stay consistent — e.g. opening PR N means going
+refresh the "📚 PR stack" section of every *other* PR in the stack (and the
+**Delivery / PR sequence** in the spec's `design.md`) so they all stay consistent — e.g. opening PR N means going
 back to PRs 1..N-1 and adding PR N to their stack lists. This is the orchestrator's job:
 the `implementer` only maintains the stack section of the PR it is building, since it is
 scoped to a single PR and shouldn't reach into siblings.

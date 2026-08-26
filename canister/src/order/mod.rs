@@ -517,14 +517,22 @@ impl std::fmt::Display for QuantityOverflowError {
     }
 }
 
-impl TryFrom<Nat> for Quantity {
+impl TryFrom<&Nat> for Quantity {
     type Error = QuantityOverflowError;
 
-    fn try_from(value: Nat) -> Result<Self, Self::Error> {
+    fn try_from(value: &Nat) -> Result<Self, Self::Error> {
         if value.0.bits() > 256 {
             return Err(QuantityOverflowError);
         }
         Self::from_be_bytes(&value.0.to_bytes_be()).ok_or(QuantityOverflowError)
+    }
+}
+
+impl TryFrom<Nat> for Quantity {
+    type Error = QuantityOverflowError;
+
+    fn try_from(value: Nat) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
     }
 }
 
