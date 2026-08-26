@@ -390,6 +390,21 @@ pub fn place_limit_order(
     .unwrap();
 }
 
+/// Run `scenario` against a pristine canister and return what it observed.
+///
+/// A test that has to compare two whole runs — the same operations issued as one
+/// batch versus one at a time — cannot run them in the same thread: the event
+/// log and the stable-memory maps behind `storage` are thread-locals that no
+/// reset helper clears, so the second run would start on the first one's
+/// leftovers. Running each in its own thread gives each a canister of its own.
+#[cfg(test)]
+pub fn in_fresh_canister<T: Send + 'static>(scenario: impl FnOnce() -> T + Send + 'static) -> T {
+    match std::thread::spawn(scenario).join() {
+        Ok(observed) => observed,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
 pub fn order_history() -> OrderHistory<VectorMemory> {
     OrderHistory::new(VectorMemory::default(), VectorMemory::default())
 }
@@ -1147,6 +1162,7 @@ pub mod mocks {
     use candid::utils::ArgumentEncoder;
     use ic_cdk::call::{CallFailed, Response};
     use mockall::mock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     pub fn mock_runtime_for(caller: Principal) -> MockRuntime {
         mock_runtime_at(caller, Timestamp::EPOCH)
@@ -1156,6 +1172,7 @@ pub mod mocks {
         let mut mock = MockRuntime::new();
         mock.expect_instruction_counter().return_const(0u64);
         mock.expect_time().return_const(Timestamp::EPOCH);
+        mock.expect_schedule_matching().return_const(());
         mock
     }
 
@@ -1166,6 +1183,7 @@ pub mod mocks {
         mock.expect_msg_caller().return_const(caller);
         mock.expect_time().return_const(now);
         mock.expect_instruction_counter().return_const(0u64);
+        mock.expect_schedule_matching().return_const(());
         mock
     }
 
@@ -1189,6 +1207,74 @@ pub mod mocks {
             fn is_controller(&self, principal: &Principal) -> bool;
             fn instruction_counter(&self) -> u64;
             fn time(&self) -> Timestamp;
+            fn schedule_matching(&self);
+        }
+    }
+
+    /// A test runtime that counts the matching kickoffs the code under test
+    /// arms. Whether an endpoint arms matching is part of its contract, and no
+    /// state or event-log assertion can observe it — so the count has to be
+    /// asserted directly.
+    ///
+    /// Its caller doubles as a controller, so controller-gated endpoints can be
+    /// measured through it too.
+    pub struct CountingRuntime {
+        caller: Principal,
+        now: Timestamp,
+        matching_kickoffs: AtomicUsize,
+    }
+
+    impl CountingRuntime {
+        pub fn new(caller: Principal, now: Timestamp) -> Self {
+            Self {
+                caller,
+                now,
+                matching_kickoffs: AtomicUsize::new(0),
+            }
+        }
+
+        /// How many times the code under test armed the matching timer.
+        pub fn matching_kickoffs(&self) -> usize {
+            self.matching_kickoffs.load(Ordering::Relaxed)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Runtime for CountingRuntime {
+        async fn call_unbounded_wait<A>(
+            &self,
+            _canister_id: Principal,
+            _method: &str,
+            _args: A,
+        ) -> Result<Response, CallFailed>
+        where
+            A: ArgumentEncoder + Send,
+        {
+            unimplemented!("CountingRuntime makes no inter-canister calls")
+        }
+
+        fn msg_caller(&self) -> Principal {
+            self.caller
+        }
+
+        fn canister_self(&self) -> Principal {
+            Principal::anonymous()
+        }
+
+        fn is_controller(&self, principal: &Principal) -> bool {
+            principal == &self.caller
+        }
+
+        fn instruction_counter(&self) -> u64 {
+            0
+        }
+
+        fn time(&self) -> Timestamp {
+            self.now
+        }
+
+        fn schedule_matching(&self) {
+            self.matching_kickoffs.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -1268,6 +1354,10 @@ pub mod mocks {
 
         fn time(&self) -> Timestamp {
             Timestamp::EPOCH
+        }
+
+        fn schedule_matching(&self) {
+            unimplemented!("CapturingRuntime drives no matching")
         }
     }
 }

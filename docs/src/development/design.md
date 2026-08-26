@@ -422,6 +422,7 @@ controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
 - **`add_trading_account(principal)` / `remove_trading_account(principal)`**: the caller (a funding account) whitelists or revokes a trading principal that may then place and cancel orders on the caller's balance. Grants are gated (registered granter, 1:1 mapping, `MAX_TRADING_ACCOUNTS_PER_USER` cap) and rate-limited by a per-account cooldown; revocation is never rate-limited. Recorded as events. Fully synchronous. Time: O(1).
 - **`add_limit_order(pair, side, price, quantity)`**: validates the order (balance, tick/lot size), debits the required amount from the user's available balance to reserved, enqueues the order, and returns an order ID. Fully synchronous — no inter-canister calls. Time: O(1). Memory: O(1) for the queued order.
 - **`cancel_limit_order(order_id)`**: removes a resting order from the book and returns reserved tokens to the user's available balance. Time: O(log p + k) where p is the number of price levels and k is the queue depth at the order's price level (to find and remove the order from the `VecDeque`). Memory: frees the canceled order.
+- **`cancel_limit_orders(order_ids)`**: cancels up to `MAX_BATCH_LEN` (100) orders in one call. **Partial success, not atomic**: the response carries one outcome per id, positionally aligned with the request and of the same length, each either the canceled `OrderRecord` or exactly the error `cancel_limit_order` would have returned for that id. An id that cannot be canceled fails only its own item — re-issuing a half-applied batch would otherwise risk double-acting on the ids that already went through, so the caller is told precisely which did. The batch is *sequential* cancellation: the effect is that of the same ids passed to `cancel_limit_order` one at a time, so a repeated id fails its second occurrence with `OrderAlreadyTerminal`, and (like the single-order call) the batch never kicks off a matching round. An empty batch is a successful no-op; more than 100 items fails the whole call with `BatchTooLarge` before any item is processed. Time: N × the single-cancel cost above, plus batch overhead linear in N. Measured at 0.14 % of the per-message instruction budget for a full 100-item batch against a 10,000-order backlog — see `canister/src/benchmarks.rs` for the state envelope that number is scoped to, since neither k nor the backlog length is bounded by the caller's input or by the canister's own state.
 
 **Timer-driven** (internal):
 
@@ -434,7 +435,7 @@ controller-only `add_trading_pair`, `halt_trading`, and `resume_trading`.
 - **`list_supported_tokens()`**: returns the full list of tokens registered with OISY TRADE. Time: O(n) over the registered tokens.
 - **`get_my_trading_accounts()`**: returns the caller's whitelist of trading principals (empty for a principal with none). Acts on the raw caller — it never resolves delegation. Time: O(1).
 
-`get_balances`, `get_my_orders`, `get_my_trades`, `add_limit_order`, and `cancel_limit_order` resolve the caller to its funding account: called by a trading account, they act on the funding account's balances, orders, and trades exactly as if the funding account had called (the acting key is recorded as `placed_by` / `canceled_by`). The whitelist-management calls above are the exception — they always act on the raw caller.
+`get_balances`, `get_my_orders`, `get_my_trades`, `add_limit_order`, `cancel_limit_order`, and `cancel_limit_orders` resolve the caller to its funding account: called by a trading account, they act on the funding account's balances, orders, and trades exactly as if the funding account had called (the acting key is recorded as `placed_by` / `canceled_by`). The whitelist-management calls above are the exception — they always act on the raw caller.
 
 ### Expected Load
 
@@ -532,4 +533,3 @@ The canister exposes Prometheus-format metrics over its `/metrics` HTTP endpoint
 
 - **Market orders**: execute at best available price with no resting in the book.
 - **Order expiry**: support good-til-time orders that are automatically canceled after a specified deadline, in addition to the default good-til-canceled.
-- **Batch operations**: place or cancel multiple orders atomically in a single call, reducing round trips for market makers.

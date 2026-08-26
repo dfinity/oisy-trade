@@ -835,6 +835,414 @@ mod cancel_limit_order {
     }
 }
 
+mod cancel_limit_orders {
+    use crate::Timestamp;
+    use crate::state::StateSnapshot;
+    use crate::state::event::{Event, EventType};
+    use crate::test_fixtures::mocks::{CountingRuntime, mock_runtime_at, mock_runtime_for_timer};
+    use crate::test_fixtures::{
+        fund_user, in_fresh_canister, init_state_with_order_book, limit_order_request,
+    };
+    use crate::{
+        add_limit_order, add_trading_account, cancel_limit_order, cancel_limit_orders,
+        get_balances, get_my_orders, state, storage,
+    };
+    use candid::Principal;
+    use oisy_trade_types::{
+        BatchRequestError, CancelLimitOrderOutcome, CancelLimitOrderRequestError,
+        CancelLimitOrdersError, ErrorKind, GetMyOrdersArgs, MAX_BATCH_LEN, OrderRecord,
+        OrderStatus, UserOrder, UserTokenBalance,
+    };
+    use proptest::collection::vec as arb_vec;
+    use proptest::prelude::{Just, Strategy};
+    use proptest::test_runner::Config;
+    use proptest::{prop_assert_eq, prop_oneof, proptest};
+
+    const OWNER: Principal = Principal::from_slice(&[0x01]);
+    const STRANGER: Principal = Principal::from_slice(&[0x02]);
+    const TRADING: Principal = Principal::from_slice(&[0x03]);
+    /// Every principal an equivalence scenario touches, so an observation
+    /// covers all of their balances and orders.
+    const USERS: [Principal; 2] = [OWNER, STRANGER];
+    /// A well-formed order id no order is ever assigned.
+    const UNASSIGNED_ORDER_ID: &str = "ffffffffffffffffffffffffffffffff";
+    const MALFORMED_ORDER_ID: &str = "not-a-valid-id";
+    const PLACEMENT_TIME: Timestamp = Timestamp::new(1_000);
+    const CANCEL_TIME: Timestamp = Timestamp::new(2_000);
+    /// How many orders the owner holds in an equivalence scenario. Several, so a
+    /// generated batch can repeat ids and interleave good ones with bad.
+    const OWNED_ORDERS: usize = 5;
+
+    proptest! {
+        #![proptest_config(Config { cases: 24, ..Config::default() })]
+        /// A batch cancel is sequential cancel: same state, same event log, and
+        /// the same outcomes *in the same positions* — a caller zips its id list
+        /// against the response, so an implementation that returned the right
+        /// records in the wrong order, or paired an item with another item's
+        /// error, would break it while leaving state equality intact.
+        #[test]
+        fn should_be_equivalent_to_cancelling_one_at_a_time(
+            targets in arb_vec(arb_target(), 1..=8),
+            orders_are_resting in proptest::bool::ANY,
+        ) {
+            let batched = {
+                let targets = targets.clone();
+                in_fresh_canister(move || observe(&targets, orders_are_resting, Arm::Batched))
+            };
+            let one_at_a_time =
+                in_fresh_canister(move || observe(&targets, orders_are_resting, Arm::OneAtATime));
+
+            prop_assert_eq!(batched, one_at_a_time);
+        }
+    }
+
+    #[test]
+    fn should_fail_the_second_occurrence_of_a_repeated_id() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        let order_id = place_order(OWNER);
+
+        let outcomes = cancel_limit_orders(
+            vec![order_id.clone(), order_id],
+            &mock_runtime_at(OWNER, CANCEL_TIME),
+        )
+        .expect("a two-item batch is within the cap");
+
+        assert_eq!(
+            outcomes[0].as_ref().map(|record| record.status.clone()),
+            Ok(OrderStatus::Canceled)
+        );
+        assert_eq!(
+            outcomes[1].as_ref().map_err(|err| err.kind.clone()),
+            Err(ErrorKind::RequestError(Some(
+                CancelLimitOrderRequestError::OrderAlreadyTerminal
+            ))),
+            "the first occurrence canceled the order, so the second finds it terminal"
+        );
+    }
+
+    /// R14: no `cancel_limit_orders` call may arm the matching timer — arming it
+    /// would pull unrelated pending orders into a round the equivalent
+    /// single-order cancels never triggered, and no state or event-log assertion
+    /// can see that. The placements first assert a non-zero count, so the zero
+    /// below cannot pass vacuously against an instrument that counts nothing.
+    #[test]
+    fn should_never_arm_matching() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        let placements = CountingRuntime::new(OWNER, PLACEMENT_TIME);
+        let order_ids: Vec<_> = (0..3).map(|_| place_order_with(&placements)).collect();
+        assert_eq!(placements.matching_kickoffs(), 3);
+
+        let cancels = CountingRuntime::new(OWNER, CANCEL_TIME);
+        cancel_limit_orders(order_ids, &cancels).expect("a three-item batch is within the cap");
+        cancel_limit_orders(vec![MALFORMED_ORDER_ID.to_string()], &cancels)
+            .expect("a one-item batch is within the cap");
+        cancel_limit_orders(Vec::new(), &cancels).expect("an empty batch is a no-op");
+        let _over_the_cap = cancel_limit_orders(over_the_cap(MALFORMED_ORDER_ID), &cancels);
+
+        assert_eq!(
+            cancels.matching_kickoffs(),
+            0,
+            "no cancel batch may arm matching: a fully successful one, one whose \
+             every item failed, an empty one, nor one rejected over the cap"
+        );
+    }
+
+    #[test]
+    fn should_reject_a_batch_over_the_cap_without_processing_any_item() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        let order_id = place_order(OWNER);
+        let events_before = storage::total_event_count();
+        let order_ids = over_the_cap(&order_id);
+        let len = order_ids.len() as u32;
+
+        let result = cancel_limit_orders(order_ids, &mock_runtime_at(OWNER, CANCEL_TIME));
+
+        assert_eq!(
+            result,
+            Err(CancelLimitOrdersError::request(
+                BatchRequestError::BatchTooLarge {
+                    len,
+                    max: MAX_BATCH_LEN,
+                }
+            ))
+        );
+        assert_eq!(
+            storage::total_event_count(),
+            events_before,
+            "the cap is checked before any item is processed, so nothing is recorded"
+        );
+        assert_eq!(status_of(&order_id), OrderStatus::Pending);
+    }
+
+    /// The cap's accepting side: a batch of exactly `MAX_BATCH_LEN` items is
+    /// attempted. Pins which side of the boundary is rejected — an
+    /// off-by-one cap would still satisfy the over-the-cap test above.
+    #[test]
+    fn should_accept_a_batch_of_exactly_the_cap() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        let order_id = place_order(OWNER);
+
+        let outcomes = cancel_limit_orders(
+            vec![order_id; MAX_BATCH_LEN as usize],
+            &mock_runtime_at(OWNER, CANCEL_TIME),
+        )
+        .expect("a batch of exactly the cap is attempted");
+
+        assert_eq!(outcomes.len(), MAX_BATCH_LEN as usize);
+        assert!(outcomes[0].is_ok());
+        assert!(outcomes[1..].iter().all(|outcome| outcome.is_err()));
+    }
+
+    #[test]
+    fn should_treat_an_empty_batch_as_a_successful_no_op() {
+        init_state_with_order_book();
+        let events_before = storage::total_event_count();
+
+        let outcomes = cancel_limit_orders(Vec::new(), &mock_runtime_at(OWNER, CANCEL_TIME));
+
+        assert_eq!(outcomes, Ok(Vec::new()));
+        assert_eq!(storage::total_event_count(), events_before);
+    }
+
+    /// R18: a batch adds no event *type*. It writes one `CancelLimitOrder` per
+    /// successful item plus the settling event that cancel's inline settlement
+    /// produces — `2N` entries for `N` successful cancels, which is why this
+    /// counts per type rather than asserting a raw total delta.
+    #[test]
+    fn should_record_one_cancel_and_one_settling_event_per_successful_item() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        fund_user(STRANGER);
+        let order_ids = vec![
+            place_order(OWNER),
+            place_order(OWNER),
+            place_order(OWNER),
+            place_order(STRANGER),
+            UNASSIGNED_ORDER_ID.to_string(),
+            MALFORMED_ORDER_ID.to_string(),
+        ];
+        let events_before = storage::total_event_count();
+
+        let outcomes = cancel_limit_orders(order_ids, &mock_runtime_at(OWNER, CANCEL_TIME))
+            .expect("a six-item batch is within the cap");
+
+        assert_eq!(
+            outcomes.iter().filter(|outcome| outcome.is_ok()).count(),
+            3,
+            "only the owner's three orders can be canceled"
+        );
+        assert_eq!(event_count_since(events_before, is_cancel), 3);
+        assert_eq!(event_count_since(events_before, is_settling), 3);
+        assert_eq!(
+            storage::total_event_count() - events_before,
+            6,
+            "the three rejected items record nothing at all"
+        );
+    }
+
+    /// R15: the batch resolves the caller to its funding account once and
+    /// attributes the acting key on every order it cancels.
+    #[test]
+    fn should_attribute_the_acting_trading_account_on_every_item() {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        add_trading_account(TRADING, &mock_runtime_at(OWNER, PLACEMENT_TIME)).unwrap();
+        let order_ids = vec![place_order(OWNER), place_order(OWNER)];
+
+        let outcomes = cancel_limit_orders(order_ids, &mock_runtime_at(TRADING, CANCEL_TIME))
+            .expect("a two-item batch is within the cap");
+
+        for outcome in &outcomes {
+            let record = outcome.as_ref().expect("the trading account may cancel");
+            assert_eq!(record.owner, OWNER);
+            assert_eq!(record.canceled_by, Some(TRADING));
+        }
+        assert_eq!(
+            cancel_events_since(0),
+            vec![Some(TRADING), Some(TRADING)],
+            "each order's cancel event attributes the acting key"
+        );
+    }
+
+    /// What one item of a generated batch points at. Every kind that makes an
+    /// item fail on its own is represented, plus repeats of the owner's ids —
+    /// which is how a generated batch comes to cancel the same order twice.
+    #[derive(Debug, Clone, Copy)]
+    enum Target {
+        /// The owner's order at this index into its placed orders.
+        Own(usize),
+        /// An order owned by someone else.
+        Foreign,
+        /// A well-formed id no order was assigned.
+        Unassigned,
+        /// Not a well-formed order id at all.
+        Malformed,
+    }
+
+    /// Which way the same cancels are issued.
+    enum Arm {
+        /// One `cancel_limit_orders` call.
+        Batched,
+        /// One `cancel_limit_order` call per id.
+        OneAtATime,
+    }
+
+    /// Everything an observer can see once a run is over, with the timestamps
+    /// taken out: a batch is one message, so every record it stamps shares a
+    /// single `Runtime::time` sample where separate calls need not, and the
+    /// equivalence is explicitly modulo that. Nothing else may differ.
+    #[derive(Debug, PartialEq)]
+    struct Observation {
+        outcomes: Vec<CancelLimitOrderOutcome>,
+        snapshot: StateSnapshot,
+        balances: Vec<Vec<UserTokenBalance>>,
+        orders: Vec<Vec<UserOrder>>,
+        events: Vec<EventType>,
+    }
+
+    fn arb_target() -> impl Strategy<Value = Target> {
+        prop_oneof![
+            6 => (0..OWNED_ORDERS).prop_map(Target::Own),
+            1 => Just(Target::Foreign),
+            1 => Just(Target::Unassigned),
+            1 => Just(Target::Malformed),
+        ]
+    }
+
+    /// Place the owner's orders and a foreign one, cancel `targets` the way
+    /// `arm` says to, and report what the run left behind.
+    fn observe(targets: &[Target], orders_are_resting: bool, arm: Arm) -> Observation {
+        init_state_with_order_book();
+        fund_user(OWNER);
+        fund_user(STRANGER);
+        let owned: Vec<_> = (0..OWNED_ORDERS).map(|_| place_order(OWNER)).collect();
+        let foreign = place_order(STRANGER);
+        if orders_are_resting {
+            // Removing a resting order and removing a still-pending one are
+            // different paths through the book, so the equivalence is asserted
+            // over both.
+            crate::process_pending_orders(&mock_runtime_for_timer());
+        }
+        let order_ids: Vec<_> = targets
+            .iter()
+            .map(|target| match target {
+                Target::Own(index) => owned[*index].clone(),
+                Target::Foreign => foreign.clone(),
+                Target::Unassigned => UNASSIGNED_ORDER_ID.to_string(),
+                Target::Malformed => MALFORMED_ORDER_ID.to_string(),
+            })
+            .collect();
+
+        let outcomes = match arm {
+            Arm::Batched => cancel_limit_orders(order_ids, &mock_runtime_at(OWNER, CANCEL_TIME))
+                .expect("a generated batch stays within the cap"),
+            // Deliberately distinct, increasing timestamps: normalizing them is
+            // only meaningful if the two arms do not happen to stamp the same
+            // values anyway.
+            Arm::OneAtATime => order_ids
+                .into_iter()
+                .enumerate()
+                .map(|(nth, order_id)| {
+                    let at = Timestamp::new(CANCEL_TIME.as_nanos() + nth as u64);
+                    cancel_limit_order(order_id, &mock_runtime_at(OWNER, at))
+                })
+                .collect(),
+        };
+        Observation::new(outcomes)
+    }
+
+    impl Observation {
+        fn new(outcomes: Vec<CancelLimitOrderOutcome>) -> Self {
+            Self {
+                outcomes: outcomes
+                    .into_iter()
+                    .map(|outcome| outcome.map(without_timestamps))
+                    .collect(),
+                snapshot: state::with_state(StateSnapshot::from_state),
+                balances: USERS.into_iter().map(balances_of).collect(),
+                orders: USERS.into_iter().map(orders_of).collect(),
+                events: storage::with_event_iter(|events| {
+                    events.map(|Event { payload, .. }| payload).collect()
+                }),
+            }
+        }
+    }
+
+    fn balances_of(who: Principal) -> Vec<UserTokenBalance> {
+        get_balances(None, who).expect("an absent filter is always accepted")
+    }
+
+    fn orders_of(who: Principal) -> Vec<UserOrder> {
+        get_my_orders(Some(GetMyOrdersArgs::default()), who)
+            .expect("the default page is always accepted")
+            .into_iter()
+            .map(|entry| UserOrder {
+                order: without_timestamps(entry.order),
+                ..entry
+            })
+            .collect()
+    }
+
+    fn without_timestamps(record: OrderRecord) -> OrderRecord {
+        OrderRecord {
+            created_at: 0,
+            last_updated_at: None,
+            ..record
+        }
+    }
+
+    fn place_order(who: Principal) -> String {
+        place_order_with(&mock_runtime_at(who, PLACEMENT_TIME))
+    }
+
+    fn place_order_with(runtime: &impl crate::Runtime) -> String {
+        add_limit_order(limit_order_request(), runtime).expect("the user is funded")
+    }
+
+    /// `MAX_BATCH_LEN + 1` copies of `order_id`.
+    fn over_the_cap(order_id: &str) -> Vec<String> {
+        vec![order_id.to_string(); MAX_BATCH_LEN as usize + 1]
+    }
+
+    fn status_of(order_id: &str) -> OrderStatus {
+        get_my_orders(Some(GetMyOrdersArgs::by_id(order_id.to_string())), OWNER).unwrap()[0]
+            .order
+            .status
+            .clone()
+    }
+
+    fn event_count_since(first: u64, is_kind: fn(&EventType) -> bool) -> usize {
+        (first..storage::total_event_count())
+            .filter_map(storage::get_event)
+            .filter(|Event { payload, .. }| is_kind(payload))
+            .count()
+    }
+
+    /// The `canceled_by` each `CancelLimitOrderEvent` from `first` onwards
+    /// recorded, in log order.
+    fn cancel_events_since(first: u64) -> Vec<Option<Principal>> {
+        (first..storage::total_event_count())
+            .filter_map(storage::get_event)
+            .filter_map(|Event { payload, .. }| match payload {
+                EventType::CancelLimitOrder(event) => Some(event.canceled_by),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn is_cancel(payload: &EventType) -> bool {
+        matches!(payload, EventType::CancelLimitOrder(_))
+    }
+
+    fn is_settling(payload: &EventType) -> bool {
+        matches!(payload, EventType::Settling(_))
+    }
+}
+
 mod order_status_via_get_my_orders {
     use crate::test_fixtures::mocks::mock_runtime_for;
     use crate::test_fixtures::{fund_user, init_state_with_order_book, limit_order_request};
@@ -3004,7 +3412,8 @@ mod process_pending_orders {
 }
 
 mod set_halt {
-    use crate::test_fixtures::mocks::{MockRuntime, mock_runtime_for};
+    use crate::Timestamp;
+    use crate::test_fixtures::mocks::{CountingRuntime, MockRuntime, mock_runtime_for};
     use crate::test_fixtures::{ckbtc_token_id, icp_token_id, init_state_with_order_book};
     use crate::{MAX_HALT_BOOKS, halt_trading, resume_trading};
     use candid::Principal;
@@ -3018,6 +3427,29 @@ mod set_halt {
 
         assert_eq!(halt_trading(Some(pairs.clone()), &runtime), Ok(()));
         assert_eq!(resume_trading(Some(pairs), &runtime), Ok(()));
+    }
+
+    /// Resuming re-arms matching from the endpoint, so orders that piled up
+    /// while halted match without waiting for the periodic timer; halting
+    /// must not, or it would drive a matching round on the pairs it just
+    /// closed.
+    #[test]
+    fn should_arm_matching_on_resume_but_not_on_halt() {
+        init_state_with_order_book();
+        let controller = Principal::anonymous();
+        let runtime = CountingRuntime::new(controller, Timestamp::EPOCH);
+
+        assert_eq!(
+            halt_trading(Some(vec![registered_pair()]), &runtime),
+            Ok(())
+        );
+        assert_eq!(runtime.matching_kickoffs(), 0);
+
+        assert_eq!(
+            resume_trading(Some(vec![registered_pair()]), &runtime),
+            Ok(())
+        );
+        assert_eq!(runtime.matching_kickoffs(), 1);
     }
 
     fn registered_pair() -> TradingPair {

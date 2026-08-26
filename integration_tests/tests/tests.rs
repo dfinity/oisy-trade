@@ -1341,6 +1341,259 @@ mod cancel_limit_order {
     }
 }
 
+mod cancel_limit_orders {
+    use candid::{Nat, Principal};
+    use oisy_trade_int_tests::{PRICE_SCALE, Setup};
+    use oisy_trade_types::{
+        Balance, BatchRequestError, CancelLimitOrderError, CancelLimitOrderRequestError,
+        CancelLimitOrdersError, LimitOrderRequest, MAX_BATCH_LEN, OrderId, OrderStatus, Side,
+    };
+
+    /// A well-formed order id no order is ever assigned.
+    const UNASSIGNED_ORDER_ID: &str = "ffffffffffffffffffffffffffffffff";
+    const MALFORMED_ORDER_ID: &str = "not-a-valid-id";
+    const QUANTITY: u64 = 1_000_000;
+    const RESTING_ORDERS: usize = 3;
+
+    /// One live round trip covering the whole per-item contract: which ids
+    /// succeed, which fail and with what, that the outcomes line up with the
+    /// request positionally, and that only the successful ones moved funds.
+    #[tokio::test]
+    async fn should_cancel_a_batch_and_report_each_failure_against_its_own_id() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let seller = setup.user();
+        let client = setup.oisy_trade_client_with_caller(seller);
+        let stranger = Principal::from_slice(&[0x0B]);
+        let resting = rest_sells(&setup, seller, RESTING_ORDERS).await;
+        let foreign = rest_sells(&setup, stranger, 1).await.remove(0);
+        assert_eq!(
+            client.get_balance(setup.base_token_id()).await.unwrap(),
+            Balance {
+                free: 0u64.into(),
+                reserved: (RESTING_ORDERS as u64 * QUANTITY).into(),
+            }
+        );
+
+        let order_ids = vec![
+            resting[0].clone(),
+            foreign.clone(),
+            resting[1].clone(),
+            // A repeat of an id this very batch already canceled: the batch is
+            // sequential cancellation, so the second occurrence finds the order
+            // terminal rather than being deduplicated away.
+            resting[0].clone(),
+            UNASSIGNED_ORDER_ID.to_string(),
+            MALFORMED_ORDER_ID.to_string(),
+        ];
+
+        let outcomes = client
+            .cancel_limit_orders(order_ids.clone())
+            .await
+            .expect("a six-item batch is within the cap");
+
+        assert_eq!(outcomes.len(), order_ids.len());
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|outcome| outcome
+                    .as_ref()
+                    .map(|record| record.status.clone())
+                    .map_err(Clone::clone))
+                .collect::<Vec<_>>(),
+            vec![
+                Ok(OrderStatus::Canceled),
+                Err(CancelLimitOrderError::request(
+                    CancelLimitOrderRequestError::NotOrderOwner
+                )),
+                Ok(OrderStatus::Canceled),
+                Err(CancelLimitOrderError::request(
+                    CancelLimitOrderRequestError::OrderAlreadyTerminal
+                )),
+                Err(CancelLimitOrderError::request(
+                    CancelLimitOrderRequestError::OrderNotFound
+                )),
+                Err(CancelLimitOrderError::request(
+                    CancelLimitOrderRequestError::InvalidOrderId
+                )),
+            ],
+            "each failure is reported against its own id — and carries the \
+             advisory message the single-order endpoint would have carried"
+        );
+
+        // Two of the caller's three orders were canceled, so exactly two
+        // reservations came back; the third is untouched and the stranger's
+        // order is still open.
+        assert_eq!(
+            client.get_balance(setup.base_token_id()).await.unwrap(),
+            Balance {
+                free: (2 * QUANTITY).into(),
+                reserved: QUANTITY.into(),
+            }
+        );
+        assert_eq!(
+            client
+                .get_my_order(resting[2].clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open
+        );
+        assert_eq!(
+            setup
+                .oisy_trade_client_with_caller(stranger)
+                .get_my_order(foreign)
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open
+        );
+
+        // The two ends of the batch-level contract: an empty batch is a
+        // successful no-op, and an over-cap batch fails whole, leaving the one
+        // remaining order open.
+        assert_eq!(client.cancel_limit_orders(Vec::new()).await, Ok(Vec::new()));
+        let over_the_cap = vec![resting[2].clone(); MAX_BATCH_LEN as usize + 1];
+        assert_eq!(
+            client.cancel_limit_orders(over_the_cap).await,
+            Err(CancelLimitOrdersError::request(
+                BatchRequestError::BatchTooLarge {
+                    len: MAX_BATCH_LEN + 1,
+                    max: MAX_BATCH_LEN,
+                }
+            ))
+        );
+        assert_eq!(
+            client
+                .get_my_order(resting[2].clone())
+                .await
+                .unwrap()
+                .order
+                .status,
+            OrderStatus::Open,
+            "a batch rejected over the cap processes no item"
+        );
+
+        setup.drop().await;
+    }
+
+    /// Halt keeps the exit open: cancels are permitted while trading is halted,
+    /// in batch exactly as one at a time.
+    #[tokio::test]
+    async fn should_permit_a_cancel_batch_while_trading_is_halted() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let seller = setup.user();
+        let client = setup.oisy_trade_client_with_caller(seller);
+        let resting = rest_sells(&setup, seller, RESTING_ORDERS).await;
+        assert_eq!(
+            setup
+                .oisy_trade_client_with_caller(setup.controller())
+                .halt_trading(Some(vec![setup.trading_pair()]))
+                .await,
+            Ok(())
+        );
+
+        let outcomes = client
+            .cancel_limit_orders(resting)
+            .await
+            .expect("a cancel batch is within the cap");
+
+        assert!(
+            outcomes.iter().all(|outcome| outcome.is_ok()),
+            "cancels stay permitted under halt, so users can always exit: {outcomes:?}"
+        );
+        assert_eq!(
+            client.get_balance(setup.base_token_id()).await.unwrap(),
+            Balance {
+                free: (RESTING_ORDERS as u64 * QUANTITY).into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    /// A trading account cancels its funding account's orders, and the acting
+    /// key is recorded on every order the batch canceled — not just the first.
+    #[tokio::test]
+    async fn should_attribute_the_acting_trading_account_on_every_canceled_order() {
+        let setup = Setup::new().await.with_trading_pair().await;
+        let funding = setup.user();
+        let funding_client = setup.oisy_trade_client_with_caller(funding);
+        let trading = Principal::from_slice(&[0xF0, 0x01]);
+        let resting = rest_sells(&setup, funding, RESTING_ORDERS).await;
+        funding_client.add_trading_account(trading).await.unwrap();
+
+        let outcomes = setup
+            .oisy_trade_client_with_caller(trading)
+            .cancel_limit_orders(resting.clone())
+            .await
+            .expect("a cancel batch is within the cap");
+
+        for (order_id, outcome) in resting.iter().zip(outcomes) {
+            let record = outcome.expect("the trading account acts for the funding account");
+            assert_eq!(
+                record.owner, funding,
+                "order {order_id} stays owned by the funding account"
+            );
+            assert_eq!(record.canceled_by, Some(trading), "order {order_id}");
+            assert_eq!(record.status, OrderStatus::Canceled, "order {order_id}");
+        }
+        // The batch resolved to the funding account, so the refund landed there.
+        assert_eq!(
+            funding_client
+                .get_balance(setup.base_token_id())
+                .await
+                .unwrap(),
+            Balance {
+                free: (RESTING_ORDERS as u64 * QUANTITY).into(),
+                reserved: 0u64.into(),
+            }
+        );
+
+        setup.drop().await;
+    }
+
+    /// Fund `seller` and rest `count` sell orders it owns, each of [`QUANTITY`]
+    /// base units at a price no bid crosses.
+    async fn rest_sells(setup: &Setup, seller: Principal, count: usize) -> Vec<OrderId> {
+        setup.fund_base(seller, count as u64 * QUANTITY).await;
+        let client = setup.oisy_trade_client_with_caller(seller);
+        let mut order_ids = Vec::with_capacity(count);
+        for nth in 0..count {
+            order_ids.push(
+                client
+                    .add_limit_order(LimitOrderRequest {
+                        pair: setup.trading_pair(),
+                        side: Side::Sell,
+                        // A distinct price per order, so they rest on separate
+                        // levels rather than queueing behind one another.
+                        price: Nat::from((9_000 + nth as u64) * PRICE_SCALE),
+                        quantity: QUANTITY.into(),
+                        time_in_force: None,
+                    })
+                    .await
+                    .unwrap(),
+            );
+        }
+        setup.env().tick().await;
+        for order_id in &order_ids {
+            assert_eq!(
+                client
+                    .get_my_order(order_id.clone())
+                    .await
+                    .unwrap()
+                    .order
+                    .status,
+                OrderStatus::Open,
+                "order {order_id} must be resting before the batch cancels it"
+            );
+        }
+        order_ids
+    }
+}
+
 #[tokio::test]
 async fn should_return_empty_trading_pairs() {
     let setup = Setup::new().await;

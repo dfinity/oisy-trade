@@ -54,6 +54,18 @@ pub trait Runtime {
 
     /// Returns the current time in nanoseconds since the Unix epoch.
     fn time(&self) -> Timestamp;
+
+    /// Arms a zero-delay timer that runs one matching round, so orders an
+    /// endpoint just enqueued are processed without waiting for the periodic
+    /// timer.
+    ///
+    /// Endpoints arm it through this method rather than calling
+    /// `ic_cdk_timers` directly so a test can count the kickoffs: whether an
+    /// endpoint arms matching is part of its contract (a cancel must not, or it
+    /// would drag unrelated pending orders into a round that the equivalent
+    /// single-order calls never triggered) and no state or event-log assertion
+    /// can observe it.
+    fn schedule_matching(&self);
 }
 
 #[derive(Copy, Clone)]
@@ -93,5 +105,14 @@ impl Runtime for IcRuntime {
 
     fn time(&self) -> Timestamp {
         Timestamp::new(ic_cdk::api::time())
+    }
+
+    fn schedule_matching(&self) {
+        // TODO DEFI-2823: coalesce zero-delay matching timers so a burst of
+        // kickoffs plus `drive_matching`'s self-reschedule chain doesn't queue
+        // O(N) redundant timers per burst.
+        ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+            crate::drive_matching();
+        });
     }
 }

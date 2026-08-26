@@ -11,13 +11,14 @@ mod error;
 pub use error::{
     AddLimitOrderError, AddLimitOrderRequestError, AddLimitOrderTemporaryError,
     AddTradingAccountError, AddTradingAccountRequestError, AddTradingAccountTemporaryError,
-    CancelLimitOrderError, CancelLimitOrderRequestError, DepositError, DepositInternalError,
-    DepositRequestError, DepositTemporaryError, Error, ErrorKind, GetBalancesError,
-    GetBalancesRequestError, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesError,
-    GetMyTradesRequestError, GetMyTradingAccountsError, GetOrderBookDepthError,
-    GetOrderBookDepthRequestError, GetOrderBookTickerError, GetOrderBookTickerRequestError, Never,
-    RemoveTradingAccountError, RemoveTradingAccountRequestError, WithdrawError,
-    WithdrawInternalError, WithdrawRequestError, WithdrawTemporaryError,
+    BatchRequestError, CancelLimitOrderError, CancelLimitOrderRequestError, CancelLimitOrdersError,
+    DepositError, DepositInternalError, DepositRequestError, DepositTemporaryError, Error,
+    ErrorKind, GetBalancesError, GetBalancesRequestError, GetMyOrdersError,
+    GetMyOrdersRequestError, GetMyTradesError, GetMyTradesRequestError, GetMyTradingAccountsError,
+    GetOrderBookDepthError, GetOrderBookDepthRequestError, GetOrderBookTickerError,
+    GetOrderBookTickerRequestError, Never, RemoveTradingAccountError,
+    RemoveTradingAccountRequestError, WithdrawError, WithdrawInternalError, WithdrawRequestError,
+    WithdrawTemporaryError,
 };
 
 use candid::{CandidType, Nat, Principal};
@@ -272,6 +273,32 @@ impl fmt::Display for OrderRecord {
         )
     }
 }
+
+/// Maximum number of items a batch endpoint accepts. A batch carrying more
+/// fails as a whole with [`BatchRequestError::BatchTooLarge`], before any item
+/// is processed.
+///
+/// The cap is part of each batch endpoint's public contract, so it may be
+/// **raised, never lowered**: lowering it would reject requests that previously
+/// succeeded. Its value is set by the `cancel_limit_orders` benchmarks — the
+/// heaviest per-item batch path, since each cancel settles inline within the
+/// same message — where a full 100-item batch measures ~0.14 % of the
+/// per-message instruction budget. See `canister/src/benchmarks.rs` for the
+/// numbers, the scaling curve, and the state envelope they were taken at: the
+/// margin is large but conditional on that envelope, not a bound for all book
+/// depths.
+pub const MAX_BATCH_LEN: u32 = 100;
+
+/// Outcome of one item of a `cancel_limit_orders` batch: the canceled order's
+/// record, or exactly the [`CancelLimitOrderError`] the single-order
+/// `cancel_limit_order` would have returned for that id.
+///
+/// The two arms are the whole variant, permanently: a future per-item outcome
+/// is added as a leaf under one of [`CancelLimitOrderError`]'s disposition
+/// arms, never as a third arm here. A third arm would decode fine on an old
+/// client until the canister first put it on the wire — a break that surfaces
+/// in production rather than at deploy.
+pub type CancelLimitOrderOutcome = Result<OrderRecord, CancelLimitOrderError>;
 
 /// Maximum number of orders returned by a single `get_my_orders` call.
 /// Requests for more are silently capped to this many.

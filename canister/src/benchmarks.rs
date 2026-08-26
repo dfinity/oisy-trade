@@ -817,6 +817,10 @@ mod settling_event_sweep {
         fn time(&self) -> Timestamp {
             IC_RUNTIME.time()
         }
+
+        fn schedule_matching(&self) {
+            IC_RUNTIME.schedule_matching()
+        }
     }
 
     // Mainnet ICP/ckUSDT listing parameters (ICP: 8 decimals, ckUSDT: 6).
@@ -966,6 +970,322 @@ mod settling_event_sweep {
             FeeRates::default(),
         );
         state
+    }
+}
+
+/// Bound the cost of a `cancel_limit_orders` batch, and fix `MAX_BATCH_LEN`
+/// from the measurement.
+///
+/// Batch cancellation is the heaviest per-item batch path: `State::
+/// cancel_limit_order` drains the settling it produces within the same message,
+/// so an `N`-item batch is `N` book removals **plus** `N` settlements in one
+/// message. Multiplying one measured single cancel by `MAX_BATCH_LEN` would not
+/// bound it — the batch also pays for the outcome vector and for encoding the
+/// reply — so the batch itself is measured, at four sizes (1, 10, 50 and the
+/// cap), because a scaling claim cannot be tested with one data point and one
+/// cap-sized number cannot tell you which lower cap is safe.
+///
+/// `OrderBook::remove_order` has two unbounded paths and neither is bounded by
+/// caller input *or* by the canister's own state, so each gets its own
+/// worst-case fixture and the cap is set from the worse of the two:
+///
+/// - a **resting** order costs `O(log p + k)` in the depth `k` of its price
+///   level, which `OrderQueue::remove` scans with `iter().position(..)`;
+/// - a still-**pending** order falls through to a linear
+///   `pending_orders.iter().position(..)` scan, costing `O(pending)`.
+///
+/// **Measured, in instructions:**
+///
+/// ```text
+/// N          |          1 |         10 |         50 |        100
+/// -----------|------------|------------|------------|-----------
+/// resting    |    959_711 |  3_915_126 | 16_952_468 | 33_487_349
+/// pending    |  1_205_371 |  6_552_892 | 28_891_425 | 56_330_960
+/// ```
+///
+/// Both curves are linear in `N` — the marginal item costs ~329 K instructions
+/// resting and ~557 K pending, flat across the range — so the batch overhead
+/// stays inside R17's `O(N log N)` bound and is nowhere near quadratic (a
+/// quadratic curve would cost ~4× as much at `N = 100` as at `N = 50`; these
+/// cost ~1.98× and ~1.95×).
+///
+/// The **pending** fixture is the worse of the two and therefore the one the cap
+/// is set from: a full 100-item batch costs 56.3 M instructions, about 0.14 % of
+/// the 40 B per-message budget — a margin of roughly 710×. `MAX_BATCH_LEN`
+/// stays at 100.
+///
+/// **State envelope.** That absolute "a full batch fits one message" reading
+/// holds only at the depths measured here — a resting book of
+/// [`RESTING_LEVELS`] price levels each [`LEVEL_DEPTH`] orders deep, and a
+/// pending backlog of [`PENDING_BACKLOG`] orders — with every target placed at
+/// the far end of the structure it is removed from. A fixture is evidence for an
+/// envelope, never a proof for all depths: at a large enough live depth even a
+/// *single* cancel can exceed the instruction budget, which is a pre-existing
+/// property of `cancel_limit_order` rather than something batching introduces.
+/// What batching adds is a multiplier of at most `MAX_BATCH_LEN`. Beyond the
+/// envelope the message traps and the replica discards its state changes, so an
+/// over-budget batch applies nothing and the caller retries with fewer items.
+mod batch_cancel {
+    use crate::order::{OrderId, PendingOrder, Price, Quantity, Side, TimeInForce};
+    use crate::state::State;
+    use crate::state::execution_policy::ExecutionPolicy;
+    use crate::storage;
+    use crate::{EXECUTOR, IC_RUNTIME, Runtime, Timestamp};
+    use async_trait::async_trait;
+    use canbench_rs::bench;
+    use candid::Principal;
+    use candid::utils::ArgumentEncoder;
+    use ic_cdk::call::{CallFailed, Response};
+
+    /// Price levels in the resting fixture's book.
+    const RESTING_LEVELS: usize = 100;
+    /// Orders resting at each of those price levels. A batch's targets sit at
+    /// the **back** of their level's queue, the worst case for the scan
+    /// `OrderQueue::remove` does.
+    const LEVEL_DEPTH: usize = 100;
+    /// Orders waiting in the pending fixture's backlog. A batch's targets are
+    /// the **last** of them, the worst case for the linear `pending_orders`
+    /// scan.
+    const PENDING_BACKLOG: usize = 10_000;
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_resting_1() -> canbench_rs::BenchResult {
+        bench_cancel_resting(1)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_resting_10() -> canbench_rs::BenchResult {
+        bench_cancel_resting(10)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_resting_50() -> canbench_rs::BenchResult {
+        bench_cancel_resting(50)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_resting_max_batch() -> canbench_rs::BenchResult {
+        bench_cancel_resting(oisy_trade_types::MAX_BATCH_LEN as usize)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_pending_1() -> canbench_rs::BenchResult {
+        bench_cancel_pending(1)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_pending_10() -> canbench_rs::BenchResult {
+        bench_cancel_pending(10)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_pending_50() -> canbench_rs::BenchResult {
+        bench_cancel_pending(50)
+    }
+
+    #[bench(raw)]
+    fn bench_cancel_limit_orders_pending_max_batch() -> canbench_rs::BenchResult {
+        bench_cancel_pending(oisy_trade_types::MAX_BATCH_LEN as usize)
+    }
+
+    /// Cancel `batch_len` **resting** orders, each at the back of its own price
+    /// level in a book of [`RESTING_LEVELS`] levels × [`LEVEL_DEPTH`] orders.
+    fn bench_cancel_resting(batch_len: usize) -> canbench_rs::BenchResult {
+        assert!(batch_len <= RESTING_LEVELS);
+        let mut state = super::new_state();
+        let owner = super::user(0);
+        super::fund_user(&mut state, owner);
+
+        // Every order rests: they are all buys, so nothing crosses.
+        let last_of_level: Vec<OrderId> = (0..RESTING_LEVELS)
+            .map(|level| {
+                let mut last = None;
+                for _ in 0..LEVEL_DEPTH {
+                    last = Some(place_buy(&mut state, owner, price_of_level(level)));
+                }
+                last.expect("LEVEL_DEPTH is non-zero")
+            })
+            .collect();
+        state.set_execution_policy(ExecutionPolicy::MAX);
+        EXECUTOR.run_once(&mut state, &BenchRuntime::new(owner));
+        let book = state
+            .get_order_book(&super::trading_pair())
+            .expect("the pair is registered");
+        assert_eq!(book.pending_orders_len(), 0);
+        assert_eq!(book.resting_orders_len(), RESTING_LEVELS * LEVEL_DEPTH);
+        assert_eq!(book.bids_len(), RESTING_LEVELS);
+
+        run(state, owner, &last_of_level[..batch_len])
+    }
+
+    /// Cancel `batch_len` still-**pending** orders from the far end of a
+    /// [`PENDING_BACKLOG`]-order backlog, the worst case for the linear scan
+    /// `OrderBook::remove_order` falls through to.
+    fn bench_cancel_pending(batch_len: usize) -> canbench_rs::BenchResult {
+        assert!(batch_len <= PENDING_BACKLOG);
+        let mut state = super::new_state();
+        let owner = super::user(0);
+        super::fund_user(&mut state, owner);
+
+        // Matching is never run, so every order stays in `pending_orders`.
+        let backlog: Vec<OrderId> = (0..PENDING_BACKLOG)
+            .map(|nth| place_buy(&mut state, owner, price_of_level(nth % RESTING_LEVELS)))
+            .collect();
+        let book = state
+            .get_order_book(&super::trading_pair())
+            .expect("the pair is registered");
+        assert_eq!(book.pending_orders_len(), PENDING_BACKLOG);
+
+        run(state, owner, &backlog[PENDING_BACKLOG - batch_len..])
+    }
+
+    /// Install `state` and measure one `cancel_limit_orders` call over
+    /// `targets`, reply encoding included: the outcome vector and its Candid
+    /// encoding are part of what a batch costs over the equivalent single
+    /// calls, so leaving them out would understate the overhead the cap has to
+    /// cover.
+    fn run(
+        state: State<storage::VMem, storage::VMem>,
+        owner: Principal,
+        targets: &[OrderId],
+    ) -> canbench_rs::BenchResult {
+        let expected_cancels = targets.len();
+        let order_ids: Vec<oisy_trade_types::OrderId> =
+            targets.iter().map(OrderId::to_string).collect();
+        let resting_before = resting_orders(&state);
+        let pending_before = pending_orders(&state);
+        crate::state::reset_state();
+        crate::state::init_state(state);
+        let runtime = BenchRuntime::new(owner);
+
+        let res = canbench_rs::bench_fn(move || {
+            let outcomes = crate::cancel_limit_orders(order_ids, &runtime)
+                .expect("the batch is within MAX_BATCH_LEN");
+            assert_eq!(outcomes.len(), expected_cancels);
+            assert!(
+                outcomes.iter().all(|outcome| outcome.is_ok()),
+                "the owner can cancel every target"
+            );
+            candid::encode_one(Ok::<_, oisy_trade_types::CancelLimitOrdersError>(outcomes))
+                .expect("the reply encodes");
+        });
+
+        // Each cancel removes its order from exactly one of the two structures,
+        // so a fixture that silently degenerated (targets already gone, or
+        // resting when they were meant to be pending) fails here rather than
+        // reporting a cheap number.
+        crate::state::with_state(|state| {
+            assert_eq!(
+                resting_before - resting_orders(state) + pending_before - pending_orders(state),
+                expected_cancels
+            );
+        });
+        res
+    }
+
+    fn place_buy(
+        state: &mut State<storage::VMem, storage::VMem>,
+        owner: Principal,
+        price: Price,
+    ) -> OrderId {
+        super::place_order(
+            state,
+            owner,
+            PendingOrder {
+                side: Side::Buy,
+                price,
+                quantity: Quantity::from(super::LOT_SIZE.get()),
+                time_in_force: TimeInForce::GoodTilCanceled,
+            },
+        )
+    }
+
+    /// A distinct, tick-aligned price per level, well below any ask so nothing
+    /// crosses.
+    fn price_of_level(level: usize) -> Price {
+        Price::new(super::TICK_SIZE.get() * (level as u128 + 1))
+    }
+
+    fn resting_orders(state: &State<storage::VMem, storage::VMem>) -> usize {
+        state
+            .get_order_book(&super::trading_pair())
+            .expect("the pair is registered")
+            .resting_orders_len()
+    }
+
+    fn pending_orders(state: &State<storage::VMem, storage::VMem>) -> usize {
+        state
+            .get_order_book(&super::trading_pair())
+            .expect("the pair is registered")
+            .pending_orders_len()
+    }
+
+    /// A [`Runtime`] that reports `owner` as the caller — the public endpoints
+    /// under measurement resolve the caller themselves, so the benchmark cannot
+    /// pass the order owner in — and reports the instruction counter *relative
+    /// to its own construction*.
+    ///
+    /// The relative counter matters because canbench runs setup and `bench_fn`
+    /// in one message behind one shared counter: with the raw reading, the
+    /// executor's per-message budget check would see the fixture's own
+    /// (unmeasured) population work and bail before doing the work under
+    /// measurement. canbench counts instructions independently of this reading,
+    /// so the reported cost is unaffected.
+    struct BenchRuntime {
+        caller: Principal,
+        baseline: u64,
+    }
+
+    impl BenchRuntime {
+        fn new(caller: Principal) -> Self {
+            Self {
+                caller,
+                baseline: IC_RUNTIME.instruction_counter(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Runtime for BenchRuntime {
+        async fn call_unbounded_wait<A>(
+            &self,
+            canister_id: Principal,
+            method: &str,
+            args: A,
+        ) -> Result<Response, CallFailed>
+        where
+            A: ArgumentEncoder + Send,
+        {
+            IC_RUNTIME
+                .call_unbounded_wait(canister_id, method, args)
+                .await
+        }
+
+        fn msg_caller(&self) -> Principal {
+            self.caller
+        }
+
+        fn canister_self(&self) -> Principal {
+            IC_RUNTIME.canister_self()
+        }
+
+        fn is_controller(&self, principal: &Principal) -> bool {
+            IC_RUNTIME.is_controller(principal)
+        }
+
+        fn instruction_counter(&self) -> u64 {
+            IC_RUNTIME
+                .instruction_counter()
+                .saturating_sub(self.baseline)
+        }
+
+        fn time(&self) -> Timestamp {
+            IC_RUNTIME.time()
+        }
+
+        fn schedule_matching(&self) {
+            IC_RUNTIME.schedule_matching()
+        }
     }
 }
 

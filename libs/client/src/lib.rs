@@ -9,13 +9,13 @@ use candid::{CandidType, Principal};
 use ic_cdk::call::{Call, CallFailed, RejectCode};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
-    Balance, CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, FilterToken,
-    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyTradesArgs, GetMyTradesError,
-    GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, RemoveTradingAccountError, Token, TokenId, Trade, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse,
+    Balance, CancelLimitOrderError, CancelLimitOrderOutcome, CancelLimitOrdersError, DepositError,
+    DepositRequest, DepositResponse, FilterToken, GetBalancesError, GetMyOrdersArgs,
+    GetMyOrdersError, GetMyTradesArgs, GetMyTradesError, GetMyTradingAccountsError,
+    GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
+    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, RemoveTradingAccountError, Token,
+    TokenId, Trade, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
+    WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use serde::de::DeserializeOwned;
 
@@ -89,6 +89,30 @@ impl<R: Runtime> OisyTradeClient<R> {
                 self.oisy_trade_canister,
                 "cancel_limit_order",
                 (order_id,),
+                0,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Cancel up to `MAX_BATCH_LEN` limit orders previously submitted by the
+    /// caller, in one call.
+    ///
+    /// On success, returns one outcome per requested id, positionally aligned
+    /// with `order_ids`: either the canceled order's record or exactly the error
+    /// [`Self::cancel_limit_order`] would have returned for that id. An item's
+    /// failure does not affect the others. The whole call fails only when the
+    /// batch itself is unacceptable — today, more than `MAX_BATCH_LEN` items —
+    /// in which case nothing was canceled.
+    pub async fn cancel_limit_orders(
+        &self,
+        order_ids: Vec<OrderId>,
+    ) -> Result<Vec<CancelLimitOrderOutcome>, CancelLimitOrdersError> {
+        self.runtime
+            .call(
+                self.oisy_trade_canister,
+                "cancel_limit_orders",
+                (order_ids,),
                 0,
             )
             .await

@@ -1,12 +1,13 @@
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
-    CancelLimitOrderError, DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse,
-    FilterToken, GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetMyTradingAccountsError,
+    BatchRequestError, CancelLimitOrderError, CancelLimitOrderOutcome, CancelLimitOrdersError,
+    DEFAULT_DEPTH_LIMIT, DepositError, DepositRequest, DepositResponse, FilterToken,
+    GetBalancesError, GetMyOrdersArgs, GetMyTradesArgs, GetMyTradingAccountsError,
     GetOrderBookDepthError, GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest,
-    MAX_DEPTH_LIMIT, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE, MAX_TRADES_PER_RESPONSE,
-    OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel, RemoveTradingAccountError,
-    Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance,
-    WithdrawError, WithdrawRequest, WithdrawResponse,
+    MAX_BATCH_LEN, MAX_DEPTH_LIMIT, MAX_FILTER_LEN, MAX_ORDERS_PER_RESPONSE,
+    MAX_TRADES_PER_RESPONSE, OrderBookDepth, OrderBookTicker, OrderId, OrderRecord, PriceLevel,
+    RemoveTradingAccountError, Token, TradingPair, TradingPairInfo, UnauthorizedError, UserOrder,
+    UserTokenBalance, WithdrawError, WithdrawRequest, WithdrawResponse,
 };
 use std::{
     num::{NonZeroU64, NonZeroU128},
@@ -58,14 +59,35 @@ pub enum Task {
     ProcessPendingOrders,
 }
 
+/// The account an order operation acts on, plus the principal that acted when
+/// it is not the account itself (a trading account acting for its funding
+/// account).
+///
+/// Resolving the caller is per-*call* work, not per-order: a batch endpoint
+/// builds one of these before its loop, so every item in the batch is attributed
+/// exactly as the equivalent single-order calls would attribute it.
+struct ActingCaller {
+    owner: candid::Principal,
+    delegate: Option<candid::Principal>,
+}
+
+impl ActingCaller {
+    fn resolve(runtime: &impl Runtime) -> Self {
+        state::with_state(|s| s.assert_caller_is_allowed(runtime));
+        let caller = runtime.msg_caller();
+        let owner = state::with_state(|s| s.effective_account(caller));
+        Self {
+            owner,
+            delegate: (caller != owner).then_some(caller),
+        }
+    }
+}
+
 pub fn add_limit_order(
     request: LimitOrderRequest,
     runtime: &impl Runtime,
 ) -> Result<OrderId, AddLimitOrderError> {
-    state::with_state(|s| s.assert_caller_is_allowed(runtime));
-    let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let placed_by = (caller != owner).then_some(caller);
+    let ActingCaller { owner, delegate } = ActingCaller::resolve(runtime);
     let pair = order::TradingPair::from(request.pair);
     let pending = order::PendingOrder::try_from(request).map_err(|_| {
         AddLimitOrderError::request(
@@ -86,7 +108,7 @@ pub fn add_limit_order(
             price: order.price(),
             quantity: *order.remaining_quantity(),
             time_in_force: order.time_in_force(),
-            placed_by,
+            placed_by: delegate,
         };
         state::audit::process_event(
             s,
@@ -96,6 +118,9 @@ pub fn add_limit_order(
         );
         Ok::<(), AddLimitOrderError>(())
     })?;
+    // The order is enqueued as `Pending`; match it now instead of waiting for
+    // the periodic timer.
+    runtime.schedule_matching();
     Ok(order_id.to_string())
 }
 
@@ -103,16 +128,67 @@ pub fn cancel_limit_order(
     order_id: OrderId,
     runtime: &impl Runtime,
 ) -> Result<OrderRecord, CancelLimitOrderError> {
-    state::with_state(|s| s.assert_caller_is_allowed(runtime));
-    let caller = runtime.msg_caller();
-    let owner = state::with_state(|s| s.effective_account(caller));
-    let canceled_by = (caller != owner).then_some(caller);
+    cancel_one(&ActingCaller::resolve(runtime), order_id, runtime)
+}
+
+/// Cancel up to [`MAX_BATCH_LEN`] orders in one call, each succeeding or failing
+/// on its own.
+///
+/// The batch is *sequential* cancellation: the observable effect is that of the
+/// same ids passed to [`cancel_limit_order`] one at a time by the same caller,
+/// differing only in costing one message and in every canceled record sharing a
+/// single `Runtime::time` sample. Duplicated ids are not special-cased — the
+/// second occurrence of an id fails with `OrderAlreadyTerminal`, because the
+/// first occurrence canceled it.
+///
+/// Returns one outcome per id, positionally aligned with `order_ids` and of the
+/// same length, so a caller can zip its request against the response. An item's
+/// failure never aborts the batch. The whole call fails only for a fault in the
+/// call itself — today, exceeding [`MAX_BATCH_LEN`] — in which case no item was
+/// processed at all.
+///
+/// Like [`cancel_limit_order`], this never arms the matching timer: arming it
+/// would pull unrelated pending orders into a matching round that the equivalent
+/// single-order calls would not have triggered.
+pub fn cancel_limit_orders(
+    order_ids: Vec<OrderId>,
+    runtime: &impl Runtime,
+) -> Result<Vec<CancelLimitOrderOutcome>, CancelLimitOrdersError> {
+    let len = u32::try_from(order_ids.len()).unwrap_or(u32::MAX);
+    if len > MAX_BATCH_LEN {
+        return Err(CancelLimitOrdersError::request(
+            BatchRequestError::BatchTooLarge {
+                len,
+                max: MAX_BATCH_LEN,
+            },
+        ));
+    }
+    if order_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let caller = ActingCaller::resolve(runtime);
+    Ok(order_ids
+        .into_iter()
+        .map(|order_id| cancel_one(&caller, order_id, runtime))
+        .collect())
+}
+
+/// Cancel one order on `caller`'s behalf. The single entry point both
+/// [`cancel_limit_order`] and [`cancel_limit_orders`] cancel through, which is
+/// what makes a batch equivalent to the same cancels issued one at a time.
+fn cancel_one(
+    caller: &ActingCaller,
+    order_id: OrderId,
+    runtime: &impl Runtime,
+) -> Result<OrderRecord, CancelLimitOrderError> {
     let id = order_id.parse::<order::OrderId>().map_err(|_| {
         CancelLimitOrderError::request(
             oisy_trade_types::CancelLimitOrderRequestError::InvalidOrderId,
         )
     })?;
-    let record = state::with_state_mut(|s| s.cancel_limit_order(&owner, canceled_by, id, runtime))?;
+    let record = state::with_state_mut(|s| {
+        s.cancel_limit_order(&caller.owner, caller.delegate, id, runtime)
+    })?;
     Ok(record.into())
 }
 
@@ -188,14 +264,7 @@ pub fn process_pending_orders(runtime: &impl Runtime) -> execute::ExecutionStatu
 /// [`process_pending_orders`] directly, which is synchronous and timer-free.
 pub fn drive_matching() {
     match process_pending_orders(&IC_RUNTIME) {
-        execute::ExecutionStatus::MoreWork => {
-            // TODO DEFI-2823: coalesce zero-delay matching timers so a
-            // burst of `add_limit_order` kickoffs plus this self-reschedule
-            // chain doesn't queue O(N) redundant timers per burst.
-            ic_cdk_timers::set_timer(Duration::ZERO, async {
-                drive_matching();
-            });
-        }
+        execute::ExecutionStatus::MoreWork => IC_RUNTIME.schedule_matching(),
         // Complete: nothing left to do. AlreadyRunning: the holder will
         // reschedule itself if its run left work unfinished, so we don't
         // pile on another timer.
@@ -749,7 +818,11 @@ pub fn resume_trading(
     pairs: Option<Vec<TradingPair>>,
     runtime: &impl Runtime,
 ) -> Result<(), UnauthorizedError> {
-    set_halt(pairs, false, runtime)
+    set_halt(pairs, false, runtime)?;
+    // Match the orders that piled up while halted now, without waiting for the
+    // periodic timer. Mirrors the `add_limit_order` kickoff.
+    runtime.schedule_matching();
+    Ok(())
 }
 
 fn set_halt(

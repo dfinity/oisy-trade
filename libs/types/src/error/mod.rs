@@ -206,6 +206,29 @@ pub enum CancelLimitOrderRequestError {
     OrderAlreadyTerminal,
 }
 
+/// Error returned when a batch of limit-order cancellations cannot be
+/// attempted. It reports a fault in the *call*, not in any single item: a
+/// rejected batch processed nothing, so no item outcome exists to report.
+/// Per-item faults are [`CancelLimitOrderError`]s inside the `Ok` vector.
+pub type CancelLimitOrdersError = Error<BatchRequestError, Never, Never>;
+
+/// Caller-side reasons a batch endpoint rejects the whole call before
+/// processing any item.
+///
+/// Shared by every batch endpoint: the batch level has no endpoint-specific
+/// failure, so one leaf keeps the shape from drifting between them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType, thiserror::Error)]
+pub enum BatchRequestError {
+    /// The batch carries more items than the endpoint accepts.
+    #[error("the batch has {len} items, exceeding the maximum {max}")]
+    BatchTooLarge {
+        /// The submitted batch length.
+        len: u32,
+        /// The maximum number of items the endpoint accepts.
+        max: u32,
+    },
+}
+
 /// Error returned by the `get_my_orders` query.
 pub type GetMyOrdersError = Error<GetMyOrdersRequestError, Never, Never>;
 

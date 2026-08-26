@@ -155,6 +155,35 @@ type CancelLimitOrderError = record {
     message : opt text;
 };
 
+// Error returned when a batch of limit-order cancellations cannot be
+// attempted at all. It reports a fault in the *call*, never in a single item:
+// a rejected batch processed nothing, so there is no item outcome to report.
+// Per-item faults are `CancelLimitOrderError`s inside the `Ok` vector.
+// See the disposition contract at the top of this file.
+type CancelLimitOrdersError = record {
+    kind : variant {
+        RequestError : opt variant {
+            // The batch carries more items than the endpoint accepts (`max`
+            // reports the effective cap, currently 100). No item was
+            // processed.
+            BatchTooLarge : record { len : nat32; max : nat32 };
+        };
+        TemporaryError : opt variant {};
+        InternalError : opt variant {};
+    };
+    message : opt text;
+};
+
+// Outcome of one item of a `cancel_limit_orders` batch: the canceled order's
+// record, or exactly the error `cancel_limit_order` would have returned for
+// that id.
+//
+// These two arms are the whole variant, permanently: a future per-item outcome
+// is added as a leaf under one of `CancelLimitOrderError`'s disposition arms,
+// never as a third arm here. A third arm would keep decoding on an existing
+// client right up until the canister first put it on the wire.
+type CancelLimitOrderOutcome = variant { Ok : OrderRecord; Err : CancelLimitOrderError };
+
 // Information about a listed trading pair.
 // Whether trading on a pair is currently active or halted.
 type TradingStatus = variant {
@@ -944,6 +973,24 @@ service : (OisyTradeArg) -> {
     /// Cancel a limit order previously submitted by the caller. Any remaining
     /// reserved balance is credited back to the caller's free balance.
     cancel_limit_order : (OrderId) -> (variant { Ok : OrderRecord; Err : CancelLimitOrderError });
+
+    // Cancel up to 100 limit orders previously submitted by the caller, in one
+    // call. Each id succeeds or fails on its own: the response carries one
+    // outcome per id, positionally aligned with the request and of the same
+    // length, so a caller can zip its id list against it. An id that cannot be
+    // canceled fails only its own item.
+    //
+    // The batch is *sequential* cancellation — the observable effect is that of
+    // the same ids passed to `cancel_limit_order` one at a time, differing only
+    // in costing one message and in every canceled record sharing a single
+    // timestamp. Repeated ids are not special-cased: the second occurrence of
+    // an id fails with `OrderAlreadyTerminal`, the first having canceled it.
+    // Like `cancel_limit_order`, this never kicks off a matching round.
+    //
+    // An empty batch is a successful no-op returning an empty vector. The whole
+    // call fails only when the batch itself is unacceptable — today, more than
+    // 100 items (`BatchTooLarge`) — in which case no id was processed.
+    cancel_limit_orders : (vec OrderId) -> (variant { Ok : vec CancelLimitOrderOutcome; Err : CancelLimitOrdersError });
 
     // Query all listed trading pairs.
     get_trading_pairs : () -> (vec TradingPairInfo) query;

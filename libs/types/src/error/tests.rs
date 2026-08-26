@@ -38,8 +38,16 @@ type CurrentError = crate::Error<CurrentRequestError, CurrentTemporaryError, Cur
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
 enum FutureRequestError {
-    KnownReason,
-    SomeFutureReason { detail: String },
+    /// Carries the same payload as [`CurrentRequestError::KnownReason`], so a
+    /// leaf the current interface already knows decodes fully typed rather than
+    /// softening — which is what lets a test tell "softened because it is
+    /// unknown" from "softened because everything softens".
+    KnownReason {
+        detail: String,
+    },
+    SomeFutureReason {
+        detail: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, CandidType)]
@@ -149,4 +157,66 @@ fn should_decode_future_leaf_as_none_keeping_arm_and_message() {
 
     assert_eq!(decoded.kind, ErrorKind::RequestError(None));
     assert_eq!(decoded.message, Some("a future reason".to_string()));
+}
+
+/// The same softening inside a batch reply, which nests the envelope one level
+/// deeper: an unknown future leaf softens **in its own item**, a sibling item's
+/// known leaf still decodes fully typed, and `message` survives at the item
+/// level and at the batch level alike.
+///
+/// This is what lets a batch endpoint add a per-item reason without breaking
+/// existing clients — and therefore why the per-item `variant { Ok; Err }` never
+/// needs, and never gets, a third arm.
+#[test]
+fn should_decode_a_future_leaf_as_none_per_item_and_at_the_batch_level() {
+    type FutureBatchReply = Result<Vec<Result<u64, FutureError>>, FutureError>;
+    type CurrentBatchReply = Result<Vec<Result<u64, CurrentError>>, CurrentError>;
+
+    let future_leaf = |detail: &str, message: &str| FutureError {
+        kind: FutureErrorKind::RequestError(Some(FutureRequestError::SomeFutureReason {
+            detail: detail.to_string(),
+        })),
+        message: Some(message.to_string()),
+    };
+    let partial_success: FutureBatchReply = Ok(vec![
+        Ok(7),
+        Err(future_leaf("from the future", "a future reason")),
+        Err(FutureError {
+            kind: FutureErrorKind::RequestError(Some(FutureRequestError::KnownReason {
+                detail: "bad request".to_string(),
+            })),
+            message: Some("request failed: bad request".to_string()),
+        }),
+    ]);
+
+    let encoded = candid::encode_one(&partial_success).unwrap();
+    let decoded: CurrentBatchReply = candid::decode_one(&encoded).unwrap();
+
+    let items = decoded.expect("the batch itself succeeded");
+    assert_eq!(
+        items,
+        vec![
+            Ok(7),
+            Err(CurrentError {
+                kind: ErrorKind::RequestError(None),
+                message: Some("a future reason".to_string()),
+            }),
+            Err(CurrentError::request(CurrentRequestError::KnownReason {
+                detail: "bad request".to_string(),
+            })),
+        ]
+    );
+
+    let rejected: FutureBatchReply = Err(future_leaf("too large", "the batch is too large"));
+
+    let encoded = candid::encode_one(&rejected).unwrap();
+    let decoded: CurrentBatchReply = candid::decode_one(&encoded).unwrap();
+
+    assert_eq!(
+        decoded,
+        Err(CurrentError {
+            kind: ErrorKind::RequestError(None),
+            message: Some("the batch is too large".to_string()),
+        })
+    );
 }

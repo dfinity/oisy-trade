@@ -1,14 +1,14 @@
 use ic_http_types::{HttpRequest, HttpResponse};
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
-    CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, DepositTemporaryError,
-    ErrorKind, FilterToken, GetBalancesError, GetMyOrdersArgs, GetMyOrdersError,
-    GetMyOrdersRequestError, GetMyTradesArgs, GetMyTradesError, GetMyTradesRequestError,
-    GetMyTradingAccountsError, GetOrderBookDepthError, GetOrderBookDepthRequest,
-    GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth, OrderBookTicker, OrderId,
-    OrderRecord, RemoveTradingAccountError, Token, Trade, TradingPair, TradingPairInfo,
-    UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError, WithdrawRequest,
-    WithdrawResponse, WithdrawTemporaryError,
+    CancelLimitOrderError, CancelLimitOrderOutcome, CancelLimitOrdersError, DepositError,
+    DepositRequest, DepositResponse, DepositTemporaryError, ErrorKind, FilterToken,
+    GetBalancesError, GetMyOrdersArgs, GetMyOrdersError, GetMyOrdersRequestError, GetMyTradesArgs,
+    GetMyTradesError, GetMyTradesRequestError, GetMyTradingAccountsError, GetOrderBookDepthError,
+    GetOrderBookDepthRequest, GetOrderBookTickerError, LimitOrderRequest, OrderBookDepth,
+    OrderBookTicker, OrderId, OrderRecord, RemoveTradingAccountError, Token, Trade, TradingPair,
+    TradingPairInfo, UnauthorizedError, UserOrder, UserTokenBalance, WithdrawError,
+    WithdrawRequest, WithdrawResponse, WithdrawTemporaryError,
 };
 use oisy_trade_types_internal::OisyTradeArg;
 use oisy_trade_types_internal::log::Priority;
@@ -23,12 +23,6 @@ fn add_limit_order(request: LimitOrderRequest) -> Result<OrderId, AddLimitOrderE
         order_id,
         request
     );
-    // Trigger matching immediately, no need to wait for the periodic timer.
-    // TODO DEFI-2823: coalesce — a burst of order placements currently
-    // queues one zero-delay timer per call.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
     Ok(order_id)
 }
 
@@ -40,6 +34,26 @@ fn cancel_limit_order(order_id: OrderId) -> Result<OrderRecord, CancelLimitOrder
         Ok(record) => canlog::log!(
             Priority::Info,
             "[cancel_limit_order]: canceled order_id={order_id}: {record}"
+        ),
+        Err(_err) => {
+            // do not log errors due to user actions
+        }
+    }
+    result
+}
+
+#[ic_cdk::update]
+fn cancel_limit_orders(
+    order_ids: Vec<OrderId>,
+) -> Result<Vec<CancelLimitOrderOutcome>, CancelLimitOrdersError> {
+    let requested = order_ids.len();
+    let result =
+        oisy_trade_canister::cancel_limit_orders(order_ids, &oisy_trade_canister::IC_RUNTIME);
+    match &result {
+        Ok(outcomes) => canlog::log!(
+            Priority::Info,
+            "[cancel_limit_orders]: canceled {} of {requested} requested orders",
+            outcomes.iter().filter(|outcome| outcome.is_ok()).count()
         ),
         Err(_err) => {
             // do not log errors due to user actions
@@ -247,13 +261,7 @@ fn halt_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError
 
 #[ic_cdk::update]
 fn resume_trading(pairs: Option<Vec<TradingPair>>) -> Result<(), UnauthorizedError> {
-    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)?;
-    // Re-arm matching immediately so orders that piled up while halted match now,
-    // without waiting for the periodic timer. Mirrors the add_limit_order kickoff.
-    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
-        oisy_trade_canister::drive_matching();
-    });
-    Ok(())
+    oisy_trade_canister::resume_trading(pairs, &oisy_trade_canister::IC_RUNTIME)
 }
 
 /// *WARNING*: This is a debug endpoint, backwards-compatibility is not guaranteed.
