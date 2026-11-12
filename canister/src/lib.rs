@@ -32,6 +32,7 @@ pub mod cbor;
 pub mod dashboard;
 pub mod execute;
 pub mod guard;
+pub mod icrc21;
 pub mod ids;
 pub mod lifecycle;
 pub mod metrics;

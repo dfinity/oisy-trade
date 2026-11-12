@@ -1,4 +1,7 @@
 use ic_http_types::{HttpRequest, HttpResponse};
+use icrc_ledger_types::icrc21::errors::Icrc21Error;
+use icrc_ledger_types::icrc21::requests::ConsentMessageRequest;
+use icrc_ledger_types::icrc21::responses::ConsentInfo;
 use oisy_trade_types::{
     AddLimitOrderError, AddTradingAccountError, AddTradingPairError, AddTradingPairRequest,
     CancelLimitOrderError, DepositError, DepositRequest, DepositResponse, DepositTemporaryError,
@@ -84,6 +87,18 @@ fn remove_trading_account(trading: candid::Principal) -> Result<(), RemoveTradin
 fn get_my_trading_accounts() -> Result<Vec<candid::Principal>, GetMyTradingAccountsError> {
     use oisy_trade_canister::Runtime;
     oisy_trade_canister::get_my_trading_accounts(oisy_trade_canister::IC_RUNTIME.msg_caller())
+}
+
+#[ic_cdk::update]
+fn icrc21_canister_call_consent_message(
+    consent_msg_request: ConsentMessageRequest,
+) -> Result<ConsentInfo, Icrc21Error> {
+    oisy_trade_canister::icrc21::icrc21_canister_call_consent_message(consent_msg_request)
+}
+
+#[ic_cdk::query]
+fn icrc10_supported_standards() -> Vec<oisy_trade_canister::icrc21::StandardRecord> {
+    oisy_trade_canister::icrc21::icrc10_supported_standards()
 }
 
 #[ic_cdk::query]

@@ -4453,3 +4453,250 @@ mod trading_accounts {
         setup.drop().await;
     }
 }
+
+/// Smoke-tests the ICRC-10 / ICRC-21 endpoints through the Candid interface of
+/// the installed canister (ckSOL/ckBTC pair, zero fees). The consent message
+/// content is covered in detail by the canister's unit tests.
+mod icrc21 {
+    use candid::{CandidType, Decode, Deserialize, Encode, Nat, Principal};
+    use icrc_ledger_types::icrc21::errors::Icrc21Error;
+    use icrc_ledger_types::icrc21::requests::{
+        ConsentMessageMetadata, ConsentMessageRequest, ConsentMessageSpec, DisplayMessageType,
+    };
+    use icrc_ledger_types::icrc21::responses::{ConsentInfo, ConsentMessage, FieldsDisplay, Value};
+    use oisy_trade_int_tests::Setup;
+    use oisy_trade_types::{DepositRequest, LimitOrderRequest, Side, TradingPair};
+
+    #[derive(CandidType, Deserialize, Debug)]
+    struct StandardRecord {
+        name: String,
+        url: String,
+    }
+
+    fn make_request(
+        method: &str,
+        arg: Vec<u8>,
+        device_spec: DisplayMessageType,
+    ) -> ConsentMessageRequest {
+        ConsentMessageRequest {
+            method: method.to_string(),
+            arg,
+            user_preferences: ConsentMessageSpec {
+                metadata: ConsentMessageMetadata {
+                    language: "en".to_string(),
+                    utc_offset_minutes: None,
+                },
+                device_spec: Some(device_spec),
+            },
+        }
+    }
+
+    /// Requests a consent message as the anonymous principal: ICRC-21 requires
+    /// the endpoint not to need authentication (cold signer use case).
+    async fn consent_message(
+        setup: &Setup,
+        request: &ConsentMessageRequest,
+    ) -> Result<ConsentInfo, Icrc21Error> {
+        let bytes = setup
+            .env()
+            .update_call(
+                setup.oisy_trade_id(),
+                Principal::anonymous(),
+                "icrc21_canister_call_consent_message",
+                Encode!(request).unwrap(),
+            )
+            .await
+            .expect("icrc21_canister_call_consent_message failed");
+        Decode!(&bytes, Result<ConsentInfo, Icrc21Error>).unwrap()
+    }
+
+    #[tokio::test]
+    async fn should_advertise_supported_standards() {
+        let setup = Setup::new().await;
+
+        let bytes = setup
+            .env()
+            .query_call(
+                setup.oisy_trade_id(),
+                Principal::anonymous(),
+                "icrc10_supported_standards",
+                Encode!().unwrap(),
+            )
+            .await
+            .expect("icrc10_supported_standards failed");
+        let standards = Decode!(&bytes, Vec<StandardRecord>).unwrap();
+        let names: Vec<_> = standards.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["ICRC-10", "ICRC-21"]);
+        assert_eq!(
+            standards[1].url,
+            "https://github.com/dfinity/ICRC/blob/main/ICRCs/ICRC-21/ICRC-21.md"
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_return_consent_messages() {
+        let setup = Setup::new().await.with_trading_pair().await;
+
+        // add_limit_order / GenericDisplay: symbols and decimals come from the
+        // registered pair (ckSOL: 9 decimals, ckBTC: 8 decimals). Full-string
+        // equality so any wording change has to be updated here consciously.
+        let order = LimitOrderRequest {
+            pair: setup.trading_pair(),
+            side: Side::Buy,
+            price: Nat::from(250_000u64),
+            quantity: Nat::from(500_000_000u64),
+            time_in_force: None,
+        };
+        let info = consent_message(
+            &setup,
+            &make_request(
+                "add_limit_order",
+                Encode!(&order).unwrap(),
+                DisplayMessageType::GenericDisplay,
+            ),
+        )
+        .await
+        .expect("consent message should be produced for add_limit_order");
+        assert_eq!(
+            info.consent_message,
+            ConsentMessage::GenericDisplayMessage(
+                "# Buy ckSOL on OISY TRADE\n\n\
+                 Place a limit order to buy ckSOL with ckBTC on OISY TRADE, at the limit price \
+                 or better. The order uses your OISY TRADE balance.\n\n\
+                 **Market:** `ckSOL/ckBTC`\n\n\
+                 **Side:** `Buy`\n\n\
+                 **Quantity:** `0.5 ckSOL`\n\n\
+                 **Limit price:** `0.0025 ckBTC per ckSOL`\n\n\
+                 **Reserved:** `0.00125 ckBTC`\n\
+                 Locked from your free OISY TRADE balance while the order is open; any amount \
+                 not spent is released back to it.\n\n\
+                 **Time in force:** `Good 'til canceled`\n\
+                 The order stays in the order book until it is filled or canceled.\n\n\
+                 **Trading fee:** `0% maker / 0% taker`\n\
+                 Deducted from the ckSOL you receive, rounded up on each fill."
+                    .to_string()
+            )
+        );
+
+        // deposit / FieldsDisplay.
+        let deposit = DepositRequest {
+            token_id: setup.quote_token_id(),
+            amount: Nat::from(150_000_000u64),
+        };
+        let info = consent_message(
+            &setup,
+            &make_request(
+                "deposit",
+                Encode!(&deposit).unwrap(),
+                DisplayMessageType::FieldsDisplay,
+            ),
+        )
+        .await
+        .expect("consent message should be produced for deposit");
+        assert_eq!(
+            info.consent_message,
+            ConsentMessage::FieldsDisplayMessage(FieldsDisplay {
+                intent: "Deposit ckBTC".to_string(),
+                fields: vec![
+                    (
+                        "Amount".to_string(),
+                        Value::TokenAmount {
+                            decimals: 8,
+                            amount: 150_000_000,
+                            symbol: "ckBTC".to_string(),
+                        }
+                    ),
+                    (
+                        "Fees".to_string(),
+                        Value::Text {
+                            content: "Ledger fee, charged on top of the amount".to_string(),
+                        }
+                    ),
+                ],
+            })
+        );
+
+        // cancel_limit_order accepts an order ID returned by add_limit_order.
+        let seller = Principal::from_slice(&[0xC0, 0x01]);
+        let order_id = setup.rest_sell_maker(seller, 1_000_000, 250_000u64).await;
+        let info = consent_message(
+            &setup,
+            &make_request(
+                "cancel_limit_order",
+                Encode!(&order_id).unwrap(),
+                DisplayMessageType::FieldsDisplay,
+            ),
+        )
+        .await
+        .expect("consent message should be produced for cancel_limit_order");
+        assert_eq!(
+            info.consent_message,
+            ConsentMessage::FieldsDisplayMessage(FieldsDisplay {
+                intent: "Cancel order".to_string(),
+                fields: vec![
+                    (
+                        "Market".to_string(),
+                        Value::Text {
+                            content: "ckSOL/ckBTC".to_string(),
+                        }
+                    ),
+                    ("Order ID".to_string(), Value::Text { content: order_id }),
+                ],
+            })
+        );
+
+        setup.drop().await;
+    }
+
+    #[tokio::test]
+    async fn should_reject_unsupported_calls() {
+        let setup = Setup::new().await.with_trading_pair().await;
+
+        // Admin endpoints and unknown methods.
+        for method in ["add_trading_pair", "halt_trading", "resume_trading", "foo"] {
+            let result = consent_message(
+                &setup,
+                &make_request(
+                    method,
+                    Encode!().unwrap(),
+                    DisplayMessageType::GenericDisplay,
+                ),
+            )
+            .await;
+            assert!(
+                matches!(result, Err(Icrc21Error::UnsupportedCanisterCall(_))),
+                "method {method:?} should be rejected as unsupported, got {result:?}"
+            );
+        }
+
+        // An order on a trading pair that is not registered.
+        let pair = setup.trading_pair();
+        let order = LimitOrderRequest {
+            pair: TradingPair {
+                base: pair.quote,
+                quote: pair.base,
+            },
+            side: Side::Sell,
+            price: Nat::from(250_000u64),
+            quantity: Nat::from(500_000_000u64),
+            time_in_force: None,
+        };
+        let result = consent_message(
+            &setup,
+            &make_request(
+                "add_limit_order",
+                Encode!(&order).unwrap(),
+                DisplayMessageType::GenericDisplay,
+            ),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Icrc21Error::UnsupportedCanisterCall(_))),
+            "an unknown trading pair should be rejected, got {result:?}"
+        );
+
+        setup.drop().await;
+    }
+}
