@@ -140,6 +140,12 @@ After a reinstall, every trading pair must be re-listed from scratch — see
 
 `add_trading_pair` is an update call restricted to controllers. The request takes multiple parameters that are explained below.
 
+On production, every `add_trading_pair` call is first proposed and peer-reviewed in a pull request that adds a file to
+[`canister/prod/proposals/`](https://github.com/dfinity/oisy-trade/tree/main/canister/prod/proposals), named
+`YYYY_MM_DD_oisy_trade_add_trading_pair_<base>_<quote>.md`. The file records the motivation, the chosen parameters
+with a comparison against centralized exchanges, the exact Candid arguments and their hash, and the commands to verify
+and submit them.
+
 ### Ledger parameters
 
 Base is the asset being bought/sold; quote is the asset prices are denominated in.
@@ -273,7 +279,8 @@ export TAKER_FEE_BPS=20
 
 ### Launch basket
 
-OISY TRADE's chosen parameters for the initial listings, with the equivalent figures
+OISY TRADE's chosen parameters for the initial listings (later listings are recorded in
+[`canister/prod/proposals/`](https://github.com/dfinity/oisy-trade/tree/main/canister/prod/proposals)), with the equivalent figures
 on the major venues for the same pair (or the closest substitute). The OISY TRADE
 rows show **decimal = `nat`** in each cell: the decimal is the human-readable amount,
 the `nat` is the integer in the unit convention from
