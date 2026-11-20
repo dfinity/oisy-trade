@@ -280,7 +280,7 @@ mod add_trading_pair {
         }
     }
 
-    /// The pairs selected for initial listing are accepted under their intended
+    /// The pairs selected for listing on production are accepted under their intended
     /// parameters, where `tick_size = price_increment × 10^quote_decimals` and
     /// `lot_size = quantity_increment × 10^base_decimals`.
     #[test]
@@ -301,7 +301,7 @@ mod add_trading_pair {
             max_notional: Some(Nat::from(9_000_000_000_000_u64)),
         };
         // Deliberately all ckUSDT-quoted (quote_decimals = 6) — this mirrors the
-        // real launch basket rather than maximizing quote-decimal variety.
+        // pairs selected for listing rather than maximizing quote-decimal variety.
         let pairs = [
             // ICP/ckUSDT
             oisy_trade_types::AddTradingPairRequest {
@@ -336,6 +336,13 @@ mod add_trading_pair {
                 base: SupportedTokens::CKETH.token(),
                 tick_size: Nat::from(10_000_u32),
                 lot_size: Nat::from(100_000_000_000_000_u64),
+                ..ckusdt_quote.clone()
+            },
+            // ckSOL/ckUSDT
+            oisy_trade_types::AddTradingPairRequest {
+                base: SupportedTokens::CKSOL.token(),
+                tick_size: Nat::from(10_000_u32),
+                lot_size: Nat::from(1_000_000_u32),
                 ..ckusdt_quote.clone()
             },
         ];
