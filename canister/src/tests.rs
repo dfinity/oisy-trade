@@ -301,7 +301,7 @@ mod add_trading_pair {
             max_notional: Some(Nat::from(9_000_000_000_000_u64)),
         };
         // Deliberately all ckUSDT-quoted (quote_decimals = 6) — this mirrors the
-        // real production listings rather than maximizing quote-decimal variety.
+        // pairs selected for listing rather than maximizing quote-decimal variety.
         let pairs = [
             // ICP/ckUSDT
             oisy_trade_types::AddTradingPairRequest {

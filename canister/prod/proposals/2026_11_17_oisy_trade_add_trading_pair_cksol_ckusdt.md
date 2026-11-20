@@ -78,24 +78,41 @@ icp canister call cngnf-vqaaa-aaaar-qag4q-cai icrc1_decimals '()' --query --netw
 ```
 
 Verify that the hash of the encoded arguments matches the args hash above.
-The arguments are read from the Candid block of this file, and the interface from the deployed commit.
+The arguments are read from the Candid block of this file at `REF`, and the interface from the deployed commit.
+`didc` is available from the [`didc-v0.6.2`](https://github.com/dfinity/candid/releases/tag/didc-v0.6.2) release of `dfinity/candid`.
 
 ```
-git fetch
+git fetch origin
+REF=origin/main  # while this proposal is under review: the PR branch, e.g. origin/<branch>
 PROPOSAL=canister/prod/proposals/2026_11_17_oisy_trade_add_trading_pair_cksol_ckusdt.md
 didc encode \
   -d <(git show 5ce6b8cb347e33ee085e06950e79233d01f9babb:canister/oisy_trade.did) \
   -t '(AddTradingPairRequest)' \
-  "$(sed -n '/^```candid$/,/^```$/{//!p}' "$PROPOSAL")" \
-  | xxd -r -p > args.bin
-sha256sum args.bin
+  "$(git show "$REF:$PROPOSAL" | sed -n '/^```candid$/,/^```$/{//!p;}')" \
+  > args.hex
+xxd -r -p args.hex | sha256sum
 ```
 
 ## Execution
 
-A controller produces `args.bin` as in the verification step, checks its hash, and submits exactly those bytes.
+`sy2xe-miaaa-aaaar-qb7sq-cai` is controlled by the Orbit station `cmqvo-qqaaa-aaaai-q3waa-cai` and the NNS root, so the call is submitted as an Orbit request to call an external canister, which executes once approved.
+
+A requester produces `args.hex` as in the verification step and submits exactly those bytes,
+with [`dfx-orbit`](https://github.com/dfinity/orbit/tree/main/tools/dfx-orbit) or in the Orbit web UI.
+The arguments are passed with `--raw-arg` and not with `--arg-file`, which `dfx-orbit` reads as Candid text and re-encodes without the interface.
 
 ```
-icp canister call sy2xe-miaaa-aaaar-qb7sq-cai add_trading_pair --args-file args.bin --args-format bin --network ic --identity "$IDENTITY"
+dfx-orbit request canister call sy2xe-miaaa-aaaar-qb7sq-cai add_trading_pair --raw-arg "$(cat args.hex)"
+```
+
+Each approver produces `args.hex` from the merged proposal (`REF=origin/main`), and checks that the request targets `add_trading_pair` of `sy2xe-miaaa-aaaar-qb7sq-cai` and that its argument checksum equals the args hash above:
+
+```
+dfx-orbit verify <REQUEST_ID> canister call sy2xe-miaaa-aaaar-qb7sq-cai add_trading_pair --raw-arg "$(cat args.hex)"
+```
+
+After execution, check that the pair is listed:
+
+```
 icp canister call sy2xe-miaaa-aaaar-qb7sq-cai get_trading_pairs '()' --query --network ic --identity anonymous
 ```

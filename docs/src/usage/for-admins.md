@@ -140,11 +140,12 @@ After a reinstall, every trading pair must be re-listed from scratch — see
 
 `add_trading_pair` is an update call restricted to controllers. The request takes multiple parameters that are explained below.
 
-On production, every `add_trading_pair` call is first proposed and peer-reviewed in a pull request that adds a file to
+From now on, every `add_trading_pair` call on production is first proposed and peer-reviewed in a pull request that adds a file to
 [`canister/prod/proposals/`](https://github.com/dfinity/oisy-trade/tree/main/canister/prod/proposals), named
 `YYYY_MM_DD_oisy_trade_add_trading_pair_<base>_<quote>.md`. The file records the motivation, the chosen parameters
 with a comparison against centralized exchanges, the exact Candid arguments and their hash, and the commands to verify
-and submit them.
+and submit them. Production is controlled by an Orbit station, so the call is submitted as an Orbit request, and approvers
+check that the request's argument checksum equals the args hash of the merged proposal file.
 
 ### Ledger parameters
 
@@ -290,31 +291,33 @@ smallest units for min notional. CEX rows are human-readable only.
 Snapshot as of 2026-06-16; CEX parameters drift, so re-check via the APIs above
 before copying.
 
-| Pair              | Source             | Tick (price increment) | Lot (qty increment)                  | Min notional       |
-|-------------------|--------------------|------------------------|--------------------------------------|--------------------|
-| **ICP/ckUSDT**    | OISY TRADE         | `0.001` USDT = `1_000` | `0.01` ICP = `1_000_000`             | `$5` = `5_000_000` |
-|                   | Binance `ICPUSDT`  | `0.001`                | `0.01`                               | `$5`               |
-|                   | Coinbase `ICP-USD` | `0.001`                | `0.0001`                             | `$1`               |
-|                   | Kraken `ICPUSD`    | `0.001`                | `0.00000001`                         | `$0.50`            |
-| **ckBTC/ckUSDT**  | OISY TRADE         | `0.1` USDT = `100_000` | `0.00001` BTC = `1_000`              | `$5` = `5_000_000` |
-|                   | Binance `BTCUSDT`  | `0.01`                 | `0.00001`                            | `$5`               |
-|                   | Coinbase `BTC-USD` | `0.01`                 | `0.00000001`                         | `$1`               |
-|                   | Kraken `XBTUSD`    | `0.1`                  | `0.00000001`                         | `$0.50`            |
-| **VCHF/ckUSDT**   | OISY TRADE         | `0.0001` USDT = `100`  | `0.01` VCHF = `1_000_000`            | `$5` = `5_000_000` |
-|                   | Binance / Coinbase | not listed             | —                                    | —                  |
-|                   | Kraken `USDTCHF` ‡ | `0.00001` (inverted)   | `0.00000001`                         | `$0.50`            |
-| **ckUSDC/ckUSDT** | OISY TRADE         | `0.00001` USDT = `10`  | `1` USDC = `1_000_000`               | `$5` = `5_000_000` |
-|                   | Binance `USDCUSDT` | `0.00001`              | `1`                                  | `$5`               |
-|                   | Coinbase           | not listed             | —                                    | —                  |
-|                   | Kraken `USDCUSDT`  | `0.0001`               | `0.00000001`                         | `$0.50`            |
-| **ckETH/ckUSDT**  | OISY TRADE         | `0.01` USDT = `10_000` | `0.0001` ETH = `100_000_000_000_000` | `$5` = `5_000_000` |
-|                   | Binance `ETHUSDT`  | `0.01`                 | `0.0001`                             | `$5`               |
-|                   | Coinbase `ETH-USD` | `0.01`                 | `0.00000001`                         | `$1`               |
-|                   | Kraken `ETHUSD`    | `0.01`                 | `0.00000001`                         | `$0.50`            |
+| Pair              | Source                 | Tick (price increment) | Lot (qty increment)                  | Min notional       |
+|-------------------|------------------------|------------------------|--------------------------------------|--------------------|
+| **ICP/ckUSDT**    | OISY TRADE             | `0.001` USDT = `1_000` | `0.01` ICP = `1_000_000`             | `$5` = `5_000_000` |
+|                   | Binance `ICPUSDT`      | `0.001`                | `0.01`                               | `$5`               |
+|                   | Coinbase `ICP-USD`     | `0.001`                | `0.0001`                             | `$1`               |
+|                   | Kraken `ICPUSD`        | `0.001`                | `0.00000001`                         | `$0.50`            |
+| **ckBTC/ckUSDT**  | OISY TRADE             | `0.1` USDT = `100_000` | `0.00001` BTC = `1_000`              | `$5` = `5_000_000` |
+|                   | Binance `BTCUSDT`      | `0.01`                 | `0.00001`                            | `$5`               |
+|                   | Coinbase `BTC-USD`     | `0.01`                 | `0.00000001`                         | `$1`               |
+|                   | Kraken `XBTUSD`        | `0.1`                  | `0.00000001`                         | `$0.50`            |
+| **VCHF/ckUSDT**   | OISY TRADE             | `0.0001` USDT = `100`  | `0.01` VCHF = `1_000_000`            | `$5` = `5_000_000` |
+|                   | Binance / Coinbase     | not listed             | —                                    | —                  |
+|                   | Kraken `USDTCHF` ‡     | `0.00001` (inverted)   | `0.00000001`                         | `$0.50`            |
+| **ckUSDC/ckUSDT** | OISY TRADE             | `0.00001` USDT = `10`  | `1` USDC = `1_000_000`               | `$5` = `5_000_000` |
+|                   | Binance `USDCUSDT`     | `0.00001`              | `1`                                  | `$5`               |
+|                   | Coinbase `USDT-USDC` § | `0.0001` (inverted)    | `0.01`                               | `$1`               |
+|                   | Kraken `USDCUSDT`      | `0.0001`               | `0.00000001`                         | `$0.50`            |
+| **ckETH/ckUSDT**  | OISY TRADE             | `0.01` USDT = `10_000` | `0.0001` ETH = `100_000_000_000_000` | `$5` = `5_000_000` |
+|                   | Binance `ETHUSDT`      | `0.01`                 | `0.0001`                             | `$5`               |
+|                   | Coinbase `ETH-USD`     | `0.01`                 | `0.00000001`                         | `$1`               |
+|                   | Kraken `ETHUSD`        | `0.01`                 | `0.00000001`                         | `$0.50`            |
 
 ‡ Kraken's `USDTCHF` quotes USDT *in CHF* — the inverse direction of VCHF/ckUSDT.
 At near-parity prices the precision implications transfer, so the tick is a
 loose proxy for VCHF/USDT precision; treat as directional, not exact.
+
+§ Coinbase's `USDT-USDC` quotes USDT *in USDC* — the inverse direction of ckUSDC/ckUSDT.
 
 VCHF is a synthetic Swiss-franc stablecoin. There's no direct CHF/USDT pair on
 Binance, Coinbase, or Kraken; `USDTCHF` is the closest market for the same
