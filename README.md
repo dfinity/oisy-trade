@@ -16,6 +16,8 @@
 - [Deployment](#deployment)
 - [Usage](#usage)
 - [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
 
 <a id="key-features"></a>
 ## ✨ Key Features
@@ -120,3 +122,13 @@ Releases are cut from `main` with [release-plz](https://release-plz.dev/) in two
    - publishes `oisy_trade_types` to [crates.io](https://crates.io/).
 
 The pipeline does not deploy — releasing and deploying are separate steps.
+
+<a id="contributing"></a>
+## 🤝 Contributing
+
+External contributions are welcome! Please read the [contributor guidelines](.github/CONTRIBUTING.md) before opening a pull request. To report a security vulnerability, follow the [security policy](SECURITY.md) instead of opening a public issue.
+
+<a id="license"></a>
+## 📄 License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
