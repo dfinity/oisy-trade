@@ -17,6 +17,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-benchmarks.outputs.matrix }}
       pr_number: ${{ steps.set-benchmarks.outputs.pr_number }}
+      has_results: ${{ steps.set-benchmarks.outputs.has_results }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -36,12 +37,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_RUN_REPO: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           ARTIFACTS_DIR: ${{ runner.temp }}/canbench-artifacts
         run: bash "$GITHUB_WORKSPACE/scripts/ci_download_canbench_artifacts.sh"
 
+  # Skipped (with a warning from the previous job) when there is nothing to post
+  # or no PR to post it to. For a fork PR, neither this comment nor the
+  # `benchmark` check can be trusted: the run executes code the fork controls,
+  # not just its copy of .github/ and scripts/ but everything the build runs
+  # (canbench's `build_cmd`, Cargo build scripts, proc-macros, dependencies),
+  # and any of it can rewrite the result before it is uploaded. To rely on the
+  # numbers, run `just bench-check` locally on the reviewed changes.
   post-comment:
     runs-on: ubuntu-latest
     needs: [download-results]
+    if: needs.download-results.outputs.pr_number != '' && needs.download-results.outputs.has_results == 'true'
     permissions:
       pull-requests: write
     strategy:
