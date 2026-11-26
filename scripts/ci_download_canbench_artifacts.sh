@@ -24,6 +24,7 @@ import os
 # The only result the `benchmark` job in ci.yml uploads.
 TITLE = "canbench_result_benchmark"
 # canbench results are a few KiB; GitHub rejects comments over 65536 characters.
+# The cap applies after escaping, so the posted comment stays well below that.
 MAX_RESULT_CHARS = 32_000
 
 artifacts_dir = os.environ["ARTIFACTS_DIR"]
@@ -40,15 +41,27 @@ def is_safe(path):
     return os.path.realpath(path).startswith(root + os.sep)
 
 
+# A zero-width joiner after `@` keeps the text readable but stops GitHub from
+# turning it into a mention. GitHub decodes HTML entities before it looks for
+# mentions, so `&` is escaped too: otherwise `&#64;`, `&commat;`, ... would
+# still become mentions. canbench output contains no entities, so nothing is
+# lost.
+ESCAPES = {"&": "&amp;", "@": "@\u200d"}
+
+
 def sanitize(text):
-    if len(text) > MAX_RESULT_CHARS:
-        text = text[:MAX_RESULT_CHARS] + "\n\n… (truncated)\n"
-    # A zero-width joiner after `@` keeps the text readable but stops GitHub
-    # from turning it into a mention. GitHub decodes HTML entities before it
-    # looks for mentions, so `&` is escaped first: otherwise `&#64;`,
-    # `&commat;`, ... would still become mentions. canbench output contains no
-    # entities, so nothing is lost.
-    return text.replace("&", "&amp;").replace("@", "@\u200d")
+    # Escaping lengthens the text, so the cap applies to the escaped text, and
+    # it only cuts between escapes, never inside one.
+    out = []
+    length = 0
+    for ch in text:
+        escaped = ESCAPES.get(ch, ch)
+        if length + len(escaped) > MAX_RESULT_CHARS:
+            out.append("\n\n… (truncated)\n")
+            break
+        out.append(escaped)
+        length += len(escaped)
+    return "".join(out)
 
 
 benchmarks = []
