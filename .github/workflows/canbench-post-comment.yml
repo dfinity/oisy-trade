@@ -17,6 +17,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-benchmarks.outputs.matrix }}
       pr_number: ${{ steps.set-benchmarks.outputs.pr_number }}
+      has_results: ${{ steps.set-benchmarks.outputs.has_results }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -36,12 +37,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_RUN_REPO: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           ARTIFACTS_DIR: ${{ runner.temp }}/canbench-artifacts
         run: bash "$GITHUB_WORKSPACE/scripts/ci_download_canbench_artifacts.sh"
 
+  # Skipped when there is nothing to post or no PR to post it to. The comment
+  # body is the PR author's artifact content: for a fork PR it is untrusted and
+  # may claim anything, so reviewers must rely on the `benchmark` check's
+  # status, not on this comment.
   post-comment:
     runs-on: ubuntu-latest
     needs: [download-results]
+    if: needs.download-results.outputs.pr_number != '' && needs.download-results.outputs.has_results == 'true'
     permissions:
       pull-requests: write
     strategy:

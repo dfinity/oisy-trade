@@ -56,6 +56,14 @@ PY
 # step-output keys.
 echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
 
+# An empty matrix (e.g. CI failed before uploading any results) is an error in
+# a matrix job, so tell the next job whether there is anything to post.
+if [ "$(jq '.benchmark | length' <<<"$matrix_json")" -gt 0 ]; then
+  echo "has_results=true" >> "$GITHUB_OUTPUT"
+else
+  echo "has_results=false" >> "$GITHUB_OUTPUT"
+fi
+
 # Resolve the target PR number authoritatively from the GitHub API using the
 # head SHA of the workflow run that produced these artifacts, instead of
 # trusting the downloaded `pr_number` artifact.
@@ -65,12 +73,19 @@ echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
 # fully controlled by the (possibly fork) PR author. Their contents must never
 # be `cat`'d raw into $GITHUB_OUTPUT (multi-line content could override other
 # outputs such as `matrix` — step-output injection) nor be used to target an
-# arbitrary PR (spoofed bot comments). Deriving the number from the SHA binds
-# the comment to the PR that actually produced the results.
+# arbitrary PR (spoofed bot comments). Requiring the PR's head to be the run's
+# head SHA binds the comment to the PR that actually produced the results.
+#
+# The PR is looked up by its head `<owner>:<branch>` rather than via
+# `commits/<sha>/pulls`, which returns no PRs when the commit lives in a fork.
+# The owner and branch come from the run's head repository and are chosen by
+# the PR author, so they are passed as query parameters (URL-encoded by `gh`)
+# and only used to narrow the lookup; the head SHA check decides the match.
 pr_number=""
-if [ -n "${HEAD_SHA:-}" ]; then
+if [ -n "${HEAD_SHA:-}" ] && [ -n "${HEAD_OWNER:-}" ] && [ -n "${HEAD_BRANCH:-}" ]; then
   pr_number="$(
-    gh api "repos/${WORKFLOW_RUN_REPO:-}/commits/${HEAD_SHA}/pulls" \
+    gh api --method GET "repos/${WORKFLOW_RUN_REPO:-}/pulls" \
+      -f head="${HEAD_OWNER}:${HEAD_BRANCH}" -f state=open \
       --jq '[.[] | select(.head.sha == env.HEAD_SHA) | .number] | first // empty' 2>/dev/null || true
   )"
 fi
