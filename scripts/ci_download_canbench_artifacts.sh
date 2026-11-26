@@ -44,8 +44,11 @@ def sanitize(text):
     if len(text) > MAX_RESULT_CHARS:
         text = text[:MAX_RESULT_CHARS] + "\n\n… (truncated)\n"
     # A zero-width joiner after `@` keeps the text readable but stops GitHub
-    # from turning it into a mention.
-    return text.replace("@", "@‍")
+    # from turning it into a mention. GitHub decodes HTML entities before it
+    # looks for mentions, so `&` is escaped first: otherwise `&#64;`,
+    # `&commat;`, ... would still become mentions. canbench output contains no
+    # entities, so nothing is lost.
+    return text.replace("&", "&amp;").replace("@", "@\u200d")
 
 
 benchmarks = []
