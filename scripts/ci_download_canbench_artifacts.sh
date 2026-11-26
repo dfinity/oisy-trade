@@ -92,21 +92,33 @@ fi
 # the PR author, so they are passed as query parameters (URL-encoded by `gh`)
 # and only used to narrow the lookup; the head SHA check decides the match.
 #
+# Several open PRs can share a head (owner, branch, SHA) while targeting
+# different base branches, and the results depend on the base (ci.yml compares
+# against the PR's base branch). The run does not say which of them triggered
+# it, so the comment is only posted when exactly one open PR matches.
+#
 # A failing API call (permissions, rate limit, ...) fails this job loudly;
-# only a successful lookup that finds no matching open PR skips the comment.
+# only a successful lookup that finds no single matching open PR skips the
+# comment. `head` narrows the result to that branch's PRs, so one page of 100
+# is the complete lookup.
 : "${HEAD_SHA:?}"
-pr_number="$(
+pr_numbers="$(
   gh api --method GET "repos/${WORKFLOW_RUN_REPO:?}/pulls" \
-    -f head="${HEAD_OWNER:?}:${HEAD_BRANCH:?}" -f state=open \
-    --jq '[.[] | select(.head.sha == env.HEAD_SHA) | .number] | first // empty'
+    -f head="${HEAD_OWNER:?}:${HEAD_BRANCH:?}" -f state=open -F per_page=100 \
+    --jq '[.[] | select(.head.sha == env.HEAD_SHA) | .number] | map(tostring) | join(" ")'
 )"
+read -r -a matches <<<"$pr_numbers"
 
 # Defense in depth: only ever emit a bare positive integer (PR numbers start at 1).
-if [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
-  echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+# The owner and branch are PR-author-controlled, so they are kept out of the
+# workflow commands below.
+if [ "${#matches[@]}" -eq 1 ] && [[ "${matches[0]}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "pr_number=${matches[0]}" >> "$GITHUB_OUTPUT"
 else
   echo "pr_number=" >> "$GITHUB_OUTPUT"
-  # The owner and branch are PR-author-controlled, so they are kept out of
-  # this workflow command.
-  echo "::warning::No open PR whose head is ${HEAD_SHA} (closed, or pushed to since?); not posting a comment."
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "::warning::No open PR whose head is ${HEAD_SHA} (closed, or pushed to since?); not posting a comment."
+  else
+    echo "::warning::${#matches[@]} open PRs have head ${HEAD_SHA} and the run does not say which one triggered it; not posting a comment."
+  fi
 fi
