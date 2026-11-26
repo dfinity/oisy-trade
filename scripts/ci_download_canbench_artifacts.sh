@@ -55,7 +55,10 @@ for result_path in (
 ):
     if os.path.isfile(result_path) and is_safe(result_path):
         with open(result_path, encoding="utf-8", errors="replace") as fh:
-            benchmarks.append({"title": TITLE, "result": sanitize(fh.read())})
+            # Read one character past the cap so `sanitize` can tell that the
+            # result was truncated, without loading the rest of the file.
+            result = fh.read(MAX_RESULT_CHARS + 1)
+            benchmarks.append({"title": TITLE, "result": sanitize(result)})
         break
 
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
