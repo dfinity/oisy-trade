@@ -116,9 +116,9 @@ just deploy hsm ~/.config/icp/hsm.pin         # non-interactive with PIN file
 Releases are cut from `main` with [release-plz](https://release-plz.dev/) in two manual steps:
 
 1. **Open the release PR.** Run the [`Release`](.github/workflows/release.yml) workflow (Actions → Release → *Run workflow*). It opens a PR that bumps the crate versions and updates the changelogs from the [conventional commits](https://www.conventionalcommits.org/) made since the last release.
-2. **Merge the release PR.** Review and merge it. Merging triggers the [`Publish`](.github/workflows/publish.yml) workflow, which:
+2. **Merge the release PR and publish.** Review and merge it, then run the [`Publish`](.github/workflows/publish.yml) workflow (Actions → Publish → *Run workflow*), which:
    - tags the released crates,
-   - builds `oisy_trade_canister.wasm.gz` reproducibly from the tagged commit and publishes a GitHub Release with the WASM, its SHA-256, the candid interface, and the deployment status, and
+   - builds `oisy_trade_canister.wasm.gz` reproducibly from the tagged commit and creates a draft GitHub Release with the WASM, its SHA-256, the candid interface, and the deployment status, and
    - publishes `oisy_trade_types` to [crates.io](https://crates.io/).
 
 The pipeline does not deploy — releasing and deploying are separate steps.

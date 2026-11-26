@@ -30,4 +30,4 @@ The endpoint `get_trading_pairs` is the source of truth for what is listed.
 - New to OISY TRADE? Start with [For Users](usage/for-users.md).
 - Want your agent to place orders? See [For Agents](usage/for-agents.md).
 - Operating the canister? See [For Admins](usage/for-admins.md).
-- Contributing or reviewing? See [Design](development/design.md) and [Specs](development/specs/index.md).
+- Contributing or reviewing? See the [contributor guidelines](https://github.com/dfinity/oisy-trade/blob/main/.github/CONTRIBUTING.md), [Design](development/design.md), and [Specs](development/specs/index.md).
