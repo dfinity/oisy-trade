@@ -44,9 +44,11 @@ jobs:
 
   # Skipped (with a warning from the previous job) when there is nothing to post
   # or no PR to post it to. For a fork PR, neither this comment nor the
-  # `benchmark` check can be trusted on its own: both come from the fork's own
-  # copy of ci.yml and scripts/, so a reviewer must first check the PR's
-  # changes to .github/ and scripts/.
+  # `benchmark` check can be trusted: the run executes code the fork controls,
+  # not just its copy of .github/ and scripts/ but everything the build runs
+  # (canbench's `build_cmd`, Cargo build scripts, proc-macros, dependencies),
+  # and any of it can rewrite the result before it is uploaded. To rely on the
+  # numbers, run `just bench-check` locally on the reviewed changes.
   post-comment:
     runs-on: ubuntu-latest
     needs: [download-results]
