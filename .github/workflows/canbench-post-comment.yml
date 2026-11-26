@@ -42,10 +42,11 @@ jobs:
           ARTIFACTS_DIR: ${{ runner.temp }}/canbench-artifacts
         run: bash "$GITHUB_WORKSPACE/scripts/ci_download_canbench_artifacts.sh"
 
-  # Skipped when there is nothing to post or no PR to post it to. The comment
-  # body is the PR author's artifact content: for a fork PR it is untrusted and
-  # may claim anything, so reviewers must rely on the `benchmark` check's
-  # status, not on this comment.
+  # Skipped (with a warning from the previous job) when there is nothing to post
+  # or no PR to post it to. For a fork PR, neither this comment nor the
+  # `benchmark` check can be trusted on its own: both come from the fork's own
+  # copy of ci.yml and scripts/, so a reviewer must first check the PR's
+  # changes to .github/ and scripts/.
   post-comment:
     runs-on: ubuntu-latest
     needs: [download-results]
