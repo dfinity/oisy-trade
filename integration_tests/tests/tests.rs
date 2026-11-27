@@ -1671,6 +1671,56 @@ async fn oversized_amount_is_rejected_without_trapping() {
     setup.drop().await;
 }
 
+/// In restricted mode the vulnerable handler rendered the request — exhausting
+/// the instruction budget — before any authorization check, so a
+/// non-allowlisted caller could trap the call. Now the allowlist check rejects
+/// it first, at a cost independent of the amount's magnitude.
+///
+/// The call traps either way, so trap-vs-no-trap proves nothing here: the
+/// guarantee is in *why* it trapped. Assert the trap names the authorization
+/// failure rather than the instruction limit, which is what makes the
+/// rejection cheap instead of costing a full message's budget.
+#[tokio::test]
+async fn oversized_amount_from_non_allowlisted_caller_is_rejected_by_the_allowlist() {
+    use oisy_trade_types_internal::{InitArg, Mode};
+    use pocket_ic::{RejectCode, RejectResponse};
+
+    const OVERSIZED_LIMBS: usize = 200_000;
+
+    let allowlisted = Principal::from_slice(&[0x09]);
+    let setup = Setup::builder()
+        .with_init_arg(InitArg {
+            mode: Mode::restricted_to([allowlisted]),
+            max_orders_per_chunk: oisy_trade_types_internal::DEFAULT_MAX_ORDERS_PER_CHUNK,
+            instruction_budget: oisy_trade_types_internal::DEFAULT_INSTRUCTION_BUDGET,
+            max_settlement_units_per_event: Some(
+                oisy_trade_types_internal::DEFAULT_MAX_SETTLEMENT_UNITS_PER_EVENT,
+            ),
+        })
+        .build()
+        .await;
+
+    let outsider = Principal::from_slice(&[0x0A]);
+    let args = candid::encode_args((DepositRequest {
+        token_id: setup.base_token_id(),
+        amount: Nat(num_bigint::BigUint::new(vec![u32::MAX; OVERSIZED_LIMBS])),
+    },))
+    .expect("encode deposit args");
+
+    let result = setup
+        .env()
+        .update_call(setup.oisy_trade_id(), outsider, "deposit", args)
+        .await;
+
+    assert_matches!(
+        result,
+        Err(RejectResponse { reject_code: RejectCode::CanisterError, reject_message, .. })
+        if reject_message.contains("is not allowed to call this endpoint in restricted mode")
+    );
+
+    setup.drop().await;
+}
+
 #[tokio::test]
 async fn should_fail_deposit_when_ledger_is_stopped() {
     let setup = Setup::new().await.with_trading_pair().await;
