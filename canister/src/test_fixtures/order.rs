@@ -68,7 +68,11 @@ impl<'a> PlaceOrder<'a> {
         };
         state.deposit(self.user, token, amount, StableMemoryOptions::Write);
         let (order_id, order) = state
-            .validate_limit_order(self.user, self.pair.clone(), pending)
+            .validate_limit_order(
+                state.lookup_account(self.user).as_ref(),
+                self.pair.clone(),
+                pending,
+            )
             .expect("order: validate_limit_order failed");
         state.record_limit_order(
             self.user,
