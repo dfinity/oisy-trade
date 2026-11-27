@@ -314,9 +314,9 @@ dependencies = [
 
 [[package]]
 name = "candid"
-version = "0.10.35"
+version = "0.10.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cdba86ff862a2cc6b244f273a8713ffdf82b84254470e90bd029ee87c283f25"
+checksum = "88bc8f82a82e71cc997491ce7a019e503d404e6c41c45a364118173facf0fa50"
 dependencies = [
  "anyhow",
  "binrw",
@@ -337,9 +337,9 @@ dependencies = [
 
 [[package]]
 name = "candid_derive"
-version = "0.10.35"
+version = "0.10.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13501edc1f9c9f057d5d84171a13ee1fe4255705f9027a3fac64b5949cbdd170"
+checksum = "228fecfdfd310928426a71a25bc359414e827f9106665120c2cccf63bc5ab499"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -790,7 +790,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2281,7 +2281,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2532,7 +2532,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3106,7 +3106,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3752,7 +3752,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
